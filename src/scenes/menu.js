@@ -6,7 +6,7 @@ export default class MenuScene extends Phaser.Scene {
     }
 
     preload() {
-        this.load.image('grassbackground', 'assets/images/grass.png');
+
     }
 
     create() {
@@ -16,9 +16,9 @@ export default class MenuScene extends Phaser.Scene {
 
         // Set the camera to show a smaller portion of the tilemap, creating the appearance of repetition
 
-        this.add.text(400, 300, 'Phaser Game', { fontSize: '32px', fill: '#fff' });
+        this.add.text(400, 300, 'Rail Sim', { fontSize: '164px', fill: '#fff', fontFamily: 'Verdana' });
 
-        this.add.text(400, 400, 'Start', { fontSize: '32px', fill: '#fff' })
+        this.add.text(400, 500, 'Start', { fontSize: '64px', fill: '#fff', fontFamily: 'Verdana' })
             .setInteractive()
             .on('pointerdown', () => this.startGame());
     }
