@@ -20,7 +20,7 @@ export default class PreloadScene extends Phaser.Scene {
         });
 
         // Load all your assets here, for example:
-        // this.load.image('player', 'assets/images/player.png');
+
         // this.load.image('enemy', 'assets/images/enemy.png');
         // this.load.audio('backgroundMusic', 'assets/sounds/background.mp3');
 
