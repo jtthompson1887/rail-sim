@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import Background from "../components/background";
 
 export default class MenuScene extends Phaser.Scene {
     constructor() {
@@ -12,7 +13,10 @@ export default class MenuScene extends Phaser.Scene {
     create() {
 
 
-        this.add.tileSprite(0, 0, 1920, 1080, 'grassbackground').setOrigin(0, 0);
+        //this.add.tileSprite(0, 0, 1920, 1080, 'grassbackground').setOrigin(0, 0).setTileScale(0.1, 0.1).setFlipY(Phaser.Math.Between(0, 1));
+        let bg = new Background(this, 20, 20)
+
+
 
         // Set the camera to show a smaller portion of the tilemap, creating the appearance of repetition
 

@@ -20,7 +20,10 @@ export default class PreloadScene extends Phaser.Scene {
         });
 
         // Load all your assets here, for example:
-        this.load.image('grassbackground', 'assets/images/grass.png');
+        this.load.image('grass', 'assets/images/grass.png');
+        this.load.image('grass2', 'assets/images/grass2.png');
+        this.load.image('grass3', 'assets/images/grass3.png');
+        this.load.image('grass-set', 'assets/images/grass-set.png');
         this.load.image('ballast', 'assets/images/ballast.png');
         this.load.image('rail', 'assets/images/rail.png');
         // this.load.image('enemy', 'assets/images/enemy.png');
