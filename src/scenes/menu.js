@@ -27,7 +27,7 @@ export default class MenuScene extends Phaser.Scene {
         this.railTrack1 = new RailTrack(this, a, b, c)
         let railTrack2 = new RailTrack(this, c, d, e)
 
-        this.train = new Train(this, 0, 800);
+        this.train = new Train(this, 100, 800);
 
 
 
@@ -46,7 +46,7 @@ export default class MenuScene extends Phaser.Scene {
 
         let rotation = this.railTrack1.getTrackAngle(this.train.getMatterBody());
         this.train.getMatterBody().setAngle(rotation)
-        this.train.getMatterBody().thrust(0.05)
+        this.train.getMatterBody().thrust(0.042)
     }
 
     startGame() {

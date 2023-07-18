@@ -10,12 +10,13 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         this.texture2 = 'rail';
         this.railTrackWidth = 866 * 0.85; // Original width of the rail track texture
         this.railTrackScale = 0.05; // Scale factor to adjust the size
-        this.tracks = [];
+
+        this.tracksImages = [];
         this.updateTrackVectors(p0, p1, p2);
     }
 
     createTracks() {
-        this.remove(this.tracks, true); // Remove any existing tracks
+        this.remove(this.tracksImages, true); // Remove any existing tracks
 
         // Layer 1 (texture1)
         for (let i = 0; i < this.iterations; i++) {
@@ -40,11 +41,14 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         railTrack.rotation = angle;
 
         this.add(railTrack);
-        this.tracks.push(railTrack);
+        this.tracksImages.push(railTrack);
     }
 
     updateTrackVectors(p0, p1, p2) {
         this.curve = new Phaser.Curves.Path(p0.x, p0.y).splineTo([p1.x, p1.y, p2.x, p2.y]);
+        this.p0 = p0;
+        this.p1 = p1;
+        this.p2 = p2;
         this.totalDistance = this.curve.getLength();
         this.iterations = Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale));
 
