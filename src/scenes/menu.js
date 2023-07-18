@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import Background from "../components/background";
 import RailTrack from "../components/track";
 import {projectVector, qVec} from "../utils/math";
+import Train from "../components/train";
 
 export default class MenuScene extends Phaser.Scene {
     constructor() {
@@ -24,6 +25,8 @@ export default class MenuScene extends Phaser.Scene {
         let e = qVec(1940, 800)
         let railTrack1 = new RailTrack(this, a, b, c)
         let railTrack2 = new RailTrack(this, c, d, e)
+
+        let train = new Train(this, 0, 800);
 
 
         // Set the camera to show a smaller portion of the tilemap, creating the appearance of repetition

@@ -16,8 +16,10 @@ const config = {
     physics: {
         default: 'matter',
         matter: {
-            // Matter.js configuration
-            // ...
+            debug: true,
+            gravity: {
+                y: 0.0
+            }
         }
     },
     scene: [BootScene, PreloadScene, MenuScene, GameScene]
