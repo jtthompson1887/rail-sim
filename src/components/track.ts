@@ -1,7 +1,21 @@
 import Phaser from "phaser";
+import Vector2 = Phaser.Math.Vector2;
+import Image = Phaser.GameObjects.Image;
+import Path = Phaser.Curves.Path;
 
 
 export default class RailTrack extends Phaser.GameObjects.Container {
+    private texture1: string;
+    private texture2: string;
+    private railTrackWidth: number;
+    private railTrackScale: number;
+    private iterations: number;
+    private totalDistance: number;
+    private p0: Vector2;
+    private p1: Vector2;
+    private p2: Vector2;
+    private tracksImages: Image[];
+    private curve: Path;
     constructor(scene, p0, p1, p2) {
         super(scene);
         scene.add.existing(this);

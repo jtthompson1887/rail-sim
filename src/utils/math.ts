@@ -21,12 +21,8 @@ export function projectVector(p0, p1, length) {
     return result;
 }
 
-export function qVec(x, y) {
+export function qVec(x=0, y=0) {
     return new Phaser.Math.Vector2(x, y);
-}
-
-export function matterVec(qVec) {
-    return Phaser.Physics.Matter.Vector.create(qVec.x, qVec.y)
 }
 
 export function isCurveTight(p0, p1, p2, tightnessThreshold, interval = 0.05) {
@@ -69,6 +65,40 @@ function calculateTangent(p0, p1, p2, t) {
 
     return tangent;  // return the vector, not its length
 }
+
+export class PIDController {
+    private kp: number;
+    private ki: number;
+    private kd: number;
+    private previousError: number;
+    private integral: number;
+    constructor(kp = 0.1, ki = 0.01, kd = 0.1) {
+        this.kp = kp;
+        this.ki = ki;
+        this.kd = kd;
+        this.previousError = 0;
+        this.integral = 0;
+    }
+
+    calculate(error, deltaTime) {
+        // Proportional term
+        let p = this.kp * error;
+
+        // Integral term
+        this.integral += error * deltaTime;
+        let i = this.ki * this.integral;
+
+        // Derivative term
+        let d = this.kd * (error - this.previousError) / deltaTime;
+
+        // Remember this error for the next deltaTime
+        this.previousError = error;
+
+        // Return the combined force
+        return p + i + d;
+    }
+}
+
 
 
 

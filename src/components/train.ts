@@ -1,8 +1,13 @@
 import Phaser from "phaser";
-import {matterVec, qVec} from "../utils/math";
+import {PIDController} from "../utils/math";
+import type RailTrack from "./track";
 
 export default class Train extends Phaser.GameObjects.Container {
-    constructor(scene, x, y) {
+    private _trainBody: Phaser.Physics.Matter.Image;
+    private texture: string;
+    private pidController: PIDController;
+    private _currentTrack: RailTrack;
+    constructor(scene:Phaser.Scene, x:number, y:number) {
         super(scene);
         this.scene = scene;
         this.scene.add.existing(this);
@@ -13,17 +18,18 @@ export default class Train extends Phaser.GameObjects.Container {
         this._trainBody.setMass(100)
         this.add(this._trainBody)
         this._currentTrack = null
+        this.pidController = new PIDController()
     }
 
     getMatterBody() {
         return this._trainBody;
     }
 
-    get currentTrack() {
+    get currentTrack() : RailTrack {
         return this._currentTrack;
     }
 
-    set currentTrack(value) {
+    set currentTrack(value : RailTrack) {
         this._currentTrack = value;
     }
 }

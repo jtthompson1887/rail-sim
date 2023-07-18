@@ -6,6 +6,8 @@ import Train from "../components/train";
 import {guideForceTowardsPoint} from "../utils/physics";
 
 export default class MenuScene extends Phaser.Scene {
+    private railTrack1: RailTrack;
+    private train: Train;
     constructor() {
         super({ key: 'MenuScene' });
     }
@@ -33,14 +35,16 @@ export default class MenuScene extends Phaser.Scene {
 
         // Set the camera to show a smaller portion of the tilemap, creating the appearance of repetition
 
+        // @ts-ignore
         this.add.text(400, 300, 'Rail Sim', { fontSize: '164px', fill: '#fff', fontFamily: 'Verdana' });
 
+        // @ts-ignore
         this.add.text(400, 500, 'Start', { fontSize: '64px', fill: '#fff', fontFamily: 'Verdana' })
             .setInteractive()
             .on('pointerdown', () => this.startGame());
     }
 
-    update() {
+    update(time:number, delta:number) {
         let trackPoint = this.railTrack1.getTrackPoint(this.train.getMatterBody());
         guideForceTowardsPoint(this.train.getMatterBody(), trackPoint)
 
