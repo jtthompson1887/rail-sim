@@ -1,13 +1,13 @@
-import {qVec} from "./math";
+import {PIDController, qVec} from "./math";
 import Phaser from "phaser";
 
 
-export function guideForceTowardsPoint(target, p0 : Phaser.Math.Vector2) {
+export function guideForceTowardsPoint(target, p0 : Phaser.Math.Vector2, pidController?: PIDController) {
     // Calculate the vector from the cart to the track
     let position = target.body.position;
     let forceVector = qVec().copy(p0).subtract(position)
 
-    let forceConstant = 0.0005;
+    let forceConstant = 0.0008;
     // Normalize and scale the force vector based on distance
     forceVector.normalize().scale(target.body.mass * forceConstant * forceVector.length());
 

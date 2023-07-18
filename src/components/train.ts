@@ -5,8 +5,9 @@ import type RailTrack from "./track";
 export default class Train extends Phaser.GameObjects.Container {
     private _trainBody: Phaser.Physics.Matter.Image;
     private texture: string;
-    private pidController: PIDController;
-    private _currentTrack: RailTrack;
+    private readonly _pidController: PIDController = new PIDController();
+    private _currentTrack: RailTrack = null;
+    private _derailed: boolean = false;
     constructor(scene:Phaser.Scene, x:number, y:number) {
         super(scene);
         this.scene = scene;
@@ -17,10 +18,18 @@ export default class Train extends Phaser.GameObjects.Container {
         this._trainBody.setScale(0.6, 0.6)
         this._trainBody.setMass(100)
         this.add(this._trainBody)
-        this._currentTrack = null
-        this.pidController = new PIDController()
+    }
+    get derailed(): boolean {
+        return this._derailed;
     }
 
+    set derailed(value: boolean) {
+        this._derailed = value;
+    }
+
+    get pidController(): PIDController {
+        return this._pidController;
+    }
     getMatterBody() {
         return this._trainBody;
     }
@@ -32,4 +41,5 @@ export default class Train extends Phaser.GameObjects.Container {
     set currentTrack(value : RailTrack) {
         this._currentTrack = value;
     }
+
 }

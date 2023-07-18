@@ -4,9 +4,11 @@ import RailTrack from "../components/track";
 import {projectVector, qVec} from "../utils/math";
 import Train from "../components/train";
 import {guideForceTowardsPoint} from "../utils/physics";
+import TrackFlowSolver from "../components/track-flow-solver";
 
 export default class MenuScene extends Phaser.Scene {
     private railTrack1: RailTrack;
+    private railTrack2: RailTrack;
     private train: Train;
     constructor() {
         super({ key: 'MenuScene' });
@@ -27,7 +29,7 @@ export default class MenuScene extends Phaser.Scene {
         let d = projectVector(b, c, b.distance(c))
         let e = qVec(1940, 800)
         this.railTrack1 = new RailTrack(this, a, b, c)
-        let railTrack2 = new RailTrack(this, c, d, e)
+        this.railTrack2 = new RailTrack(this, c, d, e)
 
         this.train = new Train(this, 100, 800);
 
@@ -45,12 +47,9 @@ export default class MenuScene extends Phaser.Scene {
     }
 
     update(time:number, delta:number) {
-        let trackPoint = this.railTrack1.getTrackPoint(this.train.getMatterBody());
-        guideForceTowardsPoint(this.train.getMatterBody(), trackPoint)
-
-        let rotation = this.railTrack1.getTrackAngle(this.train.getMatterBody());
-        this.train.getMatterBody().setAngle(rotation)
-        this.train.getMatterBody().thrust(0.042)
+        let trackFlowSolver = new TrackFlowSolver([this.railTrack1, this.railTrack2], this.train)
+        trackFlowSolver.applyTrackFlowForces()
+        this.train.getMatterBody().thrust(0.08)
     }
 
     startGame() {

@@ -2,30 +2,25 @@ import Phaser from "phaser";
 import Vector2 = Phaser.Math.Vector2;
 import Image = Phaser.GameObjects.Image;
 import Path = Phaser.Curves.Path;
+import GameObject = Phaser.GameObjects.GameObject;
 
 
 export default class RailTrack extends Phaser.GameObjects.Container {
-    private texture1: string;
-    private texture2: string;
-    private railTrackWidth: number;
-    private railTrackScale: number;
+    private readonly texture1: string = 'ballast';
+    private readonly texture2: string = 'rail';
+    private readonly railTrackWidth: number = 866 * 0.85; // Original width of the rail track texture
+    private readonly railTrackScale: number = 0.05; // Scale factor to adjust the size
     private iterations: number;
     private totalDistance: number;
     private p0: Vector2;
     private p1: Vector2;
     private p2: Vector2;
-    private tracksImages: Image[];
+    private readonly tracksImages: Image[] = [];
     private curve: Path;
+
     constructor(scene, p0, p1, p2) {
         super(scene);
         scene.add.existing(this);
-
-        this.texture1 = 'ballast';
-        this.texture2 = 'rail';
-        this.railTrackWidth = 866 * 0.85; // Original width of the rail track texture
-        this.railTrackScale = 0.05; // Scale factor to adjust the size
-
-        this.tracksImages = [];
         this.updateTrackVectors(p0, p1, p2);
     }
 
@@ -69,7 +64,7 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         this.createTracks(); // Recreate the tracks with the new vectors
     }
 
-    getTrackAngle(object) {
+    getTrackAngle(object: GameObject) {
         let t = this.getTrackPosition(object);
         // Get the tangent to the track at this position
         let tangent = this.curve.getTangent(t);
@@ -78,7 +73,7 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         return Phaser.Math.RadToDeg(Math.atan2(tangent.y, tangent.x))
     }
 
-    getTrackPoint(object) {
+    getTrackPoint(object: GameObject) {
         // Get the position of the cart along the track
         let t = this.getTrackPosition(object);
         // Get the coordinates of this position on the track
@@ -86,7 +81,7 @@ export default class RailTrack extends Phaser.GameObjects.Container {
     }
 
 
-    getTrackPosition(object) {
+    getTrackPosition(object: GameObject) {
         // Number of points to sample along the Bézier curve
         let numSamples = 100;
 
