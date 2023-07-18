@@ -10,12 +10,12 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         this.texture2 = 'rail';
         this.railTrackWidth = 866 * 0.85; // Original width of the rail track texture
         this.railTrackScale = 0.05; // Scale factor to adjust the size
-
+        this.tracks = [];
         this.updateTrackVectors(p0, p1, p2);
     }
 
     createTracks() {
-        this.removeAll(true); // Remove any existing tracks
+        this.remove(this.tracks, true); // Remove any existing tracks
 
         // Layer 1 (texture1)
         for (let i = 0; i < this.iterations; i++) {
@@ -40,6 +40,7 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         railTrack.rotation = angle;
 
         this.add(railTrack);
+        this.tracks.push(railTrack);
     }
 
     updateTrackVectors(p0, p1, p2) {
@@ -49,6 +50,56 @@ export default class RailTrack extends Phaser.GameObjects.Container {
 
         this.createTracks(); // Recreate the tracks with the new vectors
     }
+
+    getTrackAngle(object) {
+        let t = this.getTrackPosition(object);
+        // Get the tangent to the track at this position
+        let tangent = this.curve.getTangent(t);
+
+        // Calculate the angle of the tangent
+        return Phaser.Math.RadToDeg(Math.atan2(tangent.y, tangent.x))
+    }
+
+    getTrackPoint(object) {
+        // Get the position of the cart along the track
+        let t = this.getTrackPosition(object);
+        // Get the coordinates of this position on the track
+        return this.curve.getPoint(t);
+    }
+
+
+    getTrackPosition(object) {
+        // Number of points to sample along the Bézier curve
+        let numSamples = 100;
+
+        // Start with the closest distance being infinity
+        let closestDistance = Infinity;
+
+        // Start with the closest t being 0
+        let closestT = 0;
+
+        // Iterate over each sample
+        for (let i = 0; i <= numSamples; i++) {
+            // Calculate t for this sample
+            let t = i / numSamples;
+
+            // Get the point on the Bézier curve at this t value
+            let point = this.curve.getPoint(t);
+
+            // Calculate the distance from the cart to this point
+            let distance = Phaser.Math.Distance.Between(object.body.position.x, object.body.position.y, point.x, point.y);
+
+            // If this point is closer than the current closest point, update the closest distance and t value
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestT = t;
+            }
+        }
+
+        // Return the t value of the closest point
+        return closestT;
+    }
+
 
     getCurvePath() {
         return this.curve;

@@ -25,6 +25,10 @@ export function qVec(x, y) {
     return new Phaser.Math.Vector2(x, y);
 }
 
+export function matterVec(qVec) {
+    return Phaser.Physics.Matter.Vector.create(qVec.x, qVec.y)
+}
+
 export function isCurveTight(p0, p1, p2, tightnessThreshold, interval = 0.05) {
     const steps = Math.floor(1 / interval);
 
