@@ -2,17 +2,27 @@ import Phaser from "phaser";
 
 export function projectVector(p0, p1, length) {
     const p0p1 = new Phaser.Math.Vector2().copy(p1).subtract(p0);
-    const magnitude = p0p1.lengthSq();
+    const distance = p0p1.length();
 
-    if (magnitude === 0 || length === 0) {
+    if (distance === 0) {
         // If magnitude is zero or length is zero, return p1
         return new Phaser.Math.Vector2(p1.x, p1.y);
     }
 
     const normalizedDirection = new Phaser.Math.Vector2().copy(p0p1).normalize();
-    const projectionScalar = length / Math.sqrt(magnitude);
-    const projection = new Phaser.Math.Vector2().copy(normalizedDirection).scale(projectionScalar);
-    return new Phaser.Math.Vector2().copy(p1).add(projection);
+    const projection = new Phaser.Math.Vector2().copy(normalizedDirection).scale(length);
+    let result = new Phaser.Math.Vector2().copy(p1).add(projection);
+
+    console.log(
+        Phaser.Math.RadToDeg(Phaser.Math.Angle.BetweenPoints(p0, p1)),
+        Phaser.Math.RadToDeg(Phaser.Math.Angle.BetweenPoints(p1, result))
+    );
+
+    return result;
+}
+
+export function qVec(x, y) {
+    return new Phaser.Math.Vector2(x, y);
 }
 
 export function isCurveTight(p0, p1, p2, tightnessThreshold, interval = 0.05) {

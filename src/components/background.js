@@ -5,6 +5,7 @@ export default class Background extends Phaser.GameObjects.Container {
 
     constructor(scene, width, height) {
         super(scene);
+        scene.add.existing(this);
         this.setupBackground(scene, width, height)
     }
 
