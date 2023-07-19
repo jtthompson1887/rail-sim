@@ -10,6 +10,7 @@ export default class MenuScene extends Phaser.Scene {
     private railTrack1: RailTrack;
     private railTrack2: RailTrack;
     private train: Train;
+    private train2: Train;
     constructor() {
         super({ key: 'MenuScene' });
     }
@@ -32,6 +33,8 @@ export default class MenuScene extends Phaser.Scene {
         this.railTrack2 = new RailTrack(this, c, d, e)
 
         this.train = new Train(this, 100, 800);
+        this.train2 = new Train(this, 1900, 793);
+        this.train2.getMatterBody().angle = 15
 
 
 
@@ -48,8 +51,13 @@ export default class MenuScene extends Phaser.Scene {
 
     update(time:number, delta:number) {
         let trackFlowSolver = new TrackFlowSolver([this.railTrack1, this.railTrack2], this.train)
+        let trackFlowSolver2 = new TrackFlowSolver([this.railTrack1, this.railTrack2], this.train2)
         trackFlowSolver.applyTrackFlowForces()
-        this.train.getMatterBody().thrust(0.08)
+        trackFlowSolver2.applyTrackFlowForces()
+        if (!this.train.derailed && Math.min(this.train.getMatterBody().getVelocity().x, this.train.getMatterBody().getVelocity().y) < 0.001)
+            this.train.getMatterBody().thrust(0.08)
+        if (!this.train2.derailed && Math.min(this.train2.getMatterBody().getVelocity().x, this.train2.getMatterBody().getVelocity().y) < 0.001)
+            this.train2.getMatterBody().thrust(-0.08)
     }
 
     startGame() {

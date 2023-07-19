@@ -24,6 +24,12 @@ export default class Train extends Phaser.GameObjects.Container {
     }
 
     set derailed(value: boolean) {
+
+        if (value) {
+            this.texture = 'train2'
+            this._trainBody.setTexture(this.texture)
+        }
+
         this._derailed = value;
     }
 

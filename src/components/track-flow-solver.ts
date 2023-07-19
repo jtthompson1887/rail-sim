@@ -22,13 +22,13 @@ export default class TrackFlowSolver {
         }
 
         let currentTrackPosition = this.train.currentTrack.getTrackPosition(trainBody);
-        if (currentTrackPosition > 0.9 || currentTrackPosition < 0.1) {
-            this.train.currentTrack = this.getClosestRailTrack();
-        }
+        //if (currentTrackPosition > 0.9 || currentTrackPosition < 0.1) { //cause issues if a collision happen as we wont know until the condition is meet
+            this.train.currentTrack = this.getClosestRailTrack(undefined, 20);
+        //}
 
     }
 
-    getClosestRailTrack(track: RailTrack[] = this.tracks): RailTrack {
+    getClosestRailTrack(track: RailTrack[] = this.tracks, limit: number = 0): RailTrack {
         let trainBody = this.train.getMatterBody();
         let trainPosition = trainBody.getCenter()
         let localTracks = this.tracks.filter(track => {
@@ -36,6 +36,13 @@ export default class TrackFlowSolver {
             let trackMidpoint = track.getCurvePath().getPoint(0.5);
             return trackMidpoint.distance(trainPosition) < trackLength
         })
+
+        if (limit > 0) {
+            localTracks = localTracks.filter(track => {
+                return track.getTrackPoint(trainBody).distance(trainBody) < limit
+            })
+        }
+
         if (localTracks.length > 0) {
             return localTracks.reduce((previousValue, currentValue) => {
                 let prevTrackDist = previousValue.getTrackPoint(trainBody).distance(trainBody);
@@ -61,6 +68,6 @@ export default class TrackFlowSolver {
         guideForceTowardsPoint(this.train.getMatterBody(), trackPoint, this.train.pidController)
 
         let rotation = currentTrack.getTrackAngle(trainBody);
-        trainBody.setAngle(rotation)
+        trainBody.setAngle(rotation) //todo if angle change is more than (90 abs) then flip angle
     }
 }
