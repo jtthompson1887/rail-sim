@@ -23,7 +23,7 @@ export default class TrackFlowSolver {
 
         let currentTrackPosition = this.train.currentTrack.getTrackPosition(trainBody);
         //if (currentTrackPosition > 0.9 || currentTrackPosition < 0.1) { //cause issues if a collision happen as we wont know until the condition is meet
-            this.train.currentTrack = this.getClosestRailTrack(undefined, 20);
+            this.train.currentTrack = this.getClosestRailTrack(undefined, 100);
         //}
 
     }
@@ -59,6 +59,27 @@ export default class TrackFlowSolver {
 
     }
 
+    private checkAngleDirection(currentAngle: number, targetAngle: number): number {
+        // Calculate the difference in angles
+        let diff = Math.abs(targetAngle - currentAngle);
+
+        // Check if the difference is larger than 90 degrees
+        if (diff > 90) {
+            // Flip the target angle by adding or subtracting 180, ensuring we keep the value within -180 and 180
+            if (targetAngle >= 0) {
+                targetAngle -= 180;
+                if (targetAngle < -180) targetAngle += 360;
+            } else {
+                targetAngle += 180;
+                if (targetAngle > 180) targetAngle -= 360;
+            }
+        }
+
+        // Return the (potentially flipped) target angle
+        return targetAngle;
+    }
+
+
     applyTrackFlowForces() {
         let trainBody = this.train.getMatterBody();
         let currentTrack = this.train.currentTrack
@@ -68,6 +89,8 @@ export default class TrackFlowSolver {
         guideForceTowardsPoint(this.train.getMatterBody(), trackPoint, this.train.pidController)
 
         let rotation = currentTrack.getTrackAngle(trainBody);
-        trainBody.setAngle(rotation) //todo if angle change is more than (90 abs) then flip angle
+
+        let newAngle = this.checkAngleDirection(trainBody.angle, rotation)
+        trainBody.setAngle(newAngle) //todo if angle change is more than (90 abs) then flip angle
     }
 }
