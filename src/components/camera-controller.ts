@@ -1,4 +1,6 @@
 import Phaser, {Scene} from "phaser";
+import GameObject = Phaser.GameObjects.GameObject;
+import Camera = Phaser.Cameras.Scene2D.Camera;
 
 
 export class CameraController {
@@ -16,11 +18,14 @@ export class CameraController {
         zoomOut: Phaser.Input.Keyboard.Key
     };
     private controls: Phaser.Cameras.Controls.SmoothedKeyControl;
+    private cam: Camera;
+    private following: boolean = false;
 
 
     constructor(scene :Scene) {
 
         const cursors = scene.input.keyboard.createCursorKeys();
+        this.cam = scene.cameras.main;
 
         this.controlConfig = {
             camera: scene.cameras.main,
@@ -31,16 +36,22 @@ export class CameraController {
             zoomIn: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
             zoomOut: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
             acceleration: 0.06,
-            drag: 0.0005,
-            maxSpeed: 1.0
+            drag: 0.0015,
+            maxSpeed: 3.0
         };
 
         this.controls = new Phaser.Cameras.Controls.SmoothedKeyControl(this.controlConfig);
 
     }
 
+    public startFollow(object :GameObject) {
+        this.following = true;
+        this.cam.startFollow(object, true);
+    }
+
     public update(time, delta) {
-        this.controls.update(delta);
+        if (!this.following)
+            this.controls.update(delta);
     }
 
 

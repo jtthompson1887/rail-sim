@@ -11,7 +11,8 @@ export default class GameScene extends Phaser.Scene {
         let p2 = new Phaser.Math.Vector2(200, 450);
         let p1 = new Phaser.Math.Vector2(700, 200);
         let p0 = new Phaser.Math.Vector2(1600, 450);
-        this.railTrack = new RailTrack(this, p0, p1, p2);
+        let p3 = new Phaser.Math.Vector2(1800, 200);
+        this.railTrack = new RailTrack(this, p0, p1, p2, p3);
 
         this.variableToOscillate = 0;
         this.isIncreasing = true;
@@ -38,9 +39,12 @@ export default class GameScene extends Phaser.Scene {
         let p0 = new Phaser.Math.Vector2(this.variableToOscillate, 200);
         let p1 = new Phaser.Math.Vector2(700, 450);
         let p2 = new Phaser.Math.Vector2(1600, 200);
+        let p3 = new Phaser.Math.Vector2(1800, 200);
         if (isCurveTight(p0, p1, p2, -50))
             console.log("tight")
-        this.railTrack.updateTrackVectors(p0, p1, p2)
+        if (isCurveTight(p1, p2, p3, -50))
+            console.log("tight")
+        this.railTrack.updateTrackVectors(p0, p1, p2, p3)
 
     }
 }

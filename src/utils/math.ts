@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import Vector2 = Phaser.Math.Vector2;
 
 export function projectVector(p0, p1, length) {
     const p0p1 = new Phaser.Math.Vector2().copy(p1).subtract(p0);
@@ -64,6 +65,89 @@ function calculateTangent(p0, p1, p2, t) {
     tangent.normalize(); // we normalize because we're interested in direction, not magnitude
 
     return tangent;  // return the vector, not its length
+}
+
+export function toBezierPoints(points: Vector2[]): Array<{ cp: Vector2, to: Vector2 }> {
+    const bezierPoints: Array<{ cp: Vector2, to: Vector2 }> = [];
+
+    // Add the starting point
+    bezierPoints.push({ cp: points[0].clone(), to: points[0].clone() });
+
+    for (let i = 0; i < points.length - 2; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const p2 = points[i + 2];
+
+        const mid1 = midPoint(p0, p1);
+        const mid2 = midPoint(p1, p2);
+
+        bezierPoints.push({ cp: mid1, to: p1 });
+        bezierPoints.push({ cp: mid2, to: p2 });
+    }
+
+    // Add the ending point
+    const lastPoint = points[points.length - 1];
+    bezierPoints.push({ cp: lastPoint.clone(), to: lastPoint.clone() });
+
+    return bezierPoints;
+}
+
+export function toCubicBezierPoints(points: Vector2[]): Array<{ cp1: Vector2, cp2: Vector2, to: Vector2 }> {
+    const bezierPoints: Array<{ cp1: Vector2, cp2: Vector2, to: Vector2 }> = [];
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = (i === 0) ? points[i] : points[i - 1];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = (i === points.length - 2) ? points[i + 1] : points[i + 2];
+
+        const cp1 = new Vector2(
+            p1.x + (p2.x - p0.x) / 6,
+            p1.y + (p2.y - p0.y) / 6,
+        );
+
+        const cp2 = new Vector2(
+            p2.x - (p3.x - p1.x) / 6,
+            p2.y - (p3.y - p1.y) / 6,
+        );
+
+        bezierPoints.push({ cp1, cp2, to: p2 });
+    }
+
+    return bezierPoints;
+}
+
+// export function toCubicBezierPoints(points: Vector2[]): Array<{ cp1: Vector2, cp2: Vector2, to: Vector2 }> {
+//     const bezierPoints: Array<{ cp1: Vector2, cp2: Vector2, to: Vector2 }> = [];
+//
+//     for (let i = 0; i < points.length - 3; i++) {
+//         const p0 = i === 0 ? points[i] : points[i - 1];
+//         const p1 = points[i];
+//         const p2 = points[i + 1];
+//         const p3 = points[i + 2];
+//
+//         const cp1 = new Vector2(
+//             p1.x + (p2.x - p0.x) / 6,
+//             p1.y + (p2.y - p0.y) / 6,
+//         );
+//
+//         const cp2 = new Vector2(
+//             p2.x - (p3.x - p1.x) / 6,
+//             p2.y - (p3.y - p1.y) / 6,
+//         );
+//
+//         bezierPoints.push({ cp1, cp2, to: p2 });
+//     }
+//
+//     return bezierPoints;
+// }
+
+
+function midPoint(p0: Vector2, p1: Vector2): Vector2 {
+    return new Vector2(
+        (p0.x + p1.x) / 2,
+        (p0.y + p1.y) / 2
+    );
 }
 
 export class PIDController {

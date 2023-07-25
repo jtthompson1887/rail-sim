@@ -18,10 +18,10 @@ export default class RailTrack extends Phaser.GameObjects.Container {
     private readonly tracksImages: Image[] = [];
     private curve: Path;
 
-    constructor(scene, p0, p1, p2) {
+    constructor(scene, p0, p1, p2, p3) {
         super(scene);
         scene.add.existing(this);
-        this.updateTrackVectors(p0, p1, p2);
+        this.updateTrackVectors(p0, p1, p2, p3);
     }
 
     createTracks() {
@@ -53,8 +53,8 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         this.tracksImages.push(railTrack);
     }
 
-    updateTrackVectors(p0, p1, p2) {
-        this.curve = new Phaser.Curves.Path(p0.x, p0.y).splineTo([p1.x, p1.y, p2.x, p2.y]);
+    updateTrackVectors(p0, p1, p2, p3) {
+        this.curve = new Phaser.Curves.Path(p0.x, p0.y).splineTo([p1.x, p1.y, p2.x, p2.y, p3.x, p3.y]);
         this.p0 = p0;
         this.p1 = p1;
         this.p2 = p2;

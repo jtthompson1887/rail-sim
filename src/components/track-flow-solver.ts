@@ -21,7 +21,7 @@ export default class TrackFlowSolver {
             this.train.currentTrack = this.getClosestRailTrack();
         }
 
-        let currentTrackPosition = this.train.currentTrack.getTrackPosition(trainBody);
+        //let currentTrackPosition = this.train.currentTrack.getTrackPosition(trainBody);
         //if (currentTrackPosition > 0.9 || currentTrackPosition < 0.1) { //cause issues if a collision happen as we wont know until the condition is meet
             this.train.currentTrack = this.getClosestRailTrack(undefined, 100);
         //}
@@ -59,24 +59,30 @@ export default class TrackFlowSolver {
 
     }
 
-    private checkAngleDirection(currentAngle: number, targetAngle: number): number {
-        // Calculate the difference in angles
-        let diff = Math.abs(targetAngle - currentAngle);
+    checkAngleDirection(currentAngle: number, targetAngle: number, smoothing: number): number {
+        // Ensure smoothing is between 0 and 1
+        smoothing = Math.max(0, Math.min(1, smoothing));
 
-        // Check if the difference is larger than 90 degrees
-        if (diff > 90) {
-            // Flip the target angle by adding or subtracting 180, ensuring we keep the value within -180 and 180
-            if (targetAngle >= 0) {
-                targetAngle -= 180;
-                if (targetAngle < -180) targetAngle += 360;
-            } else {
-                targetAngle += 180;
-                if (targetAngle > 180) targetAngle -= 360;
-            }
+        // Calculate the shortest difference in angles, taking into account wrapping
+        let diff = ((targetAngle - currentAngle + 180 + 360) % 360) - 180;
+
+        // If the absolute difference is larger than 90, flip the difference
+        if (Math.abs(diff) > 90) {
+            diff = ((diff + 180 + 360) % 360) - 180;
         }
 
-        // Return the (potentially flipped) target angle
-        return targetAngle;
+        // Add the difference to the current angle and normalize it to the range -180 to 180
+        let normalizedAngle = ((currentAngle + diff + 180 + 360) % 360) - 180;
+
+        // Compute the smoothed angle
+        let smoothedAngle = (1 - smoothing) * normalizedAngle + smoothing * currentAngle;
+
+        // Ensure the smoothed angle is within the range of -180 to 180
+        while (smoothedAngle > 180) smoothedAngle -= 360;
+        while (smoothedAngle < -180) smoothedAngle += 360;
+
+        // Return the smoothed angle
+        return smoothedAngle;
     }
 
 
@@ -90,7 +96,7 @@ export default class TrackFlowSolver {
 
         let rotation = currentTrack.getTrackAngle(trainBody);
 
-        let newAngle = this.checkAngleDirection(trainBody.angle, rotation)
+        let newAngle = this.checkAngleDirection(trainBody.angle, rotation, 0.7)
         trainBody.setAngle(newAngle) //todo if angle change is more than (90 abs) then flip angle
     }
 }
