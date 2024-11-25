@@ -23,6 +23,9 @@ export default class Train extends Phaser.GameObjects.Container {
         this.scene.add.existing(this);
         this.texture = 'train1';
         
+        // Set container depth to be above tracks
+        this.setDepth(100);
+        
         try {
             this._trainBody = scene.matter.add.image(x, y, this.texture, null) as TrainMatterImage;
             if (!this._trainBody) {
@@ -32,6 +35,8 @@ export default class Train extends Phaser.GameObjects.Container {
             
             matterScaling(this._trainBody, 0.15, 0.15);
             this._trainBody.setMass(1000);
+            // Set train body to appear above tracks with even higher depth
+            this._trainBody.setDepth(100);
             this.add(this._trainBody);
 
             // Set container size to match the train body

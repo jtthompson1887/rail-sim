@@ -68,14 +68,14 @@ export class InputManager {
 
         let oldPower = selectedTrain.enginePower;
         if (this.wKey && this.wKey.isDown) {
-            selectedTrain.enginePower = 10.0;
-            if (oldPower !== 10.0) {
-                console.log('Setting engine power to 10.0');
+            selectedTrain.enginePower = 35.0;
+            if (oldPower !== 35.0) {
+                console.log('Setting engine power to 35.0');
             }
         } else if (this.sKey && this.sKey.isDown) {
-            selectedTrain.enginePower = -10.0;
-            if (oldPower !== -10.0) {
-                console.log('Setting engine power to -10.0');
+            selectedTrain.enginePower = -35.0;
+            if (oldPower !== -35.0) {
+                console.log('Setting engine power to -35.0');
             }
         } else {
             selectedTrain.enginePower = 0;

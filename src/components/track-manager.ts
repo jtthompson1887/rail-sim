@@ -1,6 +1,7 @@
 import RailTrack from "./track";
 import Vector2 = Phaser.Math.Vector2;
 import Vector2Like = Phaser.Types.Math.Vector2Like;
+import Sprite = Phaser.GameObjects.Sprite;
 
 export default class TrackManager {
     private tracks: Map<string, RailTrack>;
@@ -115,22 +116,43 @@ export default class TrackManager {
         }
     }
 
-    getClosestTrack(position: Vector2Like, maxDistance: number = Infinity): RailTrack | undefined {
-        let closestTrack: RailTrack | undefined;
-        let closestDistance = maxDistance;
-        const posVec = new Vector2(position.x, position.y);
-
-        for (const track of this.getVisibleTracks()) {
+    getClosestTrack(position: Vector2Like, limit: number = 0): RailTrack | undefined {
+        const pos = new Vector2(position.x, position.y);
+        const allTracks = this.getAllTracks();
+        
+        let localTracks = allTracks.filter(track => {
+            const trackLength = track.getCurvePath().getLength();
             const trackMidpoint = track.getCurvePath().getPoint(0.5);
-            const distance = posVec.distance(trackMidpoint);
+            return new Vector2(trackMidpoint.x, trackMidpoint.y).distance(pos) < trackLength;
+        });
 
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closestTrack = track;
-            }
+        if (limit > 0) {
+            localTracks = localTracks.filter(track => {
+                // Create a temporary sprite to use with getTrackPoint
+                const tempObj = new Sprite(this.scene, position.x, position.y, '');
+                const trackPoint = track.getTrackPoint(tempObj);
+                const distance = new Vector2(trackPoint.x, trackPoint.y).distance(pos);
+                tempObj.destroy();
+                return distance < limit;
+            });
         }
 
-        return closestTrack;
+        if (localTracks.length === 0) {
+            return undefined;
+        }
+
+        return localTracks.reduce((previousValue, currentValue) => {
+            // Create temporary sprite for distance comparison
+            const tempObj = new Sprite(this.scene, position.x, position.y, '');
+            const prevPoint = previousValue.getTrackPoint(tempObj);
+            const currentPoint = currentValue.getTrackPoint(tempObj);
+            
+            const prevDist = new Vector2(prevPoint.x, prevPoint.y).distance(pos);
+            const currentDist = new Vector2(currentPoint.x, currentPoint.y).distance(pos);
+            
+            tempObj.destroy();
+            return currentDist < prevDist ? currentValue : previousValue;
+        });
     }
 
     getTracksInRadius(position: Vector2Like, radius: number): RailTrack[] {

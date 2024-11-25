@@ -1,18 +1,18 @@
 import Phaser from "phaser";
 import Train from "./train";
-import type RailTrack from "./track";
+import type TrackManager from "./track-manager";
 import TrackFlowSolver from "./track-flow-solver";
 
 export class TrainManager {
     private scene: Phaser.Scene;
     private _selectedTrain: Train | null = null;
     trains: Train[] = [];
-    private railTracks: RailTrack[];
+    private trackManager: TrackManager;
     private cameraController: any;
 
-    constructor(scene: Phaser.Scene, railTracks: RailTrack[], cameraController: any) {
+    constructor(scene: Phaser.Scene, trackManager: TrackManager, cameraController: any) {
         this.scene = scene;
-        this.railTracks = railTracks;
+        this.trackManager = trackManager;
         this.cameraController = cameraController;
     }
 
@@ -60,7 +60,7 @@ export class TrainManager {
         // Update all trains and apply track forces
         for (const train of this.trains) {
             train.update(time, delta);
-            const trackFlowSolver = new TrackFlowSolver(this.railTracks, train);
+            const trackFlowSolver = new TrackFlowSolver(this.trackManager, train);
             trackFlowSolver.applyTrackFlowForces();
         }
     }

@@ -6,13 +6,15 @@ import {CameraController} from "../components/camera-controller";
 import TrackFlowSolver from "../components/track-flow-solver";
 import {InputManager} from "../components/input-manager";
 import {TrainManager} from "../components/train-manager";
+import TrackManager from "../components/track-manager";
+import TrackGenerator from "../components/track-generator";
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
         this.selectedTrain = null;
         this.trains = [];
-        this.railTracks = [];
+        this.trackManager = null;
     }
 
     preload() {
@@ -20,44 +22,51 @@ export default class GameScene extends Phaser.Scene {
     }
 
     create() {
-        // Create track points for a circular track
-        let trackPoints = [
-            qVec(2000.0, 1000.0),
-            qVec(1866.025403784439, 1500.0),
-            qVec(1500.0, 1866.025403784439),
-            qVec(1000.0, 2000.0),
-            qVec(500.000000000002, 1866.025403784439),
-            qVec(133.97459621556136, 1500.0),
-            qVec(0.0, 1000.000000000002),
-            qVec(133.97459621556136, 499.9999999999999),
-            qVec(499.9999999999995, 133.97459621556154),
-            qVec(999.9999999999998, 0.0),
-            qVec(1500.0, 133.97459621556136),
-            qVec(1866.0254037844385, 499.9999999999995),
-            qVec(2000.0, 1000.0),
-            qVec(1866.025403784439, 1500.0),
-        ];
+        this.trackManager = new TrackManager(this);
 
-        // Convert track points to bezier curves
-        let bezierPoints = toCubicBezierPoints(trackPoints);
+        // Initialize camera controller
+        this.cameraController = new CameraController(this);
 
-        // Create rail tracks
-        for (let i = 1; i < bezierPoints.length; i++) {
-            let lastPoint = bezierPoints[i-1];
-            let currentPoint = bezierPoints[i];
-            this.railTracks.push(new RailTrack(this, lastPoint.to, currentPoint.cp1, currentPoint.cp2, currentPoint.to));
-        }
+        // Initialize train manager
+        this.trainManager = new TrainManager(this, this.trackManager, this.cameraController);
+        
+        // Create initial train at (0, 1000)
+        const train = this.trainManager.createInitialTrain();
+
+        // Create track generator starting from train position
+        const trackParams = {
+            seed: Date.now().toString(), // Random seed based on current time (as string)
+            minStraightLength: 300,
+            maxStraightLength: 600,
+            curveProbability: 0.3,
+            minCurveAngle: 15,
+            maxCurveAngle: 45,
+            curveSmoothness: 0.8
+        };
+
+        const generator = new TrackGenerator(this, this.trackManager, trackParams);
+        
+        // Modify the first section to start at train's position
+        const firstSection = generator.createStraightSection(
+            new Phaser.Math.Vector2(train.x, train.y),
+            400,  // Initial straight section length
+            Phaser.Math.DegToRad(90)  // Initial angle (90 degrees = pointing up)
+        );
+        generator.addSection(firstSection);
+        
+        // Generate the rest of the track
+        generator.generateTrack(trackParams, 99);  // 99 more sections (total 100)
 
         // Create debug graphics
         this.debugGraphics = this.add.graphics()
-            .setDepth(1);   // Low depth for game layer
+            .setDepth(1);
         
         // Create UI camera for debug info
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
         this.uiCamera.setScroll(0, 0);
         this.uiCamera.setZoom(1);
         
-        // Add debug text for coordinates (attached to UI camera)
+        // Add debug text for coordinates
         this.coordsText = this.add.text(16, 16, '', { 
             fontSize: '16px', 
             fill: '#fff',
@@ -65,23 +74,15 @@ export default class GameScene extends Phaser.Scene {
             padding: { x: 10, y: 5 },
             fixedWidth: 300
         })
-        .setDepth(1000)    // High depth for UI layer
+        .setDepth(1000)
         .setScrollFactor(0)
-        .setAlpha(0.8);    // Slightly transparent
+        .setAlpha(0.8);
 
-        // Initialize camera controller
-        this.cameraController = new CameraController(this);
-
-        // Initialize train manager
-        this.trainManager = new TrainManager(this, this.railTracks, this.cameraController);
-        
-        this.trainManager.createInitialTrain();
-        
         this.inputManager = new InputManager(this);
         this.inputManager.setupClickHandling(this.trainManager);
 
         // Configure cameras
-        this.uiCamera.ignore([this.debugGraphics, ...this.railTracks, ...this.trainManager.trains]);
+        this.uiCamera.ignore([this.debugGraphics, ...this.trackManager.tracks, ...this.trainManager.trains]);
         this.cameras.main.ignore(this.coordsText);
 
         // Set initial camera position and zoom
