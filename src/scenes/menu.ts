@@ -68,12 +68,12 @@ export default class MenuScene extends Phaser.Scene {
 
         this.camControl = new CameraController(this)
 
-        let train1 = new Train(this, 20000, 10090);
+        //let train1 = new Train(this, 20000, 10090);
         let train2 = new Train(this, 0, 10090);
         this.camControl.startFollow(train2.getMatterBody());
         train2.getMatterBody().angle = 0;
-        train1.getMatterBody().angle = 0;
-        this.trains.push(train1);
+        //train1.getMatterBody().angle = 0;
+        //this.trains.push(train1);
         this.trains.push(train2);
 
 
@@ -96,9 +96,9 @@ export default class MenuScene extends Phaser.Scene {
         this.camControl.update(time, delta)
 
         for (let train of this.trains) {
+            train.update(time, delta);
             let trackFlowSolver = new TrackFlowSolver(this.railTracks, train)
             trackFlowSolver.applyTrackFlowForces()
-            train.update(time, delta);
         }
     }
 

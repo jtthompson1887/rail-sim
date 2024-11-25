@@ -4,7 +4,6 @@ import Image = Phaser.GameObjects.Image;
 import Path = Phaser.Curves.Path;
 import GameObject = Phaser.GameObjects.GameObject;
 
-
 export default class RailTrack extends Phaser.GameObjects.Container {
     private readonly texture1: string = 'ballast';
     private readonly texture2: string = 'rail';
@@ -17,10 +16,12 @@ export default class RailTrack extends Phaser.GameObjects.Container {
     private p2: Vector2;
     private readonly tracksImages: Image[] = [];
     private curve: Path;
+    private readonly uuid: string;
 
     constructor(scene, p0, p1, p2, p3) {
         super(scene);
         scene.add.existing(this);
+        this.uuid = crypto.randomUUID();
         this.updateTrackVectors(p0, p1, p2, p3);
     }
 
@@ -80,10 +81,9 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         return this.curve.getPoint(t);
     }
 
-
     getTrackPosition(object: GameObject) {
         // Number of points to sample along the Bézier curve
-        let numSamples = 100;
+        let numSamples = 1000;
 
         // Start with the closest distance being infinity
         let closestDistance = Infinity;
@@ -113,9 +113,11 @@ export default class RailTrack extends Phaser.GameObjects.Container {
         return closestT;
     }
 
-
     getCurvePath() {
         return this.curve;
     }
-}
 
+    getUUID(): string {
+        return this.uuid;
+    }
+}

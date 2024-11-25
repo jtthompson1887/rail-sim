@@ -14,11 +14,6 @@ export function projectVector(p0, p1, length) {
     const projection = new Phaser.Math.Vector2().copy(normalizedDirection).scale(length);
     let result = new Phaser.Math.Vector2().copy(p1).add(projection);
 
-    console.log(
-        Phaser.Math.RadToDeg(Phaser.Math.Angle.BetweenPoints(p0, p1)),
-        Phaser.Math.RadToDeg(Phaser.Math.Angle.BetweenPoints(p1, result))
-    );
-
     return result;
 }
 
@@ -156,7 +151,8 @@ export class PIDController {
     private kd: number;
     private previousError: number;
     private integral: number;
-    constructor(kp = 0.1, ki = 0.01, kd = 0.1) {
+    private currentDelta: number;
+    constructor(kp = 0.5, ki = 0.0, kd = 0.3) {  // Reduced P gain, added D term
         this.kp = kp;
         this.ki = ki;
         this.kd = kd;
@@ -164,16 +160,16 @@ export class PIDController {
         this.integral = 0;
     }
 
-    calculate(error, deltaTime) {
+    calculate(error) {
         // Proportional term
         let p = this.kp * error;
 
         // Integral term
-        this.integral += error * deltaTime;
+        this.integral += error * this.currentDelta;
         let i = this.ki * this.integral;
 
-        // Derivative term
-        let d = this.kd * (error - this.previousError) / deltaTime;
+        // Derivative term (damping)
+        let d = this.kd * (error - this.previousError) / this.currentDelta;
 
         // Remember this error for the next deltaTime
         this.previousError = error;
@@ -181,9 +177,8 @@ export class PIDController {
         // Return the combined force
         return p + i + d;
     }
+
+    setCurrentDelta(delta :number) {
+        this.currentDelta = delta;
+    }
 }
-
-
-
-
-

@@ -26,7 +26,9 @@ export default class PreloadScene extends Phaser.Scene {
         this.load.image('grass-set', 'assets/images/grass-set-edited.png');
         this.load.image('ballast', 'assets/images/ballast.png');
         this.load.image('rail', 'assets/images/rail.png');
-        this.load.image('train1', 'assets/images/train1.png');
+        this.load.image('train1', 'assets/images/class43-top-view.png');
+
+
         this.load.image('train2', 'assets/images/train2.png');
         // this.load.image('enemy', 'assets/images/enemy.png');
         // this.load.audio('backgroundMusic', 'assets/sounds/background.mp3');
