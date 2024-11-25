@@ -9,13 +9,14 @@ interface TrainMatterImage extends Phaser.Physics.Matter.Image {
 }
 
 export default class Train extends Phaser.GameObjects.Container {
-    private _trainBody: TrainMatterImage | null = null;
+    private _trainBody: TrainMatterImage;
     private texture: string;
     private readonly _pidController: PIDController = new PIDController();
-    private _currentTrack: RailTrack = null;
+    private _currentTrack: RailTrack | null = null;
     private _derailed: boolean = false;
-    private _enginePower: number = 0.0;
+    private _enginePower: number = 0;
     private _selected: boolean = false;
+    public debugGraphics: Phaser.GameObjects.Graphics;
 
     constructor(scene: Phaser.Scene, x: number, y: number) {
         super(scene);
@@ -50,6 +51,10 @@ export default class Train extends Phaser.GameObjects.Container {
             
             // Store a reference back to the train on the body
             this._trainBody.parentTrain = this;
+
+            this.debugGraphics = this.scene.add.graphics();
+            // Set debug graphics depth to be above everything
+            this.debugGraphics.setDepth(1000);
         } catch (error) {
             console.error('Error creating train:', error);
         }
@@ -101,11 +106,11 @@ export default class Train extends Phaser.GameObjects.Container {
         this._enginePower = value;
     }
 
-    get currentTrack(): RailTrack {
+    get currentTrack(): RailTrack | null {
         return this._currentTrack;
     }
 
-    set currentTrack(value: RailTrack) {
+    set currentTrack(value: RailTrack | null) {
         this._currentTrack = value;
     }
 

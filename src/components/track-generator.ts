@@ -31,6 +31,8 @@ interface TrackGeneratorParams {
     maxCurveAngle: number;
     /** How smooth the curves should be (0-1) */
     curveSmoothness: number;
+    /** Base probability for curve angles. As angles approach maxCurveAngle, probability linearly decreases to 0 */
+    curveAngleProbability?: number;
 }
 
 export default class TrackGenerator {
@@ -138,17 +140,34 @@ export default class TrackGenerator {
         );
 
         if (isCurve) {
-            const curveAngle = Phaser.Math.DegToRad(
-                this.rng.between(params.minCurveAngle, params.maxCurveAngle) *
-                (this.rng.frac() < 0.5 ? 1 : -1)
-            );
+            // Get a random angle from the full range
+            const baseAngle = this.rng.between(params.minCurveAngle, params.maxCurveAngle);
+            
+            // Calculate probability based on how close the angle is to maxCurveAngle
+            const baseProbability = params.curveAngleProbability ?? 1.0;
+            const angleRange = params.maxCurveAngle - params.minCurveAngle;
+            const angleRatio = (baseAngle - params.minCurveAngle) / angleRange;
+            const probability = baseProbability * (1 - angleRatio); // Linear decrease from baseProbability to 0
+            
+            // Only use this angle if it passes the probability check
+            let curveAngle: number;
+            if (this.rng.frac() < probability) {
+                curveAngle = baseAngle;
+            } else {
+                // If it fails, use a gentler curve from the lower half of the range
+                curveAngle = this.rng.between(params.minCurveAngle, (params.minCurveAngle + params.maxCurveAngle) * 0.5);
+            }
+            
+            // Apply random direction
+            curveAngle *= (this.rng.frac() < 0.5 ? 1 : -1);
+            
             const length = this.rng.between(params.minStraightLength, params.maxStraightLength);
             
             return this.createCurvedSection(
                 this.lastSection.end,
                 length,
                 lastAngle,
-                lastAngle + curveAngle,
+                lastAngle + Phaser.Math.DegToRad(curveAngle),
                 params.curveSmoothness
             );
         } else {

@@ -11,7 +11,7 @@ export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.
     let position = gameObject.body.position;
     let forceVector = qVec().copy(p0).subtract(position)
 
-    let forceConstant = 0.0004; // Reduced from 0.0008 to make the force gentler
+    let forceConstant = 0.0020; // Reduced from 0.0008/0.0020 to make the force gentler
     // Normalize and scale the force vector based on distance
     forceVector.normalize().scale(gameObject.body.mass * forceConstant * forceVector.length());
 

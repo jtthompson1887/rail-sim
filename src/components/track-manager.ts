@@ -2,15 +2,18 @@ import RailTrack from "./track";
 import Vector2 = Phaser.Math.Vector2;
 import Vector2Like = Phaser.Types.Math.Vector2Like;
 import Sprite = Phaser.GameObjects.Sprite;
+import Junction from "./junction"; // Assuming Junction class is in junction.ts file
 
 export default class TrackManager {
     private tracks: Map<string, RailTrack>;
+    private junctions: Map<string, Junction>;
     private scene: Phaser.Scene;
     private visibleTracks: Set<string>;
 
     constructor(scene: Phaser.Scene) {
         this.scene = scene;
         this.tracks = new Map<string, RailTrack>();
+        this.junctions = new Map<string, Junction>();
         this.visibleTracks = new Set<string>();
     }
 
@@ -104,6 +107,132 @@ export default class TrackManager {
         return trackUUIDs;
     }
 
+    createJunction(trackUUID: string, position: number): Junction | null {
+        const track = this.tracks.get(trackUUID);
+        if (!track) return null;
+
+        // Get the junction point position
+        const mainPath = track.getCurvePath();
+        const junctionPoint = mainPath.getPoint(position);
+        const mainTangent = mainPath.getTangent(position);
+        const mainAngle = Math.atan2(mainTangent.y, mainTangent.x);
+
+        // Create left and right branch tracks
+        const length = 400;
+        const leftAngle = -Math.PI / 12; // -15 degrees
+        const rightAngle = Math.PI / 12;  // 15 degrees
+
+        // Create left branch
+        const leftEnd = new Vector2(
+            junctionPoint.x + Math.cos(mainAngle + leftAngle) * length,
+            junctionPoint.y + Math.sin(mainAngle + leftAngle) * length
+        );
+        const leftControl1 = new Vector2(
+            junctionPoint.x + Math.cos(mainAngle + leftAngle * 0.5) * length * 0.3,
+            junctionPoint.y + Math.sin(mainAngle + leftAngle * 0.5) * length * 0.3
+        );
+        const leftControl2 = new Vector2(
+            leftEnd.x - Math.cos(mainAngle + leftAngle) * length * 0.3,
+            leftEnd.y - Math.sin(mainAngle + leftAngle) * length * 0.3
+        );
+        const leftTrack = new RailTrack(
+            this.scene,
+            junctionPoint,
+            leftControl1,
+            leftControl2,
+            leftEnd
+        );
+
+        // Create right branch
+        const rightEnd = new Vector2(
+            junctionPoint.x + Math.cos(mainAngle + rightAngle) * length,
+            junctionPoint.y + Math.sin(mainAngle + rightAngle) * length
+        );
+        const rightControl1 = new Vector2(
+            junctionPoint.x + Math.cos(mainAngle + rightAngle * 0.5) * length * 0.3,
+            junctionPoint.y + Math.sin(mainAngle + rightAngle * 0.5) * length * 0.3
+        );
+        const rightControl2 = new Vector2(
+            rightEnd.x - Math.cos(mainAngle + rightAngle) * length * 0.3,
+            rightEnd.y - Math.sin(mainAngle + rightAngle) * length * 0.3
+        );
+        const rightTrack = new RailTrack(
+            this.scene,
+            junctionPoint,
+            rightControl1,
+            rightControl2,
+            rightEnd
+        );
+
+        // Add tracks to manager
+        this.addTrack(leftTrack);
+        this.addTrack(rightTrack);
+
+        // Create junction with all three tracks
+        const junction = new Junction(this.scene, track, leftTrack, rightTrack, position);
+        this.junctions.set(junction.getUUID(), junction);
+
+        // Set initial visibility
+        leftTrack.setAlpha(0.5);
+        rightTrack.setAlpha(1); // Right is default active branch
+
+        return junction;
+    }
+
+    getJunctionsForTrack(track: RailTrack): Junction[] {
+        return Array.from(this.junctions.values())
+            .filter(j => {
+                const tracks = j.getAllTracks();
+                return tracks.indexOf(track) !== -1;
+            });
+    }
+
+    getClosestTrack(point: Vector2Like, limit: number = 0, currentTrack?: RailTrack): RailTrack | null {
+        let closestTrack: RailTrack | null = null;
+        let closestDistance = Infinity;
+
+        // Create a temporary trackable object
+        const tempTrackable = new Phaser.GameObjects.Sprite(this.scene, point.x, point.y, '');
+
+        for (const track of this.tracks.values()) {
+            // Skip inactive branch tracks
+            const junctions = this.getJunctionsForTrack(track);
+            const isBranchTrack = junctions.some(j => {
+                const activeBranch = j.getActiveBranchTrack();
+                const inactiveBranch = j.getInactiveBranchTrack();
+                return track === activeBranch || track === inactiveBranch;
+            });
+            
+            if (isBranchTrack) {
+                const isActive = junctions.some(j => track === j.getActiveBranchTrack());
+                if (!isActive && track !== currentTrack) {
+                    continue;
+                }
+            }
+
+            const trackPoint = track.getTrackPoint(tempTrackable);
+            const distance = new Vector2(trackPoint.x - point.x, trackPoint.y - point.y).length();
+
+            if (distance < closestDistance && (!limit || distance < limit)) {
+                closestDistance = distance;
+                closestTrack = track;
+            }
+        }
+
+        // Clean up temporary object
+        tempTrackable.destroy();
+
+        return closestTrack;
+    }
+
+    getTracksInRadius(position: Vector2Like, radius: number): RailTrack[] {
+        const posVec = new Vector2(position.x, position.y);
+        return this.getVisibleTracks().filter(track => {
+            const trackMidpoint = track.getCurvePath().getPoint(0.5);
+            return posVec.distance(trackMidpoint) <= radius;
+        });
+    }
+
     updateVisibleTracks(cameraViewBounds: Phaser.Geom.Rectangle) {
         this.visibleTracks.clear();
         
@@ -114,52 +243,5 @@ export default class TrackManager {
                 this.visibleTracks.add(uuid);
             }
         }
-    }
-
-    getClosestTrack(position: Vector2Like, limit: number = 0): RailTrack | undefined {
-        const pos = new Vector2(position.x, position.y);
-        const allTracks = this.getAllTracks();
-        
-        let localTracks = allTracks.filter(track => {
-            const trackLength = track.getCurvePath().getLength();
-            const trackMidpoint = track.getCurvePath().getPoint(0.5);
-            return new Vector2(trackMidpoint.x, trackMidpoint.y).distance(pos) < trackLength;
-        });
-
-        if (limit > 0) {
-            localTracks = localTracks.filter(track => {
-                // Create a temporary sprite to use with getTrackPoint
-                const tempObj = new Sprite(this.scene, position.x, position.y, '');
-                const trackPoint = track.getTrackPoint(tempObj);
-                const distance = new Vector2(trackPoint.x, trackPoint.y).distance(pos);
-                tempObj.destroy();
-                return distance < limit;
-            });
-        }
-
-        if (localTracks.length === 0) {
-            return undefined;
-        }
-
-        return localTracks.reduce((previousValue, currentValue) => {
-            // Create temporary sprite for distance comparison
-            const tempObj = new Sprite(this.scene, position.x, position.y, '');
-            const prevPoint = previousValue.getTrackPoint(tempObj);
-            const currentPoint = currentValue.getTrackPoint(tempObj);
-            
-            const prevDist = new Vector2(prevPoint.x, prevPoint.y).distance(pos);
-            const currentDist = new Vector2(currentPoint.x, currentPoint.y).distance(pos);
-            
-            tempObj.destroy();
-            return currentDist < prevDist ? currentValue : previousValue;
-        });
-    }
-
-    getTracksInRadius(position: Vector2Like, radius: number): RailTrack[] {
-        const posVec = new Vector2(position.x, position.y);
-        return this.getVisibleTracks().filter(track => {
-            const trackMidpoint = track.getCurvePath().getPoint(0.5);
-            return posVec.distance(trackMidpoint) <= radius;
-        });
     }
 }

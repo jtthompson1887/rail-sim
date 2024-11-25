@@ -8,6 +8,7 @@ import {InputManager} from "../components/input-manager";
 import {TrainManager} from "../components/train-manager";
 import TrackManager from "../components/track-manager";
 import TrackGenerator from "../components/track-generator";
+import Junction from "../components/junction";
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -33,29 +34,37 @@ export default class GameScene extends Phaser.Scene {
         // Create initial train at (0, 1000)
         const train = this.trainManager.createInitialTrain();
 
-        // Create track generator starting from train position
+        // Create a single main track
         const trackParams = {
-            seed: Date.now().toString(), // Random seed based on current time (as string)
-            minStraightLength: 300,
-            maxStraightLength: 600,
-            curveProbability: 0.3,
-            minCurveAngle: 15,
-            maxCurveAngle: 45,
-            curveSmoothness: 0.8
+            seed: Date.now().toString(),
+            minStraightLength: 800,
+            maxStraightLength: 800,
+            curveProbability: 0,
+            minCurveAngle: 0,
+            maxCurveAngle: 0,
+            curveSmoothness: 1.0,
         };
 
         const generator = new TrackGenerator(this, this.trackManager, trackParams);
         
-        // Modify the first section to start at train's position
-        const firstSection = generator.createStraightSection(
+        // Create straight main track starting at train's position
+        const mainTrack = generator.createStraightSection(
             new Phaser.Math.Vector2(train.x, train.y),
-            400,  // Initial straight section length
-            Phaser.Math.DegToRad(90)  // Initial angle (90 degrees = pointing up)
+            800,  // Main track length
+            Phaser.Math.DegToRad(90)  // Straight up
         );
-        generator.addSection(firstSection);
-        
-        // Generate the rest of the track
-        generator.generateTrack(trackParams, 99);  // 99 more sections (total 100)
+        generator.addSection(mainTrack);
+
+        // Create a junction at the end of the main track
+        const tracks = this.trackManager.getAllTracks();
+        if (tracks.length > 0) {
+            const mainTrackObj = tracks[0];
+            const junction = this.trackManager.createJunction(mainTrackObj.getUUID(), 1.0); // At the end of main track
+        }
+
+        // Initialize input manager
+        this.inputManager = new InputManager(this);
+        this.inputManager.setupClickHandling(this.trainManager);
 
         // Create debug graphics
         this.debugGraphics = this.add.graphics()
@@ -77,9 +86,6 @@ export default class GameScene extends Phaser.Scene {
         .setDepth(1000)
         .setScrollFactor(0)
         .setAlpha(0.8);
-
-        this.inputManager = new InputManager(this);
-        this.inputManager.setupClickHandling(this.trainManager);
 
         // Configure cameras
         this.uiCamera.ignore([this.debugGraphics, ...this.trackManager.tracks, ...this.trainManager.trains]);
