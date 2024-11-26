@@ -34,6 +34,8 @@ export default class TrackFlowSolver {
         const closestTrack = this.getClosestRailTrack(100);
         if (closestTrack) {
             train.currentTrack = closestTrack;
+        } else {
+            train.derailed = true;
         }
     }
 
@@ -53,7 +55,12 @@ export default class TrackFlowSolver {
                     // If we're near a junction point, use the junction's active track
                     const junctionPos = junction.getPosition();
                     const trainPos = this.train.currentTrack.getTrackPosition(trainBody);
-                    if (Math.abs(trainPos - junctionPos) < 0.1) {
+                    
+                    // Check if we're within the limit distance of the junction
+                    const junctionPoint = this.train.currentTrack.getCurvePath().getPoint(junctionPos);
+                    const distToJunction = new Vector2(trainPosition.x - junctionPoint.x, trainPosition.y - junctionPoint.y).length();
+                    
+                    if (Math.abs(trainPos - junctionPos) < 0.1 && (limit === 0 || distToJunction < limit)) {
                         // If we're on the main track, switch to the active branch
                         if (this.train.currentTrack === junction.getMainTrack()) {
                             return junction.getActiveBranchTrack();
@@ -91,10 +98,8 @@ export default class TrackFlowSolver {
                     return currentTrackDist < prevTrackDist ? currentValue : previousValue;
                 });
             }
+            return null;
         }
-        
-        this.train.derailed = true;
-        return null;
     }
 
     private drawForceArrow(start: Vector2, force: Vector2, color: number) {
@@ -199,8 +204,8 @@ export default class TrackFlowSolver {
         const rearTrackPoint = track.getTrackPoint(rearPoint);
 
         // Calculate forces
-        const frontForce = guideForceTowardsPoint(trainBody, frontTrackPoint, this.train.pidController);
-        const rearForce = guideForceTowardsPoint(trainBody, rearTrackPoint, this.train.pidController);
+        const frontForce = guideForceTowardsPoint(trainBody, frontTrackPoint, this.train.pidControllerFront);
+        const rearForce = guideForceTowardsPoint(trainBody, rearTrackPoint, this.train.pidControllerRear);
 
         // Debug visualization of individual point forces
         if (scale === 1) { // Only for main track
@@ -240,16 +245,29 @@ export default class TrackFlowSolver {
         if (this.isTrackManager(this.trackProvider)) {
             const junctions = this.trackProvider.getJunctionsForTrack(currentTrack);
             for (const junction of junctions) {
+                // Calculate distance to junction for force scaling
+                const junctionPos = junction.getPosition();
+                const trainPos = currentTrack.getTrackPosition(trainBody);
+                const distanceToJunction = Math.abs(trainPos - junctionPos);
+                
+                // Scale force based on distance to junction (stronger when closer)
+                const proximityScale = Math.max(0, 1 - (distanceToJunction * 5));
+                
                 // Get force scale for each track in the junction
                 const tracks = junction.getAllTracks();
                 for (const track of tracks) {
                     const forceScale = junction.getForceScale(track);
                     if (forceScale !== 0 && track !== currentTrack) {
-                        const trackForce = this.getTrackForces(track, frontPoint, rearPoint, forceScale);
+                        // Apply proximity-based scaling to the force
+                        const scaledForce = this.getTrackForces(track, frontPoint, rearPoint, forceScale * proximityScale);
+                        
+                        // Convert to lateral force before adding
+                        const lateralForce = limitForceToLateralApplication(trainBody, scaledForce);
+                        
                         if (forceScale < 0) {
-                            repulsionForce.add(trackForce);
+                            repulsionForce.add(lateralForce);
                         } else {
-                            mainForce.add(trackForce);
+                            mainForce.add(lateralForce);
                         }
                     }
                 }
@@ -262,13 +280,13 @@ export default class TrackFlowSolver {
 
         // Calculate average track angle between front and rear points
         const rotation = currentTrack.getTrackAngle(trainBody);
-        const newAngle = this.checkAngleDirection(trainBody.angle, rotation, 0.7);
+        const newAngle = this.checkAngleDirection(trainBody.angle, rotation, 0.85);
         trainBody.setAngle(newAngle);
 
-        // Combine forces and apply
-        const combinedForce = mainForce.add(repulsionForce);
+        // Combine forces with proper weighting
+        const combinedForce = mainForce.add(repulsionForce.scale(0.5)); // Reduce repulsion force influence
         
-        // First limit the force to lateral only
+        // Apply final lateral force limitation
         const lateralForce = limitForceToLateralApplication(trainBody, combinedForce);
         
         // Debug visualization of final lateral force

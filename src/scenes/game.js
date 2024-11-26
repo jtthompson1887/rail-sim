@@ -34,33 +34,39 @@ export default class GameScene extends Phaser.Scene {
         // Create initial train at (0, 1000)
         const train = this.trainManager.createInitialTrain();
 
-        // Create a single main track
-        const trackParams = {
-            seed: Date.now().toString(),
-            minStraightLength: 800,
-            maxStraightLength: 800,
-            curveProbability: 0,
-            minCurveAngle: 0,
-            maxCurveAngle: 0,
-            curveSmoothness: 1.0,
+        // Initialize track generator
+        const generator = new TrackGenerator(this, this.trackManager);
+        
+        // Generate main track starting from train's position
+        const mainTracks = generator.generateTracks({
+            startPoint: new Phaser.Math.Vector2(train.x, train.y),
+            startAngle: Phaser.Math.DegToRad(90),  // Start going upward
+            sections: 4,
+            minLength: 400,
+            maxLength: 800,
+            curveProbability: 0.4,
+            minCurveAngle: 15,
+            maxCurveAngle: 45,
+            smoothness: 0.8
+        });
+        
+        // Create junction at the end of the last track
+        const lastMainTrack = mainTracks[mainTracks.length - 1];
+        const junction = this.trackManager.createJunction(lastMainTrack.getUUID(), 1.0);
+
+        // Branch parameters for more variety
+        const branchParams = {
+            minLength: 300,
+            maxLength: 600,
+            curveProbability: 0.6,
+            minCurveAngle: 20,
+            maxCurveAngle: 60,
+            smoothness: 0.7
         };
 
-        const generator = new TrackGenerator(this, this.trackManager, trackParams);
-        
-        // Create straight main track starting at train's position
-        const mainTrack = generator.createStraightSection(
-            new Phaser.Math.Vector2(train.x, train.y),
-            800,  // Main track length
-            Phaser.Math.DegToRad(90)  // Straight up
-        );
-        generator.addSection(mainTrack);
-
-        // Create a junction at the end of the main track
-        const tracks = this.trackManager.getAllTracks();
-        if (tracks.length > 0) {
-            const mainTrackObj = tracks[0];
-            const junction = this.trackManager.createJunction(mainTrackObj.getUUID(), 1.0); // At the end of main track
-        }
+        // Generate branch tracks automatically continuing from junction tracks
+        generator.continueFromTrack(junction.getLeftTrack(), 4, branchParams);
+        generator.continueFromTrack(junction.getRightTrack(), 4, branchParams);
 
         // Initialize input manager
         this.inputManager = new InputManager(this);
@@ -97,63 +103,6 @@ export default class GameScene extends Phaser.Scene {
         this.cameras.main.zoom = 0.5;
     }
 
-    getBounds(trainBody) {
-        if (!trainBody) return null;
-        
-        const width = trainBody.displayWidth;
-        const height = trainBody.displayHeight;
-        const x = trainBody.x;
-        const y = trainBody.y;
-        const angle = trainBody.angle * (Math.PI / 180); // Convert to radians
-        
-        // Calculate rotated corners
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        const halfWidth = width / 2;
-        const halfHeight = height / 2;
-        
-        // Calculate all four corners
-        const corners = [
-            { // Top Left
-                x: x + (-halfWidth * cos - halfHeight * sin),
-                y: y + (-halfWidth * sin + halfHeight * cos)
-            },
-            { // Top Right
-                x: x + (halfWidth * cos - halfHeight * sin),
-                y: y + (halfWidth * sin + halfHeight * cos)
-            },
-            { // Bottom Right
-                x: x + (halfWidth * cos + halfHeight * sin),
-                y: y + (halfWidth * sin - halfHeight * cos)
-            },
-            { // Bottom Left
-                x: x + (-halfWidth * cos + halfHeight * sin),
-                y: y + (-halfWidth * sin - halfHeight * cos)
-            }
-        ];
-        
-        // Find min and max points
-        const bounds = corners.reduce((acc, corner) => ({
-            min: {
-                x: Math.min(acc.min.x, corner.x),
-                y: Math.min(acc.min.y, corner.y)
-            },
-            max: {
-                x: Math.max(acc.max.x, corner.x),
-                y: Math.max(acc.max.y, corner.y)
-            }
-        }), {
-            min: { x: corners[0].x, y: corners[0].y },
-            max: { x: corners[0].x, y: corners[0].y }
-        });
-
-        return {
-            min: bounds.min,
-            max: bounds.max,
-            corners: corners  // Return corners for debug visualization
-        };
-    }
-
     update(time, delta) {
         // Update train movement based on input
         this.inputManager.handleTrainMovement(this.trainManager.selectedTrain);
@@ -170,7 +119,7 @@ export default class GameScene extends Phaser.Scene {
         for (const train of this.trainManager.trains) {
             const trainBody = train.getMatterBody();
             if (trainBody) {
-                const bounds = this.getBounds(trainBody);
+                const bounds = this.trainManager.getBounds(trainBody);
                 if (bounds) {
                     // Draw rotated rectangle using corners
                     this.debugGraphics.lineStyle(2, 0xff0000);
@@ -181,11 +130,11 @@ export default class GameScene extends Phaser.Scene {
                     }
                     this.debugGraphics.lineTo(bounds.corners[0].x, bounds.corners[0].y);
                     this.debugGraphics.strokePath();
-                    
-                    // Draw center point
-                    this.debugGraphics.lineStyle(2, 0x0000ff);
-                    this.debugGraphics.strokeCircle(trainBody.x, trainBody.y, 3);
                 }
+                
+                // Draw center point
+                this.debugGraphics.lineStyle(2, 0x0000ff);
+                this.debugGraphics.strokeCircle(trainBody.x, trainBody.y, 3);
             }
         }
 
@@ -203,6 +152,9 @@ export default class GameScene extends Phaser.Scene {
         // Add engine power debug info
         if (this.trainManager.selectedTrain) {
             debugText += `\nEngine Power: ${this.trainManager.selectedTrain.enginePower.toFixed(2)}`;
+            if (this.trainManager.selectedTrain.currentTrack) {
+                debugText += `\nCurrent Track: ${this.trainManager.selectedTrain.currentTrack.getUUID()}`;
+            }
         }
         
         this.coordsText.setText(debugText);

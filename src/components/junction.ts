@@ -1,8 +1,9 @@
 import Phaser from "phaser";
 import RailTrack from "./track";
 import Vector2 = Phaser.Math.Vector2;
+import { TrackNode } from "./track-node";
 
-export default class Junction extends Phaser.GameObjects.Container {
+export default class Junction extends Phaser.GameObjects.Container implements TrackNode {
     private mainTrack: RailTrack;
     private leftTrack: RailTrack;
     private rightTrack: RailTrack;
@@ -11,6 +12,10 @@ export default class Junction extends Phaser.GameObjects.Container {
     private switched: boolean = false;
     private readonly uuid: string;
     private hitArea: Phaser.GameObjects.Arc;
+    protected trackConnections: {
+        next?: TrackNode;
+        previous?: TrackNode;
+    } = {};
 
     constructor(scene: Phaser.Scene, mainTrack: RailTrack, leftTrack: RailTrack, rightTrack: RailTrack, position: number) {
         super(scene);
@@ -109,5 +114,38 @@ export default class Junction extends Phaser.GameObjects.Container {
 
     isSwitched(): boolean {
         return this.switched;
+    }
+
+    // TrackNode interface implementation
+    hasNext(): boolean {
+        return this.trackConnections.next !== undefined;
+    }
+
+    hasPrevious(): boolean {
+        return this.trackConnections.previous !== undefined;
+    }
+
+    getNext(): TrackNode | undefined {
+        return this.trackConnections.next;
+    }
+
+    getPrevious(): TrackNode | undefined {
+        return this.trackConnections.previous;
+    }
+
+    setNext(node: TrackNode | undefined): void {
+        this.trackConnections.next = node;
+    }
+
+    setPrevious(node: TrackNode | undefined): void {
+        this.trackConnections.previous = node;
+    }
+
+    isJunction(): this is Junction {
+        return true;
+    }
+
+    isTrack(): this is RailTrack {
+        return false;
     }
 }

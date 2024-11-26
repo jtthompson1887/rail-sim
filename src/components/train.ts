@@ -11,10 +11,12 @@ interface TrainMatterImage extends Phaser.Physics.Matter.Image {
 export default class Train extends Phaser.GameObjects.Container {
     private _trainBody: TrainMatterImage;
     private texture: string;
-    private readonly _pidController: PIDController = new PIDController();
+    private readonly _pidControllerFront: PIDController = new PIDController();
+    private readonly _pidControllerRear: PIDController = new PIDController();
     private _currentTrack: RailTrack | null = null;
     private _derailed: boolean = false;
     private _enginePower: number = 0;
+    private _mass: number = 0;
     private _selected: boolean = false;
     public debugGraphics: Phaser.GameObjects.Graphics;
 
@@ -23,6 +25,7 @@ export default class Train extends Phaser.GameObjects.Container {
         this.scene = scene;
         this.scene.add.existing(this);
         this.texture = 'train1';
+        this._mass = 1000;
         
         // Set container depth to be above tracks
         this.setDepth(100);
@@ -35,7 +38,7 @@ export default class Train extends Phaser.GameObjects.Container {
             }
             
             matterScaling(this._trainBody, 0.15, 0.15);
-            this._trainBody.setMass(1000);
+            this._trainBody.setMass(this._mass);
             // Set train body to appear above tracks with even higher depth
             this._trainBody.setDepth(100);
             this.add(this._trainBody);
@@ -61,7 +64,8 @@ export default class Train extends Phaser.GameObjects.Container {
     }
 
     update(time: number, delta: number) {
-        this.pidController.setCurrentDelta(delta);
+        this.pidControllerRear.setCurrentDelta(delta);
+        this.pidControllerFront.setCurrentDelta(delta);
         if (!this.derailed && this._trainBody && this._enginePower !== 0) {
             const angle = this._trainBody.angle * (Math.PI / 180); // Convert to radians
             const force = this._enginePower * 0.1; // Scale down the force
@@ -88,6 +92,10 @@ export default class Train extends Phaser.GameObjects.Container {
         if (value && this._trainBody) {
             this.texture = 'train2';
             this._trainBody.setTexture(this.texture);
+            let angle = this._trainBody.angle;
+            matterScaling(this._trainBody, 0.4, 0.4);
+            this._trainBody.setMass(this._mass);
+            this._trainBody.angle = angle;
         }
         this._derailed = value;
     }
@@ -135,7 +143,11 @@ export default class Train extends Phaser.GameObjects.Container {
         return this._trainBody;
     }
 
-    get pidController(): PIDController {
-        return this._pidController;
+    get pidControllerFront(): PIDController {
+        return this._pidControllerFront;
+    }
+
+    get pidControllerRear(): PIDController {
+        return this._pidControllerRear;
     }
 }

@@ -4,188 +4,162 @@ import RailTrack from "./track";
 import TrackManager from "./track-manager";
 
 /**
- * Represents a track section with its control points
+ * Represents a track section with its control points and additional metadata
  */
 interface TrackSection {
     start: Vector2;
     control1: Vector2;
     control2: Vector2;
     end: Vector2;
+    startTangent?: Vector2;  // Direction vector at start point
+    endTangent?: Vector2;    // Direction vector at end point
 }
 
 /**
  * Parameters for track generation
  */
 interface TrackGeneratorParams {
-    /** Random seed for consistent generation */
-    seed: string;
-    /** Minimum length of straight sections */
-    minStraightLength: number;
-    /** Maximum length of straight sections */
-    maxStraightLength: number;
-    /** Probability of creating a curve (0-1) */
+    minLength: number;
+    maxLength: number;
     curveProbability: number;
-    /** Minimum curve angle in degrees */
     minCurveAngle: number;
-    /** Maximum curve angle in degrees */
     maxCurveAngle: number;
-    /** How smooth the curves should be (0-1) */
-    curveSmoothness: number;
-    /** Base probability for curve angles. As angles approach maxCurveAngle, probability linearly decreases to 0 */
-    curveAngleProbability?: number;
+    smoothness: number;
 }
 
 export default class TrackGenerator {
     private scene: Phaser.Scene;
     private trackManager: TrackManager;
     private rng: Phaser.Math.RandomDataGenerator;
-    private lastSection: TrackSection | null = null;
+    private lastTrack: RailTrack | null = null;
 
-    constructor(scene: Phaser.Scene, trackManager: TrackManager, params: TrackGeneratorParams) {
+    constructor(scene: Phaser.Scene, trackManager: TrackManager, seed?: string) {
         this.scene = scene;
         this.trackManager = trackManager;
-        this.rng = new Phaser.Math.RandomDataGenerator([params.seed]);
+        this.rng = new Phaser.Math.RandomDataGenerator([seed || Date.now().toString()]);
     }
 
     /**
-     * Creates a straight track section
+     * Generates a sequence of tracks starting from a given point or the end of the last track
      */
-    createStraightSection(start: Vector2, length: number, angle: number): TrackSection {
-        const end = new Vector2(
-            start.x + Math.cos(angle) * length,
-            start.y + Math.sin(angle) * length
-        );
+    generateTracks(params: {
+        startPoint?: Vector2,
+        startAngle?: number,
+        sections: number,
+        minLength?: number,
+        maxLength?: number,
+        curveProbability?: number,
+        minCurveAngle?: number,
+        maxCurveAngle?: number,
+        smoothness?: number
+    }): RailTrack[] {
+        const tracks: RailTrack[] = [];
+        let currentPoint: Vector2;
+        let currentAngle: number;
 
-        // Calculate control points using the 1/6 rule from the original code
-        // This ensures smooth transitions between sections
-        const control1 = new Vector2(
-            start.x + Math.cos(angle) * (length / 3),
-            start.y + Math.sin(angle) * (length / 3)
-        );
-        const control2 = new Vector2(
-            start.x + Math.cos(angle) * (length * 2/3),
-            start.y + Math.sin(angle) * (length * 2/3)
-        );
-
-        return { start, control1, control2, end };
-    }
-
-    /**
-     * Creates a curved track section
-     */
-    createCurvedSection(start: Vector2, length: number, startAngle: number, endAngle: number, smoothness: number): TrackSection {
-        // Calculate end point
-        const end = new Vector2(
-            start.x + Math.cos(endAngle) * length,
-            start.y + Math.sin(endAngle) * length
-        );
-
-        // Get the previous and next points for control point calculation
-        const prev = new Vector2(
-            start.x - Math.cos(startAngle) * length,
-            start.y - Math.sin(startAngle) * length
-        );
-
-        const next = new Vector2(
-            end.x + Math.cos(endAngle) * length,
-            end.y + Math.sin(endAngle) * length
-        );
-
-        // Calculate control points using the 1/6 rule from the original code
-        const control1 = new Vector2(
-            start.x + (end.x - prev.x) / 6,
-            start.y + (end.y - prev.y) / 6
-        );
-
-        const control2 = new Vector2(
-            end.x - (next.x - start.x) / 6,
-            end.y - (next.y - start.y) / 6
-        );
-
-        return { start, control1, control2, end };
-    }
-
-    /**
-     * Adds a track section to the game
-     */
-    addSection(section: TrackSection): void {
-        const track = new RailTrack(
-            this.scene,
-            section.start,
-            section.control1,
-            section.control2,
-            section.end
-        );
-        this.trackManager.addTrack(track);
-        this.lastSection = section;
-    }
-
-    /**
-     * Gets the next track section based on the current state
-     */
-    getNextSection(params: TrackGeneratorParams): TrackSection {
-        if (!this.lastSection) {
-            // Create initial straight section if no previous section exists
-            return this.createStraightSection(
-                new Vector2(0, 0),
-                this.rng.between(params.minStraightLength, params.maxStraightLength),
-                0
-            );
-        }
-
-        const isCurve = this.rng.frac() < params.curveProbability;
-        const lastAngle = Math.atan2(
-            this.lastSection.end.y - this.lastSection.control2.y,
-            this.lastSection.end.x - this.lastSection.control2.x
-        );
-
-        if (isCurve) {
-            // Get a random angle from the full range
-            const baseAngle = this.rng.between(params.minCurveAngle, params.maxCurveAngle);
-            
-            // Calculate probability based on how close the angle is to maxCurveAngle
-            const baseProbability = params.curveAngleProbability ?? 1.0;
-            const angleRange = params.maxCurveAngle - params.minCurveAngle;
-            const angleRatio = (baseAngle - params.minCurveAngle) / angleRange;
-            const probability = baseProbability * (1 - angleRatio); // Linear decrease from baseProbability to 0
-            
-            // Only use this angle if it passes the probability check
-            let curveAngle: number;
-            if (this.rng.frac() < probability) {
-                curveAngle = baseAngle;
-            } else {
-                // If it fails, use a gentler curve from the lower half of the range
-                curveAngle = this.rng.between(params.minCurveAngle, (params.minCurveAngle + params.maxCurveAngle) * 0.5);
-            }
-            
-            // Apply random direction
-            curveAngle *= (this.rng.frac() < 0.5 ? 1 : -1);
-            
-            const length = this.rng.between(params.minStraightLength, params.maxStraightLength);
-            
-            return this.createCurvedSection(
-                this.lastSection.end,
-                length,
-                lastAngle,
-                lastAngle + Phaser.Math.DegToRad(curveAngle),
-                params.curveSmoothness
-            );
+        // Use provided start point/angle or get from last track
+        if (params.startPoint && params.startAngle !== undefined) {
+            currentPoint = params.startPoint.clone();
+            currentAngle = params.startAngle;
+        } else if (this.lastTrack) {
+            const endPoint = this.lastTrack.getCurvePath().getEndPoint();
+            currentPoint = new Vector2(endPoint.x, endPoint.y);
+            const endTangent = this.lastTrack.getCurvePath().getTangent(1);
+            currentAngle = Math.atan2(endTangent.y, endTangent.x);
         } else {
-            return this.createStraightSection(
-                this.lastSection.end,
-                this.rng.between(params.minStraightLength, params.maxStraightLength),
-                lastAngle
-            );
+            throw new Error("Must provide startPoint and startAngle if no previous track exists");
         }
+
+        // Default parameters
+        const {
+            sections,
+            minLength = 300,
+            maxLength = 600,
+            curveProbability = 0.4,
+            minCurveAngle = 15,
+            maxCurveAngle = 45,
+            smoothness = 0.8
+        } = params;
+
+        for (let i = 0; i < sections; i++) {
+            const length = this.rng.between(minLength, maxLength);
+            let track: RailTrack;
+
+            if (this.rng.frac() < curveProbability) {
+                // Create curved section
+                const curveAngle = Phaser.Math.DegToRad(
+                    this.rng.between(minCurveAngle, maxCurveAngle) * 
+                    (this.rng.frac() < 0.5 ? -1 : 1)
+                );
+
+                const endAngle = currentAngle + curveAngle;
+                const radius = length / (2 * Math.sin(Math.abs(curveAngle) / 2));
+                const center = new Vector2(
+                    currentPoint.x + radius * Math.cos(currentAngle + Math.PI/2 * Math.sign(curveAngle)),
+                    currentPoint.y + radius * Math.sin(currentAngle + Math.PI/2 * Math.sign(curveAngle))
+                );
+
+                const end = new Vector2(
+                    center.x + radius * Math.cos(endAngle - Math.PI/2 * Math.sign(curveAngle)),
+                    center.y + radius * Math.sin(endAngle - Math.PI/2 * Math.sign(curveAngle))
+                );
+
+                const controlLength = (length / 3) * smoothness;
+                const control1 = new Vector2(
+                    currentPoint.x + Math.cos(currentAngle) * controlLength,
+                    currentPoint.y + Math.sin(currentAngle) * controlLength
+                );
+                const control2 = new Vector2(
+                    end.x - Math.cos(endAngle) * controlLength,
+                    end.y - Math.sin(endAngle) * controlLength
+                );
+
+                track = new RailTrack(this.scene, currentPoint, control1, control2, end);
+                currentAngle = endAngle;
+            } else {
+                // Create straight section
+                const end = new Vector2(
+                    currentPoint.x + Math.cos(currentAngle) * length,
+                    currentPoint.y + Math.sin(currentAngle) * length
+                );
+
+                const control1 = new Vector2(
+                    currentPoint.x + Math.cos(currentAngle) * (length / 3),
+                    currentPoint.y + Math.sin(currentAngle) * (length / 3)
+                );
+                const control2 = new Vector2(
+                    currentPoint.x + Math.cos(currentAngle) * (length * 2/3),
+                    currentPoint.y + Math.sin(currentAngle) * (length * 2/3)
+                );
+
+                track = new RailTrack(this.scene, currentPoint, control1, control2, end);
+            }
+
+            this.trackManager.addTrack(track);
+            tracks.push(track);
+            this.lastTrack = track;
+
+            // Update current point for next section
+            const endPoint = track.getCurvePath().getEndPoint();
+            currentPoint = new Vector2(endPoint.x, endPoint.y);
+        }
+
+        return tracks;
     }
 
     /**
-     * Generates multiple track sections
+     * Generates tracks continuing from a junction's branch
      */
-    generateTrack(params: TrackGeneratorParams, numSections: number): void {
-        for (let i = 0; i < numSections; i++) {
-            const section = this.getNextSection(params);
-            this.addSection(section);
-        }
+    continueFromTrack(track: RailTrack, sections: number, params?: Partial<TrackGeneratorParams>): RailTrack[] {
+        const endPoint = track.getCurvePath().getEndPoint();
+        const endTangent = track.getCurvePath().getTangent(1);
+        const endAngle = Math.atan2(endTangent.y, endTangent.x);
+
+        return this.generateTracks({
+            startPoint: new Vector2(endPoint.x, endPoint.y),
+            startAngle: endAngle,
+            sections,
+            ...params
+        });
     }
 }

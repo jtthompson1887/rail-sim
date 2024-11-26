@@ -2,7 +2,8 @@ import RailTrack from "./track";
 import Vector2 = Phaser.Math.Vector2;
 import Vector2Like = Phaser.Types.Math.Vector2Like;
 import Sprite = Phaser.GameObjects.Sprite;
-import Junction from "./junction"; // Assuming Junction class is in junction.ts file
+import Junction from "./junction";
+import { TrackNode } from "./track-node";
 
 export default class TrackManager {
     private tracks: Map<string, RailTrack>;
@@ -17,9 +18,98 @@ export default class TrackManager {
         this.visibleTracks = new Set<string>();
     }
 
+    private setupTrackConnections(track: RailTrack | Junction) {
+        if (track instanceof RailTrack) {
+            // Find closest tracks/junctions at both ends of this track
+            const startPoint = track.getCurvePath().getStartPoint();
+            const endPoint = track.getCurvePath().getEndPoint();
+            
+            // Find closest node to start point
+            const prevNode = this.findClosestNode(startPoint, track);
+            if (prevNode) {
+                track.setPrevious(prevNode);
+                prevNode.setNext(track);
+            }
+            
+            // Find closest node to end point
+            const nextNode = this.findClosestNode(endPoint, track);
+            if (nextNode) {
+                track.setNext(nextNode);
+                nextNode.setPrevious(track);
+            }
+        } else if (track instanceof Junction) {
+            // For junctions, we already have the connections through mainTrack, leftTrack, and rightTrack
+            const mainTrack = track.getMainTrack();
+            const leftTrack = track.getLeftTrack();
+            const rightTrack = track.getRightTrack();
+            
+            // Set up connections based on junction position
+            const junctionPos = track.getPosition();
+            if (junctionPos < 0.5) {
+                // Junction is closer to start of main track
+                track.setPrevious(mainTrack);
+                mainTrack.setNext(track);
+                
+                // Set branch tracks
+                leftTrack.setPrevious(track);
+                rightTrack.setPrevious(track);
+            } else {
+                // Junction is closer to end of main track
+                track.setNext(mainTrack);
+                mainTrack.setPrevious(track);
+                
+                // Set branch tracks
+                leftTrack.setNext(track);
+                rightTrack.setNext(track);
+            }
+        }
+    }
+
+    private findClosestNode(point: Vector2Like, excludeNode: TrackNode, maxDistance: number = 10): TrackNode | undefined {
+        let closestNode: TrackNode | undefined;
+        let minDistance = maxDistance;
+
+        // Check tracks
+        for (const track of this.tracks.values()) {
+            if (track === excludeNode) continue;
+            
+            const startDist = new Vector2(track.getCurvePath().getStartPoint()).distance(new Vector2(point));
+            const endDist = new Vector2(track.getCurvePath().getEndPoint()).distance(new Vector2(point));
+            
+            const minDist = Math.min(startDist, endDist);
+            if (minDist < minDistance) {
+                minDistance = minDist;
+                closestNode = track;
+            }
+        }
+
+        // Check junctions
+        for (const junction of this.junctions.values()) {
+            if (junction === excludeNode) continue;
+            
+            const junctionPoint = junction.getPosition();
+            const dist = new Vector2(junction.x, junction.y).distance(new Vector2(point));
+            
+            if (dist < minDistance) {
+                minDistance = dist;
+                closestNode = junction;
+            }
+        }
+
+        return closestNode;
+    }
+
     addTrack(track: RailTrack): string {
         const uuid = track.getUUID();
         this.tracks.set(uuid, track);
+        this.setupTrackConnections(track);
+        return uuid;
+    }
+
+    addJunction(junction: Junction): string {
+        const uuid = junction.getUUID();
+        this.junctions.set(uuid, junction);
+        this.setupTrackConnections(junction);
         return uuid;
     }
 

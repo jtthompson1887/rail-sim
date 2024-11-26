@@ -3,6 +3,8 @@ import Vector2 = Phaser.Math.Vector2;
 import Image = Phaser.GameObjects.Image;
 import Path = Phaser.Curves.Path;
 import Transform = Phaser.GameObjects.Components.Transform;
+import { TrackNode } from "./track-node";
+import Junction from "./junction";
 
 // Define interface for objects that can be tracked (have position either directly or via body)
 interface Trackable extends Transform {
@@ -14,7 +16,7 @@ interface Trackable extends Transform {
     }
 }
 
-export default class RailTrack extends Phaser.GameObjects.Container {
+export default class RailTrack extends Phaser.GameObjects.Container implements TrackNode {
     private readonly texture1: string = 'ballast';
     private readonly texture2: string = 'rail';
     private readonly railTrackWidth: number = 866 * 0.85; // Original width of the rail track texture
@@ -27,6 +29,10 @@ export default class RailTrack extends Phaser.GameObjects.Container {
     private readonly tracksImages: Image[] = [];
     private curve: Path;
     private readonly uuid: string;
+    protected trackConnections: {
+        next?: TrackNode;
+        previous?: TrackNode;
+    } = {};
 
     constructor(scene, p0, p1, p2, p3) {
         super(scene);
@@ -136,5 +142,37 @@ export default class RailTrack extends Phaser.GameObjects.Container {
 
     getUUID(): string {
         return this.uuid;
+    }
+
+    hasNext(): boolean {
+        return this.trackConnections.next !== undefined;
+    }
+
+    hasPrevious(): boolean {
+        return this.trackConnections.previous !== undefined;
+    }
+
+    getNext(): TrackNode | undefined {
+        return this.trackConnections.next;
+    }
+
+    getPrevious(): TrackNode | undefined {
+        return this.trackConnections.previous;
+    }
+
+    setNext(node: TrackNode | undefined): void {
+        this.trackConnections.next = node;
+    }
+
+    setPrevious(node: TrackNode | undefined): void {
+        this.trackConnections.previous = node;
+    }
+
+    isJunction(): this is Junction {
+        return false;
+    }
+
+    isTrack(): this is RailTrack {
+        return true;
     }
 }
