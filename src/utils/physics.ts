@@ -12,14 +12,20 @@ export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.
     let forceVector = qVec().copy(p0).subtract(position)
 
     let forceConstant = 0.0020; // Reduced from 0.0008/0.0020 to make the force gentler
-    // Normalize and scale the force vector based on distance
-    forceVector.normalize().scale(gameObject.body.mass * forceConstant * forceVector.length());
+    // Save distance before normalizing, then scale the force proportionally to distance
+    let distance = forceVector.length();
+    forceVector.normalize().scale(gameObject.body.mass * forceConstant * distance);
 
     if (pidController) {
-        let error = forceVector.length()
-        let newMagnitude = pidController.calculate(error)
-        let multiplier = newMagnitude / error;
-        forceVector = forceVector.scale(multiplier)
+        let error = forceVector.length();
+        // Always update PID state (including when error=0) to keep derivative
+        // history fresh and avoid artificial spikes on the next non-zero frame.
+        let newMagnitude = pidController.calculate(error);
+        if (error > 0) {
+            // Clamp to zero so the force can never flip direction (pull → push)
+            let multiplier = Math.max(0, newMagnitude) / error;
+            forceVector = forceVector.scale(multiplier);
+        }
     }
 
     return forceVector;
@@ -67,8 +73,8 @@ export function matterScaling(gameObject: Phaser.Physics.Matter.Image, newScaleX
 
 
 export function limitForceToLateralApplication(gameObject : Phaser.Physics.Matter.Image, forceVector :Vector2) {
-    // Get the train's forward direction vector (normalized)
-    let forwardDirection = new Phaser.Math.Vector2(Math.cos(gameObject.angle), Math.sin(gameObject.angle)).normalize();
+    // Get the train's forward direction vector (normalized); rotation is in radians, angle is in degrees
+    let forwardDirection = new Phaser.Math.Vector2(Math.cos(gameObject.rotation), Math.sin(gameObject.rotation)).normalize();
     
     // Calculate lateral direction (perpendicular to forward direction)
     let lateralDirection = new Phaser.Math.Vector2(-forwardDirection.y, forwardDirection.x);

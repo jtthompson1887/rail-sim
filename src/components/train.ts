@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import {PIDController} from "../utils/math";
 import type RailTrack from "./track";
-import {matterScaling} from "../utils/physics";
+import {applyForceToGameObject, matterScaling} from "../utils/physics";
 
 // Extend the MatterImage type to include our custom property
 interface TrainMatterImage extends Phaser.Physics.Matter.Image {
@@ -67,20 +67,19 @@ export default class Train extends Phaser.GameObjects.Container {
         this.pidControllerRear.setCurrentDelta(delta);
         this.pidControllerFront.setCurrentDelta(delta);
         if (!this.derailed && this._trainBody && this._enginePower !== 0) {
-            const angle = this._trainBody.angle * (Math.PI / 180); // Convert to radians
-            const force = this._enginePower * 0.1; // Scale down the force
-            const vx = Math.cos(angle) * force;
-            const vy = Math.sin(angle) * force;
-            
-            if (this._enginePower !== 0) {
-                console.log('Applying velocity:', {
-                    enginePower: this._enginePower,
-                    angle: this._trainBody.angle,
-                    velocity: { x: vx, y: vy }
-                });
-            }
-            
-            this._trainBody.setVelocity(vx, vy);
+            // Use rotation (radians) — not angle (degrees) — for trig functions.
+            // Apply a force rather than setVelocity so that the physics engine can
+            // accumulate both the engine force and the lateral track-guidance forces,
+            // letting the train glide naturally instead of teleporting to a fixed speed.
+            const angle = this._trainBody.rotation;
+            // Scale enginePower to a Matter.js force magnitude that matches the original
+            // velocity-based behaviour. With mass=1000 and Matter.js default frictionAir=0.01
+            // the relationship is: terminalVelocity = F / (mass * frictionAir) = F / 10.
+            // The original code set velocity = enginePower * 0.1, so the equivalent steady-
+            // state force is: F = 0.1 * 1000 * 0.01 * enginePower = enginePower * 1.0.
+            const forceMagnitude = this._enginePower;
+            const forceVec = new Phaser.Math.Vector2(Math.cos(angle) * forceMagnitude, Math.sin(angle) * forceMagnitude);
+            applyForceToGameObject(this._trainBody, forceVec);
         }
     }
 
