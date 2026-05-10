@@ -1,16 +1,16 @@
 import Phaser from 'phaser';
 import Background from "../components/background";
 import RailTrack from "../components/track";
-import {projectVector, qVec, toBezierPoints, toCubicBezierPoints} from "../utils/math";
+import {qVec} from "../utils/math";
 import Train from "../components/train";
-import {guideForceTowardsPoint} from "../utils/physics";
 import TrackFlowSolver from "../components/track-flow-solver";
 import {CameraController} from "../components/camera-controller";
 
 export default class MenuScene extends Phaser.Scene {
     private railTracks: RailTrack[] = [];
     private trains: Train[] = [];
-    private camControl: CameraController;
+    private camControl?: CameraController;
+
     constructor() {
         super({ key: 'MenuScene' });
     }
@@ -20,85 +20,202 @@ export default class MenuScene extends Phaser.Scene {
     }
 
     create() {
+        const { width, height } = this.scale;
 
+        const bg = new Background(this, 20, 20);
+        bg.setDepth(-20);
 
-        //this.add.tileSprite(0, 0, 1920, 1080, 'grassbackground').setOrigin(0, 0).setTileScale(0.1, 0.1).setFlipY(Phaser.Math.Between(0, 1));
-        let bg = new Background(this, 20, 20)
-        let trackPoints = [
-            // qVec(200, 800),
-            // qVec(600, 800),
-            // qVec(1000, 700),
-            // qVec(2040, 800),
-            // qVec(2640, 1100),
-            // qVec(2640, 1500),
-            // qVec(2440, 1900),
-            // qVec(1800, 2000)
+        this.railTracks = [];
+        this.trains = [];
 
-            //
-            // qVec(200, 800),
-            // qVec(400, 800),
-            // qVec(600, 1000),
-            // qVec(800, 1200),
-            // qVec(1000, 1200),
+        const circleCenter = qVec(width * 0.32, height * 0.52);
+        const trackRadius = Math.min(width, height) * 0.32;
+        const circleSegments = 16;
+        const trackPoints: Phaser.Math.Vector2[] = [];
 
-
-            qVec(20000.0, 10000.0),
-            qVec(18660.25403784439, 15000.0),
-            qVec(15000.0, 18660.25403784439),
-            qVec(10000.0, 20000.0),
-            qVec(5000.000000000002, 18660.25403784439),
-            qVec(1339.7459621556136, 15000.0),
-            qVec(0.0, 10000.000000000002),
-            qVec(1339.7459621556136, 4999.999999999999),
-            qVec(4999.999999999995, 1339.7459621556154),
-            qVec(9999.999999999998, 0.0),
-            qVec(15000.0, 1339.7459621556136),
-            qVec(18660.254037844385, 4999.999999999995),
-            qVec(20000.0, 10000.0),
-            qVec(18660.25403784439, 15000.0),
-        ];
-
-        let bezierPoints = toCubicBezierPoints(trackPoints);
-
-        for (let i = 1; i < bezierPoints.length; i++) {
-            let lastPoint = bezierPoints[i-1];
-            let currentPoint = bezierPoints[i];
-            this.railTracks.push(new RailTrack(this, lastPoint.to, currentPoint.cp1, currentPoint.cp2, currentPoint.to));
+        for (let i = 0; i < circleSegments; i++) {
+            const angle = Phaser.Math.DegToRad((360 / circleSegments) * i);
+            trackPoints.push(qVec(
+                circleCenter.x + Math.cos(angle) * trackRadius,
+                circleCenter.y + Math.sin(angle) * trackRadius
+            ));
         }
 
-        this.camControl = new CameraController(this)
+        for (let i = 0; i < circleSegments; i++) {
+            const prev = trackPoints[(i - 1 + circleSegments) % circleSegments];
+            const current = trackPoints[i];
+            const next = trackPoints[(i + 1) % circleSegments];
+            const afterNext = trackPoints[(i + 2) % circleSegments];
 
-        //let train1 = new Train(this, 20000, 10090);
-        let train2 = new Train(this, 0, 10090);
-        this.camControl.startFollow(train2.getMatterBody());
-        train2.getMatterBody().angle = 0;
-        //train1.getMatterBody().angle = 0;
-        //this.trains.push(train1);
-        this.trains.push(train2);
+            const cp1 = qVec(
+                current.x + (next.x - prev.x) / 6,
+                current.y + (next.y - prev.y) / 6
+            );
 
+            const cp2 = qVec(
+                next.x - (afterNext.x - current.x) / 6,
+                next.y - (afterNext.y - current.y) / 6
+            );
 
+            this.railTracks.push(new RailTrack(this, current, cp1, cp2, next));
+        }
 
-        // Set the camera to show a smaller portion of the tilemap, creating the appearance of repetition
+        this.cameras.main.setBounds(0, 0, width, height);
+        this.cameras.main.setZoom(1);
+        this.cameras.main.centerOn(circleCenter.x, circleCenter.y);
 
-        // @ts-ignore
-        this.add.text(100, 300, 'Rail Sim', { fontSize: '164px', fill: '#fff', fontFamily: 'Verdana' })
-            .setScrollFactor(0);
+        this.camControl = new CameraController(this);
+        this.camControl.stopFollow();
 
-        // @ts-ignore
-        this.add.text(100, 500, 'Start', { fontSize: '64px', fill: '#fff', fontFamily: 'Verdana' })
+        const menuTrain = new Train(this, circleCenter.x + trackRadius, circleCenter.y);
+        const trainBody = menuTrain.getMatterBody();
+        if (trainBody) {
+            const firstTrack = this.railTracks[0];
+            const startPoint = firstTrack.getCurvePath().getPoint(0);
+            trainBody.setPosition(startPoint.x, startPoint.y);
+            menuTrain.currentTrack = firstTrack;
+            const tangentAngle = firstTrack.getTrackAngle(trainBody);
+            trainBody.setAngle(tangentAngle);
+            trainBody.setFrictionAir(0.015);
+        }
+        menuTrain.enginePower = 40;
+        this.trains.push(menuTrain);
+
+        const panelWidth = width * 0.42;
+        const panelHeight = height * 0.72;
+        const panelX = width * 0.72;
+        const panelY = height * 0.5;
+
+        const panel = this.add.rectangle(panelX, panelY, panelWidth, panelHeight, 0x031626, 0.82)
+            .setStrokeStyle(4, 0xffffff, 0.2)
             .setScrollFactor(0)
-            .setInteractive()
+            .setDepth(100);
+
+        this.add.rectangle(panelX, panelY - panelHeight * 0.36, panelWidth * 0.6, 6, 0x4ad5ff, 0.45)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        const contentTop = panelY - panelHeight * 0.38;
+        const contentLeft = panelX - panelWidth * 0.44;
+        const contentWidth = panelWidth * 0.88;
+        let currentY = contentTop;
+
+        const title = this.add.text(panelX, currentY, 'Rail Sim', {
+            fontFamily: 'Verdana',
+            fontSize: '82px',
+            fontStyle: 'bold',
+            color: '#ffffff'
+        })
+            .setOrigin(0.5, 0)
+            .setShadow(0, 6, 'rgba(0,0,0,0.6)', 8)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        currentY += title.height + 20;
+
+        const subtitle = this.add.text(panelX, currentY, 'Keep the rail network flowing smoothly', {
+            fontFamily: 'Verdana',
+            fontSize: '30px',
+            color: '#d2e6ff',
+            align: 'center',
+            wordWrap: { width: contentWidth }
+        })
+            .setOrigin(0.5, 0)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        currentY += subtitle.height + 36;
+
+        const highlights = this.add.text(contentLeft, currentY,
+            'Highlights\n' +
+            '• Design scenic routes and manage complex junctions\n' +
+            '• Balance speed, safety, and passenger demand\n' +
+            '• Upgrade engines to conquer tougher schedules', {
+                fontFamily: 'Verdana',
+                fontSize: '26px',
+                color: '#ffffff',
+                lineSpacing: 10,
+                wordWrap: { width: contentWidth }
+            })
+            .setOrigin(0, 0)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        currentY += highlights.height + 28;
+
+        const controls = this.add.text(contentLeft, currentY,
+            'Controls\n' +
+            '• Arrow Keys / WASD – Move the camera\n' +
+            '• Mouse Wheel – Adjust zoom\n' +
+            '• Click – Manage junctions', {
+                fontFamily: 'Verdana',
+                fontSize: '24px',
+                color: '#c9dcff',
+                lineSpacing: 8,
+                wordWrap: { width: contentWidth }
+            })
+            .setOrigin(0, 0)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        currentY += controls.height + 42;
+
+        const buttonWidth = panelWidth * 0.6;
+        const buttonHeight = 90;
+        const startButtonY = currentY + buttonHeight / 2;
+
+        const startButton = this.add.rectangle(panelX, startButtonY, buttonWidth, buttonHeight, 0xffffff, 0.12)
+            .setStrokeStyle(3, 0xffffff, 0.6)
+            .setScrollFactor(0)
+            .setDepth(101)
+            .setInteractive({ useHandCursor: true })
             .on('pointerdown', () => this.startGame());
+
+        startButton.on('pointerover', () => startButton.setFillStyle(0xffffff, 0.22));
+        startButton.on('pointerout', () => startButton.setFillStyle(0xffffff, 0.12));
+
+        this.add.text(startButton.x, startButton.y, 'Start Shift', {
+            fontFamily: 'Verdana',
+            fontSize: '48px',
+            fontStyle: 'bold',
+            color: '#ffffff'
+        })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(102);
+
+        const shortcutText = this.add.text(panelX, startButtonY + buttonHeight * 0.75, 'Press SPACE or ENTER to begin', {
+            fontFamily: 'Verdana',
+            fontSize: '26px',
+            color: '#9fc0ff'
+        })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        const tipY = shortcutText.y + shortcutText.height + 26;
+        this.add.text(panelX, tipY, 'Tip: mind the curves—too much speed can derail your line!', {
+            fontFamily: 'Verdana',
+            fontSize: '24px',
+            color: '#7fb8ff',
+            align: 'center',
+            wordWrap: { width: panelWidth * 0.85 }
+        })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(101);
+
+        this.input.keyboard.once('keydown-SPACE', () => this.startGame());
+        this.input.keyboard.once('keydown-ENTER', () => this.startGame());
     }
 
     update(time:number, delta:number) {
-
-        this.camControl.update(time, delta)
+        this.camControl?.update(time, delta);
 
         for (let train of this.trains) {
             train.update(time, delta);
-            let trackFlowSolver = new TrackFlowSolver(this.railTracks, train)
-            trackFlowSolver.applyTrackFlowForces()
+            const trackFlowSolver = new TrackFlowSolver(this.railTracks, train);
+            trackFlowSolver.applyTrackFlowForces();
         }
     }
 
