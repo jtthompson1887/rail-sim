@@ -72,8 +72,12 @@ export default class Train extends Phaser.GameObjects.Container {
             // accumulate both the engine force and the lateral track-guidance forces,
             // letting the train glide naturally instead of teleporting to a fixed speed.
             const angle = this._trainBody.rotation;
-            // Scale enginePower down to a reasonable Matter.js force magnitude
-            const forceMagnitude = this._enginePower * 0.0001;
+            // Scale enginePower to a Matter.js force magnitude that matches the original
+            // velocity-based behaviour. With mass=1000 and Matter.js default frictionAir=0.01
+            // the relationship is: terminalVelocity = F / (mass * frictionAir) = F / 10.
+            // The original code set velocity = enginePower * 0.1, so the equivalent steady-
+            // state force is: F = 0.1 * 1000 * 0.01 * enginePower = enginePower * 1.0.
+            const forceMagnitude = this._enginePower;
             const forceVec = new Phaser.Math.Vector2(Math.cos(angle) * forceMagnitude, Math.sin(angle) * forceMagnitude);
             applyForceToGameObject(this._trainBody, forceVec);
         }

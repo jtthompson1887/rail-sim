@@ -18,8 +18,10 @@ export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.
 
     if (pidController) {
         let error = forceVector.length();
+        // Always update PID state (including when error=0) to keep derivative
+        // history fresh and avoid artificial spikes on the next non-zero frame.
+        let newMagnitude = pidController.calculate(error);
         if (error > 0) {
-            let newMagnitude = pidController.calculate(error);
             // Clamp to zero so the force can never flip direction (pull → push)
             let multiplier = Math.max(0, newMagnitude) / error;
             forceVector = forceVector.scale(multiplier);
