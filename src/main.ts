@@ -1,28 +1,43 @@
 import Phaser from 'phaser';
+import { GameConfig } from './config/GameConfig';
+import BootScene from './scenes/BootScene';
+import DebugOverlayScene from './scenes/DebugOverlayScene';
+import GameOverScene from './scenes/GameOverScene';
+import GameScene from './scenes/GameScene';
+import HUDScene from './scenes/HUDScene';
+import LevelSelectScene from './scenes/LevelSelectScene';
+import MenuScene from './scenes/MenuScene';
+import PauseScene from './scenes/PauseScene';
+import PreloadScene from './scenes/PreloadScene';
 
-import BootScene from './scenes/boot';
-import PreloadScene from './scenes/preload';
-import MenuScene from './scenes/menu';
-import GameScene from './scenes/game';
-
-const config = {
-    type: Phaser.AUTO,
-    width: 1920,
-    height: 1080,
-    scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH
+const config: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  width: GameConfig.RESOLUTION.WIDTH,
+  height: GameConfig.RESOLUTION.HEIGHT,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  physics: {
+    default: 'matter',
+    matter: {
+      debug: GameConfig.DEBUG,
+      gravity: {
+        y: GameConfig.PHYSICS.GRAVITY_Y,
+      },
     },
-    physics: {
-        default: 'matter',
-        matter: {
-            debug: false,
-            gravity: {
-                y: 0.0
-            }
-        }
-    },
-    scene: [BootScene, PreloadScene, MenuScene, GameScene]
+  },
+  scene: [
+    BootScene,
+    PreloadScene,
+    MenuScene,
+    LevelSelectScene,
+    GameScene,
+    HUDScene,
+    PauseScene,
+    GameOverScene,
+    DebugOverlayScene,
+  ],
 };
 
-const game = new Phaser.Game(config);
+new Phaser.Game(config);

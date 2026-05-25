@@ -1,0 +1,42 @@
+import Phaser from 'phaser';
+import { GameStateManager } from '../managers/GameStateManager';
+
+export default class PauseScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'PauseScene' });
+  }
+
+  create(): void {
+    const { width, height } = this.scale;
+    this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7);
+    this.add.text(width / 2, height * 0.35, 'Paused', { fontFamily: 'Verdana', fontSize: '64px', color: '#ffffff' }).setOrigin(0.5);
+
+    const resume = this.add.text(width / 2, height * 0.5, 'Resume', { fontFamily: 'Verdana', fontSize: '36px', color: '#7dff9b' })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.resumeGame());
+    resume.setPadding(12);
+
+    const quit = this.add.text(width / 2, height * 0.6, 'Quit to Menu', { fontFamily: 'Verdana', fontSize: '32px', color: '#ffffff' })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        this.scene.stop('HUDScene');
+        this.scene.stop('DebugOverlayScene');
+        this.scene.stop('GameScene');
+        this.scene.start('MenuScene');
+        this.scene.stop();
+      });
+    quit.setPadding(12);
+
+    this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
+    this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
+    this.input.keyboard.once('keydown-ENTER', () => this.resumeGame());
+  }
+
+  private resumeGame(): void {
+    GameStateManager.resume();
+    this.scene.resume('GameScene');
+    this.scene.stop();
+  }
+}
