@@ -1,8 +1,17 @@
 import Phaser from 'phaser';
 import { ToolbarButton } from './ToolbarButton';
 import { EventBus } from '../services/EventBus';
+import { isMobileWidth } from '../utils/responsive';
 
 export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'none';
+
+/** Short labels used on narrow (mobile) screens to fit within the toolbar. */
+const MOBILE_LABELS: Record<string, string> = {
+  generator: '⚙',
+  junction: '⑃',
+  completer: '⟷',
+  select: '↖',
+};
 
 /**
  * CreateModeToolbar
@@ -12,6 +21,9 @@ export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'no
  *   – Junction Creator (draw a selection box to split and branch tracks)
  *   – Track Completer (connect two dangling endpoints)
  *   – Select / Move (click tracks to select, drag endpoints to reshape)
+ *
+ * The toolbar adapts to the current screen width: on narrow (mobile) screens
+ * buttons use icon-only labels and the panel shrinks to fill the viewport.
  *
  * Emits 'tool:changed' events via EventBus when the active tool changes.
  */
@@ -41,25 +53,31 @@ export class CreateModeToolbar {
 
   private build(): void {
     const { width } = this.scene.scale;
-    const panelW = 720;
-    const panelH = 80;
+    const mobile = isMobileWidth(width);
+
+    // Panel dimensions – fills full width on mobile, capped at 720 on desktop
+    const panelH = mobile ? 56 : 80;
+    const panelW = mobile ? width - 8 : Math.min(width - 16, 720);
     const panelX = width / 2;
-    const panelY = 50;
+    const panelY = mobile ? 32 : 50;
 
     this.panel = this.scene.add.rectangle(panelX, panelY, panelW, panelH, 0x06131f, 0.9)
       .setStrokeStyle(2, 0xffffff, 0.2)
       .setDepth(599)
       .setScrollFactor(0);
 
-    const btnW = 160;
-    const gap = 10;
-    const startX = panelX - (btnW * 2 + gap * 1.5);
+    const gap = mobile ? 4 : 10;
+    const btnCount = 4;
+    const btnW = Math.floor((panelW - gap * (btnCount + 1)) / btnCount);
+    const btnH = panelH - (mobile ? 8 : 16);
+    const labelFontSize = mobile ? '14px' : '22px';
+    const startX = panelX - (panelW / 2) + gap + btnW / 2;
 
     const toolDefs: Array<{ tool: CreateTool; label: string; tooltip: string }> = [
-      { tool: 'generator', label: '⚙ Generator',  tooltip: 'Auto-generate tracks' },
-      { tool: 'junction',  label: '⑃ Junction',   tooltip: 'Right-drag to create junction' },
-      { tool: 'completer', label: '⟷ Completer',  tooltip: 'Connect two endpoints' },
-      { tool: 'select',    label: '↖ Select',      tooltip: 'Select & move tracks' },
+      { tool: 'generator', label: mobile ? MOBILE_LABELS.generator : '⚙ Generator', tooltip: 'Auto-generate tracks' },
+      { tool: 'junction',  label: mobile ? MOBILE_LABELS.junction  : '⑃ Junction',  tooltip: 'Right-drag to create junction' },
+      { tool: 'completer', label: mobile ? MOBILE_LABELS.completer : '⟷ Completer', tooltip: 'Connect two endpoints' },
+      { tool: 'select',    label: mobile ? MOBILE_LABELS.select    : '↖ Select',    tooltip: 'Select & move tracks' },
     ];
 
     toolDefs.forEach((def, i) => {
@@ -68,19 +86,21 @@ export class CreateModeToolbar {
         label: def.label,
         tooltip: def.tooltip,
         width: btnW,
-        height: panelH - 16,
+        height: btnH,
+        labelFontSize,
         onPress: () => this.selectTool(def.tool),
       });
       this.buttons.push(btn);
     });
 
     // Toast / notification text
+    const toastFontSize = mobile ? '14px' : '20px';
     this.toastText = this.scene.add.text(panelX, panelY + panelH, '', {
       fontFamily: 'Verdana',
-      fontSize: '20px',
+      fontSize: toastFontSize,
       color: '#ffffff',
       backgroundColor: '#00000099',
-      padding: { x: 12, y: 6 },
+      padding: { x: mobile ? 8 : 12, y: mobile ? 4 : 6 },
     }).setOrigin(0.5, 0).setDepth(600).setScrollFactor(0).setAlpha(0);
   }
 
