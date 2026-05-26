@@ -181,4 +181,9 @@ export class PIDController {
     setCurrentDelta(delta :number) {
         this.currentDelta = delta;
     }
+
+    reset() {
+        this.previousError = 0;
+        this.integral = 0;
+    }
 }

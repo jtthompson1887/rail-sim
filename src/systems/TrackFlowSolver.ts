@@ -9,6 +9,8 @@ export default class TrackFlowSolver {
   private trackProvider: TrackManager | RailTrack[];
   private train: Train;
   private debugArrow: Phaser.GameObjects.Graphics;
+  /** Timestamp (performance.now) of the last automatic track switch, used to enforce SWITCH_COOLDOWN_MS. */
+  private _lastSwitchTime: number = -Infinity;
 
   constructor(trackProvider: TrackManager | RailTrack[], train: Train) {
     this.trackProvider = trackProvider;
@@ -21,25 +23,105 @@ export default class TrackFlowSolver {
     return 'getClosestTrack' in provider;
   }
 
+  /**
+   * Commit to a new track, resetting PID state so there is no derivative spike
+   * from the position jump, and recording the time to enforce the switch cooldown.
+   */
+  private _switchToTrack(track: RailTrack): void {
+    this.train.currentTrack = track;
+    this.train.pidControllerFront.reset();
+    this.train.pidControllerRear.reset();
+    this._lastSwitchTime = performance.now();
+  }
+
+  /**
+   * Returns true if `fromTrack` and `toTrack` are connected by a junction,
+   * which means the switch is a deliberate routing event rather than
+   * opportunistic proximity-based switching.
+   */
+  private _isJunctionTransition(fromTrack: RailTrack, toTrack: RailTrack): boolean {
+    if (!this.isTrackManager(this.trackProvider)) return false;
+    const junctions = this.trackProvider.getJunctionsForTrack(fromTrack);
+    return junctions.some((j) => j.getAllTracks().indexOf(toTrack) !== -1);
+  }
+
   private syncTrackState(): boolean {
     if (this.train.derailed) {
       this.train.currentTrack = null;
       return false;
     }
 
+    // Initial assignment when no track is set yet — no hysteresis needed.
     if (this.train.currentTrack === null) {
       this.train.currentTrack = this.getClosestRailTrack();
+      if (this.train.currentTrack) {
+        this._lastSwitchTime = performance.now();
+      }
     }
 
     const closestTrack = this.getClosestRailTrack(GameConfig.TRACK.MAX_CLOSE_DISTANCE);
-    if (closestTrack) {
-      this.train.currentTrack = closestTrack;
+    if (!closestTrack) {
+      this.train.derailed = true;
+      this.train.currentTrack = null;
+      return false;
+    }
+
+    // Track has not changed — stay on it.
+    if (closestTrack === this.train.currentTrack) {
       return true;
     }
 
-    this.train.derailed = true;
-    this.train.currentTrack = null;
-    return false;
+    // Junction transitions (e.g. branching at a switch point) always apply
+    // immediately — they are deliberate routing decisions, not noise.
+    if (this.train.currentTrack && this._isJunctionTransition(this.train.currentTrack, closestTrack)) {
+      this._switchToTrack(closestTrack);
+      return true;
+    }
+
+    // --- General proximity switching with hysteresis + cooldown + deadband ---
+
+    // Enforce cooldown: do not switch again so soon after the last switch.
+    const now = performance.now();
+    if (now - this._lastSwitchTime < GameConfig.TRACK.SWITCH_COOLDOWN_MS) {
+      return true;
+    }
+
+    if (this.train.currentTrack) {
+      const trainBody = this.train.getMatterBody();
+      const trainPosition = trainBody.body.position;
+
+      const currentTrackPoint = this.train.currentTrack.getTrackPoint(trainBody);
+      const currentDist = new Phaser.Math.Vector2(
+        currentTrackPoint.x - trainPosition.x,
+        currentTrackPoint.y - trainPosition.y,
+      ).length();
+
+      const candidatePoint = closestTrack.getTrackPoint(trainBody);
+      const candidateDist = new Phaser.Math.Vector2(
+        candidatePoint.x - trainPosition.x,
+        candidatePoint.y - trainPosition.y,
+      ).length();
+
+      // Parallel deadband: if the closest points of the two tracks are very near
+      // each other the tracks are in the same corridor — treat them as identical
+      // and suppress the switch to avoid oscillation between parallel tracks.
+      const trackSeparation = new Phaser.Math.Vector2(
+        candidatePoint.x - currentTrackPoint.x,
+        candidatePoint.y - currentTrackPoint.y,
+      ).length();
+      if (trackSeparation < GameConfig.TRACK.PARALLEL_DEADBAND) {
+        return true;
+      }
+
+      // Hysteresis: the candidate must offer a meaningful distance advantage
+      // before we commit to it.  A marginal 1-px lead is not enough.
+      if (candidateDist >= currentDist - GameConfig.TRACK.SWITCH_HYSTERESIS) {
+        return true;
+      }
+    }
+
+    this._switchToTrack(closestTrack);
+    return true;
   }
 
   getClosestRailTrack(limit: number = 0): RailTrack | null {
@@ -190,6 +272,11 @@ export default class TrackFlowSolver {
         const distanceToJunction = Math.abs(trainPos - junctionPos);
         const proximityScale = Math.max(0, 1 - distanceToJunction * 5);
 
+        // Only apply junction forces when the train is meaningfully close to the junction.
+        if (proximityScale <= 0.1) {
+          continue;
+        }
+
         for (const track of junction.getAllTracks()) {
           const forceScale = junction.getForceScale(track);
           if (forceScale !== 0 && track !== currentTrack) {
@@ -208,13 +295,32 @@ export default class TrackFlowSolver {
     frontPoint.destroy();
     rearPoint.destroy();
 
+    // Smooth angle correction — a higher smoothing factor (closer to 1) means slower,
+    // gentler alignment so a track switch does not cause a sudden heading snap.
     const rotation = currentTrack.getTrackAngle(trainBody);
-    const newAngle = this.checkAngleDirection(trainBody.angle, rotation, 0.85);
+    const newAngle = this.checkAngleDirection(trainBody.angle, rotation, 0.96);
     trainBody.setAngle(newAngle);
+
+    // Cap repulsion so it cannot overpower the main attraction force.
+    const mainMag = mainForce.length();
+    const repulsionMag = repulsionForce.length();
+    if (repulsionMag > mainMag * 0.5) {
+      repulsionForce.scale((mainMag * 0.5) / repulsionMag);
+    }
 
     const combinedForce = mainForce.add(repulsionForce.scale(0.5));
     const lateralForce = limitForceToLateralApplication(trainBody, combinedForce);
+
+    // Lateral velocity damping: oppose any sideways motion that is not caused by
+    // the current track force to damp out residual oscillation.
+    const velocity = new Phaser.Math.Vector2(trainBody.body.velocity.x, trainBody.body.velocity.y);
+    const forwardDir = new Phaser.Math.Vector2(Math.cos(trainBody.rotation), Math.sin(trainBody.rotation));
+    const lateralDir = new Phaser.Math.Vector2(-forwardDir.y, forwardDir.x);
+    const lateralVelocity = velocity.dot(lateralDir);
+    const dampingForce = lateralDir.clone().scale(-trainBody.body.mass * lateralVelocity * 0.08);
+
     this.drawForceArrow(new Phaser.Math.Vector2(trainBody.body.position.x, trainBody.body.position.y), lateralForce, 0x0000ff);
     applyForceToGameObject(trainBody, lateralForce);
+    applyForceToGameObject(trainBody, dampingForce);
   }
 }
