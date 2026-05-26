@@ -18,6 +18,8 @@ describe('GameConfig', () => {
   });
 
   it('has valid train settings', () => {
+    expect(GameConfig.TRAIN.REALISTIC_MASS_KG).toBeGreaterThan(0);
+    expect(GameConfig.TRAIN.MAX_ACCELERATION_MPS2).toBeGreaterThan(0);
     expect(GameConfig.TRAIN.DEFAULT_MASS).toBeGreaterThan(0);
     expect(GameConfig.TRAIN.ENGINE_POWER).toBeGreaterThan(0);
     expect(GameConfig.TRAIN.SCALE_X).toBeGreaterThan(0);

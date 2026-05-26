@@ -14,6 +14,7 @@ export class InputManager {
   private readonly mobileThrottleHandler = (data: { value: number }) => {
     this.mobileThrottle = data.value;
   };
+  private clickHandlingSetup: boolean = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -29,6 +30,13 @@ export class InputManager {
   }
 
   setupClickHandling(trainManager: TrainManager): void {
+    if (this.clickHandlingSetup) return;
+    this.clickHandlingSetup = true;
+
+    for (const train of trainManager.trains) {
+      this.scene.input.setDraggable(train.getMatterBody(), true);
+    }
+
     this.scene.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: any) => {
       this.clickedGameObject = true;
       let clickedTrain: Train | null = null;
@@ -47,6 +55,30 @@ export class InputManager {
         trainManager.deselectTrain();
       }
       this.clickedGameObject = false;
+    });
+
+    this.scene.input.on(
+      'drag',
+      (_pointer: Phaser.Input.Pointer, gameObject: any, dragX: number, dragY: number) => {
+        const draggedTrain = gameObject.parentTrain as Train | undefined;
+        if (!draggedTrain || !draggedTrain.derailed) return;
+
+        gameObject.setPosition(dragX, dragY);
+        gameObject.setVelocity(0, 0);
+        gameObject.setAngularVelocity(0);
+        draggedTrain.currentTrack = null;
+      },
+    );
+
+    this.scene.input.on('dragend', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
+      const draggedTrain = gameObject.parentTrain as Train | undefined;
+      if (!draggedTrain || !draggedTrain.derailed) return;
+      const recovered = trainManager.tryRecoverDerailedTrain(draggedTrain);
+      if (recovered) {
+        EventBus.emit('ui:toast', { message: 'Train re-railed', type: 'success' });
+      } else {
+        EventBus.emit('ui:toast', { message: 'Drop train closer to a track to re-rail it', type: 'info' });
+      }
     });
   }
 
