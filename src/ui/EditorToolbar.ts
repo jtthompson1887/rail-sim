@@ -92,7 +92,7 @@ export class EditorToolbar {
    * Every game-object created by the toolbar (buttons, labels, dividers, etc.)
    * is pushed here so setVisible() can hide/show them all in one pass.
    */
-  private allObjects: Phaser.GameObjects.GameObject[] = [];
+  private allObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text | Phaser.GameObjects.Graphics)[] = [];
 
   // Bottom-row control buttons
   private undoBg!: Phaser.GameObjects.Rectangle;
@@ -364,7 +364,7 @@ export class EditorToolbar {
     this.border.setVisible(visible);
     this.container.setVisible(visible);
     for (const go of this.allObjects) {
-      (go as Phaser.GameObjects.GameObject & { setVisible: (v: boolean) => void }).setVisible(visible);
+      go.setVisible(visible);
     }
     if (!visible) this.toastText.setAlpha(0);
   }
@@ -377,7 +377,7 @@ export class EditorToolbar {
     this.container.destroy();
     this.toastText.destroy();
     for (const go of this.allObjects) {
-      (go as Phaser.GameObjects.GameObject & { destroy: () => void }).destroy();
+      go.destroy();
     }
     this.allObjects = [];
   }

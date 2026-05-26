@@ -609,7 +609,7 @@ export default class WorldScene extends Phaser.Scene {
 
     // Filter out any tracks that fail terrain validation
     const validTracks: RailTrack[] = [];
-    const invalidCount: number[] = [];
+    let invalidCount = 0;
     for (const track of tracks) {
       const curve = track.getCurvePath();
       const p0 = curve.getStartPoint();
@@ -619,16 +619,16 @@ export default class WorldScene extends Phaser.Scene {
         WorldManager.addTrackDef(this.trackToDef(track));
         validTracks.push(track);
       } else {
-        invalidCount.push(1);
+        invalidCount++;
         track.destroy?.();
       }
     }
 
     this.toolbar.setSaveIndicator('unsaved');
-    const msg = invalidCount.length > 0
-      ? `Generated ${validTracks.length} tracks (${invalidCount.length} blocked by terrain)`
+    const msg = invalidCount > 0
+      ? `Generated ${validTracks.length} tracks (${invalidCount} blocked by terrain)`
       : `Generated ${validTracks.length} tracks`;
-    EventBus.emit('ui:toast', { message: msg, type: invalidCount.length > 0 ? 'warning' : 'success' });
+    EventBus.emit('ui:toast', { message: msg, type: invalidCount > 0 ? 'warning' : 'success' });
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────

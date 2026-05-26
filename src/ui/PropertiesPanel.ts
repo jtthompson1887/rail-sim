@@ -37,7 +37,7 @@ export class PropertiesPanel {
   private border!: Phaser.GameObjects.Rectangle;
   private lines: Phaser.GameObjects.Text[] = [];
   /** Interactive game objects created for the generator-params UI (buttons+labels). */
-  private paramObjects: Phaser.GameObjects.GameObject[] = [];
+  private paramObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text)[] = [];
   private deleteBtn!: Phaser.GameObjects.Rectangle;
   private deleteBtnText!: Phaser.GameObjects.Text;
   private tunnelBtn!: Phaser.GameObjects.Rectangle;
@@ -228,10 +228,9 @@ export class PropertiesPanel {
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
           const cur = this.generatorParams[def.key] as number;
-          (this.generatorParams as any)[def.key] = Math.max(def.min, parseFloat((cur - def.step).toFixed(4)));
-          const newStr = def.format
-            ? def.format(this.generatorParams[def.key] as number)
-            : String(this.generatorParams[def.key]);
+          const next = Math.max(def.min, parseFloat((cur - def.step).toFixed(4)));
+          this.setGeneratorParam(def.key, next);
+          const newStr = def.format ? def.format(next) : String(next);
           valTxt.setText(newStr);
         });
       this.paramObjects.push(minusBg);
@@ -248,10 +247,9 @@ export class PropertiesPanel {
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
           const cur = this.generatorParams[def.key] as number;
-          (this.generatorParams as any)[def.key] = Math.min(def.max, parseFloat((cur + def.step).toFixed(4)));
-          const newStr = def.format
-            ? def.format(this.generatorParams[def.key] as number)
-            : String(this.generatorParams[def.key]);
+          const next = Math.min(def.max, parseFloat((cur + def.step).toFixed(4)));
+          this.setGeneratorParam(def.key, next);
+          const newStr = def.format ? def.format(next) : String(next);
           valTxt.setText(newStr);
         });
       this.paramObjects.push(plusBg);
@@ -281,9 +279,14 @@ export class PropertiesPanel {
     this.paramObjects.push(genLbl);
   }
 
+  /** Type-safe setter for individual generator params. */
+  private setGeneratorParam<K extends keyof GeneratorParams>(key: K, value: GeneratorParams[K]): void {
+    this.generatorParams[key] = value;
+  }
+
   private clearParamObjects(): void {
     for (const go of this.paramObjects) {
-      (go as Phaser.GameObjects.GameObject & { destroy: () => void }).destroy();
+      go.destroy();
     }
     this.paramObjects = [];
   }
