@@ -6,9 +6,18 @@ import TrackFlowSolver from '../systems/TrackFlowSolver';
 import { CameraController } from '../systems/CameraController';
 import { SaveService } from '../services/SaveService';
 
+/** Window augmentation for Playwright / E2E test hooks. */
+declare global {
+  interface Window {
+    __railSimScene: string;
+    __railSimMenuDerailCount: number;
+  }
+}
+
 export default class MenuScene extends Phaser.Scene {
   private railTracks: RailTrack[] = [];
   private trains: Train[] = [];
+  private trainStartTracks: RailTrack[] = [];
   private camControl?: CameraController;
   private previewSolvers: TrackFlowSolver[] = [];
 
@@ -17,6 +26,10 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Expose scene identity and derail counter for E2E tests
+    window.__railSimScene = 'MenuScene';
+    window.__railSimMenuDerailCount = 0;
+
     const { width, height } = this.scale;
     const bg = new Background(this, 20, 20);
     bg.setDepth(-20);
@@ -61,6 +74,7 @@ export default class MenuScene extends Phaser.Scene {
     train1Body.setAngle(firstTrack.getTrackAngle(train1Body));
     train1.enginePower = 38;
     this.trains.push(train1);
+    this.trainStartTracks.push(firstTrack);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train1));
 
     // Train 2 – starts at the opposite side of the circle
@@ -74,6 +88,7 @@ export default class MenuScene extends Phaser.Scene {
     train2Body.setAngle(secondTrack.getTrackAngle(train2Body));
     train2.enginePower = 42;
     this.trains.push(train2);
+    this.trainStartTracks.push(secondTrack);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train2));
 
     // Right-side menu panel
@@ -170,12 +185,30 @@ export default class MenuScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     this.camControl?.update(time, delta);
-    for (const train of this.trains) {
-      train.update(time, delta);
+    for (let i = 0; i < this.trains.length; i++) {
+      this.trains[i].update(time, delta);
+      this.previewSolvers[i].applyTrackFlowForces();
+
+      // Recovery safety net: if the train somehow derails on the menu loop,
+      // teleport it back to its starting position so it keeps running.
+      if (this.trains[i].derailed) {
+        window.__railSimMenuDerailCount += 1;
+        this.recoverTrain(this.trains[i], i);
+      }
     }
-    for (const solver of this.previewSolvers) {
-      solver.applyTrackFlowForces();
-    }
+  }
+
+  /**
+   * Reset a derailed menu train to its designated start position on the
+   * circular track so it can continue driving itself.
+   */
+  private recoverTrain(train: Train, index: number): void {
+    const track = this.trainStartTracks[index];
+    train.recover();
+    const point = track.getCurvePath().getPoint(0);
+    train.getMatterBody().setPosition(point.x, point.y);
+    train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
+    train.currentTrack = track;
   }
 
   private continueGame(): void {
