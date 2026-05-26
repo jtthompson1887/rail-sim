@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
-import { isMobileWidth } from '../utils/responsive';
+import { isMobileWidth, scalePx, responsiveFontSize } from '../utils/responsive';
 
 /** All editor tools, including pan and eraser from the new framework. */
 export type CreateTool =
   | 'select'
   | 'pan'
+  | 'place-track'
   | 'completer'
   | 'junction'
   | 'generator'
@@ -17,6 +18,7 @@ export type CreateTool =
 const SHORTCUTS: Partial<Record<CreateTool, string>> = {
   select: 'V',
   pan: 'H',
+  'place-track': 'P',
   completer: 'D',
   junction: 'J',
   generator: 'G',
@@ -33,12 +35,13 @@ interface ToolEntry {
 
 const TOOL_GROUPS: ToolEntry[][] = [
   [
-    { tool: 'select', icon: '↖', label: 'Select', shortcut: 'V' },
-    { tool: 'pan',    icon: '✋', label: 'Pan',    shortcut: 'H' },
+    { tool: 'select',      icon: '↖', label: 'Select',   shortcut: 'V' },
+    { tool: 'pan',         icon: '✋', label: 'Pan',      shortcut: 'H' },
   ],
   [
-    { tool: 'completer', icon: '⟷', label: 'Connect', shortcut: 'D' },
-    { tool: 'junction',  icon: '⑃', label: 'Junction', shortcut: 'J' },
+    { tool: 'place-track', icon: '＋', label: 'Place',    shortcut: 'P' },
+    { tool: 'completer',   icon: '⟷', label: 'Connect',  shortcut: 'D' },
+    { tool: 'junction',    icon: '⑃', label: 'Junction', shortcut: 'J' },
   ],
   [
     { tool: 'generator', icon: '⚙', label: 'Generate', shortcut: 'G' },
@@ -85,6 +88,12 @@ export class EditorToolbar {
   private activeTool: CreateTool = 'none';
   private toolButtons: ButtonRef[] = [];
 
+  /**
+   * Every game-object created by the toolbar (buttons, labels, dividers, etc.)
+   * is pushed here so setVisible() can hide/show them all in one pass.
+   */
+  private allObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text | Phaser.GameObjects.Graphics)[] = [];
+
   // Bottom-row control buttons
   private undoBg!: Phaser.GameObjects.Rectangle;
   private redoBg!: Phaser.GameObjects.Rectangle;
@@ -104,7 +113,8 @@ export class EditorToolbar {
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     const { width, height } = scene.scale;
-    this.panelWidth = isMobileWidth(width) ? 56 : 72;
+    // Scale panel width with the viewport, clamped to a touch-safe minimum
+    this.panelWidth = scalePx(72, width, height, isMobileWidth(width) ? 44 : 56);
     this.container = scene.add.container(0, 0).setDepth(599).setScrollFactor(0);
 
     this.background = scene.add.rectangle(
@@ -144,13 +154,14 @@ export class EditorToolbar {
   // ── Build ──────────────────────────────────────────────────────────────────
 
   private build(): void {
-    const { height } = this.scene.scale;
+    const { width, height } = this.scene.scale;
     const w = this.panelWidth;
-    const mobile = isMobileWidth(this.scene.scale.width);
-    const btnSize = mobile ? 44 : 56;
-    const iconSize = mobile ? '16px' : '20px';
-    const labelSize = mobile ? '9px' : '10px';
-    const shortcutSize = mobile ? '7px' : '8px';
+    const mobile = isMobileWidth(width);
+    // Scale button sizes and font sizes with the viewport
+    const btnSize = scalePx(56, width, height, 44);
+    const iconSize = responsiveFontSize(20, width, height, 14, 20);
+    const labelSize = responsiveFontSize(10, width, height, 8, 10);
+    const shortcutSize = responsiveFontSize(8, width, height, 7, 8);
     let y = 12;
 
     // ── Mode toggle button (top) ───────────────────────────────────────────
@@ -161,10 +172,12 @@ export class EditorToolbar {
       .on('pointerover', () => modeBg.setFillStyle(0x22a05a, 0.95))
       .on('pointerout', () => modeBg.setFillStyle(0x1a6e3c, 0.9))
       .on('pointerdown', () => EventBus.emit('editor:mode-toggle', {}));
+    this.allObjects.push(modeBg);
 
     const modeText = this.scene.add.text(w / 2, y + btnSize / 2, '▶ Play', {
       fontFamily: 'Verdana', fontSize: iconSize, color: '#4ade80',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+    this.allObjects.push(modeText);
 
     y += btnSize + 8;
 
@@ -180,6 +193,7 @@ export class EditorToolbar {
 
         const activebar = this.scene.add.rectangle(2, by, 4, btnSize - 8, 0x2a8cff, 1)
           .setScrollFactor(0).setDepth(600).setAlpha(0);
+        this.allObjects.push(activebar);
 
         const bg = this.scene.add.rectangle(bx, by, w - 4, btnSize - 4, 0x1a3a5c, 0.85)
           .setStrokeStyle(1, 0xffffff, 0.1)
@@ -192,18 +206,22 @@ export class EditorToolbar {
             if (this.activeTool !== entry.tool) bg.setFillStyle(0x1a3a5c, 0.85);
           })
           .on('pointerdown', () => this.selectTool(entry.tool));
+        this.allObjects.push(bg);
 
-        const iconText = this.scene.add.text(bx, by - 6, entry.icon, {
+        const iconText = this.scene.add.text(bx, by - (mobile ? 4 : 6), entry.icon, {
           fontFamily: 'Verdana', fontSize: iconSize, color: '#d0e8ff',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+        this.allObjects.push(iconText);
 
-        const labelText = this.scene.add.text(bx, by + 8, mobile ? '' : entry.label, {
+        const labelText = this.scene.add.text(bx, by + (mobile ? 6 : 8), mobile ? '' : entry.label, {
           fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+        this.allObjects.push(labelText);
 
         const shortcutText = this.scene.add.text(bx + w / 2 - 10, by - btnSize / 2 + 4, entry.shortcut ?? '', {
           fontFamily: 'Verdana', fontSize: shortcutSize, color: '#4a6a8a',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+        this.allObjects.push(shortcutText);
 
         this.toolButtons.push({ tool: entry.tool, bg, iconText, labelText, shortcutText, activebar });
         y += btnSize + 2;
@@ -218,12 +236,13 @@ export class EditorToolbar {
 
     // ── Bottom section: Undo / Redo / Save ────────────────────────────────
     const bottomY = height - 12;
-    const ctrlBtnH = mobile ? 28 : 34;
+    const ctrlBtnH = scalePx(34, width, height, 28);
     const ctrlBtnW = (w - 8) / 2 - 1;
 
     this.saveText = this.scene.add.text(w / 2, bottomY - ctrlBtnH * 2 - 8, '● Saved', {
-      fontFamily: 'Verdana', fontSize: '8px', color: '#4ade80',
+      fontFamily: 'Verdana', fontSize: labelSize, color: '#4ade80',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+    this.allObjects.push(this.saveText);
 
     // Undo
     this.undoBg = this.scene.add.rectangle(4 + ctrlBtnW / 2, bottomY - ctrlBtnH / 2, ctrlBtnW, ctrlBtnH, 0x2a3a50, 0.8)
@@ -233,10 +252,12 @@ export class EditorToolbar {
       .on('pointerover', () => { if (this.undoEnabled) this.undoBg.setFillStyle(0x3a4e6a, 0.9); })
       .on('pointerout', () => this.undoBg.setFillStyle(this.undoEnabled ? 0x2a3a50 : 0x18242e, 0.8))
       .on('pointerdown', () => { if (this.undoEnabled) EventBus.emit('editor:undo', {}); });
+    this.allObjects.push(this.undoBg);
 
-    this.scene.add.text(4 + ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↩', {
+    const undoLabel = this.scene.add.text(4 + ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↩', {
       fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+    this.allObjects.push(undoLabel);
 
     // Redo
     this.redoBg = this.scene.add.rectangle(w - 4 - ctrlBtnW / 2, bottomY - ctrlBtnH / 2, ctrlBtnW, ctrlBtnH, 0x2a3a50, 0.8)
@@ -246,25 +267,29 @@ export class EditorToolbar {
       .on('pointerover', () => { if (this.redoEnabled) this.redoBg.setFillStyle(0x3a4e6a, 0.9); })
       .on('pointerout', () => this.redoBg.setFillStyle(this.redoEnabled ? 0x2a3a50 : 0x18242e, 0.8))
       .on('pointerdown', () => { if (this.redoEnabled) EventBus.emit('editor:redo', {}); });
+    this.allObjects.push(this.redoBg);
 
-    this.scene.add.text(w - 4 - ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↪', {
+    const redoLabel = this.scene.add.text(w - 4 - ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↪', {
       fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+    this.allObjects.push(redoLabel);
 
     this.setUndoEnabled(false);
     this.setRedoEnabled(false);
 
     // Toast text – appears to the right of the toolbar
     this.toastText = this.scene.add.text(this.panelWidth + 12, height - 60, '', {
-      fontFamily: 'Verdana', fontSize: '14px', color: '#ffffff',
+      fontFamily: 'Verdana', fontSize: responsiveFontSize(14, width, height, 12, 14), color: '#ffffff',
       backgroundColor: '#00000099',
       padding: { x: 10, y: 6 },
     }).setOrigin(0, 1).setDepth(700).setScrollFactor(0).setAlpha(0);
+    // Note: toast is NOT added to allObjects – it manages its own visibility via alpha
   }
 
   private addDivider(y: number): void {
-    this.scene.add.rectangle(this.panelWidth / 2, y, this.panelWidth - 8, 1, 0xffffff, 0.1)
+    const divider = this.scene.add.rectangle(this.panelWidth / 2, y, this.panelWidth - 8, 1, 0xffffff, 0.1)
       .setScrollFactor(0).setDepth(600);
+    this.allObjects.push(divider);
   }
 
   // ── Tool selection ─────────────────────────────────────────────────────────
@@ -338,6 +363,9 @@ export class EditorToolbar {
     this.background.setVisible(visible);
     this.border.setVisible(visible);
     this.container.setVisible(visible);
+    for (const go of this.allObjects) {
+      go.setVisible(visible);
+    }
     if (!visible) this.toastText.setAlpha(0);
   }
 
@@ -348,5 +376,9 @@ export class EditorToolbar {
     this.border.destroy();
     this.container.destroy();
     this.toastText.destroy();
+    for (const go of this.allObjects) {
+      go.destroy();
+    }
+    this.allObjects = [];
   }
 }

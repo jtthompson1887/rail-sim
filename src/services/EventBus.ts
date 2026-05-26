@@ -20,13 +20,13 @@ interface EventMap {
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };
   'mode:changed': { mode: 'create' | 'play' };
-  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'pan' | 'eraser' | 'none' };
+  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'pan' | 'eraser' | 'place-track' | 'none' };
   'track:placed': { trackUUID: string };
   'track:removed': { trackUUID: string };
   'junction:created': { junctionUUID: string };
   'completer:success': { trackUUIDs: string[] };
   'completer:failed': { reason: 'curvature' | 'collision' | 'budget' };
-  'ui:toast': { message: string; type: 'info' | 'error' | 'success' };
+  'ui:toast': { message: string; type: 'info' | 'error' | 'success' | 'warning' };
   'world:undo': Record<string, never>;
   'create:station-placed': { stationId: string };
   'create:train-placed': { trainId: string };
@@ -38,6 +38,7 @@ interface EventMap {
   'selection:changed': { uuids: string[] };
   'snap:toggled': { gridEnabled: boolean; endpointEnabled: boolean };
   'grid:toggled': { enabled: boolean };
+  'generator:run': Record<string, never>;
 }
 
 class EventBusClass {

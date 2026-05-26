@@ -63,6 +63,12 @@ export default class WorldScene extends Phaser.Scene {
   private reshapingTrackUUID: string | null = null;
   private reshapeBeforeDef: TrackDef | null = null;
 
+  // ── Place-track tool state ─────────────────────────────────────────────────
+  /** Anchor world point for the first click of the place-track tool. */
+  private placeAnchor: Phaser.Math.Vector2 | null = null;
+  /** Ghost graphics drawn between anchor and cursor while placing a track. */
+  private placeGhostGraphics!: Phaser.GameObjects.Graphics;
+
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
@@ -74,10 +80,21 @@ export default class WorldScene extends Phaser.Scene {
     // Block camera pan for all tools except pan/none/terrain-view
     const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
     this.cameraController.setBlockPan(freePanTools.indexOf(tool) === -1);
+    // Cancel place-track state when switching away
+    if (tool !== 'place-track') {
+      this.placeAnchor = null;
+      this.placeGhostGraphics?.clear();
+    }
   };
 
   private readonly undoHandler = () => { this.commandStack.undo(); };
   private readonly redoHandler = () => { this.commandStack.redo(); };
+  /** Triggered by the 'Generate' button in PropertiesPanel when generator tool is active. */
+  private readonly generatorRunHandler = () => {
+    const ptr = this.input.activePointer;
+    const world = this.cameras.main.getWorldPoint(ptr.x, ptr.y);
+    this.runGeneratorAt(world.x, world.y);
+  };
   private readonly saveHandler = () => { WorldManager.save(); this.toolbar.setSaveIndicator('saved'); };
 
   private readonly modeToggleHandler = () => {
@@ -141,6 +158,9 @@ export default class WorldScene extends Phaser.Scene {
     });
     this.contextMenu = new ContextMenu(this);
 
+    // Ghost graphics for the place-track tool (drawn in world space)
+    this.placeGhostGraphics = this.add.graphics().setDepth(598);
+
     this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
 
     // Load world content
@@ -157,6 +177,7 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('editor:redo',       this.redoHandler);
     EventBus.on('editor:save',       this.saveHandler);
     EventBus.on('editor:mode-toggle', this.modeToggleHandler);
+    EventBus.on('generator:run',     this.generatorRunHandler);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',       this.modeChangedHandler);
@@ -165,6 +186,7 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:redo',        this.redoHandler);
       EventBus.off('editor:save',        this.saveHandler);
       EventBus.off('editor:mode-toggle', this.modeToggleHandler);
+      EventBus.off('generator:run',      this.generatorRunHandler);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
       this.toolbar.destroy();
@@ -338,6 +360,7 @@ export default class WorldScene extends Phaser.Scene {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
+    this.toolbar.setVisible(true);
     WorldManager.save();
   }
 
@@ -345,6 +368,12 @@ export default class WorldScene extends Phaser.Scene {
     this.minimapGraphics.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
+    this.toolbar.setVisible(false);
+    // Auto-follow the first available train
+    const trains = this.trainManager.trains;
+    if (trains.length > 0) {
+      this.trainManager.selectTrain(trains[0]);
+    }
   }
 
   // ── Input dispatch ─────────────────────────────────────────────────────────
@@ -382,6 +411,8 @@ export default class WorldScene extends Phaser.Scene {
       this.eraseAtPoint(world.x, world.y);
     } else if (this.activeTool === 'generator') {
       this.runGeneratorAt(world.x, world.y);
+    } else if (this.activeTool === 'place-track') {
+      this.handlePlaceTrackDown(world.x, world.y);
     }
   }
 
@@ -393,6 +424,8 @@ export default class WorldScene extends Phaser.Scene {
       this.junctionCreator.onPointerMove(pointer);
     } else if (this.activeTool === 'select') {
       this.selectionManager.onPointerMove(world.x, world.y);
+    } else if (this.activeTool === 'place-track') {
+      this.updatePlaceTrackGhost(world.x, world.y);
     }
   }
 
@@ -426,6 +459,7 @@ export default class WorldScene extends Phaser.Scene {
         const shortcuts: Record<string, CreateTool> = {
           KeyV: 'select', KeyH: 'pan', KeyD: 'completer',
           KeyJ: 'junction', KeyG: 'generator', KeyE: 'eraser', KeyT: 'terrain-view',
+          KeyP: 'place-track',
         };
         const mapped = shortcuts[event.code];
         if (mapped) { this.toolbar.selectTool(mapped); return; }
@@ -522,23 +556,79 @@ export default class WorldScene extends Phaser.Scene {
   // ── Generator tool ─────────────────────────────────────────────────────────
 
   private runGeneratorAt(wx: number, wy: number): void {
+    const params = this.propertiesPanel.getGeneratorParams();
     const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
-    const tracks = generator.generateTracks({
-      startPoint: new Phaser.Math.Vector2(wx, wy),
-      startAngle: Phaser.Math.DegToRad(90),
-      sections: GameConfig.GENERATION.MAIN.SECTIONS,
-      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
-      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
-      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
-      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
-      smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
-    });
-    for (const track of tracks) {
-      WorldManager.addTrackDef(this.trackToDef(track));
+
+    // Check if we are near an existing track's endpoint — if so, continue from it
+    const SNAP_DIST = 120;
+    let tracks: RailTrack[] = [];
+    let continuedFromEndpoint = false;
+
+    const allTracks = this.trackManager.getAllTracks();
+    for (const track of allTracks) {
+      const curve = track.getCurvePath();
+      const start = curve.getStartPoint();
+      const end   = curve.getEndPoint();
+      if (Phaser.Math.Distance.Between(wx, wy, start.x, start.y) < SNAP_DIST ||
+          Phaser.Math.Distance.Between(wx, wy, end.x,   end.y)   < SNAP_DIST) {
+        // continueFromTrack may not exist in all versions — use generateTracks from endpoint
+        const isStart = Phaser.Math.Distance.Between(wx, wy, start.x, start.y) <
+                        Phaser.Math.Distance.Between(wx, wy, end.x,   end.y);
+        const nearPt   = isStart ? start : end;
+        const farPt    = isStart ? end   : start;
+        const angle    = Math.atan2(nearPt.y - farPt.y, nearPt.x - farPt.x);
+        tracks = generator.generateTracks({
+          startPoint: new Phaser.Math.Vector2(nearPt.x, nearPt.y),
+          startAngle: angle,
+          sections:         params.sections,
+          minLength:        params.minLength,
+          maxLength:        params.maxLength,
+          curveProbability: params.curveProbability,
+          minCurveAngle:    params.minCurveAngle,
+          maxCurveAngle:    params.maxCurveAngle,
+          smoothness:       GameConfig.GENERATION.MAIN.SMOOTHNESS,
+        });
+        continuedFromEndpoint = true;
+        break;
+      }
     }
+
+    if (!continuedFromEndpoint) {
+      tracks = generator.generateTracks({
+        startPoint: new Phaser.Math.Vector2(wx, wy),
+        startAngle: Phaser.Math.DegToRad(90),
+        sections:         params.sections,
+        minLength:        params.minLength,
+        maxLength:        params.maxLength,
+        curveProbability: params.curveProbability,
+        minCurveAngle:    params.minCurveAngle,
+        maxCurveAngle:    params.maxCurveAngle,
+        smoothness:       GameConfig.GENERATION.MAIN.SMOOTHNESS,
+      });
+    }
+
+    // Filter out any tracks that fail terrain validation
+    const validTracks: RailTrack[] = [];
+    let invalidCount = 0;
+    for (const track of tracks) {
+      const curve = track.getCurvePath();
+      const p0 = curve.getStartPoint();
+      const p3 = curve.getEndPoint();
+      const result = this.terrainValidator.canPlaceTrack(p0, p3);
+      if (result.valid) {
+        WorldManager.addTrackDef(this.trackToDef(track));
+        validTracks.push(track);
+      } else {
+        invalidCount++;
+        track.destroy?.();
+      }
+    }
+
     this.toolbar.setSaveIndicator('unsaved');
-    EventBus.emit('ui:toast', { message: `Generated ${tracks.length} tracks`, type: 'success' });
+    const msg = invalidCount > 0
+      ? `Generated ${validTracks.length} tracks (${invalidCount} blocked by terrain)`
+      : `Generated ${validTracks.length} tracks`;
+    EventBus.emit('ui:toast', { message: msg, type: invalidCount > 0 ? 'warning' : 'success' });
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
@@ -576,16 +666,96 @@ export default class WorldScene extends Phaser.Scene {
 
   private updateToolCursor(tool: CreateTool): void {
     const cursors: Record<CreateTool, string> = {
-      select:        'default',
-      pan:           'grab',
-      completer:     'crosshair',
-      junction:      'cell',
-      generator:     'crosshair',
-      eraser:        'not-allowed',
-      'terrain-view': 'default',
-      none:          'default',
+      select:          'default',
+      pan:             'grab',
+      completer:       'crosshair',
+      junction:        'cell',
+      generator:       'crosshair',
+      eraser:          'not-allowed',
+      'terrain-view':  'default',
+      'place-track':   'crosshair',
+      none:            'default',
     };
     this.cameraController.setCursor(cursors[tool] ?? 'default');
+  }
+
+  // ── Place-track tool ───────────────────────────────────────────────────────
+
+  /**
+   * Handle a click for the place-track tool.
+   * First click: sets the anchor.
+   * Second click: creates a straight cubic Bézier (linearly interpolated control
+   * points) from anchor to cursor, validates against terrain, then adds it.
+   */
+  private handlePlaceTrackDown(wx: number, wy: number): void {
+    if (!this.placeAnchor) {
+      // First click — snap to a nearby endpoint if possible
+      const SNAP = 60;
+      let snappedX = wx;
+      let snappedY = wy;
+      for (const track of this.trackManager.getAllTracks()) {
+        const curve = track.getCurvePath();
+        const s = curve.getStartPoint();
+        const e = curve.getEndPoint();
+        if (Phaser.Math.Distance.Between(wx, wy, s.x, s.y) < SNAP) {
+          snappedX = s.x; snappedY = s.y; break;
+        }
+        if (Phaser.Math.Distance.Between(wx, wy, e.x, e.y) < SNAP) {
+          snappedX = e.x; snappedY = e.y; break;
+        }
+      }
+      this.placeAnchor = new Phaser.Math.Vector2(snappedX, snappedY);
+      // Draw a small dot at the anchor
+      this.placeGhostGraphics.clear();
+      this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
+      this.placeGhostGraphics.fillCircle(snappedX, snappedY, 6);
+    } else {
+      // Second click — commit the track
+      const p0 = this.placeAnchor;
+      const p3 = new Phaser.Math.Vector2(wx, wy);
+      const p1 = new Phaser.Math.Vector2(
+        p0.x + (p3.x - p0.x) / 3,
+        p0.y + (p3.y - p0.y) / 3,
+      );
+      const p2 = new Phaser.Math.Vector2(
+        p0.x + (p3.x - p0.x) * 2 / 3,
+        p0.y + (p3.y - p0.y) * 2 / 3,
+      );
+
+      const validation = this.terrainValidator.canPlaceTrack(p0, p3);
+      if (!validation.valid) {
+        EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
+      } else {
+        const track = new RailTrack(this, p0, p1, p2, p3);
+        WorldManager.addTrackDef(this.trackToDef(track));
+        this.toolbar.setSaveIndicator('unsaved');
+        EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
+      }
+
+      // Reset for next placement — anchor stays at p3 for chaining
+      this.placeAnchor = new Phaser.Math.Vector2(wx, wy);
+      this.placeGhostGraphics.clear();
+      this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
+      this.placeGhostGraphics.fillCircle(wx, wy, 6);
+    }
+  }
+
+  /** Redraw the ghost preview line from the anchor to the current cursor position. */
+  private updatePlaceTrackGhost(wx: number, wy: number): void {
+    if (!this.placeAnchor) return;
+    this.placeGhostGraphics.clear();
+    // Anchor dot
+    this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
+    this.placeGhostGraphics.fillCircle(this.placeAnchor.x, this.placeAnchor.y, 6);
+    // Ghost line
+    this.placeGhostGraphics.lineStyle(2, 0x4ad5ff, 0.5);
+    this.placeGhostGraphics.beginPath();
+    this.placeGhostGraphics.moveTo(this.placeAnchor.x, this.placeAnchor.y);
+    this.placeGhostGraphics.lineTo(wx, wy);
+    this.placeGhostGraphics.strokePath();
+    // Cursor dot
+    this.placeGhostGraphics.fillStyle(0xffffff, 0.7);
+    this.placeGhostGraphics.fillCircle(wx, wy, 4);
   }
 
   // ── Minimap ───────────────────────────────────────────────────────────────

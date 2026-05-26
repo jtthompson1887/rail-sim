@@ -47,6 +47,21 @@ export class TrainManager {
     this.cameraController.startFollow(train.getMatterBody());
   }
 
+  /**
+   * Programmatically select a train and start the camera following it.
+   * Unlike handleTrainClick this does not require a pointer event, so it
+   * can be called when entering play mode to auto-follow the first train.
+   */
+  selectTrain(train: Train): void {
+    if (this._selectedTrain && this._selectedTrain !== train) {
+      this._selectedTrain.selected = false;
+    }
+    train.selected = true;
+    this._selectedTrain = train;
+    EventBus.emit('train:selected', { trainId: train.getUUID() });
+    this.cameraController.startFollow(train.getMatterBody());
+  }
+
   deselectTrain(): void {
     if (this._selectedTrain) {
       this._selectedTrain.selected = false;

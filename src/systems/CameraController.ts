@@ -37,6 +37,13 @@ export class CameraController {
   private lastPinchCenter: { x: number; y: number } | null = null;
   private lastPinchDist: number = 0;
 
+  /**
+   * True while any Phaser drag event is active (a game object is being dragged,
+   * e.g. a track reshape handle or a derailed train body). During this time
+   * single-pointer panning is suppressed to prevent the camera from jumping.
+   */
+  private _objectDragActive: boolean = false;
+
   constructor(scene: Scene) {
     const cursors = scene.input.keyboard.createCursorKeys();
     this.cam = scene.cameras.main;
@@ -62,6 +69,17 @@ export class CameraController {
     // Enable a second touch pointer so two-finger gestures can be tracked
     scene.input.addPointer(1);
 
+    // Track when any game object (handle or train body) is being dragged so
+    // we can suppress single-pointer camera panning during that drag.
+    scene.input.on('dragstart', () => {
+      this._objectDragActive = true;
+      // Cancel any camera drag that may have started on the same pointerdown
+      this.isDragging = false;
+    });
+    scene.input.on('dragend', () => {
+      this._objectDragActive = false;
+    });
+
     scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       // Middle-mouse drag (desktop) — always allowed
       if (pointer.middleButtonDown()) {
@@ -72,8 +90,8 @@ export class CameraController {
         this.stopFollow();
       }
 
-      // Left-button single-pointer pan (only in pan-allowed mode)
-      if (pointer.leftButtonDown() && !this._blockPan && this.pinchPointers.size < 2) {
+      // Left-button single-pointer pan (only in pan-allowed mode and no object drag)
+      if (pointer.leftButtonDown() && !this._blockPan && !this._objectDragActive && this.pinchPointers.size < 2) {
         this.isDragging = true;
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
@@ -96,7 +114,12 @@ export class CameraController {
     });
 
     scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      // Middle-mouse single-pointer pan
+      // Stop camera pan the moment an object drag takes over
+      if (this._objectDragActive) {
+        this.isDragging = false;
+      }
+
+      // Single-pointer camera pan
       if (this.isDragging) {
         const deltaX = pointer.x - this.dragStartX;
         const deltaY = pointer.y - this.dragStartY;

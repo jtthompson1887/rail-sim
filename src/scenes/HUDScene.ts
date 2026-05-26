@@ -1,15 +1,13 @@
 import Phaser from 'phaser';
 import { GameStateManager } from '../managers/GameStateManager';
 import { EventBus } from '../services/EventBus';
-import { isMobileWidth, responsiveFontSize, touchSafeSize } from '../utils/responsive';
-import { CreateModeToolbar } from '../ui/CreateModeToolbar';
+import { isMobileWidth, responsiveFontSize, touchSafeSize, scalePx } from '../utils/responsive';
 
 export default class HUDScene extends Phaser.Scene {
   private timeText!: Phaser.GameObjects.Text;
   private trainsText!: Phaser.GameObjects.Text;
   private modeToggleBtn!: Phaser.GameObjects.Text;
   private modeLabelText!: Phaser.GameObjects.Text;
-  private toolbar!: CreateModeToolbar;
 
   constructor() {
     super({ key: 'HUDScene' });
@@ -18,6 +16,10 @@ export default class HUDScene extends Phaser.Scene {
   create(): void {
     const { width, height } = this.scale;
     const mobile = isMobileWidth(width);
+
+    // The left sidebar (EditorToolbar in WorldScene) occupies the first N px.
+    // Use the same breakpoint formula so our top-bar elements don't overlap it.
+    const sidebarW = scalePx(72, width, height, mobile ? 44 : 56);
 
     const hudFontSize = responsiveFontSize(20, width, height, 12, 20);
     const labelFontSize = responsiveFontSize(22, width, height, 13, 22);
@@ -37,8 +39,8 @@ export default class HUDScene extends Phaser.Scene {
       color: '#d2e6ff',
     }).setScrollFactor(0).setDepth(300);
 
-    // Current mode label (top-left)
-    this.modeLabelText = this.add.text(12, 12, '', {
+    // Current mode label – placed just to the right of the left sidebar
+    this.modeLabelText = this.add.text(sidebarW + 8, 8, '', {
       fontFamily: 'Verdana',
       fontSize: labelFontSize,
       fontStyle: 'bold',
@@ -51,7 +53,7 @@ export default class HUDScene extends Phaser.Scene {
     const toggleFontSize = responsiveFontSize(26, width, height, 14, 26);
     const togglePadX = mobile ? 10 : 16;
     const togglePadY = mobile ? 6 : 8;
-    this.modeToggleBtn = this.add.text(width - 12, 12, '', {
+    this.modeToggleBtn = this.add.text(width - 12, 8, '', {
       fontFamily: 'Verdana',
       fontSize: toggleFontSize,
       fontStyle: 'bold',
@@ -64,16 +66,9 @@ export default class HUDScene extends Phaser.Scene {
       .on('pointerout', () => this.modeToggleBtn.setColor('#ffffff'))
       .on('pointerdown', () => this.toggleMode());
 
-    this.toolbar = new CreateModeToolbar(this);
-    this.toolbar.setVisible(GameStateManager.worldMode === 'create');
-
     if (this.sys.game.device.input.touch) {
       this.createMobileControls();
     }
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.toolbar.destroy();
-    });
   }
 
   private toggleMode(): void {
@@ -145,7 +140,6 @@ export default class HUDScene extends Phaser.Scene {
 
     this.modeLabelText.setText(mode === 'create' ? '✎ Create Mode' : '▶ Play Mode');
     this.modeToggleBtn.setText(isPlay ? '✎ Edit World' : '▶ Play');
-    this.toolbar.setVisible(mode === 'create');
     this.timeText.setText(`Time: ${GameStateManager.elapsedSecs.toFixed(1)}s`);
     this.trainsText.setText(`Trains: ${GameStateManager.activeTrains}`);
   }
