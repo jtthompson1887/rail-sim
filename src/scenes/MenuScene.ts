@@ -5,6 +5,7 @@ import Train from '../entities/Train';
 import TrackFlowSolver from '../systems/TrackFlowSolver';
 import { CameraController } from '../systems/CameraController';
 import { SaveService } from '../services/SaveService';
+import { responsiveFontSize } from '../utils/responsive';
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -103,10 +104,16 @@ export default class MenuScene extends Phaser.Scene {
 
     let currentY = panelY - panelHeight * 0.39;
 
+    // Responsive font sizes – scale down gracefully on smaller viewports
+    const titleFontSize    = responsiveFontSize(82, width, height, 28, 82);
+    const subtitleFontSize = responsiveFontSize(28, width, height, 13, 28);
+    const buttonFontSize   = responsiveFontSize(42, width, height, 16, 42);
+    const hintFontSize     = responsiveFontSize(24, width, height, 12, 24);
+
     // Title with a gentle pulsing tween
     const title = this.add.text(panelX, currentY, 'Rail Sim', {
       fontFamily: 'Verdana',
-      fontSize: '82px',
+      fontSize: titleFontSize,
       fontStyle: 'bold',
       color: '#ffffff',
     }).setOrigin(0.5, 0).setShadow(0, 6, 'rgba(0,0,0,0.6)', 8).setScrollFactor(0).setDepth(101);
@@ -123,7 +130,7 @@ export default class MenuScene extends Phaser.Scene {
     currentY += title.height + 16;
     const subtitle = this.add.text(panelX, currentY, 'Keep the rail network flowing smoothly', {
       fontFamily: 'Verdana',
-      fontSize: '28px',
+      fontSize: subtitleFontSize,
       color: '#d2e6ff',
       align: 'center',
       wordWrap: { width: panelWidth * 0.88 },
@@ -133,8 +140,9 @@ export default class MenuScene extends Phaser.Scene {
 
     // Menu buttons: New Game, Continue, Load, Settings
     const buttonWidth = panelWidth * 0.72;
-    const buttonHeight = 78;
-    const buttonSpacing = 20;
+    // Scale button height proportionally, with a minimum for touch targets
+    const buttonHeight = Math.max(48, Math.round(height * 0.072));
+    const buttonSpacing = Math.max(8, Math.round(height * 0.018));
     const hasSave = SaveService.getLastPlayedWorldId() !== null || SaveService.hasSave();
 
     const menuItems: { label: string; enabled: boolean; action: () => void }[] = [
@@ -164,7 +172,7 @@ export default class MenuScene extends Phaser.Scene {
 
       this.add.text(panelX, btnY, item.label, {
         fontFamily: 'Verdana',
-        fontSize: '42px',
+        fontSize: buttonFontSize,
         fontStyle: 'bold',
         color: textColor,
       }).setOrigin(0.5).setScrollFactor(0).setDepth(102);
@@ -175,7 +183,7 @@ export default class MenuScene extends Phaser.Scene {
     currentY += 12;
     this.add.text(panelX, currentY, 'Press SPACE or ENTER to start', {
       fontFamily: 'Verdana',
-      fontSize: '24px',
+      fontSize: hintFontSize,
       color: '#9fc0ff',
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
 

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GameStateManager } from '../managers/GameStateManager';
 import { EventBus } from '../services/EventBus';
+import { isMobileWidth, responsiveFontSize, touchSafeSize } from '../utils/responsive';
 
 export default class HUDScene extends Phaser.Scene {
   private timeText!: Phaser.GameObjects.Text;
@@ -13,42 +14,48 @@ export default class HUDScene extends Phaser.Scene {
   }
 
   create(): void {
-    const { height } = this.scale;
+    const { width, height } = this.scale;
+    const mobile = isMobileWidth(width);
+
+    const hudFontSize = responsiveFontSize(20, width, height, 12, 20);
+    const labelFontSize = responsiveFontSize(22, width, height, 13, 22);
 
     // Time display (bottom-left)
-    this.timeText = this.add.text(20, height - 60, '', {
+    this.timeText = this.add.text(12, height - 48, '', {
       fontFamily: 'Verdana',
-      fontSize: '20px',
+      fontSize: hudFontSize,
       color: '#ffffff',
       backgroundColor: '#00000088',
-      padding: { x: 10, y: 6 },
+      padding: { x: 8, y: 5 },
     }).setScrollFactor(0).setDepth(300);
 
-    this.trainsText = this.add.text(20, height - 100, '', {
+    this.trainsText = this.add.text(12, height - 84, '', {
       fontFamily: 'Verdana',
-      fontSize: '18px',
+      fontSize: responsiveFontSize(18, width, height, 11, 18),
       color: '#d2e6ff',
     }).setScrollFactor(0).setDepth(300);
 
-    // Current mode label (top-right)
-    this.modeLabelText = this.add.text(20, 20, '', {
+    // Current mode label (top-left)
+    this.modeLabelText = this.add.text(12, 12, '', {
       fontFamily: 'Verdana',
-      fontSize: '22px',
+      fontSize: labelFontSize,
       fontStyle: 'bold',
       color: '#4ad5ff',
       backgroundColor: '#00000088',
-      padding: { x: 10, y: 6 },
+      padding: { x: 8, y: 5 },
     }).setScrollFactor(0).setDepth(300);
 
-    // Mode toggle button
-    const { width } = this.scale;
-    this.modeToggleBtn = this.add.text(width - 20, 20, '', {
+    // Mode toggle button (top-right)
+    const toggleFontSize = responsiveFontSize(26, width, height, 14, 26);
+    const togglePadX = mobile ? 10 : 16;
+    const togglePadY = mobile ? 6 : 8;
+    this.modeToggleBtn = this.add.text(width - 12, 12, '', {
       fontFamily: 'Verdana',
-      fontSize: '26px',
+      fontSize: toggleFontSize,
       fontStyle: 'bold',
       color: '#ffffff',
       backgroundColor: '#1a3a5c',
-      padding: { x: 16, y: 8 },
+      padding: { x: togglePadX, y: togglePadY },
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(300)
       .setInteractive({ useHandCursor: true })
       .on('pointerover', () => this.modeToggleBtn.setColor('#4ad5ff'))
@@ -74,14 +81,21 @@ export default class HUDScene extends Phaser.Scene {
 
   /**
    * Create on-screen throttle buttons for touch/mobile devices.
+   * Sizes are proportional to the viewport so buttons remain easily tappable.
    */
   private createMobileControls(): void {
     const { width, height } = this.scale;
-    const btnSize = 130;
-    const margin = 40;
+
+    // Button size: 15% of viewport width, but at least MIN_TOUCH_TARGET_PX and
+    // no more than 120 px, so they're comfortably tappable on any screen.
+    const btnSize = touchSafeSize(Math.min(120, Math.round(width * 0.15)));
+    const margin = Math.round(width * 0.04);
     const btnX = width - margin - btnSize / 2;
 
-    const accelY = height - margin - btnSize * 2 - 20;
+    const iconFontSize = `${Math.round(btnSize * 0.42)}px`;
+    const labelFontSize = `${Math.max(11, Math.round(btnSize * 0.2))}px`;
+
+    const accelY = height - margin - btnSize * 2 - 10;
     const accelBtn = this.add
       .rectangle(btnX, accelY, btnSize, btnSize, 0x22bb44, 0.85)
       .setStrokeStyle(3, 0xffffff, 0.6)
@@ -89,12 +103,12 @@ export default class HUDScene extends Phaser.Scene {
       .setDepth(200)
       .setInteractive({ useHandCursor: true });
     this.add
-      .text(btnX, accelY, '▲', { fontFamily: 'Verdana', fontSize: '56px', color: '#ffffff' })
+      .text(btnX, accelY, '▲', { fontFamily: 'Verdana', fontSize: iconFontSize, color: '#ffffff' })
       .setOrigin(0.5).setScrollFactor(0).setDepth(201);
 
     accelBtn.on('pointerdown', () => EventBus.emit('mobile:throttle', { value: 1 }));
-    accelBtn.on('pointerup', () => EventBus.emit('mobile:throttle', { value: 0 }));
-    accelBtn.on('pointerout', () => EventBus.emit('mobile:throttle', { value: 0 }));
+    accelBtn.on('pointerup',   () => EventBus.emit('mobile:throttle', { value: 0 }));
+    accelBtn.on('pointerout',  () => EventBus.emit('mobile:throttle', { value: 0 }));
 
     const brakeY = height - margin - btnSize / 2;
     const brakeBtn = this.add
@@ -104,15 +118,15 @@ export default class HUDScene extends Phaser.Scene {
       .setDepth(200)
       .setInteractive({ useHandCursor: true });
     this.add
-      .text(btnX, brakeY, '▼', { fontFamily: 'Verdana', fontSize: '56px', color: '#ffffff' })
+      .text(btnX, brakeY, '▼', { fontFamily: 'Verdana', fontSize: iconFontSize, color: '#ffffff' })
       .setOrigin(0.5).setScrollFactor(0).setDepth(201);
 
     brakeBtn.on('pointerdown', () => EventBus.emit('mobile:throttle', { value: -1 }));
-    brakeBtn.on('pointerup', () => EventBus.emit('mobile:throttle', { value: 0 }));
-    brakeBtn.on('pointerout', () => EventBus.emit('mobile:throttle', { value: 0 }));
+    brakeBtn.on('pointerup',   () => EventBus.emit('mobile:throttle', { value: 0 }));
+    brakeBtn.on('pointerout',  () => EventBus.emit('mobile:throttle', { value: 0 }));
 
-    this.add.text(btnX, accelY - btnSize / 2 - 24, 'THROTTLE', {
-      fontFamily: 'Verdana', fontSize: '22px', color: '#d2e6ff',
+    this.add.text(btnX, accelY - btnSize / 2 - 6, 'THROTTLE', {
+      fontFamily: 'Verdana', fontSize: labelFontSize, color: '#d2e6ff',
     }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(200);
   }
 

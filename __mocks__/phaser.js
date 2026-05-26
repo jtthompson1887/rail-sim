@@ -274,6 +274,30 @@ class Rectangle {
 // ---------------------------------------------------------------------------
 // Scene factory – creates a fully cross-referenced scene mock
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Fluent game-object stub – suitable for add.rectangle / add.container returns
+// ---------------------------------------------------------------------------
+function makeFluentStub() {
+  const stub = {
+    setStrokeStyle: jest.fn().mockReturnThis(),
+    setDepth: jest.fn().mockReturnThis(),
+    setScrollFactor: jest.fn().mockReturnThis(),
+    setInteractive: jest.fn().mockReturnThis(),
+    setVisible: jest.fn().mockReturnThis(),
+    setAlpha: jest.fn().mockReturnThis(),
+    setFillStyle: jest.fn().mockReturnThis(),
+    setOrigin: jest.fn().mockReturnThis(),
+    setText: jest.fn().mockReturnThis(),
+    setColor: jest.fn().mockReturnThis(),
+    on: jest.fn().mockReturnThis(),
+    off: jest.fn().mockReturnThis(),
+    add: jest.fn().mockReturnThis(),
+    destroy: jest.fn(),
+    _children: [],
+  };
+  return stub;
+}
+
 function makeScene(overrides = {}) {
   const scene = {};
 
@@ -292,8 +316,10 @@ function makeScene(overrides = {}) {
       existing: jest.fn(),
       image: jest.fn().mockReturnValue(image),
       circle: jest.fn().mockReturnValue(arc),
-      text: jest.fn().mockReturnValue(text),
+      text: jest.fn().mockReturnValue(makeFluentStub()),
       graphics: jest.fn().mockReturnValue(graphics),
+      rectangle: jest.fn().mockImplementation(() => makeFluentStub()),
+      container: jest.fn().mockImplementation(() => makeFluentStub()),
     },
     matter: {
       add: {
@@ -311,12 +337,23 @@ function makeScene(overrides = {}) {
       },
     },
     cameras: { main: { scrollX: 0, scrollY: 0, zoom: 1, width: 1920, height: 1080 } },
+    scale: { width: 1920, height: 1080 },
     input: {
       keyboard: {
         addKey: jest.fn().mockReturnValue({ isDown: false }),
         createCursorKeys: jest.fn().mockReturnValue({}),
+        on: jest.fn(),
       },
       on: jest.fn(),
+      addPointer: jest.fn(),
+    },
+    events: {
+      once: jest.fn(),
+      on: jest.fn(),
+      emit: jest.fn(),
+    },
+    tweens: {
+      add: jest.fn(),
     },
     sound: {
       volume: 1,
@@ -404,6 +441,16 @@ const Phaser = {
         update() {}
       },
     },
+  },
+  Scenes: {
+    Events: {
+      SHUTDOWN: 'shutdown',
+    },
+  },
+  Scale: {
+    FIT: 'FIT',
+    RESIZE: 'RESIZE',
+    CENTER_BOTH: 'CENTER_BOTH',
   },
   Scene: class Scene {
     constructor() {

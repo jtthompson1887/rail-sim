@@ -23,6 +23,11 @@ export class CameraController {
   private dragStartX: number = 0;
   private dragStartY: number = 0;
 
+  // ── Multi-touch tracking (pinch-to-zoom + two-finger pan) ─────────────────
+  private readonly pinchPointers = new Map<number, { x: number; y: number }>();
+  private lastPinchCenter: { x: number; y: number } | null = null;
+  private lastPinchDist: number = 0;
+
   constructor(scene: Scene) {
     const cursors = scene.input.keyboard.createCursorKeys();
     this.cam = scene.cameras.main;
@@ -42,16 +47,34 @@ export class CameraController {
 
     this.controls = new Phaser.Cameras.Controls.SmoothedKeyControl(this.controlConfig);
 
+    // Enable a second touch pointer so two-finger gestures can be tracked
+    scene.input.addPointer(1);
+
     scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // Middle-mouse drag (desktop)
       if (pointer.middleButtonDown()) {
         this.isDragging = true;
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
         this.stopFollow();
       }
+
+      // Track all active pointers for two-finger gestures
+      this.pinchPointers.set(pointer.id, { x: pointer.x, y: pointer.y });
+      if (this.pinchPointers.size === 2) {
+        this.isDragging = false; // two-finger gesture takes over panning
+        this.stopFollow();
+        const pts = Array.from(this.pinchPointers.values());
+        this.lastPinchCenter = {
+          x: (pts[0].x + pts[1].x) / 2,
+          y: (pts[0].y + pts[1].y) / 2,
+        };
+        this.lastPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      }
     });
 
     scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      // Middle-mouse single-pointer pan
       if (this.isDragging) {
         const deltaX = pointer.x - this.dragStartX;
         const deltaY = pointer.y - this.dragStartY;
@@ -60,11 +83,50 @@ export class CameraController {
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
       }
+
+      // Update tracked pointer position
+      if (this.pinchPointers.has(pointer.id)) {
+        this.pinchPointers.set(pointer.id, { x: pointer.x, y: pointer.y });
+      }
+
+      // Two-finger pan + pinch-to-zoom
+      if (this.pinchPointers.size === 2 && this.lastPinchCenter) {
+        const pts = Array.from(this.pinchPointers.values());
+        const newCenter = {
+          x: (pts[0].x + pts[1].x) / 2,
+          y: (pts[0].y + pts[1].y) / 2,
+        };
+        const newDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+
+        // Pan by the delta of the gesture centre
+        const dcx = newCenter.x - this.lastPinchCenter.x;
+        const dcy = newCenter.y - this.lastPinchCenter.y;
+        this.cam.scrollX -= dcx / this.cam.zoom;
+        this.cam.scrollY -= dcy / this.cam.zoom;
+
+        // Zoom by the ratio of finger distances
+        if (this.lastPinchDist > 0) {
+          const scale = newDist / this.lastPinchDist;
+          this.cam.zoom = Phaser.Math.Clamp(
+            this.cam.zoom * scale,
+            GameConfig.CAMERA.MIN_ZOOM,
+            GameConfig.CAMERA.MAX_ZOOM,
+          );
+        }
+
+        this.lastPinchCenter = newCenter;
+        this.lastPinchDist = newDist;
+      }
     });
 
     scene.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.button === 1) {
         this.isDragging = false;
+      }
+      this.pinchPointers.delete(pointer.id);
+      if (this.pinchPointers.size < 2) {
+        this.lastPinchCenter = null;
+        this.lastPinchDist = 0;
       }
     });
 

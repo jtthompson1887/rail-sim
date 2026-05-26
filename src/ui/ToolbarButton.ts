@@ -7,6 +7,8 @@ export interface ToolbarButtonConfig {
   height?: number;
   color?: number;
   activeColor?: number;
+  /** Font size string for the button label, e.g. '22px'. Defaults to '22px'. */
+  labelFontSize?: string;
   onPress?: () => void;
 }
 
@@ -30,6 +32,7 @@ export class ToolbarButton {
       height: cfg.height ?? 56,
       color: cfg.color ?? 0x1a3a5c,
       activeColor: cfg.activeColor ?? 0x2a8cff,
+      labelFontSize: cfg.labelFontSize ?? '22px',
       onPress: cfg.onPress ?? (() => {}),
     };
 
@@ -50,7 +53,7 @@ export class ToolbarButton {
 
     this.label = scene.add.text(0, 0, this.config.label, {
       fontFamily: 'Verdana',
-      fontSize: '22px',
+      fontSize: this.config.labelFontSize,
       color: '#ffffff',
     }).setOrigin(0.5);
 

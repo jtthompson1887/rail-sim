@@ -15,10 +15,8 @@ import WorldScene from './scenes/WorldScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: GameConfig.RESOLUTION.WIDTH,
-  height: GameConfig.RESOLUTION.HEIGHT,
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   physics: {
