@@ -286,7 +286,6 @@ export default class WorldScene extends Phaser.Scene {
   // ── Mode switching ────────────────────────────────────────────────────────
 
   private activateCreateMode(): void {
-    this.toolbar.setVisible(true);
     // Freeze all trains
     for (const train of this.trainManager.trains) {
       train.enginePower = 0;
@@ -297,7 +296,6 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private activatePlayMode(): void {
-    this.toolbar.setVisible(false);
     this.selectedTrackHighlight.clear();
     this.minimapGraphics.clear();
     this.inputManager.setupClickHandling(this.trainManager);

@@ -79,3 +79,57 @@ describe('TrainManager.deselectTrain()', () => {
     expect(manager.selectedTrain).toBeNull();
   });
 });
+
+describe('TrainManager.tryRecoverDerailedTrain()', () => {
+  it('returns false when train is not derailed', () => {
+    const trackManager = { getClosestTrack: jest.fn() } as any;
+    const manager = new TrainManager({} as any, trackManager, {} as any);
+    const train = {
+      derailed: false,
+      currentTrack: null,
+      getMatterBody: jest.fn(),
+      recover: jest.fn(),
+      enginePower: 10,
+    } as any;
+
+    const recovered = manager.tryRecoverDerailedTrain(train);
+
+    expect(recovered).toBe(false);
+    expect(trackManager.getClosestTrack).not.toHaveBeenCalled();
+  });
+
+  it('snaps to the nearest track and recovers a derailed train', () => {
+    const body = {
+      x: 100,
+      y: 200,
+      setPosition: jest.fn(),
+      setAngle: jest.fn(),
+    };
+    const closestTrack = {
+      getTrackPoint: jest.fn().mockReturnValue({ x: 120, y: 220 }),
+      getTrackAngle: jest.fn().mockReturnValue(90),
+    };
+    const trackManager = {
+      getClosestTrack: jest.fn().mockReturnValue(closestTrack),
+    } as any;
+    const manager = new TrainManager({} as any, trackManager, {} as any);
+    const train = {
+      derailed: true,
+      currentTrack: null,
+      getMatterBody: jest.fn().mockReturnValue(body),
+      recover: jest.fn(),
+      enginePower: 10,
+    } as any;
+
+    const recovered = manager.tryRecoverDerailedTrain(train);
+
+    expect(recovered).toBe(true);
+    expect(trackManager.getClosestTrack).toHaveBeenCalled();
+    expect(closestTrack.getTrackPoint).toHaveBeenCalledWith(body);
+    expect(body.setPosition).toHaveBeenCalledWith(120, 220);
+    expect(body.setAngle).toHaveBeenCalledWith(90);
+    expect(train.currentTrack).toBe(closestTrack);
+    expect(train.recover).toHaveBeenCalledTimes(1);
+    expect(train.enginePower).toBe(0);
+  });
+});

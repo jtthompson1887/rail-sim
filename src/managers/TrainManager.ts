@@ -5,6 +5,7 @@ import { CameraController } from '../systems/CameraController';
 import { GameStateManager } from './GameStateManager';
 import { EventBus } from '../services/EventBus';
 import TrackFlowSolver from '../systems/TrackFlowSolver';
+import { GameConfig } from '../config/GameConfig';
 
 interface Bounds {
   min: { x: number; y: number };
@@ -57,6 +58,27 @@ export class TrainManager {
 
   get selectedTrain(): Train | null {
     return this._selectedTrain;
+  }
+
+  tryRecoverDerailedTrain(train: Train): boolean {
+    if (!train.derailed) return false;
+    const trainBody = train.getMatterBody();
+    const closestTrack = this.trackManager.getClosestTrack(
+      { x: trainBody.x, y: trainBody.y },
+      Math.max(GameConfig.TRACK.MAX_CLOSE_DISTANCE, 120),
+      train.currentTrack ?? undefined,
+    );
+    if (!closestTrack) {
+      return false;
+    }
+
+    const snappedPoint = closestTrack.getTrackPoint(trainBody);
+    trainBody.setPosition(snappedPoint.x, snappedPoint.y);
+    trainBody.setAngle(closestTrack.getTrackAngle(trainBody));
+    train.currentTrack = closestTrack;
+    train.recover();
+    train.enginePower = 0;
+    return true;
   }
 
   getBounds(trainBody: Phaser.Physics.Matter.Sprite): Bounds | null {
