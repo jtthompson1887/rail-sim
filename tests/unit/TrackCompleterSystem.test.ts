@@ -29,7 +29,15 @@ describe('TrackCompleterSystem', () => {
 
   beforeEach(() => {
     scene = makeScene();
-    scene.cameras = { main: { zoom: 1, scrollX: 0, scrollY: 0, width: 1920, height: 1080 } };
+    scene.cameras = {
+      main: {
+        zoom: 1, scrollX: 0, scrollY: 0, width: 1920, height: 1080,
+        getWorldPoint: (x: number, y: number) => {
+          const Phaser = require('phaser');
+          return new Phaser.Math.Vector2(x, y);
+        },
+      },
+    };
     trackManager = new TrackManager(scene);
     WorldManager.createNew('CompleterTest');
     system = new TrackCompleterSystem(scene, trackManager);

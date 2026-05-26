@@ -353,7 +353,14 @@ function makeScene(overrides = {}) {
         get scene() { return scene; }, // lazy getter to avoid circular issues
       },
     },
-    cameras: { main: { scrollX: 0, scrollY: 0, zoom: 1, width: 1920, height: 1080 } },
+    cameras: {
+      main: {
+        scrollX: 0, scrollY: 0, zoom: 1, width: 1920, height: 1080,
+    getWorldPoint: jest.fn((x, y) => new Vector2(x, y)),
+        startFollow: jest.fn(),
+        stopFollow: jest.fn(),
+      },
+    },
     scale: { width: 1920, height: 1080 },
     input: {
       keyboard: {

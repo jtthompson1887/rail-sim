@@ -23,6 +23,15 @@ export class CameraController {
   private dragStartX: number = 0;
   private dragStartY: number = 0;
 
+  /**
+   * When true the camera ignores single-pointer left-button pans so that
+   * editor tools (junction, completer, etc.) can claim left-button drags.
+   */
+  private _blockPan: boolean = false;
+
+  /** Reference to the host game canvas for cursor updates. */
+  private canvas: HTMLCanvasElement | null = null;
+
   // ── Multi-touch tracking (pinch-to-zoom + two-finger pan) ─────────────────
   private readonly pinchPointers = new Map<number, { x: number; y: number }>();
   private lastPinchCenter: { x: number; y: number } | null = null;
@@ -47,15 +56,28 @@ export class CameraController {
 
     this.controls = new Phaser.Cameras.Controls.SmoothedKeyControl(this.controlConfig);
 
+    // Grab the canvas reference for cursor changes
+    this.canvas = (scene.game as any)?.canvas ?? null;
+
     // Enable a second touch pointer so two-finger gestures can be tracked
     scene.input.addPointer(1);
 
     scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // Middle-mouse drag (desktop)
+      // Middle-mouse drag (desktop) — always allowed
       if (pointer.middleButtonDown()) {
         this.isDragging = true;
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
+        this.setCursor('grabbing');
+        this.stopFollow();
+      }
+
+      // Left-button single-pointer pan (only in pan-allowed mode)
+      if (pointer.leftButtonDown() && !this._blockPan && this.pinchPointers.size < 2) {
+        this.isDragging = true;
+        this.dragStartX = pointer.x;
+        this.dragStartY = pointer.y;
+        this.setCursor('grabbing');
         this.stopFollow();
       }
 
@@ -120,8 +142,9 @@ export class CameraController {
     });
 
     scene.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button === 1) {
+      if (pointer.button === 0 || pointer.button === 1) {
         this.isDragging = false;
+        this.setCursor('default');
       }
       this.pinchPointers.delete(pointer.id);
       if (this.pinchPointers.size < 2) {
@@ -157,6 +180,21 @@ export class CameraController {
       this.following = null;
       this.cam.stopFollow();
     }
+  }
+
+  /**
+   * Block (true) or allow (false) single-pointer left-button panning.
+   * Set to true when an editor tool is active so tool clicks are not
+   * accidentally intercepted by camera pan logic.
+   */
+  setBlockPan(block: boolean): void {
+    this._blockPan = block;
+    if (block) this.setCursor('default');
+  }
+
+  /** Update the CSS cursor on the game canvas. */
+  setCursor(cursor: string): void {
+    if (this.canvas) this.canvas.style.cursor = cursor;
   }
 
   update(_time: number, delta: number): void {
