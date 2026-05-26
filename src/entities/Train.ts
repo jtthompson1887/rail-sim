@@ -141,4 +141,22 @@ export default class Train extends Phaser.GameObjects.Container {
     this.passengers = 0;
     return delivered;
   }
+
+  /**
+   * Reset a derailed train back to its normal running state.
+   * Restores texture, scale, mass, and zeroes velocity so the
+   * TrackFlowSolver can guide the train back onto the track.
+   */
+  recover(): void {
+    if (!this._derailed) return;
+    this._derailed = false;
+    this.texture = 'train1';
+    this._trainBody.setTexture(this.texture);
+    const angle = this._trainBody.angle;
+    matterScaling(this._trainBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
+    this._trainBody.setMass(this._mass);
+    this._trainBody.angle = angle;
+    this._trainBody.setVelocity(0, 0);
+    this._trainBody.setAngularVelocity(0);
+  }
 }
