@@ -26,6 +26,9 @@ import type { TrackDef, WorldStationDef } from '../config/WorldData';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
 
+const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
+const TOOLBAR_PADDING = 2;
+
 /**
  * WorldScene – the persistent main scene for the sandbox world.
  *
@@ -152,7 +155,7 @@ export default class WorldScene extends Phaser.Scene {
     this.selectionManager = new SelectionManager(this, this.trackManager, this.snapSystem);
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
-    this.scene.launch('EditorUIScene', { trackManager: this.trackManager, selectionManager: this.selectionManager });
+    this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
 
     // Ghost graphics for the place-track tool (drawn in world space)
     this.placeGhostGraphics = this.add.graphics().setDepth(598);
@@ -185,7 +188,7 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:mode-toggle',  this.modeToggleHandler);
       EventBus.off('generator:run',       this.generatorRunHandler);
       EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
-      this.scene.stop('EditorUIScene');
+      this.scene.stop(EDITOR_UI_SCENE_KEY);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
       this.selectionManager.destroy();
@@ -378,7 +381,7 @@ export default class WorldScene extends Phaser.Scene {
   private isPointerOverUI(pointer: Phaser.Input.Pointer): boolean {
     const { width, height } = this.scale;
     const toolbarWidth = scalePx(72, width, height, isMobileWidth(width) ? 44 : 56);
-    return pointer.x <= toolbarWidth + 2;
+    return pointer.x <= toolbarWidth + TOOLBAR_PADDING;
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
@@ -549,7 +552,7 @@ export default class WorldScene extends Phaser.Scene {
   // ── Generator tool ─────────────────────────────────────────────────────────
 
   private runGeneratorAt(wx: number, wy: number): void {
-    const editorUI = this.scene.get('EditorUIScene') as EditorUIScene | null;
+    const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
     const params = editorUI?.getGeneratorParams() ?? {
       sections: GameConfig.GENERATION.MAIN.SECTIONS,
       minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
@@ -659,7 +662,7 @@ export default class WorldScene extends Phaser.Scene {
       });
     }
     if (items.length > 0) {
-      const editorUI = this.scene.get('EditorUIScene') as EditorUIScene | null;
+      const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
       editorUI?.showContextMenu(pointer.x, pointer.y, items);
     }
   }
