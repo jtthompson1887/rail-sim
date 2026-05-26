@@ -19,12 +19,15 @@ import { CommandStack, DeleteTracksCommand, ReshapeTrackCommand } from '../syste
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
-import { EditorToolbar } from '../ui/EditorToolbar';
-import { PropertiesPanel } from '../ui/PropertiesPanel';
-import { ContextMenu, buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
+import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef } from '../config/WorldData';
+import EditorUIScene from './EditorUIScene';
+import { isMobileWidth, scalePx } from '../utils/responsive';
+
+const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
+const TOOLBAR_PADDING = 2;
 
 /**
  * WorldScene – the persistent main scene for the sandbox world.
@@ -41,9 +44,6 @@ export default class WorldScene extends Phaser.Scene {
   private audioManager!: AudioManager;
   private junctionCreator!: JunctionCreatorSystem;
   private trackCompleter!: TrackCompleterSystem;
-  private toolbar!: EditorToolbar;
-  private propertiesPanel!: PropertiesPanel;
-  private contextMenu!: ContextMenu;
   private terrainGenerator!: TerrainGenerator;
   private terrainChunkManager!: TerrainChunkManager;
   private terrainValidator!: TerrainValidator;
@@ -95,7 +95,7 @@ export default class WorldScene extends Phaser.Scene {
     const world = this.cameras.main.getWorldPoint(ptr.x, ptr.y);
     this.runGeneratorAt(world.x, world.y);
   };
-  private readonly saveHandler = () => { WorldManager.save(); this.toolbar.setSaveIndicator('saved'); };
+  private readonly saveHandler = () => { WorldManager.save(); EventBus.emit('ui:toolbar-save-state', { state: 'saved' }); };
 
   private readonly modeToggleHandler = () => {
     if (GameStateManager.worldMode === 'create') {
@@ -103,6 +103,10 @@ export default class WorldScene extends Phaser.Scene {
     } else {
       GameStateManager.returnToCreate();
     }
+  };
+
+  private readonly editorDeleteHandler = ({ uuids }: { uuids: string[] }) => {
+    this.deleteSelectedTracks(uuids);
   };
 
   constructor() {
@@ -145,18 +149,13 @@ export default class WorldScene extends Phaser.Scene {
     this.snapSystem     = new SnapSystem(this.trackManager);
     this.commandStack   = new CommandStack(GameConfig.WORLD.MAX_UNDO_STEPS);
     this.commandStack.onChange = (canUndo, canRedo) => {
-      this.toolbar.setUndoEnabled(canUndo);
-      this.toolbar.setRedoEnabled(canRedo);
-      this.toolbar.setSaveIndicator('unsaved');
+      EventBus.emit('ui:toolbar-undo-state', { canUndo, canRedo });
+      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
     };
     this.selectionManager = new SelectionManager(this, this.trackManager, this.snapSystem);
 
-    // ── UI ─────────────────────────────────────────────────────────────────
-    this.toolbar = new EditorToolbar(this);
-    this.propertiesPanel = new PropertiesPanel(this, this.trackManager, this.selectionManager, (uuids) => {
-      this.deleteSelectedTracks(uuids);
-    });
-    this.contextMenu = new ContextMenu(this);
+    // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
+    this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
 
     // Ghost graphics for the place-track tool (drawn in world space)
     this.placeGhostGraphics = this.add.graphics().setDepth(598);
@@ -171,27 +170,27 @@ export default class WorldScene extends Phaser.Scene {
     this.scene.launch('DebugOverlayScene');
 
     // Subscribe to events
-    EventBus.on('mode:changed',      this.modeChangedHandler);
-    EventBus.on('tool:changed',      this.toolChangedHandler);
-    EventBus.on('editor:undo',       this.undoHandler);
-    EventBus.on('editor:redo',       this.redoHandler);
-    EventBus.on('editor:save',       this.saveHandler);
+    EventBus.on('mode:changed',       this.modeChangedHandler);
+    EventBus.on('tool:changed',       this.toolChangedHandler);
+    EventBus.on('editor:undo',        this.undoHandler);
+    EventBus.on('editor:redo',        this.redoHandler);
+    EventBus.on('editor:save',        this.saveHandler);
     EventBus.on('editor:mode-toggle', this.modeToggleHandler);
-    EventBus.on('generator:run',     this.generatorRunHandler);
+    EventBus.on('generator:run',      this.generatorRunHandler);
+    EventBus.on('editor:delete-tracks', this.editorDeleteHandler);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      EventBus.off('mode:changed',       this.modeChangedHandler);
-      EventBus.off('tool:changed',       this.toolChangedHandler);
-      EventBus.off('editor:undo',        this.undoHandler);
-      EventBus.off('editor:redo',        this.redoHandler);
-      EventBus.off('editor:save',        this.saveHandler);
-      EventBus.off('editor:mode-toggle', this.modeToggleHandler);
-      EventBus.off('generator:run',      this.generatorRunHandler);
+      EventBus.off('mode:changed',        this.modeChangedHandler);
+      EventBus.off('tool:changed',        this.toolChangedHandler);
+      EventBus.off('editor:undo',         this.undoHandler);
+      EventBus.off('editor:redo',         this.redoHandler);
+      EventBus.off('editor:save',         this.saveHandler);
+      EventBus.off('editor:mode-toggle',  this.modeToggleHandler);
+      EventBus.off('generator:run',       this.generatorRunHandler);
+      EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
+      this.scene.stop(EDITOR_UI_SCENE_KEY);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
-      this.toolbar.destroy();
-      this.propertiesPanel.destroy();
-      this.contextMenu.destroy();
       this.selectionManager.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
@@ -256,7 +255,7 @@ export default class WorldScene extends Phaser.Scene {
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
         WorldManager.save();
-        this.toolbar.setSaveIndicator('saved');
+        EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
       }
       GameStateManager.tick(delta / 1000);
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
@@ -360,7 +359,7 @@ export default class WorldScene extends Phaser.Scene {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
-    this.toolbar.setVisible(true);
+    EventBus.emit('ui:toolbar-visible', { visible: true });
     WorldManager.save();
   }
 
@@ -368,7 +367,7 @@ export default class WorldScene extends Phaser.Scene {
     this.minimapGraphics.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
-    this.toolbar.setVisible(false);
+    EventBus.emit('ui:toolbar-visible', { visible: false });
     // Auto-follow the first available train
     const trains = this.trainManager.trains;
     if (trains.length > 0) {
@@ -380,12 +379,9 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Return true if the pointer's screen position overlaps any editor UI panel. */
   private isPointerOverUI(pointer: Phaser.Input.Pointer): boolean {
-    const tb = this.toolbar.screenBounds;
-    if (pointer.x >= tb.left && pointer.x <= tb.right &&
-        pointer.y >= tb.top  && pointer.y <= tb.bottom) {
-      return true;
-    }
-    return false;
+    const { width, height } = this.scale;
+    const toolbarWidth = scalePx(72, width, height, isMobileWidth(width) ? 44 : 56);
+    return pointer.x <= toolbarWidth + TOOLBAR_PADDING;
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
@@ -449,7 +445,7 @@ export default class WorldScene extends Phaser.Scene {
         if (event.code === 'KeyY') { this.commandStack.redo(); return; }
         if (event.code === 'KeyS') {
           WorldManager.save();
-          this.toolbar.setSaveIndicator('saved');
+          EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
           return;
         }
       }
@@ -462,11 +458,11 @@ export default class WorldScene extends Phaser.Scene {
           KeyP: 'place-track',
         };
         const mapped = shortcuts[event.code];
-        if (mapped) { this.toolbar.selectTool(mapped); return; }
+        if (mapped) { EventBus.emit('ui:toolbar-select-tool', { tool: mapped }); return; }
       }
 
       if (event.code === 'Escape') {
-        this.toolbar.selectTool('none');
+        EventBus.emit('ui:toolbar-select-tool', { tool: 'none' });
         this.selectionManager.clearSelection();
         return;
       }
@@ -556,7 +552,15 @@ export default class WorldScene extends Phaser.Scene {
   // ── Generator tool ─────────────────────────────────────────────────────────
 
   private runGeneratorAt(wx: number, wy: number): void {
-    const params = this.propertiesPanel.getGeneratorParams();
+    const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
+    const params = editorUI?.getGeneratorParams() ?? {
+      sections: GameConfig.GENERATION.MAIN.SECTIONS,
+      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
+      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
+      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
+      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
+      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
+    };
     const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
 
     // Check if we are near an existing track's endpoint — if so, continue from it
@@ -620,11 +624,11 @@ export default class WorldScene extends Phaser.Scene {
         validTracks.push(track);
       } else {
         invalidCount++;
-        track.destroy?.();
+        this.trackManager.removeTrack(track.getUUID());
       }
     }
 
-    this.toolbar.setSaveIndicator('unsaved');
+    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
     const msg = invalidCount > 0
       ? `Generated ${validTracks.length} tracks (${invalidCount} blocked by terrain)`
       : `Generated ${validTracks.length} tracks`;
@@ -641,7 +645,7 @@ export default class WorldScene extends Phaser.Scene {
     for (const uuid of uuids) {
       EventBus.emit('track:removed', { trackUUID: uuid });
     }
-    this.toolbar.setSaveIndicator('unsaved');
+    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
   }
 
   // ── Context menu ───────────────────────────────────────────────────────────
@@ -658,7 +662,8 @@ export default class WorldScene extends Phaser.Scene {
       });
     }
     if (items.length > 0) {
-      this.contextMenu.show(pointer.x, pointer.y, items);
+      const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
+      editorUI?.showContextMenu(pointer.x, pointer.y, items);
     }
   }
 
@@ -728,7 +733,7 @@ export default class WorldScene extends Phaser.Scene {
       } else {
         const track = new RailTrack(this, p0, p1, p2, p3);
         WorldManager.addTrackDef(this.trackToDef(track));
-        this.toolbar.setSaveIndicator('unsaved');
+        EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
         EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
       }
 

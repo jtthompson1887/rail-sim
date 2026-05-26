@@ -119,6 +119,8 @@ describe('TrainManager.tryRecoverDerailedTrain()', () => {
       getMatterBody: jest.fn().mockReturnValue(body),
       recover: jest.fn(),
       enginePower: 10,
+      pidControllerFront: { reset: jest.fn() },
+      pidControllerRear:  { reset: jest.fn() },
     } as any;
 
     const recovered = manager.tryRecoverDerailedTrain(train);

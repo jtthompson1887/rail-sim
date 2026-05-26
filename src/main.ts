@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GameConfig } from './config/GameConfig';
 import BootScene from './scenes/BootScene';
 import DebugOverlayScene from './scenes/DebugOverlayScene';
+import EditorUIScene from './scenes/EditorUIScene';
 import GameOverScene from './scenes/GameOverScene';
 import GameScene from './scenes/GameScene';
 import HUDScene from './scenes/HUDScene';
@@ -34,6 +35,7 @@ const config: Phaser.Types.Core.GameConfig = {
     MenuScene,
     WorldSelectScene,
     WorldScene,
+    EditorUIScene,
     LevelSelectScene,
     GameScene,
     HUDScene,
