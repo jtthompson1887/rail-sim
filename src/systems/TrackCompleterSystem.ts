@@ -5,6 +5,7 @@ import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef } from '../config/WorldData';
+import type { TerrainValidator } from './TerrainValidator';
 
 interface Endpoint {
   track: RailTrack;
@@ -40,6 +41,7 @@ export class TrackCompleterSystem {
   private ghostGraphics: Phaser.GameObjects.Graphics;
   private endpointGraphics: Phaser.GameObjects.Graphics;
   private endpointDots: Phaser.GameObjects.Graphics;
+  private terrainValidator: TerrainValidator | null;
 
   private firstEndpoint: Endpoint | null = null;
   private pendingTracks: RailTrack[] = [];
@@ -48,9 +50,10 @@ export class TrackCompleterSystem {
   // Pulsing animation accumulator
   private pulseT: number = 0;
 
-  constructor(scene: Phaser.Scene, trackManager: TrackManager) {
+  constructor(scene: Phaser.Scene, trackManager: TrackManager, terrainValidator: TerrainValidator | null = null) {
     this.scene = scene;
     this.trackManager = trackManager;
+    this.terrainValidator = terrainValidator;
     this.ghostGraphics = scene.add.graphics().setDepth(490);
     this.endpointGraphics = scene.add.graphics().setDepth(491);
     this.endpointDots = scene.add.graphics().setDepth(492);
@@ -255,6 +258,22 @@ export class TrackCompleterSystem {
   private commitPending(): void {
     const uuids: string[] = [];
     for (const track of this.pendingTracks) {
+      // Terrain validation gate
+      if (this.terrainValidator) {
+        const p0 = new Phaser.Math.Vector2(track.getCurvePath().getStartPoint());
+        const p3 = new Phaser.Math.Vector2(track.getCurvePath().getEndPoint());
+        const result = this.terrainValidator.canPlaceTrack(p0, p3);
+        if (!result.valid) {
+          EventBus.emit('ui:toast', { message: result.reason, type: 'error' });
+          this.clearPending();
+          this.isAwaitingConfirm = false;
+          this.ghostGraphics.clear();
+          return;
+        }
+        track.isTunnel   = result.requiresTunnel;
+        track.elevation  = result.averageElevation;
+      }
+
       this.trackManager.addTrack(track);
       const def = this.trackToDef(track);
       WorldManager.addTrackDef(def);
@@ -376,6 +395,8 @@ export class TrackCompleterSystem {
       p1: { x: p1.x, y: p1.y },
       p2: { x: p2.x, y: p2.y },
       p3: { x: p3.x, y: p3.y },
+      isTunnel: track.isTunnel || undefined,
+      elevation: track.elevation || undefined,
     };
   }
 }

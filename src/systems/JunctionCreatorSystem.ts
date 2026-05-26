@@ -5,6 +5,7 @@ import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
 import { GameConfig } from '../config/GameConfig';
 import type { JunctionDef, TrackDef } from '../config/WorldData';
+import type { TerrainValidator } from './TerrainValidator';
 
 /**
  * JunctionCreatorSystem
@@ -23,15 +24,17 @@ export class JunctionCreatorSystem {
   private trackManager: TrackManager;
   private selectionGraphics: Phaser.GameObjects.Graphics;
   private highlightGraphics: Phaser.GameObjects.Graphics;
+  private terrainValidator: TerrainValidator | null;
 
   // Selection drag state
   private isDragging: boolean = false;
   private dragStart: Phaser.Math.Vector2 = new Phaser.Math.Vector2();
   private selectionRect: Phaser.Geom.Rectangle = new Phaser.Geom.Rectangle();
 
-  constructor(scene: Phaser.Scene, trackManager: TrackManager) {
+  constructor(scene: Phaser.Scene, trackManager: TrackManager, terrainValidator: TerrainValidator | null = null) {
     this.scene = scene;
     this.trackManager = trackManager;
+    this.terrainValidator = terrainValidator;
     this.selectionGraphics = scene.add.graphics().setDepth(500);
     this.highlightGraphics = scene.add.graphics().setDepth(499);
   }
@@ -186,6 +189,28 @@ export class JunctionCreatorSystem {
     this.trackManager.addTrack(leftTrack);
     this.trackManager.addTrack(rightTrack);
 
+    // Terrain validation for branch tracks
+    if (this.terrainValidator) {
+      const leftP0 = new Phaser.Math.Vector2(splitPoint.x, splitPoint.y);
+      const leftResult = this.terrainValidator.canPlaceTrack(leftP0, leftEnd);
+      const rightResult = this.terrainValidator.canPlaceTrack(leftP0, rightEnd);
+
+      if (!leftResult.valid || !rightResult.valid) {
+        const reason = !leftResult.valid ? leftResult.reason : rightResult.reason;
+        EventBus.emit('ui:toast', { message: `Junction blocked: ${reason}`, type: 'error' });
+        this.trackManager.removeTrack(leftTrack.getUUID());
+        this.trackManager.removeTrack(rightTrack.getUUID());
+        leftTrack.destroy();
+        rightTrack.destroy();
+        return null;
+      }
+
+      leftTrack.isTunnel   = leftResult.requiresTunnel;
+      rightTrack.isTunnel  = rightResult.requiresTunnel;
+      leftTrack.elevation  = leftResult.averageElevation;
+      rightTrack.elevation = rightResult.averageElevation;
+    }
+
     const junction = this.trackManager.createJunction(track.getUUID(), t);
     if (!junction) return null;
 
@@ -300,6 +325,8 @@ export class JunctionCreatorSystem {
       p1: { x: p1.x, y: p1.y },
       p2: { x: p2.x, y: p2.y },
       p3: { x: p3.x, y: p3.y },
+      isTunnel: track.isTunnel || undefined,
+      elevation: track.elevation || undefined,
     };
   }
 }

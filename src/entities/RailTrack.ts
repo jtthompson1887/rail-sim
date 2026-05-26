@@ -28,6 +28,10 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private readonly tracksImages: Image[] = [];
   private curve!: Path;
   private readonly uuid: string;
+  /** When true the track runs through a tunnel and renders with a darker tint. */
+  isTunnel: boolean = false;
+  /** Average terrain elevation at the time of placement. */
+  elevation: number = 0;
   protected trackConnections: {
     next?: TrackNode;
     previous?: TrackNode;
@@ -65,6 +69,12 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     railTrack.setScale(this.railTrackScale);
     railTrack.setDepth(0);
     railTrack.rotation = angle;
+
+    // Tunnel segments render darker to indicate underground passage
+    if (this.isTunnel) {
+      railTrack.setAlpha(0.45);
+      railTrack.setTint(0x334455);
+    }
 
     this.add(railTrack);
     this.tracksImages.push(railTrack);

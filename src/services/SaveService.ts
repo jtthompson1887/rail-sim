@@ -1,5 +1,6 @@
 import { GameConfig } from '../config/GameConfig';
 import type { WorldData } from '../config/WorldData';
+import { migrateWorld } from '../config/WorldData';
 
 export interface SaveData {
   unlockedLevels: string[];
@@ -115,13 +116,15 @@ export const SaveService = {
 
   /** Retrieve a single world by id, or null if not found. */
   loadWorld(id: string): WorldData | null {
-    return this.loadAllWorlds()[id] ?? null;
+    const raw = this.loadAllWorlds()[id];
+    if (!raw) return null;
+    return migrateWorld(raw as Partial<WorldData>);
   },
 
   /** List all worlds, sorted newest first. */
   listWorlds(): WorldData[] {
     const all = this.loadAllWorlds();
-    const worlds = Object.keys(all).map((k) => all[k] as WorldData);
+    const worlds = Object.keys(all).map((k) => migrateWorld(all[k] as Partial<WorldData>));
     return worlds.sort(
       (a, b) => b.metadata.updatedAt - a.metadata.updatedAt,
     );

@@ -1,7 +1,8 @@
 import { SaveService } from '../services/SaveService';
 import { EventBus } from '../services/EventBus';
 import { createEmptyWorld } from '../config/WorldData';
-import type { WorldData, TrackDef, JunctionDef, WorldStationDef, TrainDef } from '../config/WorldData';
+import type { WorldData, TrackDef, JunctionDef, WorldStationDef, TrainDef, SceneryObjectDef, BiomeType } from '../config/WorldData';
+import { GameConfig } from '../config/GameConfig';
 
 /**
  * WorldManager – singleton that holds the live in-memory world state and
@@ -32,8 +33,8 @@ class WorldManagerClass {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /** Create a brand-new empty world and set it as the active world. */
-  createNew(name: string, seed?: string): WorldData {
-    this._world = createEmptyWorld(name, seed);
+  createNew(name: string, seed?: string, biome: BiomeType = 'temperate'): WorldData {
+    this._world = createEmptyWorld(name, seed, biome);
     return this._world;
   }
 
@@ -117,6 +118,28 @@ class WorldManagerClass {
     if (!this._world) return;
     const idx = this._world.trains.findIndex((t) => t.id === updated.id);
     if (idx !== -1) this._world.trains[idx] = { ...this._world.trains[idx], ...updated };
+  }
+
+  // ── Scenery mutations ──────────────────────────────────────────────────────
+
+  addSceneryDef(def: SceneryObjectDef): void {
+    if (!this._world) return;
+    this._world.scenery.push(def);
+  }
+
+  removeSceneryDef(id: string): void {
+    if (!this._world) return;
+    this._world.scenery = this._world.scenery.filter((s) => s.id !== id);
+  }
+
+  /** Return all scenery objects whose position falls within the given chunk. */
+  getSceneryForChunk(chunkX: number, chunkY: number): SceneryObjectDef[] {
+    if (!this._world) return [];
+    const size = GameConfig.WORLD.CHUNK_SIZE;
+    return this._world.scenery.filter(
+      (s) => s.x >= chunkX && s.x < chunkX + size &&
+              s.y >= chunkY && s.y < chunkY + size,
+    );
   }
 
   // ── Serialisation helpers ──────────────────────────────────────────────────
