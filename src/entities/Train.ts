@@ -154,6 +154,7 @@ export default class Train extends Phaser.GameObjects.Container {
     this._trainBody.setTexture(this.texture);
     const angle = this._trainBody.angle;
     matterScaling(this._trainBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
+    this._trainBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
     this._trainBody.setMass(this._mass);
     this._trainBody.angle = angle;
     this._trainBody.setVelocity(0, 0);

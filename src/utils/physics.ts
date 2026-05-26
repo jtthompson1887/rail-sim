@@ -50,7 +50,8 @@ export function matterScaling(gameObject: Phaser.Physics.Matter.Image, newScaleX
     const bodyOptions = {
         isStatic: body.isStatic,
         friction: body.friction,
-        restitution: body.restitution
+        restitution: body.restitution,
+        frictionAir: body.frictionAir,
     };
 
     // Remove the old body from the Matter world
@@ -63,6 +64,7 @@ export function matterScaling(gameObject: Phaser.Physics.Matter.Image, newScaleX
     newBody.isStatic = bodyOptions.isStatic;
     newBody.friction = bodyOptions.friction;
     newBody.restitution = bodyOptions.restitution;
+    newBody.frictionAir = bodyOptions.frictionAir;
 
     // Update the Phaser game object to use the new body
     gameObject.setExistingBody(newBody);

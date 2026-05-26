@@ -3,7 +3,7 @@ import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 
-interface MenuItem {
+export interface MenuItem {
   label: string;
   action: () => void;
   color?: string;

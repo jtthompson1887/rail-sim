@@ -92,6 +92,8 @@ export class TrainManager {
     trainBody.setAngle(closestTrack.getTrackAngle(trainBody));
     train.currentTrack = closestTrack;
     train.recover();
+    train.pidControllerFront.reset();
+    train.pidControllerRear.reset();
     train.enginePower = 0;
     return true;
   }
