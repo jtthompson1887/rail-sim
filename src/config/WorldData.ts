@@ -11,6 +11,10 @@ export interface TrackDef {
   p1: Vec2Def;
   p2: Vec2Def;
   p3: Vec2Def;
+  /** True when the track segment runs through a tunnel. */
+  isTunnel?: boolean;
+  /** Average terrain elevation at the time the track was placed (world-units). */
+  elevation?: number;
 }
 
 /** A serialised Junction referencing three track UUIDs. */
@@ -53,16 +57,42 @@ export interface ScenarioDef {
   scoreReward: number;
 }
 
+/** Asset type identifiers for scenery objects. */
+export type SceneryType =
+  | 'tree_oak' | 'tree_pine' | 'tree_birch' | 'tree_dead'
+  | 'rock_boulder' | 'rock_outcrop' | 'rock_cluster'
+  | 'terrain_pond' | 'terrain_cliff' | 'terrain_mound';
+
+/** A single serialised scenery object placed in the world. */
+export interface SceneryObjectDef {
+  id: string;
+  type: SceneryType;
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  variant: number;
+}
+
+/** Biome types that control terrain colour palette and scenery asset weights. */
+export type BiomeType = 'temperate' | 'alpine' | 'arid' | 'tropical';
+
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
   id: string;
   name: string;
   seed: string;
+  /** Separate seed used exclusively for terrain generation. */
+  terrainSeed: string;
+  /** Biome type controlling colour palettes and scenery asset weights. */
+  biome: BiomeType;
   tracks: TrackDef[];
   junctions: JunctionDef[];
   stations: WorldStationDef[];
   trains: TrainDef[];
   scenarios: ScenarioDef[];
+  /** Persisted scenery object placements (player edits are saved here). */
+  scenery: SceneryObjectDef[];
   metadata: {
     createdAt: number;
     updatedAt: number;
@@ -70,17 +100,42 @@ export interface WorldData {
 }
 
 /** Create a blank world with sane defaults. */
-export function createEmptyWorld(name: string, seed?: string): WorldData {
+export function createEmptyWorld(name: string, seed?: string, biome: BiomeType = 'temperate'): WorldData {
   const now = Date.now();
+  const resolvedSeed = seed ?? now.toString();
   return {
     id: crypto.randomUUID(),
     name,
-    seed: seed ?? now.toString(),
+    seed: resolvedSeed,
+    terrainSeed: resolvedSeed,
+    biome,
     tracks: [],
     junctions: [],
     stations: [],
     trains: [],
     scenarios: [],
+    scenery: [],
     metadata: { createdAt: now, updatedAt: now },
+  };
+}
+
+/**
+ * Migrate a raw saved world blob so that any fields added after initial release
+ * are back-filled with sane defaults. Safe to call on already-current worlds.
+ */
+export function migrateWorld(raw: Partial<WorldData>): WorldData {
+  return {
+    id: raw.id ?? crypto.randomUUID(),
+    name: raw.name ?? 'Unnamed World',
+    seed: raw.seed ?? Date.now().toString(),
+    terrainSeed: raw.terrainSeed ?? (raw.seed ?? Date.now().toString()),
+    biome: raw.biome ?? 'temperate',
+    tracks: raw.tracks ?? [],
+    junctions: raw.junctions ?? [],
+    stations: raw.stations ?? [],
+    trains: raw.trains ?? [],
+    scenarios: raw.scenarios ?? [],
+    scenery: raw.scenery ?? [],
+    metadata: raw.metadata ?? { createdAt: Date.now(), updatedAt: Date.now() },
   };
 }

@@ -20,7 +20,7 @@ interface EventMap {
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };
   'mode:changed': { mode: 'create' | 'play' };
-  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'none' };
+  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'none' };
   'track:placed': { trackUUID: string };
   'track:removed': { trackUUID: string };
   'junction:created': { junctionUUID: string };

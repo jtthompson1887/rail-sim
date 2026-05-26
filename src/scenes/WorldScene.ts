@@ -1,18 +1,22 @@
 import Phaser from 'phaser';
-import Background from '../entities/Background';
 import RailTrack from '../entities/RailTrack';
 import { Station } from '../entities/Station';
 import TrackManager from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
 import { GameStateManager } from '../managers/GameStateManager';
+import { SceneryManager } from '../managers/SceneryManager';
 import { CameraController } from '../systems/CameraController';
 import { InputManager } from '../systems/InputManager';
 import TrackGenerator from '../systems/TrackGenerator';
 import { JunctionCreatorSystem } from '../systems/JunctionCreatorSystem';
 import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
+import { TerrainGenerator } from '../systems/TerrainGenerator';
+import { TerrainChunkManager } from '../systems/TerrainChunkManager';
+import { TerrainValidator } from '../systems/TerrainValidator';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
+import { CreateModeToolbar } from '../ui/CreateModeToolbar';
 import type { CreateTool } from '../ui/CreateModeToolbar';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef } from '../config/WorldData';
@@ -32,6 +36,13 @@ export default class WorldScene extends Phaser.Scene {
   private audioManager!: AudioManager;
   private junctionCreator!: JunctionCreatorSystem;
   private trackCompleter!: TrackCompleterSystem;
+  private toolbar!: CreateModeToolbar;
+  private terrainGenerator!: TerrainGenerator;
+  private terrainChunkManager!: TerrainChunkManager;
+  private terrainValidator!: TerrainValidator;
+  private sceneryManager!: SceneryManager;
+  /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
+  private terrainOverlay!: Phaser.GameObjects.Graphics;
   private stations: Station[] = [];
   private selectedTrack: RailTrack | null = null;
   private selectedTrackHighlight!: Phaser.GameObjects.Graphics;
@@ -66,15 +77,25 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   create(): void {
-    new Background(this, 20, 20).setDepth(-20);
+    // ── Terrain system ──────────────────────────────────────────────────────
+    const world = WorldManager.world;
+    const terrainSeed = world?.terrainSeed ?? (world?.seed ?? 'default');
+    const biome = world?.biome ?? 'temperate';
+
+    this.terrainGenerator    = new TerrainGenerator(terrainSeed);
+    this.terrainValidator    = new TerrainValidator(this.terrainGenerator);
+    this.terrainChunkManager = new TerrainChunkManager(this, this.terrainGenerator, biome);
+    this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
+    this.terrainOverlay      = this.add.graphics().setDepth(-50).setScrollFactor(0);
 
     this.trackManager = new TrackManager(this);
     this.cameraController = new CameraController(this);
     this.trainManager = new TrainManager(this, this.trackManager, this.cameraController);
     this.inputManager = new InputManager(this);
     this.audioManager = new AudioManager(this);
-    this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager);
-    this.trackCompleter = new TrackCompleterSystem(this, this.trackManager);
+    this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager, this.terrainValidator);
+    this.trackCompleter = new TrackCompleterSystem(this, this.trackManager, this.terrainValidator);
+    this.toolbar = new CreateModeToolbar(this);
 
     this.selectedTrackHighlight = this.add.graphics().setDepth(200);
     this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
@@ -95,6 +116,9 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('tool:changed', this.toolChangedHandler);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
+      this.toolbar.destroy();
+      this.terrainChunkManager.destroyAll();
+      this.sceneryManager.destroyAll();
     });
 
     // Input routing
@@ -130,6 +154,16 @@ export default class WorldScene extends Phaser.Scene {
     this.cameraController.update(time, delta);
     this.publishDebugState();
 
+    // Stream terrain chunks and scenery around the camera
+    const cam = this.cameras.main;
+    const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
+    const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
+    this.terrainChunkManager.update(camCX, camCY);
+    this.sceneryManager.update(camCX, camCY);
+
+    // Terrain overlay when tool is active
+    this.updateTerrainOverlay();
+
     if (GameStateManager.worldMode === 'create') {
       this.trackCompleter.update(delta);
       this.drawMinimap();
@@ -146,6 +180,21 @@ export default class WorldScene extends Phaser.Scene {
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
+  }
+
+  /** Draw a semi-transparent terrain-band overlay when the terrain-view tool is active. */
+  private updateTerrainOverlay(): void {
+    if (this.activeTool !== 'terrain-view') {
+      this.terrainOverlay.setVisible(false);
+      return;
+    }
+    this.terrainOverlay.setVisible(true);
+    // The overlay is an instructional semi-opaque tint over screen corners
+    // to signal that terrain-view mode is active. The actual coloured terrain
+    // is always visible via TerrainChunk objects.
+    this.terrainOverlay.clear();
+    this.terrainOverlay.fillStyle(0x4ad5ff, 0.12);
+    this.terrainOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
   }
 
   // ── World content loading ─────────────────────────────────────────────────
@@ -188,6 +237,8 @@ export default class WorldScene extends Phaser.Scene {
     // Preserve the saved UUID by injecting it (UUID is readonly by design,
     // so we cast for restoration only)
     (track as any).uuid = def.uuid;
+    if (def.isTunnel)  track.isTunnel  = def.isTunnel;
+    if (def.elevation) track.elevation = def.elevation;
     this.trackManager.addTrack(track);
   }
 

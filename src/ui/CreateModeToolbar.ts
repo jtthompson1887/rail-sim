@@ -3,7 +3,7 @@ import { ToolbarButton } from './ToolbarButton';
 import { EventBus } from '../services/EventBus';
 import { isMobileWidth } from '../utils/responsive';
 
-export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'none';
+export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'none';
 
 /** Short labels used on narrow (mobile) screens to fit within the toolbar. */
 const MOBILE_LABELS: Record<string, string> = {
@@ -11,6 +11,7 @@ const MOBILE_LABELS: Record<string, string> = {
   junction: '⑃',
   completer: '⟷',
   select: '↖',
+  'terrain-view': '⛰',
 };
 
 /**
@@ -67,17 +68,18 @@ export class CreateModeToolbar {
       .setScrollFactor(0);
 
     const gap = mobile ? 4 : 10;
-    const btnCount = 4;
+    const btnCount = 5;
     const btnW = Math.floor((panelW - gap * (btnCount + 1)) / btnCount);
     const btnH = panelH - (mobile ? 8 : 16);
-    const labelFontSize = mobile ? '14px' : '22px';
+    const labelFontSize = mobile ? '12px' : '20px';
     const startX = panelX - (panelW / 2) + gap + btnW / 2;
 
     const toolDefs: Array<{ tool: CreateTool; label: string; tooltip: string }> = [
-      { tool: 'generator', label: mobile ? MOBILE_LABELS.generator : '⚙ Generator', tooltip: 'Auto-generate tracks' },
-      { tool: 'junction',  label: mobile ? MOBILE_LABELS.junction  : '⑃ Junction',  tooltip: 'Right-drag to create junction' },
-      { tool: 'completer', label: mobile ? MOBILE_LABELS.completer : '⟷ Completer', tooltip: 'Connect two endpoints' },
-      { tool: 'select',    label: mobile ? MOBILE_LABELS.select    : '↖ Select',    tooltip: 'Select & move tracks' },
+      { tool: 'generator',    label: mobile ? MOBILE_LABELS.generator    : '⚙ Generator',    tooltip: 'Auto-generate tracks' },
+      { tool: 'junction',     label: mobile ? MOBILE_LABELS.junction     : '⑃ Junction',     tooltip: 'Right-drag to create junction' },
+      { tool: 'completer',    label: mobile ? MOBILE_LABELS.completer    : '⟷ Completer',    tooltip: 'Connect two endpoints' },
+      { tool: 'select',       label: mobile ? MOBILE_LABELS.select       : '↖ Select',       tooltip: 'Select & move tracks' },
+      { tool: 'terrain-view', label: mobile ? MOBILE_LABELS['terrain-view'] : '⛰ Terrain',  tooltip: 'Toggle terrain overlay' },
     ];
 
     toolDefs.forEach((def, i) => {
@@ -113,7 +115,7 @@ export class CreateModeToolbar {
     }
     this.activeTool = tool;
     this.buttons.forEach((btn, i) => {
-      const tools: CreateTool[] = ['generator', 'junction', 'completer', 'select'];
+      const tools: CreateTool[] = ['generator', 'junction', 'completer', 'select', 'terrain-view'];
       btn.setActive(tools[i] === this.activeTool);
     });
     EventBus.emit('tool:changed', { tool: this.activeTool });

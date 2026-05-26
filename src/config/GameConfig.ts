@@ -42,4 +42,51 @@ export const GameConfig = {
     COMPLETER_SAMPLE_RESOLUTION: 20,
     GHOST_ALPHA: 0.4,
   },
+  /** Procedural terrain generation parameters. */
+  TERRAIN: {
+    /** Total world size in world-units (centred at 0,0). */
+    WORLD_WIDTH: 16384,
+    WORLD_HEIGHT: 16384,
+    /** Spacing between heightmap sample points in world-units. */
+    SAMPLE_STEP: 128,
+    /** fBm noise octaves. */
+    OCTAVES: 6,
+    /** Base noise frequency (higher = more tightly packed hills). */
+    FREQUENCY: 0.0004,
+    /** Peak terrain height in world-units (range is ±AMPLITUDE). */
+    AMPLITUDE: 380,
+    /** Lacunarity – frequency multiplier per octave. */
+    LACUNARITY: 2.0,
+    /** Persistence – amplitude multiplier per octave. */
+    PERSISTENCE: 0.5,
+    /** Maximum rail gradient as a percentage (rise/run × 100). */
+    MAX_SLOPE_PERCENT: 2.5,
+    /** Minimum vertical clearance for a tunnel (world-units above terrain). */
+    MIN_TUNNEL_CLEARANCE: 50,
+    /** Slope angle above which a section is considered a cliff (degrees). */
+    CLIFF_SLOPE_DEG: 28,
+    /** Fraction of valid Poisson-disk candidate points that become scenery objects. */
+    SCENERY_DENSITY: 0.45,
+    /** Number of Poisson-disk cells along each side of a chunk. */
+    CHUNK_SCENERY_GRID: 20,
+    /** Minimum world-unit separation between adjacent scenery objects. */
+    SCENERY_MIN_DIST: 180,
+    /** Number of Poisson-disk candidates tried per active point. */
+    POISSON_K: 30,
+    /** Height bands (height thresholds in world-units, base renderer colours). */
+    BANDS: {
+      WATER:    { max:   0, color: 0x1e4d7a },
+      LOWLAND:  { max: 110, color: 0x3a6e2e },
+      MIDLAND:  { max: 220, color: 0x5a7a3a },
+      HIGHLAND: { max: 340, color: 0x7a6a50 },
+      PEAK:     { max: Infinity, color: 0xd0cfc8 },
+    },
+    /** How many world-units around a band boundary to blend colours. */
+    BAND_BLEND_RANGE: 20,
+    /** Strength of ambient-occlusion darkening [0–1]. */
+    AO_STRENGTH: 0.4,
+    /** Sun direction for AO (normalised XY; Z=1 is "up"). */
+    SUN_DIR_X: -0.6,
+    SUN_DIR_Y: -0.8,
+  },
 } as const;
