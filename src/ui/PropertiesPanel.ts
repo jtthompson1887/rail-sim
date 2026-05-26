@@ -2,16 +2,29 @@ import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
+import { scalePx, responsiveFontSize } from '../utils/responsive';
+import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
+
+/** Generator configuration exposed to the caller via getGeneratorParams(). */
+export interface GeneratorParams {
+  sections: number;
+  minLength: number;
+  maxLength: number;
+  curveProbability: number; // 0–1
+  minCurveAngle: number;
+  maxCurveAngle: number;
+}
 
 /**
  * PropertiesPanel
  *
  * A right-side inspector panel that updates whenever the editor selection
- * changes.  Shows properties for:
- *   – No selection: world statistics
- *   – Single track: UUID, length, elevation, tunnel flag, delete button
- *   – Multiple tracks: count, total length, batch delete, batch tunnel
+ * changes or the active tool changes.  Shows properties for:
+ *   – No selection / no special tool: empty (panel hidden)
+ *   – Generator tool active: editable generation parameters
+ *   – Single track selected: UUID, length, elevation, tunnel flag, delete button
+ *   – Multiple tracks selected: count, total length, batch delete, batch tunnel
  *
  * The panel slides in/out with a tween when the selection changes.
  */
@@ -23,18 +36,44 @@ export class PropertiesPanel {
   private panel!: Phaser.GameObjects.Rectangle;
   private border!: Phaser.GameObjects.Rectangle;
   private lines: Phaser.GameObjects.Text[] = [];
+  /** Interactive game objects created for the generator-params UI (buttons+labels). */
+  private paramObjects: Phaser.GameObjects.GameObject[] = [];
   private deleteBtn!: Phaser.GameObjects.Rectangle;
   private deleteBtnText!: Phaser.GameObjects.Text;
   private tunnelBtn!: Phaser.GameObjects.Rectangle;
   private tunnelBtnText!: Phaser.GameObjects.Text;
 
-  readonly panelWidth = 200;
+  readonly panelWidth: number;
   private isVisible: boolean = false;
+  private currentActiveTool: string = 'none';
+
+  /** Mutable generator parameters; edited via the panel UI. */
+  private generatorParams: GeneratorParams = {
+    sections:         GameConfig.GENERATION.MAIN.SECTIONS,
+    minLength:        GameConfig.GENERATION.MAIN.MIN_LENGTH,
+    maxLength:        GameConfig.GENERATION.MAIN.MAX_LENGTH,
+    curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
+    minCurveAngle:    GameConfig.GENERATION.MAIN.MIN_ANGLE,
+    maxCurveAngle:    GameConfig.GENERATION.MAIN.MAX_ANGLE,
+  };
 
   private onDeleteCallback: ((uuids: string[]) => void) | null = null;
 
   private readonly selectionChangedHandler = (data: { uuids: string[] }) => {
-    this.refresh(data.uuids);
+    if (this.currentActiveTool !== 'generator') {
+      this.refresh(data.uuids);
+    }
+  };
+
+  private readonly toolChangedHandler = (data: { tool: string }) => {
+    this.currentActiveTool = data.tool;
+    if (data.tool === 'generator') {
+      this.showGeneratorParams();
+    } else if (this.selectionManager.selectedUUIDs.length === 0) {
+      this.slideOut();
+    } else {
+      this.refresh(this.selectionManager.selectedUUIDs);
+    }
   };
 
   constructor(
@@ -47,11 +86,20 @@ export class PropertiesPanel {
     this.trackManager = trackManager;
     this.selectionManager = selectionManager;
     this.onDeleteCallback = onDelete;
+    const { width, height } = scene.scale;
+    this.panelWidth = scalePx(200, width, height, 160);
     this.build();
     EventBus.on('selection:changed', this.selectionChangedHandler);
+    EventBus.on('tool:changed', this.toolChangedHandler);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('selection:changed', this.selectionChangedHandler);
+      EventBus.off('tool:changed', this.toolChangedHandler);
     });
+  }
+
+  /** Return a copy of the current generator parameters set via the panel UI. */
+  getGeneratorParams(): GeneratorParams {
+    return { ...this.generatorParams };
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -59,23 +107,28 @@ export class PropertiesPanel {
   private build(): void {
     const { width, height } = this.scene.scale;
     const px = width; // starts off-screen (right edge)
+    const pw = this.panelWidth;
+    const btnH = scalePx(28, width, height, 24);
+    const btnW = pw - 16;
+    const fs = responsiveFontSize(11, width, height, 9, 11);
+    const fsSm = responsiveFontSize(10, width, height, 8, 10);
 
     this.panel = this.scene.add.rectangle(
-      px - this.panelWidth / 2, height / 2,
-      this.panelWidth, height,
+      px - pw / 2, height / 2,
+      pw, height,
       0x06131f, 0.95,
     ).setScrollFactor(0).setDepth(598);
 
     this.border = this.scene.add.rectangle(
-      px - this.panelWidth, height / 2,
+      px - pw, height / 2,
       2, height,
       0xffffff, 0.12,
     ).setScrollFactor(0).setDepth(598);
 
     // Delete button
     this.deleteBtn = this.scene.add.rectangle(
-      px - this.panelWidth / 2, height - 56,
-      this.panelWidth - 16, 28,
+      px - pw / 2, height - (btnH + 12),
+      btnW, btnH,
       0x7a1a1a, 0.9,
     ).setScrollFactor(0).setDepth(599)
       .setStrokeStyle(1, 0xff4444, 0.5)
@@ -84,14 +137,14 @@ export class PropertiesPanel {
       .on('pointerout',  () => this.deleteBtn.setFillStyle(0x7a1a1a, 0.9))
       .on('pointerdown', () => this.onDelete());
 
-    this.deleteBtnText = this.scene.add.text(px - this.panelWidth / 2, height - 56, '🗑 Delete', {
-      fontFamily: 'Verdana', fontSize: '11px', color: '#ff8080',
+    this.deleteBtnText = this.scene.add.text(px - pw / 2, height - (btnH + 12), '🗑 Delete', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#ff8080',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
 
     // Tunnel toggle button
     this.tunnelBtn = this.scene.add.rectangle(
-      px - this.panelWidth / 2, height - 92,
-      this.panelWidth - 16, 28,
+      px - pw / 2, height - (btnH * 2 + 20),
+      btnW, btnH,
       0x1a3a5c, 0.9,
     ).setScrollFactor(0).setDepth(599)
       .setStrokeStyle(1, 0x2a8cff, 0.4)
@@ -100,19 +153,150 @@ export class PropertiesPanel {
       .on('pointerout',  () => this.tunnelBtn.setFillStyle(0x1a3a5c, 0.9))
       .on('pointerdown', () => this.onToggleTunnel());
 
-    this.tunnelBtnText = this.scene.add.text(px - this.panelWidth / 2, height - 92, '🚇 Toggle Tunnel', {
-      fontFamily: 'Verdana', fontSize: '10px', color: '#8ab4d0',
+    this.tunnelBtnText = this.scene.add.text(px - pw / 2, height - (btnH * 2 + 20), '🚇 Toggle Tunnel', {
+      fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
 
     this.setPanelOffscreen();
     this.refresh([]);
   }
 
+  // ── Generator params UI ────────────────────────────────────────────────────
+
+  private showGeneratorParams(): void {
+    this.clearLines();
+    this.clearParamObjects();
+    this.slideIn();
+    this.deleteBtn.setVisible(false);
+    this.deleteBtnText.setVisible(false);
+    this.tunnelBtn.setVisible(false);
+    this.tunnelBtnText.setVisible(false);
+
+    const px = this.getOnscreenX();
+    const { width, height } = this.scene.scale;
+    const pw = this.panelWidth;
+    const fs = responsiveFontSize(11, width, height, 9, 11);
+    const fsSm = responsiveFontSize(10, width, height, 8, 10);
+    const btnH = scalePx(22, width, height, 20);
+
+    // Title
+    const title = this.scene.add.text(px, 14, '⚙ GENERATOR', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#4ad5ff',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+    this.lines.push(title);
+
+    const hint = this.scene.add.text(px, 30, 'Click near endpoint\nor anywhere to place', {
+      fontFamily: 'Verdana', fontSize: fsSm, color: '#6a8aa0', align: 'center',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+    this.lines.push(hint);
+
+    let rowY = 62;
+    const paramDefs: Array<{
+      label: string;
+      key: keyof GeneratorParams;
+      step: number;
+      min: number;
+      max: number;
+      format?: (v: number) => string;
+    }> = [
+      { label: 'Sections',    key: 'sections',         step: 1,    min: 1,  max: 20  },
+      { label: 'Min length',  key: 'minLength',        step: 50,   min: 50, max: 2000 },
+      { label: 'Max length',  key: 'maxLength',        step: 100,  min: 100, max: 4000 },
+      { label: 'Curve %',     key: 'curveProbability', step: 0.1,  min: 0,  max: 1, format: (v) => `${Math.round(v * 100)}%` },
+      { label: 'Min angle°',  key: 'minCurveAngle',    step: 5,    min: 5,  max: 60 },
+      { label: 'Max angle°',  key: 'maxCurveAngle',    step: 5,    min: 10, max: 90 },
+    ];
+
+    for (const def of paramDefs) {
+      const labelTxt = this.scene.add.text(px - pw / 2 + 6, rowY, def.label, {
+        fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
+      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(600);
+      this.lines.push(labelTxt);
+
+      const valStr = def.format
+        ? def.format(this.generatorParams[def.key] as number)
+        : String(this.generatorParams[def.key]);
+      const valTxt = this.scene.add.text(px, rowY, valStr, {
+        fontFamily: 'Verdana', fontSize: fs, color: '#d0e8ff',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(600);
+      this.lines.push(valTxt);
+
+      // '−' button
+      const minusBg = this.scene.add.rectangle(px + pw / 2 - 28, rowY, btnH + 2, btnH, 0x1a3a5c, 0.85)
+        .setStrokeStyle(1, 0x2a8cff, 0.4)
+        .setScrollFactor(0).setDepth(600)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          const cur = this.generatorParams[def.key] as number;
+          (this.generatorParams as any)[def.key] = Math.max(def.min, parseFloat((cur - def.step).toFixed(4)));
+          const newStr = def.format
+            ? def.format(this.generatorParams[def.key] as number)
+            : String(this.generatorParams[def.key]);
+          valTxt.setText(newStr);
+        });
+      this.paramObjects.push(minusBg);
+
+      const minusLbl = this.scene.add.text(px + pw / 2 - 28, rowY, '−', {
+        fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
+      this.paramObjects.push(minusLbl);
+
+      // '+' button
+      const plusBg = this.scene.add.rectangle(px + pw / 2 - 8, rowY, btnH + 2, btnH, 0x1a3a5c, 0.85)
+        .setStrokeStyle(1, 0x2a8cff, 0.4)
+        .setScrollFactor(0).setDepth(600)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          const cur = this.generatorParams[def.key] as number;
+          (this.generatorParams as any)[def.key] = Math.min(def.max, parseFloat((cur + def.step).toFixed(4)));
+          const newStr = def.format
+            ? def.format(this.generatorParams[def.key] as number)
+            : String(this.generatorParams[def.key]);
+          valTxt.setText(newStr);
+        });
+      this.paramObjects.push(plusBg);
+
+      const plusLbl = this.scene.add.text(px + pw / 2 - 8, rowY, '+', {
+        fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
+      this.paramObjects.push(plusLbl);
+
+      rowY += btnH + 6;
+    }
+
+    // 'Generate' action button
+    const genBtnY = rowY + 8;
+    const genBg = this.scene.add.rectangle(px, genBtnY, pw - 16, btnH + 4, 0x1a5a3c, 0.9)
+      .setStrokeStyle(1, 0x4ade80, 0.6)
+      .setScrollFactor(0).setDepth(600)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => genBg.setFillStyle(0x22804a, 0.95))
+      .on('pointerout',  () => genBg.setFillStyle(0x1a5a3c, 0.9))
+      .on('pointerdown', () => EventBus.emit('generator:run', {}));
+    this.paramObjects.push(genBg);
+
+    const genLbl = this.scene.add.text(px, genBtnY, '⚙ Generate', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#4ade80',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
+    this.paramObjects.push(genLbl);
+  }
+
+  private clearParamObjects(): void {
+    for (const go of this.paramObjects) {
+      (go as Phaser.GameObjects.GameObject & { destroy: () => void }).destroy();
+    }
+    this.paramObjects = [];
+  }
+
   // ── Refresh ────────────────────────────────────────────────────────────────
 
   private refresh(uuids: string[]): void {
     this.clearLines();
+    this.clearParamObjects();
     const px = this.getOnscreenX();
+    const { width, height } = this.scene.scale;
+    const fs = responsiveFontSize(11, width, height, 9, 11);
+    const fsSm = responsiveFontSize(10, width, height, 8, 10);
 
     if (uuids.length === 0) {
       this.slideOut();
@@ -128,11 +312,11 @@ export class PropertiesPanel {
         const len = Math.round(curve.getLength());
         const shortId = track.getUUID().substring(0, 8);
         this.addLines(px, [
-          { text: 'TRACK', color: '#4ad5ff', size: '10px' },
-          { text: `ID: …${shortId}`, color: '#8ab4d0' },
-          { text: `Length: ${len} u`, color: '#d0e8ff' },
-          { text: `Elev: ${Math.round(track.elevation)} m`, color: '#d0e8ff' },
-          { text: track.isTunnel ? '🚇 Tunnel' : '☀ Surface', color: '#aaddff' },
+          { text: 'TRACK', color: '#4ad5ff', size: fsSm },
+          { text: `ID: …${shortId}`, color: '#8ab4d0', size: fsSm },
+          { text: `Length: ${len} u`, color: '#d0e8ff', size: fs },
+          { text: `Elev: ${Math.round(track.elevation)} m`, color: '#d0e8ff', size: fs },
+          { text: track.isTunnel ? '🚇 Tunnel' : '☀ Surface', color: '#aaddff', size: fs },
         ]);
         this.tunnelBtnText.setText(track.isTunnel ? '☀ Set Surface' : '🚇 Set Tunnel');
         this.deleteBtn.setVisible(true);
@@ -148,9 +332,9 @@ export class PropertiesPanel {
         if (track) totalLen += track.getCurvePath().getLength();
       }
       this.addLines(px, [
-        { text: 'SELECTION', color: '#4ad5ff', size: '10px' },
-        { text: `${uuids.length} tracks`, color: '#d0e8ff' },
-        { text: `Total: ${Math.round(totalLen)} u`, color: '#d0e8ff' },
+        { text: 'SELECTION', color: '#4ad5ff', size: fsSm },
+        { text: `${uuids.length} tracks`, color: '#d0e8ff', size: fs },
+        { text: `Total: ${Math.round(totalLen)} u`, color: '#d0e8ff', size: fs },
       ]);
       this.tunnelBtnText.setText('🚇 Toggle Tunnel');
       this.deleteBtn.setVisible(true);
@@ -162,11 +346,14 @@ export class PropertiesPanel {
   }
 
   private addLines(panelCentreX: number, items: Array<{ text: string; color?: string; size?: string }>): void {
-    const startY = 20;
+    const { width, height } = this.scene.scale;
+    const defaultFs = responsiveFontSize(11, width, height, 9, 11);
+    const lineH = scalePx(20, width, height, 16);
+    const startY = 16;
     items.forEach((item, i) => {
-      const t = this.scene.add.text(panelCentreX, startY + i * 20, item.text, {
+      const t = this.scene.add.text(panelCentreX, startY + i * lineH, item.text, {
         fontFamily: 'Verdana',
-        fontSize: item.size ?? '11px',
+        fontSize: item.size ?? defaultFs,
         color: item.color ?? '#d0e8ff',
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
       this.lines.push(t);
@@ -186,8 +373,9 @@ export class PropertiesPanel {
 
   private setPanelOffscreen(): void {
     const offX = this.scene.scale.width + this.panelWidth;
+    const pw = this.panelWidth;
     this.panel.setX(offX);
-    this.border.setX(offX - this.panelWidth / 2);
+    this.border.setX(offX - pw / 2);
     this.deleteBtn.setX(offX);
     this.deleteBtnText.setX(offX);
     this.tunnelBtn.setX(offX);
@@ -262,7 +450,9 @@ export class PropertiesPanel {
 
   destroy(): void {
     EventBus.off('selection:changed', this.selectionChangedHandler);
+    EventBus.off('tool:changed', this.toolChangedHandler);
     this.clearLines();
+    this.clearParamObjects();
     this.panel.destroy();
     this.border.destroy();
     this.deleteBtn.destroy();
