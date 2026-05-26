@@ -9,6 +9,7 @@ import LevelSelectScene from './scenes/LevelSelectScene';
 import MenuScene from './scenes/MenuScene';
 import PauseScene from './scenes/PauseScene';
 import PreloadScene from './scenes/PreloadScene';
+import SettingsScene from './scenes/SettingsScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -37,6 +38,7 @@ const config: Phaser.Types.Core.GameConfig = {
     PauseScene,
     GameOverScene,
     DebugOverlayScene,
+    SettingsScene,
   ],
 };
 

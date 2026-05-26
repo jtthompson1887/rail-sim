@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1779753704314" clover="3.2.0">
-  <project timestamp="1779753704314" name="All files">
-    <metrics statements="1838" coveredstatements="1726" conditionals="311" coveredconditionals="294" methods="153" coveredmethods="147" elements="2302" coveredelements="2167" complexity="0" loc="1838" ncloc="1838" packages="6" files="16" classes="16"/>
+<coverage generated="1779769477414" clover="3.2.0">
+  <project timestamp="1779769477414" name="All files">
+    <metrics statements="1853" coveredstatements="1736" conditionals="311" coveredconditionals="294" methods="156" coveredmethods="147" elements="2320" coveredelements="2177" complexity="0" loc="1853" ncloc="1853" packages="6" files="16" classes="16"/>
     <package name="config">
       <metrics statements="78" coveredstatements="78" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
       <file name="GameConfig.ts" path="/home/runner/work/rail-sim/rail-sim/src/config/GameConfig.ts">
@@ -1067,7 +1067,7 @@
       </file>
     </package>
     <package name="services">
-      <metrics statements="114" coveredstatements="112" conditionals="29" coveredconditionals="28" methods="12" coveredmethods="12"/>
+      <metrics statements="129" coveredstatements="122" conditionals="29" coveredconditionals="28" methods="15" coveredmethods="12"/>
       <file name="EventBus.ts" path="/home/runner/work/rail-sim/rail-sim/src/services/EventBus.ts">
         <metrics statements="41" coveredstatements="41" conditionals="11" coveredconditionals="11" methods="4" coveredmethods="4"/>
         <line num="1" count="1" type="stmt"/>
@@ -1113,7 +1113,7 @@
         <line num="41" count="1" type="stmt"/>
       </file>
       <file name="SaveService.ts" path="/home/runner/work/rail-sim/rail-sim/src/services/SaveService.ts">
-        <metrics statements="73" coveredstatements="71" conditionals="18" coveredconditionals="17" methods="8" coveredmethods="8"/>
+        <metrics statements="88" coveredstatements="81" conditionals="18" coveredconditionals="17" methods="11" coveredmethods="8"/>
         <line num="1" count="1" type="stmt"/>
         <line num="2" count="1" type="stmt"/>
         <line num="3" count="1" type="stmt"/>
@@ -1135,58 +1135,73 @@
         <line num="19" count="1" type="stmt"/>
         <line num="20" count="1" type="stmt"/>
         <line num="21" count="1" type="stmt"/>
-        <line num="22" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="23" count="58" type="stmt"/>
+        <line num="22" count="1" type="stmt"/>
+        <line num="23" count="1" type="cond" truecount="1" falsecount="0"/>
         <line num="24" count="58" type="stmt"/>
-        <line num="25" count="58" type="cond" truecount="1" falsecount="0"/>
-        <line num="26" count="18" type="cond" truecount="1" falsecount="0"/>
-        <line num="27" count="58" type="cond" truecount="1" falsecount="0"/>
-        <line num="28" count="1" type="stmt"/>
+        <line num="25" count="58" type="stmt"/>
+        <line num="26" count="58" type="cond" truecount="1" falsecount="0"/>
+        <line num="27" count="18" type="cond" truecount="1" falsecount="0"/>
+        <line num="28" count="58" type="cond" truecount="1" falsecount="0"/>
         <line num="29" count="1" type="stmt"/>
         <line num="30" count="1" type="stmt"/>
         <line num="31" count="1" type="stmt"/>
-        <line num="32" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="33" count="27" type="stmt"/>
+        <line num="32" count="1" type="stmt"/>
+        <line num="33" count="1" type="cond" truecount="1" falsecount="0"/>
         <line num="34" count="27" type="stmt"/>
-        <line num="35" count="27" type="cond" truecount="0" falsecount="1"/>
-        <line num="36" count="0" type="stmt"/>
+        <line num="35" count="27" type="stmt"/>
+        <line num="36" count="27" type="cond" truecount="0" falsecount="1"/>
         <line num="37" count="0" type="stmt"/>
-        <line num="38" count="1" type="stmt"/>
+        <line num="38" count="0" type="stmt"/>
         <line num="39" count="1" type="stmt"/>
-        <line num="40" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="41" count="4" type="stmt"/>
-        <line num="42" count="4" type="cond" truecount="1" falsecount="0"/>
-        <line num="43" count="2" type="stmt"/>
+        <line num="40" count="1" type="stmt"/>
+        <line num="41" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="42" count="4" type="stmt"/>
+        <line num="43" count="4" type="cond" truecount="1" falsecount="0"/>
         <line num="44" count="2" type="stmt"/>
         <line num="45" count="2" type="stmt"/>
-        <line num="46" count="1" type="stmt"/>
+        <line num="46" count="2" type="stmt"/>
         <line num="47" count="1" type="stmt"/>
-        <line num="48" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="49" count="3" type="stmt"/>
-        <line num="50" count="1" type="stmt"/>
+        <line num="48" count="1" type="stmt"/>
+        <line num="49" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="50" count="3" type="stmt"/>
         <line num="51" count="1" type="stmt"/>
-        <line num="52" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="53" count="7" type="cond" truecount="2" falsecount="0"/>
-        <line num="54" count="1" type="stmt"/>
+        <line num="52" count="1" type="stmt"/>
+        <line num="53" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="54" count="7" type="cond" truecount="2" falsecount="0"/>
         <line num="55" count="1" type="stmt"/>
-        <line num="56" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="57" count="30" type="stmt"/>
-        <line num="58" count="30" type="cond" truecount="3" falsecount="0"/>
-        <line num="59" count="20" type="stmt"/>
+        <line num="56" count="1" type="stmt"/>
+        <line num="57" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="58" count="30" type="stmt"/>
+        <line num="59" count="30" type="cond" truecount="3" falsecount="0"/>
         <line num="60" count="20" type="stmt"/>
         <line num="61" count="20" type="stmt"/>
-        <line num="62" count="1" type="stmt"/>
+        <line num="62" count="20" type="stmt"/>
         <line num="63" count="1" type="stmt"/>
-        <line num="64" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="65" count="5" type="stmt"/>
-        <line num="66" count="1" type="stmt"/>
+        <line num="64" count="1" type="stmt"/>
+        <line num="65" count="1" type="stmt"/>
+        <line num="66" count="0" type="stmt"/>
         <line num="67" count="1" type="stmt"/>
-        <line num="68" count="1" type="cond" truecount="1" falsecount="0"/>
-        <line num="69" count="3" type="stmt"/>
-        <line num="70" count="3" type="stmt"/>
-        <line num="71" count="3" type="stmt"/>
+        <line num="68" count="1" type="stmt"/>
+        <line num="69" count="1" type="stmt"/>
+        <line num="70" count="0" type="stmt"/>
+        <line num="71" count="1" type="stmt"/>
         <line num="72" count="1" type="stmt"/>
         <line num="73" count="1" type="stmt"/>
+        <line num="74" count="0" type="stmt"/>
+        <line num="75" count="0" type="stmt"/>
+        <line num="76" count="0" type="stmt"/>
+        <line num="77" count="1" type="stmt"/>
+        <line num="78" count="1" type="stmt"/>
+        <line num="79" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="80" count="5" type="stmt"/>
+        <line num="81" count="1" type="stmt"/>
+        <line num="82" count="1" type="stmt"/>
+        <line num="83" count="1" type="cond" truecount="1" falsecount="0"/>
+        <line num="84" count="3" type="stmt"/>
+        <line num="85" count="3" type="stmt"/>
+        <line num="86" count="3" type="stmt"/>
+        <line num="87" count="1" type="stmt"/>
+        <line num="88" count="1" type="stmt"/>
       </file>
     </package>
     <package name="systems">
