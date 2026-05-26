@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { GameConfig } from '../config/GameConfig';
 import { BIOME_PALETTES } from '../config/SceneryConfig';
 import type { TerrainGenerator } from '../systems/TerrainGenerator';
-import type { BiomeType, BandName } from '../config/SceneryConfig';
+import type { BiomeType } from '../config/WorldData';
+import type { BandName } from '../config/SceneryConfig';
 
 const TC  = GameConfig.TERRAIN;
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;

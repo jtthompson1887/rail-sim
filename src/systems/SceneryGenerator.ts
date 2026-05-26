@@ -165,7 +165,7 @@ export class SceneryGenerator {
   ): (typeof SCENERY_ASSETS)[0] | null {
     // Filter to eligible assets
     const eligible = SCENERY_ASSETS.filter(
-      (a) => a.preferredBands.includes(band) && slope <= a.maxSlopeDeg,
+      (a) => a.preferredBands.indexOf(band) !== -1 && slope <= a.maxSlopeDeg,
     );
 
     if (eligible.length === 0) return null;

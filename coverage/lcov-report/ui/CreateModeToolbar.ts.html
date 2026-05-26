@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">98.68% </span>
+                <span class="strong">98.7% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>150/152</span>
+                <span class='fraction'>152/154</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">95.34% </span>
+                <span class="strong">95.55% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>41/43</span>
+                <span class='fraction'>43/45</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">98.68% </span>
+                <span class="strong">98.7% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>150/152</span>
+                <span class='fraction'>152/154</span>
             </div>
         
             
@@ -215,7 +215,10 @@
 <a name='L150'></a><a href='#L150'>150</a>
 <a name='L151'></a><a href='#L151'>151</a>
 <a name='L152'></a><a href='#L152'>152</a>
-<a name='L153'></a><a href='#L153'>153</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
@@ -298,16 +301,17 @@
 <span class="cline-any cline-yes">21x</span>
 <span class="cline-any cline-yes">21x</span>
 <span class="cline-any cline-yes">21x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
-<span class="cline-any cline-yes">84x</span>
+<span class="cline-any cline-yes">21x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
+<span class="cline-any cline-yes">105x</span>
 <span class="cline-any cline-yes">21x</span>
 <span class="cline-any cline-yes">21x</span>
 <span class="cline-any cline-yes">21x</span>
@@ -330,8 +334,8 @@
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-yes">13x</span>
-<span class="cline-any cline-yes">52x</span>
-<span class="cline-any cline-yes">52x</span>
+<span class="cline-any cline-yes">65x</span>
+<span class="cline-any cline-yes">65x</span>
 <span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-yes">13x</span>
@@ -372,7 +376,7 @@ import { ToolbarButton } from './ToolbarButton';
 import { EventBus } from '../services/EventBus';
 import { isMobileWidth } from '../utils/responsive';
 &nbsp;
-export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'none';
+export type CreateTool = 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'none';
 &nbsp;
 /** Short labels used on narrow (mobile) screens to fit within the toolbar. */
 const MOBILE_LABELS: Record&lt;string, string&gt; = {
@@ -380,6 +384,7 @@ const MOBILE_LABELS: Record&lt;string, string&gt; = {
   junction: '⑃',
   completer: '⟷',
   select: '↖',
+  'terrain-view': '⛰',
 };
 &nbsp;
 /**
@@ -436,17 +441,18 @@ export class CreateModeToolbar {
       .setScrollFactor(0);
 &nbsp;
     const gap = mobile ? 4 : 10;
-    const btnCount = 4;
+    const btnCount = 5;
     const btnW = Math.floor((panelW - gap * (btnCount + 1)) / btnCount);
     const btnH = panelH - (mobile ? 8 : 16);
-    const labelFontSize = mobile ? '14px' : '22px';
+    const labelFontSize = mobile ? '12px' : '20px';
     const startX = panelX - (panelW / 2) + gap + btnW / 2;
 &nbsp;
     const toolDefs: Array&lt;{ tool: CreateTool; label: string; tooltip: string }&gt; = [
-      { tool: 'generator', label: mobile ? MOBILE_LABELS.generator : '⚙ Generator', tooltip: 'Auto-generate tracks' },
-      { tool: 'junction',  label: mobile ? MOBILE_LABELS.junction  : '⑃ Junction',  tooltip: 'Right-drag to create junction' },
-      { tool: 'completer', label: mobile ? MOBILE_LABELS.completer : '⟷ Completer', tooltip: 'Connect two endpoints' },
-      { tool: 'select',    label: mobile ? MOBILE_LABELS.select    : '↖ Select',    tooltip: 'Select &amp; move tracks' },
+      { tool: 'generator',    label: mobile ? MOBILE_LABELS.generator    : '⚙ Generator',    tooltip: 'Auto-generate tracks' },
+      { tool: 'junction',     label: mobile ? MOBILE_LABELS.junction     : '⑃ Junction',     tooltip: 'Right-drag to create junction' },
+      { tool: 'completer',    label: mobile ? MOBILE_LABELS.completer    : '⟷ Completer',    tooltip: 'Connect two endpoints' },
+      { tool: 'select',       label: mobile ? MOBILE_LABELS.select       : '↖ Select',       tooltip: 'Select &amp; move tracks' },
+      { tool: 'terrain-view', label: mobile ? MOBILE_LABELS['terrain-view'] : '⛰ Terrain',  tooltip: 'Toggle terrain overlay' },
     ];
 &nbsp;
     toolDefs.forEach((def, i) =&gt; {
@@ -482,7 +488,7 @@ export class CreateModeToolbar {
     }
     this.activeTool = tool;
     this.buttons.forEach((btn, i) =&gt; {
-      const tools: CreateTool[] = ['generator', 'junction', 'completer', 'select'];
+      const tools: CreateTool[] = ['generator', 'junction', 'completer', 'select', 'terrain-view'];
       btn.setActive(tools[i] === this.activeTool);
     });
     EventBus.emit('tool:changed', { tool: this.activeTool });
@@ -526,7 +532,7 @@ export class CreateModeToolbar {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-05-26T13:36:39.553Z
+                at 2026-05-26T17:32:02.125Z
             </div>
         <script src="../prettify.js"></script>
         <script>
