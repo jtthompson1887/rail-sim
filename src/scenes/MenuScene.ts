@@ -192,8 +192,11 @@ export default class MenuScene extends Phaser.Scene {
       // Recovery safety net: if the train somehow derails on the menu loop,
       // teleport it back to its starting position so it keeps running.
       if (this.trains[i].derailed) {
-        window.__railSimMenuDerailCount += 1;
         this.recoverTrain(this.trains[i], i);
+        // Only count permanent derailments (where recovery itself fails).
+        if (this.trains[i].derailed) {
+          window.__railSimMenuDerailCount += 1;
+        }
       }
     }
   }
