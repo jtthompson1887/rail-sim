@@ -140,4 +140,102 @@ describe('SaveService', () => {
       expect(SaveService.getSettings().bgmVolume).toBe(GameConfig.AUDIO.BGM_VOLUME);
     });
   });
+
+  // ── World persistence ──────────────────────────────────────────────────────
+
+  describe('saveWorld() / loadWorld()', () => {
+    it('saves and loads a world by id', () => {
+      const world = { id: 'w1', name: 'Test', seed: '123', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
+      SaveService.saveWorld(world);
+      const loaded = SaveService.loadWorld('w1');
+      expect(loaded).not.toBeNull();
+      expect(loaded!.name).toBe('Test');
+    });
+
+    it('returns null for unknown world id', () => {
+      expect(SaveService.loadWorld('no-such-world')).toBeNull();
+    });
+
+    it('updates updatedAt on save', () => {
+      const world = { id: 'w-ts', name: 'TS', seed: '0', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      SaveService.saveWorld(world);
+      const loaded = SaveService.loadWorld('w-ts')!;
+      expect(loaded.metadata.updatedAt).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('listWorlds()', () => {
+    it('returns empty array when no worlds saved', () => {
+      expect(SaveService.listWorlds()).toHaveLength(0);
+    });
+
+    it('returns all saved worlds', () => {
+      const w1 = { id: 'wl1', name: 'A', seed: '1', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
+      const w2 = { id: 'wl2', name: 'B', seed: '2', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 2000, updatedAt: 2000 } };
+      SaveService.saveWorld(w1);
+      SaveService.saveWorld(w2);
+      expect(SaveService.listWorlds()).toHaveLength(2);
+    });
+
+    it('sorts worlds newest first (by updatedAt)', () => {
+      const older = { id: 'older-w', name: 'Old', seed: '0', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 100, updatedAt: 100 } };
+      const newer = { id: 'newer-w', name: 'New', seed: '0', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 999, updatedAt: 999 } };
+      // Manually set updatedAt after saving so the sort ordering is predictable
+      SaveService.saveWorld(older);
+      const raw1 = JSON.parse(localStorage.getItem('rail-sim-worlds') || '{}');
+      raw1['older-w'].metadata.updatedAt = 100;
+      localStorage.setItem('rail-sim-worlds', JSON.stringify(raw1));
+      SaveService.saveWorld(newer);
+      const raw2 = JSON.parse(localStorage.getItem('rail-sim-worlds') || '{}');
+      raw2['newer-w'].metadata.updatedAt = 999;
+      localStorage.setItem('rail-sim-worlds', JSON.stringify(raw2));
+      const list = SaveService.listWorlds();
+      expect(list[0].id).toBe('newer-w');
+    });
+  });
+
+  describe('deleteWorld()', () => {
+    it('removes a world by id', () => {
+      const w = { id: 'del-w', name: 'Del', seed: '0', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      SaveService.saveWorld(w);
+      SaveService.deleteWorld('del-w');
+      expect(SaveService.loadWorld('del-w')).toBeNull();
+    });
+
+    it('does not throw for unknown id', () => {
+      expect(() => SaveService.deleteWorld('ghost-id')).not.toThrow();
+    });
+  });
+
+  describe('exportWorld() / importWorld()', () => {
+    it('round-trips a world through JSON', () => {
+      const w = { id: 'exp', name: 'Export Me', seed: '0', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const json = SaveService.exportWorld(w);
+      const imported = SaveService.importWorld(json);
+      expect(imported).not.toBeNull();
+      expect(imported!.name).toBe('Export Me');
+    });
+
+    it('importWorld returns null for invalid JSON', () => {
+      expect(SaveService.importWorld('not-json!')).toBeNull();
+    });
+
+    it('importWorld persists the world', () => {
+      const w = { id: 'imp', name: 'Imported', seed: '1', tracks: [], junctions: [], stations: [], trains: [], scenarios: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const json = SaveService.exportWorld(w);
+      SaveService.importWorld(json);
+      expect(SaveService.loadWorld('imp')).not.toBeNull();
+    });
+  });
+
+  describe('getLastPlayedWorldId() / setLastPlayedWorldId()', () => {
+    it('returns null when not set', () => {
+      expect(SaveService.getLastPlayedWorldId()).toBeNull();
+    });
+
+    it('returns the stored world id', () => {
+      SaveService.setLastPlayedWorldId('world-xyz');
+      expect(SaveService.getLastPlayedWorldId()).toBe('world-xyz');
+    });
+  });
 });

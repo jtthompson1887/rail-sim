@@ -236,10 +236,15 @@ class Graphics extends GameObject {
   }
   setDepth(d) { this._depth = d; return this; }
   lineStyle() { return this; }
+  fillStyle() { return this; }
   beginPath() { return this; }
   moveTo() { return this; }
   lineTo() { return this; }
   strokePath() { return this; }
+  fillPath() { return this; }
+  fillCircle() { return this; }
+  fillRect() { return this; }
+  strokeRect() { return this; }
   clear() { return this; }
 }
 
@@ -251,6 +256,15 @@ class Rectangle {
     this.x = x; this.y = y; this.width = width; this.height = height;
     this.left = x; this.right = x + width;
     this.top = y; this.bottom = y + height;
+  }
+  setTo(x, y, w, h) {
+    this.x = x; this.y = y; this.width = w; this.height = h;
+    this.left = x; this.right = x + w;
+    this.top = y; this.bottom = y + h;
+    return this;
+  }
+  contains(px, py) {
+    return px >= this.left && px <= this.right && py >= this.top && py <= this.bottom;
   }
   static Overlaps(a, b) {
     return !(b.left > a.right || b.right < a.left || b.top > a.bottom || b.bottom < a.top);

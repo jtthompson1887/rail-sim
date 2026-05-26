@@ -42,7 +42,7 @@ export class JunctionCreatorSystem {
     if (!pointer.rightButtonDown()) return;
     const world = this.screenToWorld(pointer);
     this.isDragging = true;
-    this.dragStart.set(world.x, world.y);
+    this.dragStart = new Phaser.Math.Vector2(world.x, world.y);
     this.selectionRect.setTo(world.x, world.y, 0, 0);
   }
 

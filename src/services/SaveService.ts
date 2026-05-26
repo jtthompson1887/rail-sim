@@ -120,7 +120,8 @@ export const SaveService = {
 
   /** List all worlds, sorted newest first. */
   listWorlds(): WorldData[] {
-    const worlds = Object.values(this.loadAllWorlds()) as WorldData[];
+    const all = this.loadAllWorlds();
+    const worlds = Object.keys(all).map((k) => all[k] as WorldData);
     return worlds.sort(
       (a, b) => b.metadata.updatedAt - a.metadata.updatedAt,
     );

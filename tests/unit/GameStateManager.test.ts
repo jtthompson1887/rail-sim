@@ -136,6 +136,63 @@ describe('GameStateManager', () => {
     });
   });
 
+  describe('enterCreate() / enterPlay() / returnToCreate()', () => {
+    it('enterCreate sets worldMode to create', () => {
+      GameStateManager.enterCreate('world-1');
+      expect(GameStateManager.worldMode).toBe('create');
+    });
+
+    it('enterCreate sets currentWorldId', () => {
+      GameStateManager.enterCreate('world-abc');
+      expect(GameStateManager.currentWorldId).toBe('world-abc');
+    });
+
+    it('enterPlay sets worldMode to play', () => {
+      GameStateManager.enterPlay('world-2');
+      expect(GameStateManager.worldMode).toBe('play');
+    });
+
+    it('enterPlay sets state to playing', () => {
+      GameStateManager.enterPlay('world-2');
+      expect(GameStateManager.state).toBe('playing');
+    });
+
+    it('enterPlay resets elapsed time', () => {
+      GameStateManager.enterPlay('world-2');
+      GameStateManager.tick(10);
+      GameStateManager.enterPlay('world-2');
+      expect(GameStateManager.elapsedSecs).toBe(0);
+    });
+
+    it('returnToCreate switches worldMode back to create from play', () => {
+      GameStateManager.enterPlay('world-3');
+      GameStateManager.returnToCreate();
+      expect(GameStateManager.worldMode).toBe('create');
+    });
+
+    it('returnToCreate is a no-op when already in create mode', () => {
+      GameStateManager.enterCreate('world-4');
+      expect(() => GameStateManager.returnToCreate()).not.toThrow();
+      expect(GameStateManager.worldMode).toBe('create');
+    });
+
+    it('emits mode:changed event on enterCreate', () => {
+      const cb = jest.fn();
+      EventBus.on('mode:changed', cb);
+      GameStateManager.enterCreate('w');
+      expect(cb).toHaveBeenCalledWith({ mode: 'create' });
+      EventBus.off('mode:changed', cb);
+    });
+
+    it('emits mode:changed event on enterPlay', () => {
+      const cb = jest.fn();
+      EventBus.on('mode:changed', cb);
+      GameStateManager.enterPlay('w');
+      expect(cb).toHaveBeenCalledWith({ mode: 'play' });
+      EventBus.off('mode:changed', cb);
+    });
+  });
+
   describe('endGame()', () => {
     it('sets state to gameOver', () => {
       GameStateManager.endGame(true);
