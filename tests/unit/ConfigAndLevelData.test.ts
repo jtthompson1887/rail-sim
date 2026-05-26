@@ -62,6 +62,56 @@ describe('GameConfig', () => {
   it('DEBUG flag is a boolean', () => {
     expect(typeof GameConfig.DEBUG).toBe('boolean');
   });
+
+  // ── WORLD section ──────────────────────────────────────────────────────────
+
+  it('has a positive WORLD.CHUNK_SIZE', () => {
+    expect(GameConfig.WORLD.CHUNK_SIZE).toBeGreaterThan(0);
+  });
+
+  it('has a positive WORLD.MAX_UNDO_STEPS', () => {
+    expect(GameConfig.WORLD.MAX_UNDO_STEPS).toBeGreaterThan(0);
+  });
+
+  it('has a positive WORLD.SNAP_GRID_SIZE', () => {
+    expect(GameConfig.WORLD.SNAP_GRID_SIZE).toBeGreaterThan(0);
+  });
+
+  it('has MAX_CURVE_TOLERANCE_DEG in (0, 90]', () => {
+    expect(GameConfig.WORLD.MAX_CURVE_TOLERANCE_DEG).toBeGreaterThan(0);
+    expect(GameConfig.WORLD.MAX_CURVE_TOLERANCE_DEG).toBeLessThanOrEqual(90);
+  });
+
+  it('has a non-empty WORLD.WORLDS_SAVE_KEY', () => {
+    expect(GameConfig.WORLD.WORLDS_SAVE_KEY).toBeTruthy();
+  });
+
+  it('has a positive WORLD.AUTO_SAVE_INTERVAL_SECS', () => {
+    expect(GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS).toBeGreaterThan(0);
+  });
+
+  // ── TOOLS section ──────────────────────────────────────────────────────────
+
+  it('has a positive TOOLS.COMPLETER_SEARCH_BUDGET', () => {
+    expect(GameConfig.TOOLS.COMPLETER_SEARCH_BUDGET).toBeGreaterThan(0);
+  });
+
+  it('has a positive TOOLS.JUNCTION_OPTIMISATION_ITERATIONS', () => {
+    expect(GameConfig.TOOLS.JUNCTION_OPTIMISATION_ITERATIONS).toBeGreaterThan(0);
+  });
+
+  it('has a positive TOOLS.JUNCTION_SAMPLE_POINTS', () => {
+    expect(GameConfig.TOOLS.JUNCTION_SAMPLE_POINTS).toBeGreaterThan(0);
+  });
+
+  it('has a positive TOOLS.COMPLETER_SAMPLE_RESOLUTION', () => {
+    expect(GameConfig.TOOLS.COMPLETER_SAMPLE_RESOLUTION).toBeGreaterThan(0);
+  });
+
+  it('has TOOLS.GHOST_ALPHA in (0, 1]', () => {
+    expect(GameConfig.TOOLS.GHOST_ALPHA).toBeGreaterThan(0);
+    expect(GameConfig.TOOLS.GHOST_ALPHA).toBeLessThanOrEqual(1);
+  });
 });
 
 describe('LevelData', () => {

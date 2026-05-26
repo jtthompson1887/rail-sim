@@ -16,6 +16,20 @@ interface EventMap {
   'audio:play-sfx': { key: string };
   'audio:play-bgm': { key: string };
   'mobile:throttle': { value: number };
+  // World / mode events
+  'world:saved': { worldId: string };
+  'world:loaded': { worldId: string };
+  'mode:changed': { mode: 'create' | 'play' };
+  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'none' };
+  'track:placed': { trackUUID: string };
+  'track:removed': { trackUUID: string };
+  'junction:created': { junctionUUID: string };
+  'completer:success': { trackUUIDs: string[] };
+  'completer:failed': { reason: 'curvature' | 'collision' | 'budget' };
+  'ui:toast': { message: string; type: 'info' | 'error' | 'success' };
+  'world:undo': Record<string, never>;
+  'create:station-placed': { stationId: string };
+  'create:train-placed': { trainId: string };
 }
 
 class EventBusClass {

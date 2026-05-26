@@ -1,9 +1,11 @@
 import { GameConfig } from '../config/GameConfig';
+import type { WorldData } from '../config/WorldData';
 
 export interface SaveData {
   unlockedLevels: string[];
   highScores: Record<string, number>;
   lastPlayedLevelId?: string;
+  lastPlayedWorldId?: string;
   settings: {
     bgmVolume: number;
     sfxVolume: number;
@@ -74,6 +76,83 @@ export const SaveService = {
     const data = this.load();
     data.lastPlayedLevelId = levelId;
     this.save(data);
+  },
+
+  getLastPlayedWorldId(): string | null {
+    return this.load().lastPlayedWorldId ?? null;
+  },
+
+  setLastPlayedWorldId(worldId: string): void {
+    const data = this.load();
+    data.lastPlayedWorldId = worldId;
+    this.save(data);
+  },
+
+  // ── World persistence ──────────────────────────────────────────────────────
+
+  /** Load all worlds as an id→WorldData map. */
+  loadAllWorlds(): Record<string, WorldData> {
+    try {
+      const raw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+      if (!raw) return {};
+      return JSON.parse(raw) as Record<string, WorldData>;
+    } catch {
+      return {};
+    }
+  },
+
+  /** Persist a world (insert or update). */
+  saveWorld(world: WorldData): void {
+    try {
+      const all = this.loadAllWorlds();
+      world.metadata.updatedAt = Date.now();
+      all[world.id] = world;
+      localStorage.setItem(GameConfig.WORLD.WORLDS_SAVE_KEY, JSON.stringify(all));
+    } catch {
+      console.warn('SaveService: failed to save world to localStorage');
+    }
+  },
+
+  /** Retrieve a single world by id, or null if not found. */
+  loadWorld(id: string): WorldData | null {
+    return this.loadAllWorlds()[id] ?? null;
+  },
+
+  /** List all worlds, sorted newest first. */
+  listWorlds(): WorldData[] {
+    const all = this.loadAllWorlds();
+    const worlds = Object.keys(all).map((k) => all[k] as WorldData);
+    return worlds.sort(
+      (a, b) => b.metadata.updatedAt - a.metadata.updatedAt,
+    );
+  },
+
+  /** Remove a world by id. */
+  deleteWorld(id: string): void {
+    try {
+      const all = this.loadAllWorlds();
+      delete all[id];
+      localStorage.setItem(GameConfig.WORLD.WORLDS_SAVE_KEY, JSON.stringify(all));
+    } catch {
+      console.warn('SaveService: failed to delete world from localStorage');
+    }
+  },
+
+  /** Export a world as a JSON string (for file download). */
+  exportWorld(world: WorldData): string {
+    return JSON.stringify(world, null, 2);
+  },
+
+  /** Import a world from a JSON string (from file upload). Overwrites if id matches. */
+  importWorld(json: string): WorldData | null {
+    try {
+      const world = JSON.parse(json) as WorldData;
+      if (!world.id || !world.name) return null;
+      this.saveWorld(world);
+      return world;
+    } catch {
+      return null;
+    }
   },
 
   getSettings(): SaveData['settings'] {

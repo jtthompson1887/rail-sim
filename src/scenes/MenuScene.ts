@@ -135,13 +135,13 @@ export default class MenuScene extends Phaser.Scene {
     const buttonWidth = panelWidth * 0.72;
     const buttonHeight = 78;
     const buttonSpacing = 20;
-    const hasSave = SaveService.hasSave();
+    const hasSave = SaveService.getLastPlayedWorldId() !== null || SaveService.hasSave();
 
     const menuItems: { label: string; enabled: boolean; action: () => void }[] = [
-      { label: 'New Game', enabled: true,     action: () => this.scene.start('LevelSelectScene') },
-      { label: 'Continue', enabled: hasSave,  action: () => this.continueGame() },
-      { label: 'Load',     enabled: true,     action: () => this.scene.start('LevelSelectScene') },
-      { label: 'Settings', enabled: true,     action: () => this.scene.start('SettingsScene') },
+      { label: 'New World',  enabled: true,     action: () => this.scene.start('WorldSelectScene') },
+      { label: 'Continue',  enabled: hasSave,   action: () => this.continueGame() },
+      { label: 'Worlds',    enabled: true,      action: () => this.scene.start('WorldSelectScene') },
+      { label: 'Settings',  enabled: true,      action: () => this.scene.start('SettingsScene') },
     ];
 
     for (const item of menuItems) {
@@ -179,8 +179,8 @@ export default class MenuScene extends Phaser.Scene {
       color: '#9fc0ff',
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
 
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('LevelSelectScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('LevelSelectScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('WorldSelectScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('WorldSelectScene'));
   }
 
   update(time: number, delta: number): void {
@@ -215,11 +215,11 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   private continueGame(): void {
-    const levelId = SaveService.getLastPlayedLevelId();
-    if (levelId) {
-      this.scene.start('GameScene', { levelId });
+    const worldId = SaveService.getLastPlayedWorldId();
+    if (worldId) {
+      this.scene.start('WorldScene', { worldId, mode: 'create' });
     } else {
-      this.scene.start('LevelSelectScene');
+      this.scene.start('WorldSelectScene');
     }
   }
 }
