@@ -162,7 +162,6 @@ export class PropertiesPanel {
   }
 
   private addLines(panelCentreX: number, items: Array<{ text: string; color?: string; size?: string }>): void {
-    const { height } = this.scene.scale;
     const startY = 20;
     items.forEach((item, i) => {
       const t = this.scene.add.text(panelCentreX, startY + i * 20, item.text, {
@@ -172,7 +171,6 @@ export class PropertiesPanel {
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
       this.lines.push(t);
     });
-    void height; // unused here; kept for future bottom-anchored layout
   }
 
   private clearLines(): void {
@@ -200,7 +198,7 @@ export class PropertiesPanel {
     if (this.isVisible) return;
     this.isVisible = true;
     const px = this.getOnscreenX();
-    const { width, height } = this.scene.scale;
+    const { width } = this.scene.scale;
     this.scene.tweens.add({
       targets: [this.panel, this.deleteBtn, this.deleteBtnText, this.tunnelBtn, this.tunnelBtnText],
       x: px,
@@ -213,7 +211,6 @@ export class PropertiesPanel {
       duration: 180,
       ease: 'Cubic.Out',
     });
-    void height;
   }
 
   private slideOut(): void {

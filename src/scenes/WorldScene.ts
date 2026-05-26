@@ -80,7 +80,7 @@ export default class WorldScene extends Phaser.Scene {
   private readonly redoHandler = () => { this.commandStack.redo(); };
   private readonly saveHandler = () => { WorldManager.save(); this.toolbar.setSaveIndicator('saved'); };
 
-  private readonly modeToogleHandler = () => {
+  private readonly modeToggleHandler = () => {
     if (GameStateManager.worldMode === 'create') {
       GameStateManager.enterPlay(WorldManager.currentWorldId ?? '');
     } else {
@@ -156,7 +156,7 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('editor:undo',       this.undoHandler);
     EventBus.on('editor:redo',       this.redoHandler);
     EventBus.on('editor:save',       this.saveHandler);
-    EventBus.on('editor:mode-toggle', this.modeToogleHandler);
+    EventBus.on('editor:mode-toggle', this.modeToggleHandler);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',       this.modeChangedHandler);
@@ -164,7 +164,7 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:undo',        this.undoHandler);
       EventBus.off('editor:redo',        this.redoHandler);
       EventBus.off('editor:save',        this.saveHandler);
-      EventBus.off('editor:mode-toggle', this.modeToogleHandler);
+      EventBus.off('editor:mode-toggle', this.modeToggleHandler);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
       this.toolbar.destroy();

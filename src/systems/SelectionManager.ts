@@ -8,6 +8,9 @@ import type { SnapSystem } from './SnapSystem';
 
 export type Selectable = RailTrack | Junction | Station;
 
+/** Number of line segments used when drawing a track highlight stroke. */
+const CURVE_STROKE_SAMPLES = 24;
+
 interface HandleRef {
   rect: Phaser.GameObjects.Rectangle;
   type: 'p0' | 'p1' | 'p2' | 'p3';
@@ -247,8 +250,8 @@ export class SelectionManager {
   private strokeTrack(track: RailTrack): void {
     const curve = track.getCurvePath();
     this.highlightGraphics.beginPath();
-    for (let i = 0; i <= 24; i++) {
-      const pt = curve.getPoint(i / 24);
+    for (let i = 0; i <= CURVE_STROKE_SAMPLES; i++) {
+      const pt = curve.getPoint(i / CURVE_STROKE_SAMPLES);
       if (i === 0) this.highlightGraphics.moveTo(pt.x, pt.y);
       else this.highlightGraphics.lineTo(pt.x, pt.y);
     }
