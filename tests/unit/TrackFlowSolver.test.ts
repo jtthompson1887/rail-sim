@@ -19,7 +19,7 @@ function makeMockTrain(scene: any, x = 0, y = 0) {
     moveTo: jest.fn(), lineTo: jest.fn(), strokePath: jest.fn(),
   };
   const body = {
-    body: { position: { x, y }, mass: 1000, force: { x: 0, y: 0 } },
+    body: { position: { x, y }, mass: 1000, force: { x: 0, y: 0 }, velocity: { x: 0, y: 0 } },
     displayWidth: 100, displayHeight: 50, angle: 0, rotation: 0,
     setAngle: jest.fn(),
   };
@@ -28,8 +28,8 @@ function makeMockTrain(scene: any, x = 0, y = 0) {
     debugGraphics: graphics,
     derailed: false,
     currentTrack: null as RailTrack | null,
-    pidControllerFront: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn() },
-    pidControllerRear: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn() },
+  pidControllerFront: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn() },
+  pidControllerRear: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn() },
     getMatterBody: jest.fn().mockReturnValue(body),
   };
 }
@@ -279,5 +279,118 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     const solver = new TrackFlowSolver([track], train as any);
     solver.applyTrackFlowForces();
     expect(train.derailed).toBe(true);
+  });
+});
+
+describe('TrackFlowSolver — hysteresis & parallel-deadband (oscillation prevention)', () => {
+  let scene: any;
+
+  beforeEach(() => {
+    scene = makeScene();
+  });
+
+  it('Given a train on a track, When a parallel track is only marginally closer, Then the train stays on its current track', () => {
+    // Two parallel horizontal tracks separated by 25 px (less than PARALLEL_DEADBAND = 30)
+    const currentTrack = makeTrack(scene, 0, 0, 500, 0);   // y = 0
+    const parallelTrack = makeTrack(scene, 0, 25, 500, 25); // y = 25 — very close
+
+    // Train sits exactly on the parallel track so it is marginally closer, but
+    // separation between the tracks (25 px) is inside the PARALLEL_DEADBAND (30 px).
+    const train = makeMockTrain(scene, 250, 25);
+    train.currentTrack = currentTrack;
+
+    const mockManager = {
+      getClosestTrack: jest.fn().mockReturnValue(parallelTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+
+    // Wind the clock back so we are past any cooldown period.
+    jest.spyOn(performance, 'now').mockReturnValue(Date.now() + 10_000);
+
+    const solver = new TrackFlowSolver(mockManager as any, train as any);
+    solver.applyTrackFlowForces();
+
+    // The train should remain on currentTrack despite parallelTrack being closer.
+    expect(train.currentTrack).toBe(currentTrack);
+
+    jest.restoreAllMocks();
+  });
+
+  it('Given a train on a track, When it is within the switch cooldown period, Then track switches are suppressed', () => {
+    const currentTrack = makeTrack(scene, 0, 0, 500, 0);
+    // A second track far enough away to clear the deadband (> 30 px) and enough
+    // hysteresis advantage (> 20 px) — the only reason it should not switch is the cooldown.
+    const farTrack = makeTrack(scene, 0, 60, 500, 60);
+
+    const train = makeMockTrain(scene, 250, 55); // very close to farTrack
+    train.currentTrack = currentTrack;
+
+    const mockManager = {
+      getClosestTrack: jest.fn().mockReturnValue(farTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+
+    // Simulate that a switch just happened by setting performance.now to a recent value.
+    const now = Date.now();
+    jest.spyOn(performance, 'now').mockReturnValue(now);
+
+    const solver = new TrackFlowSolver(mockManager as any, train as any);
+
+    // Manually record a very recent switch (internal field via cast).
+    (solver as any)._lastSwitchTime = now - 10; // only 10 ms ago
+
+    solver.applyTrackFlowForces();
+
+    // The train should remain on currentTrack because cooldown has not expired.
+    expect(train.currentTrack).toBe(currentTrack);
+
+    jest.restoreAllMocks();
+  });
+
+  it('Given a train on a track, When a genuinely closer track is outside the deadband and cooldown has elapsed, Then the train switches tracks', () => {
+    const currentTrack = makeTrack(scene, 0, 0, 500, 0);   // train is 50 px away from this
+    const betterTrack  = makeTrack(scene, 0, 50, 500, 50);  // train is ~0 px away from this (separation 50 px > deadband 30 px)
+
+    const train = makeMockTrain(scene, 250, 50); // right on betterTrack
+    train.currentTrack = currentTrack;
+
+    const mockManager = {
+      getClosestTrack: jest.fn().mockReturnValue(betterTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+
+    // Past the cooldown window.
+    jest.spyOn(performance, 'now').mockReturnValue(Date.now() + 10_000);
+
+    const solver = new TrackFlowSolver(mockManager as any, train as any);
+    solver.applyTrackFlowForces();
+
+    // The train should switch to betterTrack.
+    expect(train.currentTrack).toBe(betterTrack);
+
+    jest.restoreAllMocks();
+  });
+
+  it('Given a track switch, When _switchToTrack is called, Then PID controllers are reset', () => {
+    const currentTrack = makeTrack(scene, 0, 0, 500, 0);
+    const betterTrack  = makeTrack(scene, 0, 50, 500, 50);
+
+    const train = makeMockTrain(scene, 250, 50);
+    train.currentTrack = currentTrack;
+
+    const mockManager = {
+      getClosestTrack: jest.fn().mockReturnValue(betterTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+
+    jest.spyOn(performance, 'now').mockReturnValue(Date.now() + 10_000);
+
+    const solver = new TrackFlowSolver(mockManager as any, train as any);
+    solver.applyTrackFlowForces();
+
+    expect(train.pidControllerFront.reset).toHaveBeenCalled();
+    expect(train.pidControllerRear.reset).toHaveBeenCalled();
+
+    jest.restoreAllMocks();
   });
 });
