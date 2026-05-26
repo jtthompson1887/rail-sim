@@ -5,17 +5,29 @@ import Junction from '../entities/Junction';
 import type { TrackNode } from '../entities/TrackNode';
 import { GameConfig } from '../config/GameConfig';
 
+/** Chunk coordinate key for the spatial index. */
+type ChunkKey = string;
+
+function chunkKey(x: number, y: number): ChunkKey {
+  const cx = Math.floor(x / GameConfig.WORLD.CHUNK_SIZE);
+  const cy = Math.floor(y / GameConfig.WORLD.CHUNK_SIZE);
+  return `${cx}:${cy}`;
+}
+
 export default class TrackManager {
   private trackMap: Map<string, RailTrack>;
   private junctionMap: Map<string, Junction>;
   private scene: Phaser.Scene;
   private visibleTracks: Set<string>;
+  /** Spatial index: chunk key → set of track UUIDs whose midpoint is in that chunk. */
+  private chunkIndex: Map<ChunkKey, Set<string>>;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.trackMap = new Map<string, RailTrack>();
     this.junctionMap = new Map<string, Junction>();
     this.visibleTracks = new Set<string>();
+    this.chunkIndex = new Map<ChunkKey, Set<string>>();
   }
 
   get tracks(): RailTrack[] {
@@ -24,6 +36,42 @@ export default class TrackManager {
 
   get junctions(): Junction[] {
     return Array.from(this.junctionMap.values());
+  }
+
+  // ── Chunk helpers ──────────────────────────────────────────────────────────
+
+  private indexTrack(track: RailTrack): void {
+    const mid = track.getCurvePath().getPoint(0.5);
+    const key = chunkKey(mid.x, mid.y);
+    if (!this.chunkIndex.has(key)) this.chunkIndex.set(key, new Set());
+    this.chunkIndex.get(key)!.add(track.getUUID());
+  }
+
+  private deindexTrack(track: RailTrack): void {
+    const mid = track.getCurvePath().getPoint(0.5);
+    const key = chunkKey(mid.x, mid.y);
+    this.chunkIndex.get(key)?.delete(track.getUUID());
+  }
+
+  /**
+   * Return all track UUIDs in chunks that overlap the given world-space rectangle,
+   * plus one chunk margin in every direction (for smooth loading at chunk boundaries).
+   */
+  getTracksInChunks(bounds: Phaser.Geom.Rectangle): string[] {
+    const margin = 1;
+    const cs = GameConfig.WORLD.CHUNK_SIZE;
+    const minCX = Math.floor(bounds.left / cs) - margin;
+    const maxCX = Math.floor(bounds.right / cs) + margin;
+    const minCY = Math.floor(bounds.top / cs) - margin;
+    const maxCY = Math.floor(bounds.bottom / cs) + margin;
+    const result: string[] = [];
+    for (let cx = minCX; cx <= maxCX; cx++) {
+      for (let cy = minCY; cy <= maxCY; cy++) {
+        const set = this.chunkIndex.get(`${cx}:${cy}`);
+        if (set) result.push(...set);
+      }
+    }
+    return result;
   }
 
   private setupTrackConnections(track: RailTrack | Junction): void {
@@ -91,6 +139,7 @@ export default class TrackManager {
   addTrack(track: RailTrack): string {
     const uuid = track.getUUID();
     this.trackMap.set(uuid, track);
+    this.indexTrack(track);
     this.setupTrackConnections(track);
     return uuid;
   }
@@ -105,6 +154,7 @@ export default class TrackManager {
   removeTrack(uuid: string): boolean {
     const track = this.trackMap.get(uuid);
     if (!track) return false;
+    this.deindexTrack(track);
     track.destroy();
     this.trackMap.delete(uuid);
     this.visibleTracks.delete(uuid);
