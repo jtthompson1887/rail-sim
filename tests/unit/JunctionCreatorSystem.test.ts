@@ -70,7 +70,9 @@ describe('JunctionCreatorSystem', () => {
       EventBus.on('ui:toast', handler);
 
       // Simulate a right-drag over an empty area
-      const cam = { zoom: 1, scrollX: 0, scrollY: 0 };
+      const cam = { zoom: 1, scrollX: 0, scrollY: 0, getWorldPoint: (x: number, y: number) => {
+        const Phaser = require('phaser'); return new Phaser.Math.Vector2(x, y);
+      } };
       scene.cameras = { main: cam };
 
       const downPointer = { rightButtonDown: () => true, x: 0, y: 0 };
@@ -85,7 +87,9 @@ describe('JunctionCreatorSystem', () => {
     });
 
     it('does not throw when track is present in selection', () => {
-      const cam = { zoom: 1, scrollX: 0, scrollY: 0 };
+      const cam = { zoom: 1, scrollX: 0, scrollY: 0, getWorldPoint: (x: number, y: number) => {
+        const Phaser = require('phaser'); return new Phaser.Math.Vector2(x, y);
+      } };
       scene.cameras = { main: cam };
 
       const track = makeTrack(scene, 50, 50, 150, 50);

@@ -376,11 +376,7 @@ export class TrackCompleterSystem {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private screenToWorld(pointer: Phaser.Input.Pointer): Phaser.Math.Vector2 {
-    const cam = this.scene.cameras.main;
-    return new Phaser.Math.Vector2(
-      pointer.x / cam.zoom + cam.scrollX,
-      pointer.y / cam.zoom + cam.scrollY,
-    );
+    return this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y) as Phaser.Math.Vector2;
   }
 
   private trackToDef(track: RailTrack): TrackDef {

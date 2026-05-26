@@ -20,7 +20,7 @@ interface EventMap {
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };
   'mode:changed': { mode: 'create' | 'play' };
-  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'none' };
+  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'pan' | 'eraser' | 'none' };
   'track:placed': { trackUUID: string };
   'track:removed': { trackUUID: string };
   'junction:created': { junctionUUID: string };
@@ -30,6 +30,14 @@ interface EventMap {
   'world:undo': Record<string, never>;
   'create:station-placed': { stationId: string };
   'create:train-placed': { trainId: string };
+  // Editor framework events
+  'editor:undo': Record<string, never>;
+  'editor:redo': Record<string, never>;
+  'editor:save': Record<string, never>;
+  'editor:mode-toggle': Record<string, never>;
+  'selection:changed': { uuids: string[] };
+  'snap:toggled': { gridEnabled: boolean; endpointEnabled: boolean };
+  'grid:toggled': { enabled: boolean };
 }
 
 class EventBusClass {

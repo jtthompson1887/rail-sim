@@ -14,10 +14,15 @@ import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
+import { SnapSystem } from '../systems/SnapSystem';
+import { CommandStack, DeleteTracksCommand, ReshapeTrackCommand } from '../systems/CommandStack';
+import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
-import { CreateModeToolbar } from '../ui/CreateModeToolbar';
-import type { CreateTool } from '../ui/CreateModeToolbar';
+import { EditorToolbar } from '../ui/EditorToolbar';
+import { PropertiesPanel } from '../ui/PropertiesPanel';
+import { ContextMenu, buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
+import type { CreateTool } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef } from '../config/WorldData';
 
@@ -36,20 +41,27 @@ export default class WorldScene extends Phaser.Scene {
   private audioManager!: AudioManager;
   private junctionCreator!: JunctionCreatorSystem;
   private trackCompleter!: TrackCompleterSystem;
-  private toolbar!: CreateModeToolbar;
+  private toolbar!: EditorToolbar;
+  private propertiesPanel!: PropertiesPanel;
+  private contextMenu!: ContextMenu;
   private terrainGenerator!: TerrainGenerator;
   private terrainChunkManager!: TerrainChunkManager;
   private terrainValidator!: TerrainValidator;
   private sceneryManager!: SceneryManager;
+  private snapSystem!: SnapSystem;
+  private commandStack!: CommandStack;
+  private selectionManager!: SelectionManager;
+
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
   private stations: Station[] = [];
-  private selectedTrack: RailTrack | null = null;
-  private selectedTrackHighlight!: Phaser.GameObjects.Graphics;
   private minimapGraphics!: Phaser.GameObjects.Graphics;
-  private undoStack: ReturnType<typeof WorldManager.snapshot>[] = [];
   private autoSaveTimer: number = 0;
   private activeTool: CreateTool = 'none';
+
+  // ── Drag-reshape state ─────────────────────────────────────────────────────
+  private reshapingTrackUUID: string | null = null;
+  private reshapeBeforeDef: TrackDef | null = null;
 
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
@@ -58,6 +70,22 @@ export default class WorldScene extends Phaser.Scene {
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
     this.activeTool = tool;
+    this.updateToolCursor(tool);
+    // Block camera pan for all tools except pan/none/terrain-view
+    const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
+    this.cameraController.setBlockPan(freePanTools.indexOf(tool) === -1);
+  };
+
+  private readonly undoHandler = () => { this.commandStack.undo(); };
+  private readonly redoHandler = () => { this.commandStack.redo(); };
+  private readonly saveHandler = () => { WorldManager.save(); this.toolbar.setSaveIndicator('saved'); };
+
+  private readonly modeToogleHandler = () => {
+    if (GameStateManager.worldMode === 'create') {
+      GameStateManager.enterPlay(WorldManager.currentWorldId ?? '');
+    } else {
+      GameStateManager.returnToCreate();
+    }
   };
 
   constructor() {
@@ -88,16 +116,31 @@ export default class WorldScene extends Phaser.Scene {
     this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
     this.terrainOverlay      = this.add.graphics().setDepth(-50).setScrollFactor(0);
 
-    this.trackManager = new TrackManager(this);
+    this.trackManager    = new TrackManager(this);
     this.cameraController = new CameraController(this);
-    this.trainManager = new TrainManager(this, this.trackManager, this.cameraController);
-    this.inputManager = new InputManager(this);
-    this.audioManager = new AudioManager(this);
+    this.trainManager    = new TrainManager(this, this.trackManager, this.cameraController);
+    this.inputManager    = new InputManager(this);
+    this.audioManager    = new AudioManager(this);
     this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager, this.terrainValidator);
-    this.trackCompleter = new TrackCompleterSystem(this, this.trackManager, this.terrainValidator);
-    this.toolbar = new CreateModeToolbar(this);
+    this.trackCompleter  = new TrackCompleterSystem(this, this.trackManager, this.terrainValidator);
 
-    this.selectedTrackHighlight = this.add.graphics().setDepth(200);
+    // ── Editor systems ─────────────────────────────────────────────────────
+    this.snapSystem     = new SnapSystem(this.trackManager);
+    this.commandStack   = new CommandStack(GameConfig.WORLD.MAX_UNDO_STEPS);
+    this.commandStack.onChange = (canUndo, canRedo) => {
+      this.toolbar.setUndoEnabled(canUndo);
+      this.toolbar.setRedoEnabled(canRedo);
+      this.toolbar.setSaveIndicator('unsaved');
+    };
+    this.selectionManager = new SelectionManager(this, this.trackManager, this.snapSystem);
+
+    // ── UI ─────────────────────────────────────────────────────────────────
+    this.toolbar = new EditorToolbar(this);
+    this.propertiesPanel = new PropertiesPanel(this, this.trackManager, this.selectionManager, (uuids) => {
+      this.deleteSelectedTracks(uuids);
+    });
+    this.contextMenu = new ContextMenu(this);
+
     this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
 
     // Load world content
@@ -108,15 +151,26 @@ export default class WorldScene extends Phaser.Scene {
     this.scene.launch('DebugOverlayScene');
 
     // Subscribe to events
-    EventBus.on('mode:changed', this.modeChangedHandler);
-    EventBus.on('tool:changed', this.toolChangedHandler);
+    EventBus.on('mode:changed',      this.modeChangedHandler);
+    EventBus.on('tool:changed',      this.toolChangedHandler);
+    EventBus.on('editor:undo',       this.undoHandler);
+    EventBus.on('editor:redo',       this.redoHandler);
+    EventBus.on('editor:save',       this.saveHandler);
+    EventBus.on('editor:mode-toggle', this.modeToogleHandler);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      EventBus.off('mode:changed', this.modeChangedHandler);
-      EventBus.off('tool:changed', this.toolChangedHandler);
+      EventBus.off('mode:changed',       this.modeChangedHandler);
+      EventBus.off('tool:changed',       this.toolChangedHandler);
+      EventBus.off('editor:undo',        this.undoHandler);
+      EventBus.off('editor:redo',        this.redoHandler);
+      EventBus.off('editor:save',        this.saveHandler);
+      EventBus.off('editor:mode-toggle', this.modeToogleHandler);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
       this.toolbar.destroy();
+      this.propertiesPanel.destroy();
+      this.contextMenu.destroy();
+      this.selectionManager.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
     });
@@ -124,9 +178,17 @@ export default class WorldScene extends Phaser.Scene {
     // Input routing
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.input.on('pointermove', this.handlePointerMove, this);
-    this.input.on('pointerup', this.handlePointerUp, this);
+    this.input.on('pointerup',   this.handlePointerUp,   this);
     this.input.keyboard.on('keydown', (event: KeyboardEvent) => {
       this.handleKeyDown(event);
+    });
+
+    // Drag events for control-point reshape handles
+    this.input.on('drag', (_ptr: Phaser.Input.Pointer, go: any, dragX: number, dragY: number) => {
+      this.handleHandleDrag(go, dragX, dragY);
+    });
+    this.input.on('dragend', (_ptr: Phaser.Input.Pointer, go: any) => {
+      this.handleHandleDragEnd(go);
     });
 
     // ESC → pause in play mode
@@ -166,11 +228,13 @@ export default class WorldScene extends Phaser.Scene {
 
     if (GameStateManager.worldMode === 'create') {
       this.trackCompleter.update(delta);
+      this.selectionManager.update(delta);
       this.drawMinimap();
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
         WorldManager.save();
+        this.toolbar.setSaveIndicator('saved');
       }
       GameStateManager.tick(delta / 1000);
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
@@ -189,9 +253,6 @@ export default class WorldScene extends Phaser.Scene {
       return;
     }
     this.terrainOverlay.setVisible(true);
-    // The overlay is an instructional semi-opaque tint over screen corners
-    // to signal that terrain-view mode is active. The actual coloured terrain
-    // is always visible via TerrainChunk objects.
     this.terrainOverlay.clear();
     this.terrainOverlay.fillStyle(0x4ad5ff, 0.12);
     this.terrainOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
@@ -202,22 +263,13 @@ export default class WorldScene extends Phaser.Scene {
   private loadWorldContent(): void {
     const world = WorldManager.world;
     if (!world || world.tracks.length === 0) {
-      // Brand-new world: generate a starter track
       this.generateStarterTrack();
       return;
     }
 
-    // Restore tracks
-    for (const def of world.tracks) {
-      this.restoreTrack(def);
-    }
+    for (const def of world.tracks)   { this.restoreTrack(def); }
+    for (const def of world.stations) { this.restoreStation(def); }
 
-    // Restore stations (after tracks so track lookups work)
-    for (const def of world.stations) {
-      this.restoreStation(def);
-    }
-
-    // Restore trains
     for (const def of world.trains) {
       const track = this.trackManager.getTrack(def.trackUUID);
       if (!track) continue;
@@ -234,8 +286,6 @@ export default class WorldScene extends Phaser.Scene {
     const p2 = new Phaser.Math.Vector2(def.p2.x, def.p2.y);
     const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
     const track = new RailTrack(this, p0, p1, p2, p3);
-    // Preserve the saved UUID by injecting it (UUID is readonly by design,
-    // so we cast for restoration only)
     (track as any).uuid = def.uuid;
     if (def.isTunnel)  track.isTunnel  = def.isTunnel;
     if (def.elevation) track.elevation = def.elevation;
@@ -269,12 +319,10 @@ export default class WorldScene extends Phaser.Scene {
       smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
     });
 
-    // Persist to WorldManager
     for (const track of tracks) {
       WorldManager.addTrackDef(this.trackToDef(track));
     }
 
-    // Spawn a train on the first track
     const firstTrack = tracks[0];
     const startPt = firstTrack.getCurvePath().getPoint(0);
     const train = this.trainManager.createInitialTrain();
@@ -286,114 +334,258 @@ export default class WorldScene extends Phaser.Scene {
   // ── Mode switching ────────────────────────────────────────────────────────
 
   private activateCreateMode(): void {
-    // Freeze all trains
     for (const train of this.trainManager.trains) {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
-    // Auto-save on entering create mode
     WorldManager.save();
   }
 
   private activatePlayMode(): void {
-    this.selectedTrackHighlight.clear();
     this.minimapGraphics.clear();
+    this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
   }
 
   // ── Input dispatch ─────────────────────────────────────────────────────────
 
+  /** Return true if the pointer's screen position overlaps any editor UI panel. */
+  private isPointerOverUI(pointer: Phaser.Input.Pointer): boolean {
+    const tb = this.toolbar.screenBounds;
+    if (pointer.x >= tb.left && pointer.x <= tb.right &&
+        pointer.y >= tb.top  && pointer.y <= tb.bottom) {
+      return true;
+    }
+    return false;
+  }
+
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
+    if (this.isPointerOverUI(pointer)) return;
+
+    // Right-click → context menu
+    if (pointer.rightButtonDown()) {
+      this.showContextMenu(pointer);
+      return;
+    }
+
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
     if (this.activeTool === 'junction') {
       this.junctionCreator.onPointerDown(pointer);
     } else if (this.activeTool === 'completer') {
       this.trackCompleter.onPointerDown(pointer);
     } else if (this.activeTool === 'select') {
-      this.handleSelectClick(pointer);
+      const shift = pointer.event ? (pointer.event as MouseEvent).shiftKey : false;
+      this.selectionManager.onPointerDown(world.x, world.y, shift);
+    } else if (this.activeTool === 'eraser') {
+      this.eraseAtPoint(world.x, world.y);
+    } else if (this.activeTool === 'generator') {
+      this.runGeneratorAt(world.x, world.y);
     }
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+
     if (this.activeTool === 'junction') {
       this.junctionCreator.onPointerMove(pointer);
+    } else if (this.activeTool === 'select') {
+      this.selectionManager.onPointerMove(world.x, world.y);
     }
   }
 
   private handlePointerUp(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const shift  = pointer.event ? (pointer.event as MouseEvent).shiftKey : false;
+
     if (this.activeTool === 'junction') {
       this.junctionCreator.onPointerUp(pointer);
+    } else if (this.activeTool === 'select') {
+      this.selectionManager.onPointerUp(world.x, world.y, shift);
     }
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (GameStateManager.worldMode === 'create') {
-      if (event.ctrlKey && event.code === 'KeyZ') {
-        this.undo();
+      // Ctrl shortcuts
+      if (event.ctrlKey) {
+        if (event.code === 'KeyZ') { this.commandStack.undo(); return; }
+        if (event.code === 'KeyY') { this.commandStack.redo(); return; }
+        if (event.code === 'KeyS') {
+          WorldManager.save();
+          this.toolbar.setSaveIndicator('saved');
+          return;
+        }
+      }
+
+      // Keyboard tool shortcuts (only when no modifier)
+      if (!event.ctrlKey && !event.altKey) {
+        const shortcuts: Record<string, CreateTool> = {
+          KeyV: 'select', KeyH: 'pan', KeyD: 'completer',
+          KeyJ: 'junction', KeyG: 'generator', KeyE: 'eraser', KeyT: 'terrain-view',
+        };
+        const mapped = shortcuts[event.code];
+        if (mapped) { this.toolbar.selectTool(mapped); return; }
+      }
+
+      if (event.code === 'Escape') {
+        this.toolbar.selectTool('none');
+        this.selectionManager.clearSelection();
         return;
       }
+
       if (this.activeTool === 'completer') {
         this.trackCompleter.onKeyDown(event);
       }
-      if (event.code === 'Delete' && this.selectedTrack) {
-        this.deleteSelectedTrack();
+
+      if (event.code === 'Delete') {
+        const uuids = this.selectionManager.selectedUUIDs;
+        if (uuids.length > 0) this.deleteSelectedTracks(uuids);
       }
     }
   }
 
-  // ── Select tool ────────────────────────────────────────────────────────────
+  // ── Reshape drag handles ───────────────────────────────────────────────────
 
-  private handleSelectClick(pointer: Phaser.Input.Pointer): void {
-    const world = this.pointerToWorld(pointer);
-    const track = this.trackManager.getClosestTrack(world, 60);
-    this.selectedTrack = track;
-    this.selectedTrackHighlight.clear();
+  private handleHandleDrag(go: any, dragX: number, dragY: number): void {
+    const trackUUID: string | undefined = go._trackUUID;
+    const cpType: string | undefined = go._cpType;
+    if (!trackUUID || !cpType) return;
 
-    if (track) {
-      this.selectedTrackHighlight.lineStyle(4, 0xffffff, 0.8);
-      const curve = track.getCurvePath();
-      this.selectedTrackHighlight.beginPath();
-      for (let i = 0; i <= 20; i++) {
-        const pt = curve.getPoint(i / 20);
-        if (i === 0) this.selectedTrackHighlight.moveTo(pt.x, pt.y);
-        else this.selectedTrackHighlight.lineTo(pt.x, pt.y);
-      }
-      this.selectedTrackHighlight.strokePath();
+    const track = this.trackManager.getTrack(trackUUID);
+    if (!track) return;
+
+    // Snapshot before-state on first drag event
+    if (this.reshapingTrackUUID !== trackUUID) {
+      this.reshapingTrackUUID = trackUUID;
+      const def = WorldManager.world?.tracks.find((t) => t.uuid === trackUUID);
+      this.reshapeBeforeDef = def ? { ...def } : null;
+    }
+
+    const snapped = this.snapSystem.snapPoint(dragX, dragY, [trackUUID]);
+    const nx = snapped.x;
+    const ny = snapped.y;
+
+    const cps = track.getControlPoints();
+    const newCps = { ...cps };
+    (newCps as any)[cpType] = new Phaser.Math.Vector2(nx, ny);
+
+    track.updateTrackVectors(newCps.p0, newCps.p1, newCps.p2, newCps.p3);
+
+    // Move the handle game object to follow
+    go.setPosition(nx, ny);
+  }
+
+  private handleHandleDragEnd(go: any): void {
+    const trackUUID: string | undefined = go._trackUUID;
+    if (!trackUUID || !this.reshapeBeforeDef) {
+      this.reshapingTrackUUID = null;
+      this.reshapeBeforeDef = null;
+      return;
+    }
+
+    const track = this.trackManager.getTrack(trackUUID);
+    if (!track) return;
+
+    const curve = track.getCurvePath();
+    const afterDef: TrackDef = {
+      uuid: trackUUID,
+      p0: curve.getStartPoint(),
+      p1: curve.getPoint(0.33),
+      p2: curve.getPoint(0.67),
+      p3: curve.getEndPoint(),
+      isTunnel: track.isTunnel,
+      elevation: track.elevation,
+    };
+
+    const beforeDef = this.reshapeBeforeDef;
+    const cmd = new ReshapeTrackCommand(this.trackManager, trackUUID, beforeDef, afterDef);
+    // The drag already applied the change — record without re-executing
+    this.commandStack.record(cmd);
+    WorldManager.updateTrackDef(afterDef);
+
+    this.reshapingTrackUUID = null;
+    this.reshapeBeforeDef = null;
+  }
+
+  // ── Eraser tool ────────────────────────────────────────────────────────────
+
+  private eraseAtPoint(wx: number, wy: number): void {
+    const track = this.trackManager.getClosestTrack({ x: wx, y: wy }, 80);
+    if (!track) return;
+    this.deleteSelectedTracks([track.getUUID()]);
+  }
+
+  // ── Generator tool ─────────────────────────────────────────────────────────
+
+  private runGeneratorAt(wx: number, wy: number): void {
+    const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
+    const tracks = generator.generateTracks({
+      startPoint: new Phaser.Math.Vector2(wx, wy),
+      startAngle: Phaser.Math.DegToRad(90),
+      sections: GameConfig.GENERATION.MAIN.SECTIONS,
+      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
+      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
+      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
+      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
+      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
+      smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
+    });
+    for (const track of tracks) {
+      WorldManager.addTrackDef(this.trackToDef(track));
+    }
+    this.toolbar.setSaveIndicator('unsaved');
+    EventBus.emit('ui:toast', { message: `Generated ${tracks.length} tracks`, type: 'success' });
+  }
+
+  // ── Delete ─────────────────────────────────────────────────────────────────
+
+  private deleteSelectedTracks(uuids: string[]): void {
+    if (uuids.length === 0) return;
+    const cmd = new DeleteTracksCommand(this.trackManager, uuids);
+    this.commandStack.push(cmd);
+    this.selectionManager.clearSelection();
+    for (const uuid of uuids) {
+      EventBus.emit('track:removed', { trackUUID: uuid });
+    }
+    this.toolbar.setSaveIndicator('unsaved');
+  }
+
+  // ── Context menu ───────────────────────────────────────────────────────────
+
+  private showContextMenu(pointer: Phaser.Input.Pointer): void {
+    const uuids = this.selectionManager.selectedUUIDs;
+    let items;
+    if (uuids.length > 0) {
+      items = buildTrackContextItems(this.trackManager, uuids, (ids) => this.deleteSelectedTracks(ids));
+    } else {
+      items = buildEmptyContextItems(pointer.x, pointer.y, (sx, sy) => {
+        const world = this.cameras.main.getWorldPoint(sx, sy);
+        this.runGeneratorAt(world.x, world.y);
+      });
+    }
+    if (items.length > 0) {
+      this.contextMenu.show(pointer.x, pointer.y, items);
     }
   }
 
-  private deleteSelectedTrack(): void {
-    if (!this.selectedTrack) return;
-    this.pushUndoSnapshot();
-    const uuid = this.selectedTrack.getUUID();
-    this.trackManager.removeTrack(uuid);
-    WorldManager.removeTrackDef(uuid);
-    this.selectedTrack = null;
-    this.selectedTrackHighlight.clear();
-    EventBus.emit('track:removed', { trackUUID: uuid });
-  }
+  // ── Cursor feedback ────────────────────────────────────────────────────────
 
-  // ── Undo ──────────────────────────────────────────────────────────────────
-
-  private pushUndoSnapshot(): void {
-    const snap = WorldManager.snapshot();
-    if (snap) {
-      this.undoStack.push(snap);
-      if (this.undoStack.length > GameConfig.WORLD.MAX_UNDO_STEPS) {
-        this.undoStack.shift();
-      }
-    }
-  }
-
-  private undo(): void {
-    const snap = this.undoStack.pop();
-    if (!snap) return;
-    WorldManager.restore(snap);
-    // Reload scene content
-    this.scene.restart({ worldId: WorldManager.currentWorldId, mode: 'create' });
+  private updateToolCursor(tool: CreateTool): void {
+    const cursors: Record<CreateTool, string> = {
+      select:        'default',
+      pan:           'grab',
+      completer:     'crosshair',
+      junction:      'cell',
+      generator:     'crosshair',
+      eraser:        'not-allowed',
+      'terrain-view': 'default',
+      none:          'default',
+    };
+    this.cameraController.setCursor(cursors[tool] ?? 'default');
   }
 
   // ── Minimap ───────────────────────────────────────────────────────────────
@@ -402,6 +594,7 @@ export default class WorldScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const mapW = 180;
     const mapH = 120;
+    // Offset right to avoid overlapping the properties panel
     const mapX = width - mapW - 16;
     const mapY = height - mapH - 16;
 
@@ -414,7 +607,6 @@ export default class WorldScene extends Phaser.Scene {
     const tracks = this.trackManager.tracks;
     if (tracks.length === 0) return;
 
-    // Find world bounds
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const t of tracks) {
       const mid = t.getCurvePath().getPoint(0.5);
@@ -431,7 +623,9 @@ export default class WorldScene extends Phaser.Scene {
 
     for (const t of tracks) {
       const isConnected = t.hasNext() || t.hasPrevious();
-      this.minimapGraphics.lineStyle(1, isConnected ? 0x00ff88 : 0xff4444, 0.9);
+      const isSelected  = this.selectionManager.isSelected(t.getUUID());
+      const color = isSelected ? 0xffffff : (isConnected ? 0x00ff88 : 0xff4444);
+      this.minimapGraphics.lineStyle(isSelected ? 2 : 1, color, 0.9);
       this.minimapGraphics.beginPath();
       for (let i = 0; i <= 8; i++) {
         const pt = t.getCurvePath().getPoint(i / 8);
@@ -469,14 +663,6 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  private pointerToWorld(pointer: Phaser.Input.Pointer): { x: number; y: number } {
-    const cam = this.cameras.main;
-    return {
-      x: pointer.x / cam.zoom + cam.scrollX,
-      y: pointer.y / cam.zoom + cam.scrollY,
-    };
-  }
 
   private trackToDef(track: RailTrack): TrackDef {
     const curve = track.getCurvePath();
