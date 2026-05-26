@@ -12,6 +12,7 @@ import { GameStateManager } from '../managers/GameStateManager';
 import { ScheduleSystem } from '../systems/ScheduleSystem';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
+import { SaveService } from '../services/SaveService';
 import type Train from '../entities/Train';
 import type RailTrack from '../entities/RailTrack';
 
@@ -47,6 +48,7 @@ export default class GameScene extends Phaser.Scene {
   create(): void {
     new Background(this, 20, 20).setDepth(-20);
     GameStateManager.startLevel(this.levelDef.id);
+    SaveService.setLastPlayedLevelId(this.levelDef.id);
     this.audioManager = new AudioManager(this);
     this.trackManager = new TrackManager(this);
     this.cameraController = new CameraController(this);

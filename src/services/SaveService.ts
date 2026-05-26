@@ -3,6 +3,7 @@ import { GameConfig } from '../config/GameConfig';
 export interface SaveData {
   unlockedLevels: string[];
   highScores: Record<string, number>;
+  lastPlayedLevelId?: string;
   settings: {
     bgmVolume: number;
     sfxVolume: number;
@@ -59,6 +60,20 @@ export const SaveService = {
       data.highScores[levelId] = score;
       this.save(data);
     }
+  },
+
+  hasSave(): boolean {
+    return !!this.load().lastPlayedLevelId;
+  },
+
+  getLastPlayedLevelId(): string | null {
+    return this.load().lastPlayedLevelId ?? null;
+  },
+
+  setLastPlayedLevelId(levelId: string): void {
+    const data = this.load();
+    data.lastPlayedLevelId = levelId;
+    this.save(data);
   },
 
   getSettings(): SaveData['settings'] {
