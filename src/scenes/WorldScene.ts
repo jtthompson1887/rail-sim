@@ -13,7 +13,6 @@ import { JunctionCreatorSystem } from '../systems/JunctionCreatorSystem';
 import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
-import { CreateModeToolbar } from '../ui/CreateModeToolbar';
 import type { CreateTool } from '../ui/CreateModeToolbar';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef } from '../config/WorldData';
@@ -33,7 +32,6 @@ export default class WorldScene extends Phaser.Scene {
   private audioManager!: AudioManager;
   private junctionCreator!: JunctionCreatorSystem;
   private trackCompleter!: TrackCompleterSystem;
-  private toolbar!: CreateModeToolbar;
   private stations: Station[] = [];
   private selectedTrack: RailTrack | null = null;
   private selectedTrackHighlight!: Phaser.GameObjects.Graphics;
@@ -77,7 +75,6 @@ export default class WorldScene extends Phaser.Scene {
     this.audioManager = new AudioManager(this);
     this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager);
     this.trackCompleter = new TrackCompleterSystem(this, this.trackManager);
-    this.toolbar = new CreateModeToolbar(this);
 
     this.selectedTrackHighlight = this.add.graphics().setDepth(200);
     this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
@@ -98,7 +95,6 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('tool:changed', this.toolChangedHandler);
       this.junctionCreator.destroy();
       this.trackCompleter.destroy();
-      this.toolbar.destroy();
     });
 
     // Input routing
@@ -239,7 +235,6 @@ export default class WorldScene extends Phaser.Scene {
   // ── Mode switching ────────────────────────────────────────────────────────
 
   private activateCreateMode(): void {
-    this.toolbar.setVisible(true);
     // Freeze all trains
     for (const train of this.trainManager.trains) {
       train.enginePower = 0;
@@ -250,7 +245,6 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private activatePlayMode(): void {
-    this.toolbar.setVisible(false);
     this.selectedTrackHighlight.clear();
     this.minimapGraphics.clear();
     this.inputManager.setupClickHandling(this.trainManager);

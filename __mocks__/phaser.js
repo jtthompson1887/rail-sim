@@ -186,6 +186,23 @@ class Sprite extends GameObject {
     this.displayHeight = (y !== undefined ? y : x || 1) * 50;
     return this;
   }
+  setPosition(x, y) {
+    this.x = x;
+    this.y = y;
+    if (this.body && this.body.position) {
+      this.body.position.x = x;
+      this.body.position.y = y;
+    }
+    return this;
+  }
+  setVelocity(x, y) {
+    this._velocity = { x, y };
+    return this;
+  }
+  setAngularVelocity(v) {
+    this._angularVelocity = v;
+    return this;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +362,7 @@ function makeScene(overrides = {}) {
         on: jest.fn(),
       },
       on: jest.fn(),
+      setDraggable: jest.fn(),
       addPointer: jest.fn(),
     },
     events: {
