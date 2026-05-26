@@ -13,16 +13,18 @@ interface TrackedObjective {
 export class ScheduleSystem {
   private objectives: TrackedObjective[];
   private passengersDelivered: Map<string, number> = new Map();
+  private readonly deliveryHandler: (data: { stationId: string; count: number }) => void;
 
   constructor(objectives: LevelObjective[]) {
     this.objectives = objectives.map((def) => ({ def, status: 'pending' as ObjectiveStatus, progress: 0 }));
     this.activateObjectives();
 
-    EventBus.on('passenger:delivered', ({ stationId, count }) => {
+    this.deliveryHandler = ({ stationId, count }) => {
       const prev = this.passengersDelivered.get(stationId) ?? 0;
       this.passengersDelivered.set(stationId, prev + count);
       this.checkDeliveryObjectives(stationId);
-    });
+    };
+    EventBus.on('passenger:delivered', this.deliveryHandler);
   }
 
   private activateObjectives(): void {
@@ -71,4 +73,8 @@ export class ScheduleSystem {
   }
 
   getObjectives(): TrackedObjective[] { return this.objectives; }
+
+  destroy(): void {
+    EventBus.off('passenger:delivered', this.deliveryHandler);
+  }
 }
