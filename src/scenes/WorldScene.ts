@@ -68,6 +68,8 @@ export default class WorldScene extends Phaser.Scene {
   private placeAnchor: Phaser.Math.Vector2 | null = null;
   /** Ghost graphics drawn between anchor and cursor while placing a track. */
   private placeGhostGraphics!: Phaser.GameObjects.Graphics;
+  /** Per-track validation overlay drawn during handle-drag reshape. */
+  private reshapeValidationOverlay!: Phaser.GameObjects.Graphics;
 
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
@@ -84,6 +86,7 @@ export default class WorldScene extends Phaser.Scene {
     if (tool !== 'place-track') {
       this.placeAnchor = null;
       this.placeGhostGraphics?.clear();
+      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
     }
   };
 
@@ -159,6 +162,8 @@ export default class WorldScene extends Phaser.Scene {
 
     // Ghost graphics for the place-track tool (drawn in world space)
     this.placeGhostGraphics = this.add.graphics().setDepth(598);
+    // Validation colour overlay drawn during reshape drags (world space)
+    this.reshapeValidationOverlay = this.add.graphics().setDepth(595);
 
     this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
 
@@ -507,6 +512,33 @@ export default class WorldScene extends Phaser.Scene {
 
     // Move the handle game object to follow
     go.setPosition(nx, ny);
+
+    // Live validation overlay
+    const validation = this.terrainValidator.canPlaceTrack(
+      newCps.p0, newCps.p1, newCps.p2, newCps.p3,
+      20,
+      this.trackManager,
+    );
+    const overlayColour = validation.valid
+      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
+      : 0xff4444;
+    this.reshapeValidationOverlay.clear();
+    this.reshapeValidationOverlay.lineStyle(4, overlayColour, 0.7);
+    this.reshapeValidationOverlay.beginPath();
+    this.reshapeValidationOverlay.moveTo(newCps.p0.x, newCps.p0.y);
+    // Approximate curve with linear samples
+    const STEPS = 20;
+    for (let i = 1; i <= STEPS; i++) {
+      const t = i / STEPS;
+      const it = 1 - t;
+      const bx = it*it*it*newCps.p0.x + 3*it*it*t*newCps.p1.x + 3*it*t*t*newCps.p2.x + t*t*t*newCps.p3.x;
+      const by = it*it*it*newCps.p0.y + 3*it*it*t*newCps.p1.y + 3*it*t*t*newCps.p2.y + t*t*t*newCps.p3.y;
+      this.reshapeValidationOverlay.lineTo(bx, by);
+    }
+    this.reshapeValidationOverlay.strokePath();
+
+    const hintState = validation.valid ? (validation.requiresTunnel ? 'warning' : 'ok') : 'error';
+    EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
   }
 
   private handleHandleDragEnd(go: any): void {
@@ -539,6 +571,8 @@ export default class WorldScene extends Phaser.Scene {
 
     this.reshapingTrackUUID = null;
     this.reshapeBeforeDef = null;
+    this.reshapeValidationOverlay.clear();
+    EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
   }
 
   // ── Eraser tool ────────────────────────────────────────────────────────────
@@ -727,7 +761,7 @@ export default class WorldScene extends Phaser.Scene {
         p0.y + (p3.y - p0.y) * 2 / 3,
       );
 
-      const validation = this.terrainValidator.canPlaceTrack(p0, p3);
+      const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
       if (!validation.valid) {
         EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
       } else {
@@ -748,19 +782,36 @@ export default class WorldScene extends Phaser.Scene {
   /** Redraw the ghost preview line from the anchor to the current cursor position. */
   private updatePlaceTrackGhost(wx: number, wy: number): void {
     if (!this.placeAnchor) return;
+
+    // Compute straight Bézier control points (same as placement would commit)
+    const p0 = this.placeAnchor;
+    const p3 = new Phaser.Math.Vector2(wx, wy);
+    const dx = p3.x - p0.x;
+    const dy = p3.y - p0.y;
+    const p1 = new Phaser.Math.Vector2(p0.x + dx / 3, p0.y + dy / 3);
+    const p2 = new Phaser.Math.Vector2(p0.x + dx * 2 / 3, p0.y + dy * 2 / 3);
+
+    const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
+    const colour = validation.valid
+      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
+      : 0xff4444;
+    const hintState = validation.valid ? (validation.requiresTunnel ? 'warning' : 'ok') : 'error';
+
     this.placeGhostGraphics.clear();
     // Anchor dot
-    this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
-    this.placeGhostGraphics.fillCircle(this.placeAnchor.x, this.placeAnchor.y, 6);
+    this.placeGhostGraphics.fillStyle(colour, 0.9);
+    this.placeGhostGraphics.fillCircle(p0.x, p0.y, 6);
     // Ghost line
-    this.placeGhostGraphics.lineStyle(2, 0x4ad5ff, 0.5);
+    this.placeGhostGraphics.lineStyle(2, colour, 0.6);
     this.placeGhostGraphics.beginPath();
-    this.placeGhostGraphics.moveTo(this.placeAnchor.x, this.placeAnchor.y);
+    this.placeGhostGraphics.moveTo(p0.x, p0.y);
     this.placeGhostGraphics.lineTo(wx, wy);
     this.placeGhostGraphics.strokePath();
     // Cursor dot
-    this.placeGhostGraphics.fillStyle(0xffffff, 0.7);
+    this.placeGhostGraphics.fillStyle(colour, 0.7);
     this.placeGhostGraphics.fillCircle(wx, wy, 4);
+
+    EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
   }
 
   // ── Minimap ───────────────────────────────────────────────────────────────

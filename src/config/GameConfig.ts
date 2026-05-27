@@ -27,6 +27,10 @@ export const GameConfig = {
     SWITCH_COOLDOWN_MS: 250,
     /** Minimum lateral separation (px) below which a candidate track is ignored when the train is already on a track. */
     PARALLEL_DEADBAND: 30,
+    /** Minimum allowed Bézier curve radius in world-units (px). Tighter curves fail validation. */
+    MIN_CURVE_RADIUS_PX: 150,
+    /** Maximum angle difference (degrees) allowed at a track–track join before flagging as misaligned. */
+    ALIGNMENT_ANGLE_DEG: 5,
   },
   JUNCTION: { LENGTH: 400, LEFT_ANGLE_DEG: -15, RIGHT_ANGLE_DEG: 15 },
   FORCE: { GUIDE_CONSTANT: 0.002 },

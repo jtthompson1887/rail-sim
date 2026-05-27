@@ -284,6 +284,56 @@ export default class TrackManager {
     return this.getVisibleTracks().filter((track) => posVec.distance(track.getCurvePath().getPoint(0.5)) <= radius);
   }
 
+  /**
+   * Find the track endpoint (start or end) closest to `point` within `radius`.
+   *
+   * Returns the matching track, its normalised *outward* tangent at that endpoint
+   * (i.e. pointing away from the track body), and whether it is the start or end.
+   * Returns `null` when no endpoint is within range.
+   *
+   * The outward tangent convention:
+   *   - At the END  (t=1): direction  P2 → P3 (forward tangent)
+   *   - At the START (t=0): direction P1 → P0 (reverse tangent)
+   * This means the returned tangent always points "out" of the track at the
+   * connection point, so callers can compare it directly with the proposed
+   * track's p0→p1 direction for alignment checks.
+   */
+  findEndpointNear(
+    point: Phaser.Math.Vector2,
+    radius: number,
+    excludeUUID?: string,
+  ): { track: RailTrack; tangent: Phaser.Math.Vector2; isStart: boolean } | null {
+    let best: { track: RailTrack; tangent: Phaser.Math.Vector2; isStart: boolean } | null = null;
+    let bestDist = radius;
+
+    for (const track of this.trackMap.values()) {
+      if (excludeUUID && track.getUUID() === excludeUUID) continue;
+      const curve = track.getCurvePath();
+
+      const startPt = curve.getStartPoint();
+      const dStart = Math.hypot(startPt.x - point.x, startPt.y - point.y);
+      if (dStart < bestDist) {
+        bestDist = dStart;
+        const fwd = curve.getTangent(0);
+        // Outward at start = reverse of forward tangent
+        const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
+        best = { track, tangent: new Phaser.Math.Vector2(-fwd.x / len, -fwd.y / len), isStart: true };
+      }
+
+      const endPt = curve.getEndPoint();
+      const dEnd = Math.hypot(endPt.x - point.x, endPt.y - point.y);
+      if (dEnd < bestDist) {
+        bestDist = dEnd;
+        const fwd = curve.getTangent(1);
+        // Outward at end = forward tangent
+        const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
+        best = { track, tangent: new Phaser.Math.Vector2(fwd.x / len, fwd.y / len), isStart: false };
+      }
+    }
+
+    return best;
+  }
+
   updateVisibleTracks(cameraViewBounds: Phaser.Geom.Rectangle): void {
     this.visibleTracks.clear();
     for (const [uuid, track] of this.trackMap) {
