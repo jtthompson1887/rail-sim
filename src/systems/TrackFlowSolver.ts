@@ -211,25 +211,29 @@ export default class TrackFlowSolver {
     return smoothedAngle;
   }
 
-  getFrontContactPoint(): Phaser.GameObjects.Sprite {
+  getFrontContactPoint(): { x: number; y: number; body?: { position: { x: number; y: number } } } {
     const trainBody = this.train.getMatterBody();
     const trainLength = trainBody.displayWidth;
     const trainAngle = trainBody.angle * (Math.PI / 180);
     const trainDirection = new Phaser.Math.Vector2(Math.cos(trainAngle), Math.sin(trainAngle));
     const frontOffset = trainDirection.clone().scale(trainLength * 0.4);
-    return new Phaser.GameObjects.Sprite(this.train.scene, trainBody.body.position.x + frontOffset.x, trainBody.body.position.y + frontOffset.y, '');
+    const x = trainBody.body.position.x + frontOffset.x;
+    const y = trainBody.body.position.y + frontOffset.y;
+    return { x, y, body: { position: { x, y } } };
   }
 
-  getRearContactPoint(): Phaser.GameObjects.Sprite {
+  getRearContactPoint(): { x: number; y: number; body?: { position: { x: number; y: number } } } {
     const trainBody = this.train.getMatterBody();
     const trainLength = trainBody.displayWidth;
     const trainAngle = trainBody.angle * (Math.PI / 180);
     const trainDirection = new Phaser.Math.Vector2(Math.cos(trainAngle), Math.sin(trainAngle));
     const rearOffset = trainDirection.clone().scale(-trainLength * 0.4);
-    return new Phaser.GameObjects.Sprite(this.train.scene, trainBody.body.position.x + rearOffset.x, trainBody.body.position.y + rearOffset.y, '');
+    const x = trainBody.body.position.x + rearOffset.x;
+    const y = trainBody.body.position.y + rearOffset.y;
+    return { x, y, body: { position: { x, y } } };
   }
 
-  getTrackForces(track: RailTrack, frontPoint: Phaser.GameObjects.Sprite, rearPoint: Phaser.GameObjects.Sprite, scale: number = 1): Phaser.Math.Vector2 {
+  getTrackForces(track: RailTrack, frontPoint: { x: number; y: number; body?: { position: { x: number; y: number } } }, rearPoint: { x: number; y: number; body?: { position: { x: number; y: number } } }, scale: number = 1): Phaser.Math.Vector2 {
     const trainBody = this.train.getMatterBody();
     const frontTrackPoint = track.getTrackPoint(frontPoint);
     const rearTrackPoint = track.getTrackPoint(rearPoint);
@@ -292,8 +296,7 @@ export default class TrackFlowSolver {
       }
     }
 
-    frontPoint.destroy();
-    rearPoint.destroy();
+    // No destroy needed - frontPoint/rearPoint are plain objects now
 
     // Smooth angle correction — a higher smoothing factor (closer to 1) means slower,
     // gentler alignment so a track switch does not cause a sudden heading snap.

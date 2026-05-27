@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type Train from '../entities/Train';
-import type { TrainManager } from '../managers/TrainManager';
+import { TrainManager } from '../managers/TrainManager';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 
@@ -40,8 +40,9 @@ export class InputManager {
     this.scene.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: any) => {
       this.clickedGameObject = true;
       let clickedTrain: Train | null = null;
-      if (gameObject.parentTrain) {
-        clickedTrain = gameObject.parentTrain as Train;
+      const mappedTrain = TrainManager.bodyToTrain.get(gameObject);
+      if (mappedTrain) {
+        clickedTrain = mappedTrain;
       } else if (trainManager.trains.indexOf(gameObject as Train) !== -1) {
         clickedTrain = gameObject as Train;
       }
@@ -60,7 +61,7 @@ export class InputManager {
     this.scene.input.on(
       'drag',
       (_pointer: Phaser.Input.Pointer, gameObject: any, dragX: number, dragY: number) => {
-        const draggedTrain = gameObject.parentTrain as Train | undefined;
+        const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
         if (!draggedTrain || !draggedTrain.derailed) return;
 
         gameObject.setPosition(dragX, dragY);
@@ -71,7 +72,7 @@ export class InputManager {
     );
 
     this.scene.input.on('dragend', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
-      const draggedTrain = gameObject.parentTrain as Train | undefined;
+      const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
       if (!draggedTrain || !draggedTrain.derailed) return;
       const recovered = trainManager.tryRecoverDerailedTrain(draggedTrain);
       if (recovered) {

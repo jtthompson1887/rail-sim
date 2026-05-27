@@ -1,6 +1,4 @@
 import Phaser from 'phaser';
-import RailTrack from '../entities/RailTrack';
-import { Station } from '../entities/Station';
 import TrackManager from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
@@ -8,7 +6,6 @@ import { GameStateManager } from '../managers/GameStateManager';
 import { SceneryManager } from '../managers/SceneryManager';
 import { CameraController } from '../systems/CameraController';
 import { InputManager } from '../systems/InputManager';
-import TrackGenerator from '../systems/TrackGenerator';
 import { JunctionCreatorSystem } from '../systems/JunctionCreatorSystem';
 import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
@@ -21,11 +18,13 @@ import { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
 import { TrackSerializer } from '../utils/TrackSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
+import { WorldContentLoader } from '../services/WorldContentLoader';
 import { AudioManager } from '../managers/AudioManager';
+import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
-import type { TrackDef, WorldStationDef } from '../config/WorldData';
+import type { TrackDef } from '../config/WorldData';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
 import type { IEditorTool } from '../systems/tools/IEditorTool';
@@ -64,8 +63,8 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
-  private stations: Station[] = [];
-  private minimapGraphics!: Phaser.GameObjects.Graphics;
+  private contentLoader!: WorldContentLoader;
+  private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
   private activeTool: CreateTool = 'none';
 
@@ -174,10 +173,11 @@ export default class WorldScene extends Phaser.Scene {
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
     this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
 
-    this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
+    this.minimapRenderer = new MinimapRenderer(this, this.trackManager, this.selectionManager);
 
     // Load world content
-    this.loadWorldContent();
+    this.contentLoader = new WorldContentLoader(this, this.trackManager, this.trainManager);
+    this.contentLoader.load();
 
     // HUD and debug overlays
     this.scene.launch('HUDScene');
@@ -262,7 +262,7 @@ export default class WorldScene extends Phaser.Scene {
 
     if (GameStateManager.worldMode === 'create') {
       this.activeEditorTool?.update(delta);
-      this.drawMinimap();
+      this.minimapRenderer.draw();
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
@@ -273,7 +273,7 @@ export default class WorldScene extends Phaser.Scene {
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
       this.inputManager.handleTrainMovement(this.trainManager.selectedTrain);
       this.trainManager.update(time, delta);
-      this.stations.forEach((s) => s.update(delta));
+      this.contentLoader.stations.forEach((s) => s.update(delta));
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
@@ -291,79 +291,6 @@ export default class WorldScene extends Phaser.Scene {
     this.terrainOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
   }
 
-  // ── World content loading ─────────────────────────────────────────────────
-
-  private loadWorldContent(): void {
-    const world = WorldManager.world;
-    if (!world || world.tracks.length === 0) {
-      this.generateStarterTrack();
-      return;
-    }
-
-    for (const def of world.tracks)   { this.restoreTrack(def); }
-    for (const def of world.stations) { this.restoreStation(def); }
-
-    for (const def of world.trains) {
-      const track = this.trackManager.getTrack(def.trackUUID);
-      if (!track) continue;
-      const train = this.trainManager.createInitialTrain();
-      const pt = track.getCurvePath().getPoint(def.trackT);
-      train.getMatterBody().setPosition(pt.x, pt.y);
-      train.currentTrack = track;
-    }
-  }
-
-  private restoreTrack(def: TrackDef): void {
-    const p0 = new Phaser.Math.Vector2(def.p0.x, def.p0.y);
-    const p1 = new Phaser.Math.Vector2(def.p1.x, def.p1.y);
-    const p2 = new Phaser.Math.Vector2(def.p2.x, def.p2.y);
-    const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
-    const track = new RailTrack(this, p0, p1, p2, p3);
-    (track as any).uuid = def.uuid;
-    if (def.isTunnel)  track.isTunnel  = def.isTunnel;
-    if (def.elevation) track.elevation = def.elevation;
-    this.trackManager.addTrack(track);
-  }
-
-  private restoreStation(def: WorldStationDef): void {
-    const track = this.trackManager.getTrack(def.trackUUID);
-    if (!track) return;
-    const stationDef = {
-      id: def.id,
-      name: def.name,
-      trackSectionIndex: 0,
-      trackT: def.trackT,
-      passengerSpawnRate: def.passengerSpawnRate,
-    };
-    this.stations.push(new Station(this, stationDef, track));
-  }
-
-  private generateStarterTrack(): void {
-    const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
-    const tracks = generator.generateTracks({
-      startPoint: new Phaser.Math.Vector2(0, 500),
-      startAngle: Phaser.Math.DegToRad(90),
-      sections: GameConfig.GENERATION.MAIN.SECTIONS,
-      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
-      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
-      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
-      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
-      smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
-    });
-
-    for (const track of tracks) {
-      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
-    }
-
-    const firstTrack = tracks[0];
-    const startPt = firstTrack.getCurvePath().getPoint(0);
-    const train = this.trainManager.createInitialTrain();
-    train.getMatterBody().setPosition(startPt.x, startPt.y);
-    train.currentTrack = firstTrack;
-    train.getMatterBody().setAngle(firstTrack.getTrackAngle(train.getMatterBody()));
-  }
-
   // ── Mode switching ────────────────────────────────────────────────────────
 
   private activateCreateMode(): void {
@@ -376,7 +303,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private activatePlayMode(): void {
-    this.minimapGraphics.clear();
+    this.minimapRenderer.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });
@@ -564,55 +491,6 @@ export default class WorldScene extends Phaser.Scene {
       none:            'default',
     };
     this.cameraController.setCursor(cursors[tool] ?? 'default');
-  }
-
-  // ── Minimap ───────────────────────────────────────────────────────────────
-
-  private drawMinimap(): void {
-    const { width, height } = this.scale;
-    const mapW = 180;
-    const mapH = 120;
-    // Offset right to avoid overlapping the properties panel
-    const mapX = width - mapW - 16;
-    const mapY = height - mapH - 16;
-
-    this.minimapGraphics.clear();
-    this.minimapGraphics.fillStyle(0x06131f, 0.85);
-    this.minimapGraphics.fillRect(mapX, mapY, mapW, mapH);
-    this.minimapGraphics.lineStyle(1, 0xffffff, 0.3);
-    this.minimapGraphics.strokeRect(mapX, mapY, mapW, mapH);
-
-    const tracks = this.trackManager.tracks;
-    if (tracks.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const t of tracks) {
-      const mid = t.getCurvePath().getPoint(0.5);
-      minX = Math.min(minX, mid.x); maxX = Math.max(maxX, mid.x);
-      minY = Math.min(minY, mid.y); maxY = Math.max(maxY, mid.y);
-    }
-    const worldW = Math.max(maxX - minX, 1);
-    const worldH = Math.max(maxY - minY, 1);
-
-    const toMap = (x: number, y: number) => ({
-      mx: mapX + ((x - minX) / worldW) * mapW,
-      my: mapY + ((y - minY) / worldH) * mapH,
-    });
-
-    for (const t of tracks) {
-      const isConnected = t.hasNext() || t.hasPrevious();
-      const isSelected  = this.selectionManager.isSelected(t.getUUID());
-      const color = isSelected ? 0xffffff : (isConnected ? 0x00ff88 : 0xff4444);
-      this.minimapGraphics.lineStyle(isSelected ? 2 : 1, color, 0.9);
-      this.minimapGraphics.beginPath();
-      for (let i = 0; i <= 8; i++) {
-        const pt = t.getCurvePath().getPoint(i / 8);
-        const { mx, my } = toMap(pt.x, pt.y);
-        if (i === 0) this.minimapGraphics.moveTo(mx, my);
-        else this.minimapGraphics.lineTo(mx, my);
-      }
-      this.minimapGraphics.strokePath();
-    }
   }
 
   // ── HUD / debug publishing ────────────────────────────────────────────────

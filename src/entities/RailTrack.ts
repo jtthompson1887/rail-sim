@@ -1,12 +1,18 @@
 import Phaser from 'phaser';
-type Image = Phaser.GameObjects.Image;
 type Path = Phaser.Curves.Path;
-type Transform = Phaser.GameObjects.Components.Transform;
 import { GameConfig } from '../config/GameConfig';
 import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
+import { RailTrackRenderer } from './RailTrackRenderer';
+import { createPort, type TrackPort } from './TrackPort';
 
-interface Trackable extends Transform {
+/**
+ * Minimal interface for objects whose position can be projected onto a track.
+ * Accepts both Phaser GameObjects (with Transform) and plain {x, y} objects.
+ */
+export interface Trackable {
+  x: number;
+  y: number;
   body?: {
     position: {
       x: number;
@@ -16,8 +22,6 @@ interface Trackable extends Transform {
 }
 
 export default class RailTrack extends Phaser.GameObjects.Container implements TrackNode {
-  private readonly texture1: string = 'ballast';
-  private readonly texture2: string = 'rail';
   private readonly railTrackWidth: number = GameConfig.TRACK.RAIL_TRACK_WIDTH;
   private readonly railTrackScale: number = GameConfig.TRACK.SCALE;
   private iterations: number = 0;
@@ -25,9 +29,12 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private p0!: Phaser.Math.Vector2;
   private p1!: Phaser.Math.Vector2;
   private p2!: Phaser.Math.Vector2;
-  private readonly tracksImages: Image[] = [];
   private curve!: Path;
   private readonly uuid: string;
+  private renderer: RailTrackRenderer;
+  /** Port-based connection model. */
+  private _startPort!: TrackPort;
+  private _endPort!: TrackPort;
   /** When true the track runs through a tunnel and renders with a darker tint. */
   isTunnel: boolean = false;
   /** Average terrain elevation at the time of placement. */
@@ -42,42 +49,10 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     scene.add.existing(this);
     this.uuid = crypto.randomUUID();
     this.setDepth(0);
+    this.renderer = new RailTrackRenderer(scene, this);
+    this._startPort = createPort(this, p0, 'start');
+    this._endPort = createPort(this, p3, 'end');
     this.updateTrackVectors(p0, p1, p2, p3);
-  }
-
-  createTracks(): void {
-    this.remove(this.tracksImages, true);
-    this.tracksImages.length = 0;
-
-    for (let i = 0; i < this.iterations; i++) {
-      this.createTrackSegment(this.texture1, i);
-    }
-
-    for (let i = 0; i < this.iterations; i++) {
-      this.createTrackSegment(this.texture2, i);
-    }
-  }
-
-  createTrackSegment(texture: string, i: number): void {
-    const t = i / this.iterations;
-    const point = this.curve.getPoint(t);
-    const nextPoint = this.curve.getPoint((i + 1) / this.iterations);
-    const angle = Phaser.Math.Angle.BetweenPoints(point, nextPoint);
-
-    const railTrack = this.scene.add.image(point.x, point.y, texture);
-    railTrack.setOrigin(0, 0.5);
-    railTrack.setScale(this.railTrackScale);
-    railTrack.setDepth(0);
-    railTrack.rotation = angle;
-
-    // Tunnel segments render darker to indicate underground passage
-    if (this.isTunnel) {
-      railTrack.setAlpha(0.45);
-      railTrack.setTint(0x334455);
-    }
-
-    this.add(railTrack);
-    this.tracksImages.push(railTrack);
   }
 
   updateTrackVectors(p0: Phaser.Math.Vector2, p1: Phaser.Math.Vector2, p2: Phaser.Math.Vector2, p3: Phaser.Math.Vector2): void {
@@ -87,8 +62,10 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     this.p2 = p2;
     this.totalDistance = this.curve.getLength();
     this.iterations = Math.max(1, Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale)));
-
-    this.createTracks();
+    // Update port positions
+    (this._startPort as any).position = { x: p0.x, y: p0.y };
+    (this._endPort as any).position = { x: p3.x, y: p3.y };
+    this.renderer.rebuild();
   }
 
   getTrackAngle(object: Trackable): number {
@@ -103,23 +80,46 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   }
 
   getTrackPosition(object: Trackable): number {
-    const numSamples = 1000;
-    let closestDistance = Infinity;
-    let closestT = 0;
     const objectX = object.body ? object.body.position.x : object.x;
     const objectY = object.body ? object.body.position.y : object.y;
 
-    for (let i = 0; i <= numSamples; i++) {
-      const t = i / numSamples;
+    // Phase 1: Coarse search with fewer samples
+    const coarseSamples = 50;
+    let closestDistance = Infinity;
+    let closestT = 0;
+
+    for (let i = 0; i <= coarseSamples; i++) {
+      const t = i / coarseSamples;
       const point = this.curve.getPoint(t);
-      const distance = Phaser.Math.Distance.Between(objectX, objectY, point.x, point.y);
-      if (distance < closestDistance) {
-        closestDistance = distance;
+      const dx = objectX - point.x;
+      const dy = objectY - point.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < closestDistance) {
+        closestDistance = distSq;
         closestT = t;
       }
     }
 
-    return closestT;
+    // Phase 2: Refine with bisection in the neighborhood of closestT
+    const step = 1 / coarseSamples;
+    let lo = Math.max(0, closestT - step);
+    let hi = Math.min(1, closestT + step);
+
+    for (let iter = 0; iter < 10; iter++) {
+      const mid1 = lo + (hi - lo) / 3;
+      const mid2 = hi - (hi - lo) / 3;
+      const p1 = this.curve.getPoint(mid1);
+      const p2 = this.curve.getPoint(mid2);
+      const d1 = (objectX - p1.x) ** 2 + (objectY - p1.y) ** 2;
+      const d2 = (objectX - p2.x) ** 2 + (objectY - p2.y) ** 2;
+      if (d1 < d2) {
+        hi = mid2;
+      } else {
+        lo = mid1;
+      }
+    }
+
+    return (lo + hi) / 2;
   }
 
   getCurvePath(): Path {
@@ -176,4 +176,11 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   isTrack(): this is RailTrack {
     return true;
   }
+
+  /** Return the start port of this track. */
+  get startPort(): TrackPort { return this._startPort; }
+  /** Return the end port of this track. */
+  get endPort(): TrackPort { return this._endPort; }
+  /** Return all ports for graph traversal. */
+  getPorts(): TrackPort[] { return [this._startPort, this._endPort]; }
 }
