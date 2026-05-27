@@ -14,6 +14,18 @@ function chunkKey(x: number, y: number): ChunkKey {
   return `${cx}:${cy}`;
 }
 
+/**
+ * Normalise a curve tangent vector and optionally reverse it.
+ * The `|| 1` fallback safely handles degenerate zero-length tangents that can
+ * arise from a collapsed Bézier curve (all control points coincident). In that
+ * case the returned vector has zero length, which callers treat as "no tangent".
+ */
+function normalizeTangent(fwd: { x: number; y: number }, reverse: boolean): InstanceType<typeof Phaser.Math.Vector2> {
+  const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
+  const sign = reverse ? -1 : 1;
+  return new Phaser.Math.Vector2(sign * fwd.x / len, sign * fwd.y / len);
+}
+
 export default class TrackManager {
   private trackMap: Map<string, RailTrack>;
   private junctionMap: Map<string, Junction>;
@@ -281,6 +293,56 @@ export default class TrackManager {
   getTracksInRadius(position: Vector2Like, radius: number): RailTrack[] {
     const posVec = new Phaser.Math.Vector2(position.x, position.y);
     return this.getVisibleTracks().filter((track) => posVec.distance(track.getCurvePath().getPoint(0.5)) <= radius);
+  }
+
+  /**
+   * Find the track endpoint (start or end) closest to `point` within `radius`.
+   *
+   * Returns the matching track, its normalised *outward* tangent at that endpoint
+   * (i.e. pointing away from the track body), and whether it is the start or end.
+   * Returns `null` when no endpoint is within range.
+   *
+   * The outward tangent convention:
+   *   - At the END  (t=1): direction  P2 → P3 (forward tangent)
+   *   - At the START (t=0): direction P1 → P0 (reverse tangent)
+   * This means the returned tangent always points "out" of the track at the
+   * connection point, so callers can compare it directly with the proposed
+   * track's p0→p1 direction for alignment checks.
+   */
+  findEndpointNear(
+    point: Phaser.Math.Vector2,
+    radius: number,
+    excludeUUID?: string,
+  ): { track: RailTrack; tangent: Phaser.Math.Vector2; isStart: boolean } | null {
+    let best: { track: RailTrack; tangent: Phaser.Math.Vector2; isStart: boolean } | null = null;
+    let bestDist = radius;
+
+    for (const track of this.trackMap.values()) {
+      if (excludeUUID && track.getUUID() === excludeUUID) continue;
+      const curve = track.getCurvePath();
+
+      const startPt = curve.getStartPoint();
+      const dStart = Math.hypot(startPt.x - point.x, startPt.y - point.y);
+      if (dStart < bestDist) {
+        bestDist = dStart;
+        const fwd = curve.getTangent(0);
+        // Outward at start = reverse of forward tangent
+        const t = normalizeTangent(fwd, true);
+        best = { track, tangent: t, isStart: true };
+      }
+
+      const endPt = curve.getEndPoint();
+      const dEnd = Math.hypot(endPt.x - point.x, endPt.y - point.y);
+      if (dEnd < bestDist) {
+        bestDist = dEnd;
+        const fwd = curve.getTangent(1);
+        // Outward at end = forward tangent
+        const t = normalizeTangent(fwd, false);
+        best = { track, tangent: t, isStart: false };
+      }
+    }
+
+    return best;
   }
 
   updateVisibleTracks(cameraViewBounds: Phaser.Geom.Rectangle): void {
