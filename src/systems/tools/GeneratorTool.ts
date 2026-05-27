@@ -37,7 +37,9 @@ export class GeneratorTool implements IEditorTool {
   }
 
   activate(): void {}
-  deactivate(): void {}
+  deactivate(): void {
+    EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
+  }
 
   onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
     this.runGeneratorAt(worldX, worldY);
@@ -72,10 +74,10 @@ export class GeneratorTool implements IEditorTool {
       const curve = track.getCurvePath();
       const start = curve.getStartPoint();
       const end = curve.getEndPoint();
-      if (Phaser.Math.Distance.Between(wx, wy, start.x, start.y) < SNAP_DIST ||
-          Phaser.Math.Distance.Between(wx, wy, end.x, end.y) < SNAP_DIST) {
-        const isStart = Phaser.Math.Distance.Between(wx, wy, start.x, start.y) <
-                        Phaser.Math.Distance.Between(wx, wy, end.x, end.y);
+      if (Phaser.Math.Distance.Between(snapped.x, snapped.y, start.x, start.y) < SNAP_DIST ||
+          Phaser.Math.Distance.Between(snapped.x, snapped.y, end.x, end.y) < SNAP_DIST) {
+        const isStart = Phaser.Math.Distance.Between(snapped.x, snapped.y, start.x, start.y) <
+                        Phaser.Math.Distance.Between(snapped.x, snapped.y, end.x, end.y);
         const nearPt = isStart ? start : end;
         const farPt = isStart ? end : start;
         const angle = Math.atan2(nearPt.y - farPt.y, nearPt.x - farPt.x);
@@ -97,7 +99,7 @@ export class GeneratorTool implements IEditorTool {
 
     if (!continuedFromEndpoint) {
       tracks = generator.generateTracks({
-        startPoint: new Phaser.Math.Vector2(wx, wy),
+        startPoint: new Phaser.Math.Vector2(snapped.x, snapped.y),
         startAngle: Phaser.Math.DegToRad(90),
         sections: params.sections,
         minLength: params.minLength,
@@ -109,15 +111,15 @@ export class GeneratorTool implements IEditorTool {
       });
     }
 
-    // Filter by terrain validation
+    // Filter by full terrain/curvature/alignment validation.
     const validTracks: RailTrack[] = [];
     let invalidCount = 0;
     for (const track of tracks) {
-      const curve = track.getCurvePath();
-      const p0 = curve.getStartPoint();
-      const p3 = curve.getEndPoint();
-      const result = this.terrainValidator.canPlaceTrack(p0, p3);
+      const cps = track.getControlPoints();
+      const result = this.terrainValidator.canPlaceTrack(cps.p0, cps.p1, cps.p2, cps.p3, 20, this.trackManager);
       if (result.valid) {
+        track.isTunnel = result.requiresTunnel;
+        track.elevation = result.averageElevation;
         WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
         validTracks.push(track);
       } else {
@@ -130,6 +132,10 @@ export class GeneratorTool implements IEditorTool {
     const msg = invalidCount > 0
       ? `Generated ${validTracks.length} tracks (${invalidCount} blocked by terrain)`
       : `Generated ${validTracks.length} tracks`;
+    EventBus.emit('ui:validation-hint', {
+      state: invalidCount > 0 ? 'warning' : 'ok',
+      message: invalidCount > 0 ? `${invalidCount} generated section(s) failed validation` : '',
+    });
     EventBus.emit('ui:toast', { message: msg, type: invalidCount > 0 ? 'warning' : 'success' });
   }
 }
