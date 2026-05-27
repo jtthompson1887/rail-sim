@@ -111,15 +111,17 @@ export class GeneratorTool implements IEditorTool {
       });
     }
 
-    // Filter by full terrain/curvature/alignment validation.
+    // Generated tracks are already in TrackManager, so skip alignment here to
+    // avoid each new track finding itself as a neighbouring endpoint.
     const validTracks: RailTrack[] = [];
     let invalidCount = 0;
     for (const track of tracks) {
       const cps = track.getControlPoints();
-      const result = this.terrainValidator.canPlaceTrack(cps.p0, cps.p1, cps.p2, cps.p3, 20, this.trackManager);
+      const result = this.terrainValidator.canPlaceTrack(cps.p0, cps.p1, cps.p2, cps.p3, 20, null);
       if (result.valid) {
         track.isTunnel = result.requiresTunnel;
         track.elevation = result.averageElevation;
+        track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
         WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
         validTracks.push(track);
       } else {
