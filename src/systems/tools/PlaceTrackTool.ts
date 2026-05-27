@@ -91,6 +91,8 @@ export class PlaceTrackTool implements IEditorTool {
         const track = new RailTrack(this.scene, snap.p0, snap.p1, snap.p2, snap.p3);
         track.isTunnel = validation.requiresTunnel;
         track.elevation = validation.averageElevation;
+        // Rebuild after tunnel/elevation flags are set so renderer tint/alpha is correct.
+        track.updateTrackVectors(snap.p0, snap.p1, snap.p2, snap.p3);
         this.trackManager.addTrack(track);
         WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
         EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
