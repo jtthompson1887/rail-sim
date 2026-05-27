@@ -126,6 +126,16 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     return this.curve;
   }
 
+  /** The stored second knot (p1) of the spline curve, as a copy. */
+  getP1(): Phaser.Math.Vector2 {
+    return new Phaser.Math.Vector2(this.p1.x, this.p1.y);
+  }
+
+  /** The stored third knot (p2) of the spline curve, as a copy. */
+  getP2(): Phaser.Math.Vector2 {
+    return new Phaser.Math.Vector2(this.p2.x, this.p2.y);
+  }
+
   /** Return all four Bézier control points (p0..p3) as world-space vectors. */
   getControlPoints(): { p0: Phaser.Math.Vector2; p1: Phaser.Math.Vector2; p2: Phaser.Math.Vector2; p3: Phaser.Math.Vector2 } {
     return {

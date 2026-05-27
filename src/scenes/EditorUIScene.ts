@@ -5,6 +5,7 @@ import { PropertiesPanel } from '../ui/PropertiesPanel';
 import type { GeneratorParams } from '../ui/PropertiesPanel';
 import { ContextMenu } from '../ui/ContextMenu';
 import type { MenuItem } from '../ui/ContextMenu';
+import { ValidationHint } from '../ui/ValidationHint';
 import { EventBus } from '../services/EventBus';
 import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
@@ -31,6 +32,7 @@ export default class EditorUIScene extends Phaser.Scene {
   private toolbar!: EditorToolbar;
   private propertiesPanel!: PropertiesPanel;
   private contextMenu!: ContextMenu;
+  private validationHint!: ValidationHint;
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -72,6 +74,7 @@ export default class EditorUIScene extends Phaser.Scene {
       (uuids) => EventBus.emit('editor:delete-tracks', { uuids }),
     );
     this.contextMenu = new ContextMenu(this);
+    this.validationHint = new ValidationHint(this);
 
     // Subscribe to WorldScene → EditorUIScene events
     EventBus.on('ui:toolbar-undo-state', this.undoStateHandler);
@@ -87,6 +90,7 @@ export default class EditorUIScene extends Phaser.Scene {
       this.toolbar.destroy();
       this.propertiesPanel.destroy();
       this.contextMenu.destroy();
+      this.validationHint.destroy();
     });
   }
 
