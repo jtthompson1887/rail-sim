@@ -100,7 +100,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
       }
     }
 
-    // Phase 2: Refine with bisection in the neighborhood of closestT
+    // Phase 2: Refine with ternary search in the neighborhood of closestT
     const step = 1 / coarseSamples;
     let lo = Math.max(0, closestT - step);
     let hi = Math.min(1, closestT + step);
@@ -124,6 +124,16 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
 
   getCurvePath(): Path {
     return this.curve;
+  }
+
+  /** The stored second knot (p1) of the spline curve, as a copy. */
+  getP1(): Phaser.Math.Vector2 {
+    return new Phaser.Math.Vector2(this.p1.x, this.p1.y);
+  }
+
+  /** The stored third knot (p2) of the spline curve, as a copy. */
+  getP2(): Phaser.Math.Vector2 {
+    return new Phaser.Math.Vector2(this.p2.x, this.p2.y);
   }
 
   /** Return all four Bézier control points (p0..p3) as world-space vectors. */
