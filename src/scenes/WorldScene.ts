@@ -29,6 +29,12 @@ import { isMobileWidth, scalePx } from '../utils/responsive';
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
 
+/** Map a TrackValidationResult to the EventBus hint state string. */
+function validationHintState(validation: { valid: boolean; requiresTunnel: boolean }): 'ok' | 'warning' | 'error' {
+  if (!validation.valid) return 'error';
+  return validation.requiresTunnel ? 'warning' : 'ok';
+}
+
 /**
  * WorldScene – the persistent main scene for the sandbox world.
  *
@@ -537,7 +543,7 @@ export default class WorldScene extends Phaser.Scene {
     }
     this.reshapeValidationOverlay.strokePath();
 
-    const hintState = validation.valid ? (validation.requiresTunnel ? 'warning' : 'ok') : 'error';
+    const hintState = validationHintState(validation);
     EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
   }
 
@@ -795,7 +801,6 @@ export default class WorldScene extends Phaser.Scene {
     const colour = validation.valid
       ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
       : 0xff4444;
-    const hintState = validation.valid ? (validation.requiresTunnel ? 'warning' : 'ok') : 'error';
 
     this.placeGhostGraphics.clear();
     // Anchor dot
@@ -811,7 +816,7 @@ export default class WorldScene extends Phaser.Scene {
     this.placeGhostGraphics.fillStyle(colour, 0.7);
     this.placeGhostGraphics.fillCircle(wx, wy, 4);
 
-    EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
+    EventBus.emit('ui:validation-hint', { state: validationHintState(validation), message: validation.reason });
   }
 
   // ── Minimap ───────────────────────────────────────────────────────────────

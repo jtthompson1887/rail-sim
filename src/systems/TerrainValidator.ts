@@ -20,6 +20,9 @@ export interface TrackValidationResult {
 
 const TC = GameConfig.TERRAIN;
 
+/** Minimum denominator / curvature value considered numerically non-zero. */
+const CURVATURE_EPSILON = 1e-10;
+
 /**
  * TerrainValidator
  *
@@ -267,9 +270,9 @@ export class TerrainValidator {
       const t = i / sampleCount;
       const { dxdt, dydt, d2xdt2, d2ydt2 } = this.bezierDerivatives(p0, p1, p2, p3, t);
       const denom = Math.pow(dxdt * dxdt + dydt * dydt, 1.5);
-      if (denom < 1e-10) continue; // straight section → infinite radius
+      if (denom < CURVATURE_EPSILON) continue; // straight section → infinite radius
       const kappa = Math.abs(dxdt * d2ydt2 - dydt * d2xdt2) / denom;
-      if (kappa > 1e-10) {
+      if (kappa > CURVATURE_EPSILON) {
         const r = 1 / kappa;
         if (r < minRadius) minRadius = r;
       }
@@ -295,8 +298,7 @@ export class TerrainValidator {
     p1: Phaser.Math.Vector2,
     trackManager: TrackManager,
   ): { aligned: boolean; angleDeg: number } {
-    const snapRadius = 60;
-    const near = trackManager.findEndpointNear(p0, snapRadius);
+    const near = trackManager.findEndpointNear(p0, GameConfig.TRACK.SNAP_RADIUS_PX);
     if (!near) return { aligned: true, angleDeg: 0 };
 
     const proposedDx = p1.x - p0.x;

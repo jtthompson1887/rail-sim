@@ -14,6 +14,18 @@ function chunkKey(x: number, y: number): ChunkKey {
   return `${cx}:${cy}`;
 }
 
+/**
+ * Normalise a curve tangent vector and optionally reverse it.
+ * The `|| 1` fallback safely handles degenerate zero-length tangents that can
+ * arise from a collapsed Bézier curve (all control points coincident). In that
+ * case the returned vector has zero length, which callers treat as "no tangent".
+ */
+function normalizeTangent(fwd: { x: number; y: number }, reverse: boolean): InstanceType<typeof Phaser.Math.Vector2> {
+  const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
+  const sign = reverse ? -1 : 1;
+  return new Phaser.Math.Vector2(sign * fwd.x / len, sign * fwd.y / len);
+}
+
 export default class TrackManager {
   private trackMap: Map<string, RailTrack>;
   private junctionMap: Map<string, Junction>;
@@ -316,8 +328,8 @@ export default class TrackManager {
         bestDist = dStart;
         const fwd = curve.getTangent(0);
         // Outward at start = reverse of forward tangent
-        const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
-        best = { track, tangent: new Phaser.Math.Vector2(-fwd.x / len, -fwd.y / len), isStart: true };
+        const t = normalizeTangent(fwd, true);
+        best = { track, tangent: t, isStart: true };
       }
 
       const endPt = curve.getEndPoint();
@@ -326,8 +338,8 @@ export default class TrackManager {
         bestDist = dEnd;
         const fwd = curve.getTangent(1);
         // Outward at end = forward tangent
-        const len = Math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y) || 1;
-        best = { track, tangent: new Phaser.Math.Vector2(fwd.x / len, fwd.y / len), isStart: false };
+        const t = normalizeTangent(fwd, false);
+        best = { track, tangent: t, isStart: false };
       }
     }
 
