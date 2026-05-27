@@ -15,7 +15,10 @@ import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
 import { SnapSystem } from '../systems/SnapSystem';
-import { CommandStack, DeleteTracksCommand, ReshapeTrackCommand } from '../systems/CommandStack';
+import { CommandStack } from '../systems/CommandStack';
+import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
+import { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
+import { TrackSerializer } from '../utils/TrackSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { AudioManager } from '../managers/AudioManager';
@@ -341,7 +344,7 @@ export default class WorldScene extends Phaser.Scene {
     });
 
     for (const track of tracks) {
-      WorldManager.addTrackDef(this.trackToDef(track));
+      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
     }
 
     const firstTrack = tracks[0];
@@ -520,16 +523,7 @@ export default class WorldScene extends Phaser.Scene {
     const track = this.trackManager.getTrack(trackUUID);
     if (!track) return;
 
-    const curve = track.getCurvePath();
-    const afterDef: TrackDef = {
-      uuid: trackUUID,
-      p0: curve.getStartPoint(),
-      p1: curve.getPoint(0.33),
-      p2: curve.getPoint(0.67),
-      p3: curve.getEndPoint(),
-      isTunnel: track.isTunnel,
-      elevation: track.elevation,
-    };
+    const afterDef: TrackDef = TrackSerializer.toTrackDef(track);
 
     const beforeDef = this.reshapeBeforeDef;
     const cmd = new ReshapeTrackCommand(this.trackManager, trackUUID, beforeDef, afterDef);
@@ -620,7 +614,7 @@ export default class WorldScene extends Phaser.Scene {
       const p3 = curve.getEndPoint();
       const result = this.terrainValidator.canPlaceTrack(p0, p3);
       if (result.valid) {
-        WorldManager.addTrackDef(this.trackToDef(track));
+        WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
         validTracks.push(track);
       } else {
         invalidCount++;
@@ -639,7 +633,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private deleteSelectedTracks(uuids: string[]): void {
     if (uuids.length === 0) return;
-    const cmd = new DeleteTracksCommand(this.trackManager, uuids);
+    const cmd = new DeleteTracksCommand(this.trackManager, this, uuids);
     this.commandStack.push(cmd);
     this.selectionManager.clearSelection();
     for (const uuid of uuids) {
@@ -732,7 +726,7 @@ export default class WorldScene extends Phaser.Scene {
         EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
       } else {
         const track = new RailTrack(this, p0, p1, p2, p3);
-        WorldManager.addTrackDef(this.trackToDef(track));
+        WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
         EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
         EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
       }
@@ -839,18 +833,4 @@ export default class WorldScene extends Phaser.Scene {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private trackToDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
-    return {
-      uuid: track.getUUID(),
-      p0: { x: p0.x, y: p0.y },
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      p3: { x: p3.x, y: p3.y },
-    };
-  }
 }

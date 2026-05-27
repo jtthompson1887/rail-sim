@@ -157,7 +157,7 @@ describe('DeleteTracksCommand', () => {
     trackManager.addTrack(track);
     const uuid = track.getUUID();
 
-    const cmd = new DeleteTracksCommand(trackManager, [uuid]);
+    const cmd = new DeleteTracksCommand(trackManager, scene, [uuid]);
     cmd.execute();
 
     expect(trackManager.getTrack(uuid)).toBeFalsy();
@@ -168,7 +168,7 @@ describe('DeleteTracksCommand', () => {
     trackManager.addTrack(track);
     const uuid = track.getUUID();
 
-    const cmd = new DeleteTracksCommand(trackManager, [uuid]);
+    const cmd = new DeleteTracksCommand(trackManager, scene, [uuid]);
     cmd.execute();
     cmd.undo();
 
@@ -176,7 +176,7 @@ describe('DeleteTracksCommand', () => {
   });
 
   it('ignores unknown UUIDs without throwing', () => {
-    const cmd = new DeleteTracksCommand(trackManager, ['nonexistent-uuid']);
+    const cmd = new DeleteTracksCommand(trackManager, scene, ['nonexistent-uuid']);
     expect(() => cmd.execute()).not.toThrow();
   });
 });
