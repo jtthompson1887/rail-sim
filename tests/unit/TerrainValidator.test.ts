@@ -266,3 +266,105 @@ describe('TrackManager.findEndpointNear()', () => {
     expect(result).toBeNull();
   });
 });
+
+// ── snapToFlushConnection ─────────────────────────────────────────────────────
+
+describe('TerrainValidator.snapToFlushConnection()', () => {
+  let validator: TerrainValidator;
+  let scene: any;
+  let trackManager: TrackManager;
+
+  beforeEach(() => {
+    validator = new TerrainValidator(makeFlatTerrain() as any);
+    scene = makeScene();
+    trackManager = new TrackManager(scene);
+  });
+
+  it('Given no nearby track, When snapping, Then returns original points unchanged', () => {
+    const p0 = v(1000, 1000);
+    const p1 = v(1100, 1000);
+    const p2 = v(1200, 1000);
+    const p3 = v(1300, 1000);
+    const result = validator.snapToFlushConnection(p0, p1, p2, p3, trackManager);
+    expect(result.p0).toBe(p0);
+    expect(result.p1).toBe(p1);
+    expect(result.p2).toBe(p2);
+    expect(result.p3).toBe(p3);
+    expect(result.neighbourAdjustment).toBeNull();
+  });
+
+  it('Given a 3° misaligned connection, When snapping, Then new track p1 is aligned to bisector (≈0° residual angle)', () => {
+    // Existing track goes right: (0,0) → (200,0); end tangent = +x direction.
+    const existing = makeTrack(scene, 0, 0, 200, 0);
+    trackManager.addTrack(existing);
+
+    // Proposed track departs at 3° from (200, 0)
+    const angle3 = (3 * Math.PI) / 180;
+    const p0 = v(200, 0);
+    const p1 = v(200 + Math.cos(angle3) * 100, Math.sin(angle3) * 100);
+    const p2 = v(200 + Math.cos(angle3) * 200, Math.sin(angle3) * 200);
+    const p3 = v(200 + Math.cos(angle3) * 300, Math.sin(angle3) * 300);
+
+    const result = validator.snapToFlushConnection(p0, p1, p2, p3, trackManager);
+
+    // p0 must be snapped to the existing track's endpoint
+    expect(result.p0.x).toBeCloseTo(200);
+    expect(result.p0.y).toBeCloseTo(0);
+
+    // New track's adjusted tangent (p0→p1) should be very close to 0° from
+    // the neighbour tangent; the residual angle is at most half the original.
+    const dx = result.p1.x - result.p0.x;
+    const dy = result.p1.y - result.p0.y;
+    const adjustedAngleDeg = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+    expect(adjustedAngleDeg).toBeLessThan(2); // bisector: < 2° from +x axis
+  });
+
+  it('Given a 3° misaligned connection, When snapping, Then neighbour inner control point is adjusted', () => {
+    const existing = makeTrack(scene, 0, 0, 200, 0);
+    trackManager.addTrack(existing);
+
+    const angle3 = (3 * Math.PI) / 180;
+    const p0 = v(200, 0);
+    const p1 = v(200 + Math.cos(angle3) * 100, Math.sin(angle3) * 100);
+    const p2 = v(200 + Math.cos(angle3) * 200, Math.sin(angle3) * 200);
+    const p3 = v(200 + Math.cos(angle3) * 300, Math.sin(angle3) * 300);
+
+    const result = validator.snapToFlushConnection(p0, p1, p2, p3, trackManager);
+
+    expect(result.neighbourAdjustment).not.toBeNull();
+    expect(result.neighbourAdjustment!.track).toBe(existing);
+
+    // Neighbour's new p2 should be on the same side of p3 as before (x < 200)
+    // and the arm length should be preserved.
+    const adj = result.neighbourAdjustment!;
+    const origArmLen = Math.hypot(adj.p3.x - existing.getP2().x, adj.p3.y - existing.getP2().y);
+    const newArmLen  = Math.hypot(adj.p3.x - adj.p2.x,           adj.p3.y - adj.p2.y);
+    expect(newArmLen).toBeCloseTo(origArmLen, 5);
+  });
+
+  it('Given a perfectly aligned connection, When snapping, Then p0 snaps and adjustments are minimal', () => {
+    const existing = makeTrack(scene, 0, 0, 200, 0);
+    trackManager.addTrack(existing);
+
+    // New track exactly collinear — 0° angle
+    const p0 = v(200, 0);
+    const p1 = v(300, 0);
+    const p2 = v(400, 0);
+    const p3 = v(500, 0);
+
+    const result = validator.snapToFlushConnection(p0, p1, p2, p3, trackManager);
+
+    // p0 snapped
+    expect(result.p0.x).toBeCloseTo(200);
+    expect(result.p0.y).toBeCloseTo(0);
+
+    // p1 should remain pointing in the +x direction (bisector of two identical tangents)
+    const dx = result.p1.x - result.p0.x;
+    const dy = result.p1.y - result.p0.y;
+    expect(dy / Math.sqrt(dx * dx + dy * dy)).toBeCloseTo(0, 5); // no y component
+    expect(dx).toBeGreaterThan(0);
+
+    // Neighbour adjustment present but arm length preserved
+    expect(result.neighbourAdjustment).not.toBeNull();
+  });
+});

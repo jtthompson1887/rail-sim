@@ -771,7 +771,22 @@ export default class WorldScene extends Phaser.Scene {
       if (!validation.valid) {
         EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
       } else {
-        const track = new RailTrack(this, p0, p1, p2, p3);
+        // Snap connection to flush (0°) when a neighbouring endpoint is within
+        // snap distance. Both the new track and the neighbour are slightly
+        // adjusted toward the bisector of their current tangents.
+        const snap = this.terrainValidator.snapToFlushConnection(p0, p1, p2, p3, this.trackManager);
+
+        if (snap.neighbourAdjustment) {
+          const { track: nTrack, p0: nP0, p1: nP1, p2: nP2, p3: nP3 } = snap.neighbourAdjustment;
+          // Validate the adjusted neighbour still satisfies all constraints.
+          const nCheck = this.terrainValidator.canPlaceTrack(nP0, nP1, nP2, nP3, 20, null);
+          if (nCheck.valid) {
+            nTrack.updateTrackVectors(nP0, nP1, nP2, nP3);
+            WorldManager.updateTrackDef(this.trackToDef(nTrack));
+          }
+        }
+
+        const track = new RailTrack(this, snap.p0, snap.p1, snap.p2, snap.p3);
         WorldManager.addTrackDef(this.trackToDef(track));
         EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
         EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });

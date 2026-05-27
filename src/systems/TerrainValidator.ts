@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import type { TerrainGenerator } from './TerrainGenerator';
 import { GameConfig } from '../config/GameConfig';
 import type TrackManager from '../managers/TrackManager';
+import type RailTrack from '../entities/RailTrack';
 
 /** Machine-readable classification of why a track is invalid (or 'ok' when valid). */
 export type ValidationReasonCode = 'ok' | 'slope' | 'cliff' | 'curvature' | 'misaligned';
@@ -316,6 +317,122 @@ export class TerrainValidator {
     return {
       aligned: angleDeg <= GameConfig.TRACK.ALIGNMENT_ANGLE_DEG,
       angleDeg,
+    };
+  }
+
+  /**
+   * Slightly adjust the control points of both the new track and its neighbour
+   * to create a perfectly flush (0° angle) connection at the join point.
+   *
+   * Call this **after** `canPlaceTrack` returns valid, immediately before
+   * committing the track. The method:
+   *
+   * 1. Snaps `p0` exactly to the neighbour's endpoint.
+   * 2. Rotates `p1` (new track inner control) toward the **bisector** of the
+   *    two current tangents, keeping the arm length unchanged.
+   * 3. Rotates the neighbour's inner control point (p2 when connecting at its
+   *    end, p1 when connecting at its start) toward the same bisector.
+   *
+   * The bisector approach distributes the correction equally between both
+   * tracks so neither makes a change larger than half the original angle.
+   * When no neighbouring endpoint is within snap distance the input points
+   * are returned unchanged.
+   *
+   * @param p0  Start of the proposed track (connection point).
+   * @param p1  First inner control point of the proposed track.
+   * @param p2  Second inner control point (unchanged).
+   * @param p3  End of the proposed track (unchanged).
+   * @param trackManager  Used to locate the neighbouring endpoint.
+   */
+  snapToFlushConnection(
+    p0: Phaser.Math.Vector2,
+    p1: Phaser.Math.Vector2,
+    p2: Phaser.Math.Vector2,
+    p3: Phaser.Math.Vector2,
+    trackManager: TrackManager,
+  ): {
+    p0: Phaser.Math.Vector2;
+    p1: Phaser.Math.Vector2;
+    p2: Phaser.Math.Vector2;
+    p3: Phaser.Math.Vector2;
+    neighbourAdjustment: {
+      track: RailTrack;
+      p0: Phaser.Math.Vector2;
+      p1: Phaser.Math.Vector2;
+      p2: Phaser.Math.Vector2;
+      p3: Phaser.Math.Vector2;
+    } | null;
+  } {
+    const near = trackManager.findEndpointNear(p0, GameConfig.TRACK.SNAP_RADIUS_PX);
+    if (!near) return { p0, p1, p2, p3, neighbourAdjustment: null };
+
+    // ── Snap p0 exactly to the neighbour's endpoint ──────────────────────────
+    const nCurve = near.track.getCurvePath();
+    const neighbourEndpt = near.isStart ? nCurve.getStartPoint() : nCurve.getEndPoint();
+    const newP0 = new Phaser.Math.Vector2(neighbourEndpt.x, neighbourEndpt.y);
+
+    // ── Proposed forward tangent (p0→p1) ─────────────────────────────────────
+    const proposedDx = p1.x - p0.x;
+    const proposedDy = p1.y - p0.y;
+    const proposedLen = Math.sqrt(proposedDx * proposedDx + proposedDy * proposedDy);
+    if (proposedLen < 1e-6) return { p0, p1, p2, p3, neighbourAdjustment: null };
+
+    const pTx = proposedDx / proposedLen;
+    const pTy = proposedDy / proposedLen;
+
+    // ── Bisector of the two unit tangents ─────────────────────────────────────
+    // near.tangent is the neighbour's outward tangent (pointing away from that track).
+    // The new track's outward tangent at p0 equals its forward tangent (p0→p1).
+    const nTx = near.tangent.x;
+    const nTy = near.tangent.y;
+    const bx = pTx + nTx;
+    const by = pTy + nTy;
+    const bLen = Math.sqrt(bx * bx + by * by);
+    // If tangents are anti-parallel the bisector is undefined — leave unchanged.
+    if (bLen < 1e-6) return { p0, p1, p2, p3, neighbourAdjustment: null };
+    const bisectTx = bx / bLen;
+    const bisectTy = by / bLen;
+
+    // ── Adjust new track p1: same arm length, new direction ───────────────────
+    const newP1 = new Phaser.Math.Vector2(
+      newP0.x + proposedLen * bisectTx,
+      newP0.y + proposedLen * bisectTy,
+    );
+
+    // ── Adjust neighbour's inner control point ────────────────────────────────
+    // The spline tangent at the endpoint is determined by the direction from
+    // the second-to-last knot to the endpoint (for the end) or from the
+    // endpoint to the second knot (for the start). We preserve arm length and
+    // rotate the knot to produce the bisector tangent direction.
+    let nP0 = new Phaser.Math.Vector2(nCurve.getStartPoint().x, nCurve.getStartPoint().y);
+    let nP1 = near.track.getP1();
+    let nP2 = near.track.getP2();
+    let nP3 = new Phaser.Math.Vector2(nCurve.getEndPoint().x, nCurve.getEndPoint().y);
+
+    if (near.isStart) {
+      // Outward tangent at start = -(p1 − p0).  We want -(nP1 − nP0) = bisector.
+      // So nP1 = nP0 − armLen × bisector.
+      const armLen = Math.hypot(nP1.x - nP0.x, nP1.y - nP0.y);
+      nP1 = new Phaser.Math.Vector2(
+        nP0.x - armLen * bisectTx,
+        nP0.y - armLen * bisectTy,
+      );
+    } else {
+      // Outward tangent at end = (p3 − p2).  We want (nP3 − nP2) = bisector × armLen.
+      // So nP2 = nP3 − armLen × bisector.
+      const armLen = Math.hypot(nP3.x - nP2.x, nP3.y - nP2.y);
+      nP2 = new Phaser.Math.Vector2(
+        nP3.x - armLen * bisectTx,
+        nP3.y - armLen * bisectTy,
+      );
+    }
+
+    return {
+      p0: newP0,
+      p1: newP1,
+      p2,
+      p3,
+      neighbourAdjustment: { track: near.track, p0: nP0, p1: nP1, p2: nP2, p3: nP3 },
     };
   }
 
