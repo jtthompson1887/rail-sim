@@ -57,6 +57,8 @@ export class WorldContentLoader {
     track.setUUID(def.uuid);
     if (def.isTunnel)  track.isTunnel  = def.isTunnel;
     if (def.elevation) track.elevation = def.elevation;
+    // Rebuild after loading tunnel/elevation flags so renderer tint/alpha is correct.
+    track.updateTrackVectors(p0, p1, p2, p3);
     this.trackManager.addTrack(track);
   }
 
