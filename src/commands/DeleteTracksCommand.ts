@@ -41,7 +41,7 @@ export class DeleteTracksCommand implements Command {
       const p2 = new Phaser.Math.Vector2(def.p2.x, def.p2.y);
       const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
       const track = new RailTrack(this.scene, p0, p1, p2, p3);
-      (track as any).uuid = def.uuid;
+      track.setUUID(def.uuid);
       if (def.isTunnel) track.isTunnel = def.isTunnel;
       if (def.elevation) track.elevation = def.elevation;
       this.trackManager.addTrack(track);

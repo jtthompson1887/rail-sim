@@ -30,7 +30,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private p1!: Phaser.Math.Vector2;
   private p2!: Phaser.Math.Vector2;
   private curve!: Path;
-  private readonly uuid: string;
+  private uuid: string;
   private renderer: RailTrackRenderer;
   /** Port-based connection model. */
   private _startPort!: TrackPort;
@@ -63,8 +63,8 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     this.totalDistance = this.curve.getLength();
     this.iterations = Math.max(1, Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale)));
     // Update port positions
-    (this._startPort as any).position = { x: p0.x, y: p0.y };
-    (this._endPort as any).position = { x: p3.x, y: p3.y };
+    this._startPort.position = { x: p0.x, y: p0.y };
+    this._endPort.position = { x: p3.x, y: p3.y };
     this.renderer.rebuild();
   }
 
@@ -143,6 +143,11 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
 
   getUUID(): string {
     return this.uuid;
+  }
+
+  /** Override the auto-generated UUID (used when restoring from saved state). */
+  setUUID(uuid: string): void {
+    this.uuid = uuid;
   }
 
   hasNext(): boolean {
