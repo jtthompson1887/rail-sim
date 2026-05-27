@@ -38,6 +38,12 @@ import { CompleterTool } from '../systems/tools/CompleterTool';
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
 
+/** Map a TrackValidationResult to the EventBus hint state string. */
+function validationHintState(validation: { valid: boolean; requiresTunnel: boolean }): 'ok' | 'warning' | 'error' {
+  if (!validation.valid) return 'error';
+  return validation.requiresTunnel ? 'warning' : 'ok';
+}
+
 /**
  * WorldScene – the persistent main scene for the sandbox world.
  *
@@ -63,6 +69,8 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
+  /** Per-track validation overlay drawn during handle-drag reshape. */
+  private reshapeValidationOverlay!: Phaser.GameObjects.Graphics;
   private contentLoader!: WorldContentLoader;
   private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
@@ -143,6 +151,7 @@ export default class WorldScene extends Phaser.Scene {
     this.terrainChunkManager = new TerrainChunkManager(this, this.terrainGenerator, biome);
     this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
     this.terrainOverlay      = this.add.graphics().setDepth(-50).setScrollFactor(0);
+    this.reshapeValidationOverlay = this.add.graphics().setDepth(595);
 
     this.trackManager    = new TrackManager(this);
     this.cameraController = new CameraController(this);
@@ -205,6 +214,7 @@ export default class WorldScene extends Phaser.Scene {
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
+      this.reshapeValidationOverlay.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
     });
@@ -418,6 +428,33 @@ export default class WorldScene extends Phaser.Scene {
 
     // Move the handle game object to follow
     go.setPosition(nx, ny);
+
+    // Live validation overlay
+    const validation = this.terrainValidator.canPlaceTrack(
+      newCps.p0, newCps.p1, newCps.p2, newCps.p3,
+      20,
+      this.trackManager,
+    );
+    const overlayColour = validation.valid
+      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
+      : 0xff4444;
+    this.reshapeValidationOverlay.clear();
+    this.reshapeValidationOverlay.lineStyle(4, overlayColour, 0.7);
+    this.reshapeValidationOverlay.beginPath();
+    this.reshapeValidationOverlay.moveTo(newCps.p0.x, newCps.p0.y);
+    // Approximate curve with linear samples
+    const STEPS = 20;
+    for (let i = 1; i <= STEPS; i++) {
+      const t = i / STEPS;
+      const it = 1 - t;
+      const bx = it*it*it*newCps.p0.x + 3*it*it*t*newCps.p1.x + 3*it*t*t*newCps.p2.x + t*t*t*newCps.p3.x;
+      const by = it*it*it*newCps.p0.y + 3*it*it*t*newCps.p1.y + 3*it*t*t*newCps.p2.y + t*t*t*newCps.p3.y;
+      this.reshapeValidationOverlay.lineTo(bx, by);
+    }
+    this.reshapeValidationOverlay.strokePath();
+
+    const hintState = validationHintState(validation);
+    EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
   }
 
   private handleHandleDragEnd(go: any): void {
@@ -425,11 +462,17 @@ export default class WorldScene extends Phaser.Scene {
     if (!trackUUID || !this.reshapeBeforeDef) {
       this.reshapingTrackUUID = null;
       this.reshapeBeforeDef = null;
+      this.reshapeValidationOverlay.clear();
+      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
       return;
     }
 
     const track = this.trackManager.getTrack(trackUUID);
-    if (!track) return;
+    if (!track) {
+      this.reshapeValidationOverlay.clear();
+      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
+      return;
+    }
 
     const afterDef: TrackDef = TrackSerializer.toTrackDef(track);
 
@@ -441,6 +484,8 @@ export default class WorldScene extends Phaser.Scene {
 
     this.reshapingTrackUUID = null;
     this.reshapeBeforeDef = null;
+    this.reshapeValidationOverlay.clear();
+    EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
