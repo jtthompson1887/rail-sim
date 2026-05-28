@@ -21,6 +21,9 @@ export class TrainManager {
   private cameraController: CameraController;
   private trackSolvers: Map<Train, TrackFlowSolver> = new Map();
 
+  /** Map from Matter body game objects back to their owning Train. */
+  static readonly bodyToTrain: WeakMap<Phaser.GameObjects.GameObject, Train> = new WeakMap();
+
   constructor(scene: Phaser.Scene, trackManager: TrackManager, cameraController: CameraController) {
     this.scene = scene;
     this.trackManager = trackManager;
@@ -32,6 +35,7 @@ export class TrainManager {
     train.getMatterBody().angle = 90;
     this.trains.push(train);
     this.trackSolvers.set(train, new TrackFlowSolver(this.trackManager, train));
+    TrainManager.bodyToTrain.set(train.getMatterBody(), train);
     GameStateManager.setActiveTrains(this.trains.length);
     return train;
   }

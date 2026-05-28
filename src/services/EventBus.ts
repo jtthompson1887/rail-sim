@@ -45,7 +45,7 @@ interface EventMap {
   'ui:toolbar-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
   'editor:delete-tracks': { uuids: string[] };
-  /** Emitted by WorldScene during track placement / reshaping to show live validation feedback. */
+  /** Emitted by editor tools during track placement / reshaping to show live validation feedback. */
   'ui:validation-hint': { state: 'ok' | 'warning' | 'error'; message: string };
 }
 

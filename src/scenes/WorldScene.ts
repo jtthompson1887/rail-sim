@@ -1,6 +1,4 @@
 import Phaser from 'phaser';
-import RailTrack from '../entities/RailTrack';
-import { Station } from '../entities/Station';
 import TrackManager from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
@@ -8,23 +6,34 @@ import { GameStateManager } from '../managers/GameStateManager';
 import { SceneryManager } from '../managers/SceneryManager';
 import { CameraController } from '../systems/CameraController';
 import { InputManager } from '../systems/InputManager';
-import TrackGenerator from '../systems/TrackGenerator';
 import { JunctionCreatorSystem } from '../systems/JunctionCreatorSystem';
 import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
 import { SnapSystem } from '../systems/SnapSystem';
-import { CommandStack, DeleteTracksCommand, ReshapeTrackCommand } from '../systems/CommandStack';
+import { CommandStack } from '../systems/CommandStack';
+import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
+import { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
+import { TrackSerializer } from '../utils/TrackSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
+import { WorldContentLoader } from '../services/WorldContentLoader';
 import { AudioManager } from '../managers/AudioManager';
+import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
-import type { TrackDef, WorldStationDef } from '../config/WorldData';
+import type { TrackDef } from '../config/WorldData';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
+import type { IEditorTool } from '../systems/tools/IEditorTool';
+import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
+import { EraserTool } from '../systems/tools/EraserTool';
+import { GeneratorTool } from '../systems/tools/GeneratorTool';
+import { SelectTool } from '../systems/tools/SelectTool';
+import { JunctionTool } from '../systems/tools/JunctionTool';
+import { CompleterTool } from '../systems/tools/CompleterTool';
 
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
@@ -60,22 +69,20 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
-  private stations: Station[] = [];
-  private minimapGraphics!: Phaser.GameObjects.Graphics;
+  /** Per-track validation overlay drawn during handle-drag reshape. */
+  private reshapeValidationOverlay!: Phaser.GameObjects.Graphics;
+  private contentLoader!: WorldContentLoader;
+  private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
   private activeTool: CreateTool = 'none';
+
+  // ── Tool system ──────────────────────────────────────────────────────────
+  private toolRegistry!: Map<CreateTool, IEditorTool>;
+  private activeEditorTool: IEditorTool | null = null;
 
   // ── Drag-reshape state ─────────────────────────────────────────────────────
   private reshapingTrackUUID: string | null = null;
   private reshapeBeforeDef: TrackDef | null = null;
-
-  // ── Place-track tool state ─────────────────────────────────────────────────
-  /** Anchor world point for the first click of the place-track tool. */
-  private placeAnchor: Phaser.Math.Vector2 | null = null;
-  /** Ghost graphics drawn between anchor and cursor while placing a track. */
-  private placeGhostGraphics!: Phaser.GameObjects.Graphics;
-  /** Per-track validation overlay drawn during handle-drag reshape. */
-  private reshapeValidationOverlay!: Phaser.GameObjects.Graphics;
 
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
@@ -83,17 +90,15 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
+    // Deactivate previous tool
+    this.activeEditorTool?.deactivate();
     this.activeTool = tool;
+    this.activeEditorTool = this.toolRegistry.get(tool) ?? null;
+    this.activeEditorTool?.activate();
     this.updateToolCursor(tool);
     // Block camera pan for all tools except pan/none/terrain-view
     const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
     this.cameraController.setBlockPan(freePanTools.indexOf(tool) === -1);
-    // Cancel place-track state when switching away
-    if (tool !== 'place-track') {
-      this.placeAnchor = null;
-      this.placeGhostGraphics?.clear();
-      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
-    }
   };
 
   private readonly undoHandler = () => { this.commandStack.undo(); };
@@ -102,7 +107,8 @@ export default class WorldScene extends Phaser.Scene {
   private readonly generatorRunHandler = () => {
     const ptr = this.input.activePointer;
     const world = this.cameras.main.getWorldPoint(ptr.x, ptr.y);
-    this.runGeneratorAt(world.x, world.y);
+    const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
+    generatorTool?.runGeneratorAt(world.x, world.y);
   };
   private readonly saveHandler = () => { WorldManager.save(); EventBus.emit('ui:toolbar-save-state', { state: 'saved' }); };
 
@@ -145,6 +151,7 @@ export default class WorldScene extends Phaser.Scene {
     this.terrainChunkManager = new TerrainChunkManager(this, this.terrainGenerator, biome);
     this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
     this.terrainOverlay      = this.add.graphics().setDepth(-50).setScrollFactor(0);
+    this.reshapeValidationOverlay = this.add.graphics().setDepth(595);
 
     this.trackManager    = new TrackManager(this);
     this.cameraController = new CameraController(this);
@@ -163,18 +170,23 @@ export default class WorldScene extends Phaser.Scene {
     };
     this.selectionManager = new SelectionManager(this, this.trackManager, this.snapSystem);
 
+    // ── Tool registry ──────────────────────────────────────────────────────
+    this.toolRegistry = new Map<CreateTool, IEditorTool>();
+    this.toolRegistry.set('place-track', new PlaceTrackTool(this, this.trackManager, this.snapSystem, this.terrainValidator));
+    this.toolRegistry.set('eraser', new EraserTool(this, this.trackManager, this.commandStack, this.selectionManager));
+    this.toolRegistry.set('generator', new GeneratorTool(this, this.trackManager, this.snapSystem, this.terrainValidator));
+    this.toolRegistry.set('select', new SelectTool(this.selectionManager));
+    this.toolRegistry.set('junction', new JunctionTool(this.junctionCreator));
+    this.toolRegistry.set('completer', new CompleterTool(this.trackCompleter));
+
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
     this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
 
-    // Ghost graphics for the place-track tool (drawn in world space)
-    this.placeGhostGraphics = this.add.graphics().setDepth(598);
-    // Validation colour overlay drawn during reshape drags (world space)
-    this.reshapeValidationOverlay = this.add.graphics().setDepth(595);
-
-    this.minimapGraphics = this.add.graphics().setDepth(601).setScrollFactor(0);
+    this.minimapRenderer = new MinimapRenderer(this, this.trackManager, this.selectionManager);
 
     // Load world content
-    this.loadWorldContent();
+    this.contentLoader = new WorldContentLoader(this, this.trackManager, this.trainManager);
+    this.contentLoader.load();
 
     // HUD and debug overlays
     this.scene.launch('HUDScene');
@@ -200,9 +212,9 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('generator:run',       this.generatorRunHandler);
       EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
       this.scene.stop(EDITOR_UI_SCENE_KEY);
-      this.junctionCreator.destroy();
-      this.trackCompleter.destroy();
+      for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
+      this.reshapeValidationOverlay.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
     });
@@ -259,9 +271,8 @@ export default class WorldScene extends Phaser.Scene {
     this.updateTerrainOverlay();
 
     if (GameStateManager.worldMode === 'create') {
-      this.trackCompleter.update(delta);
-      this.selectionManager.update(delta);
-      this.drawMinimap();
+      this.activeEditorTool?.update(delta);
+      this.minimapRenderer.draw();
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
@@ -272,7 +283,7 @@ export default class WorldScene extends Phaser.Scene {
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
       this.inputManager.handleTrainMovement(this.trainManager.selectedTrain);
       this.trainManager.update(time, delta);
-      this.stations.forEach((s) => s.update(delta));
+      this.contentLoader.stations.forEach((s) => s.update(delta));
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
@@ -290,79 +301,6 @@ export default class WorldScene extends Phaser.Scene {
     this.terrainOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
   }
 
-  // ── World content loading ─────────────────────────────────────────────────
-
-  private loadWorldContent(): void {
-    const world = WorldManager.world;
-    if (!world || world.tracks.length === 0) {
-      this.generateStarterTrack();
-      return;
-    }
-
-    for (const def of world.tracks)   { this.restoreTrack(def); }
-    for (const def of world.stations) { this.restoreStation(def); }
-
-    for (const def of world.trains) {
-      const track = this.trackManager.getTrack(def.trackUUID);
-      if (!track) continue;
-      const train = this.trainManager.createInitialTrain();
-      const pt = track.getCurvePath().getPoint(def.trackT);
-      train.getMatterBody().setPosition(pt.x, pt.y);
-      train.currentTrack = track;
-    }
-  }
-
-  private restoreTrack(def: TrackDef): void {
-    const p0 = new Phaser.Math.Vector2(def.p0.x, def.p0.y);
-    const p1 = new Phaser.Math.Vector2(def.p1.x, def.p1.y);
-    const p2 = new Phaser.Math.Vector2(def.p2.x, def.p2.y);
-    const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
-    const track = new RailTrack(this, p0, p1, p2, p3);
-    (track as any).uuid = def.uuid;
-    if (def.isTunnel)  track.isTunnel  = def.isTunnel;
-    if (def.elevation) track.elevation = def.elevation;
-    this.trackManager.addTrack(track);
-  }
-
-  private restoreStation(def: WorldStationDef): void {
-    const track = this.trackManager.getTrack(def.trackUUID);
-    if (!track) return;
-    const stationDef = {
-      id: def.id,
-      name: def.name,
-      trackSectionIndex: 0,
-      trackT: def.trackT,
-      passengerSpawnRate: def.passengerSpawnRate,
-    };
-    this.stations.push(new Station(this, stationDef, track));
-  }
-
-  private generateStarterTrack(): void {
-    const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
-    const tracks = generator.generateTracks({
-      startPoint: new Phaser.Math.Vector2(0, 500),
-      startAngle: Phaser.Math.DegToRad(90),
-      sections: GameConfig.GENERATION.MAIN.SECTIONS,
-      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
-      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
-      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
-      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
-      smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
-    });
-
-    for (const track of tracks) {
-      WorldManager.addTrackDef(this.trackToDef(track));
-    }
-
-    const firstTrack = tracks[0];
-    const startPt = firstTrack.getCurvePath().getPoint(0);
-    const train = this.trainManager.createInitialTrain();
-    train.getMatterBody().setPosition(startPt.x, startPt.y);
-    train.currentTrack = firstTrack;
-    train.getMatterBody().setAngle(firstTrack.getTrackAngle(train.getMatterBody()));
-  }
-
   // ── Mode switching ────────────────────────────────────────────────────────
 
   private activateCreateMode(): void {
@@ -375,7 +313,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private activatePlayMode(): void {
-    this.minimapGraphics.clear();
+    this.minimapRenderer.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });
@@ -406,46 +344,19 @@ export default class WorldScene extends Phaser.Scene {
     }
 
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-
-    if (this.activeTool === 'junction') {
-      this.junctionCreator.onPointerDown(pointer);
-    } else if (this.activeTool === 'completer') {
-      this.trackCompleter.onPointerDown(pointer);
-    } else if (this.activeTool === 'select') {
-      const shift = pointer.event ? (pointer.event as MouseEvent).shiftKey : false;
-      this.selectionManager.onPointerDown(world.x, world.y, shift);
-    } else if (this.activeTool === 'eraser') {
-      this.eraseAtPoint(world.x, world.y);
-    } else if (this.activeTool === 'generator') {
-      this.runGeneratorAt(world.x, world.y);
-    } else if (this.activeTool === 'place-track') {
-      this.handlePlaceTrackDown(world.x, world.y);
-    }
+    this.activeEditorTool?.onPointerDown(world.x, world.y, pointer);
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-
-    if (this.activeTool === 'junction') {
-      this.junctionCreator.onPointerMove(pointer);
-    } else if (this.activeTool === 'select') {
-      this.selectionManager.onPointerMove(world.x, world.y);
-    } else if (this.activeTool === 'place-track') {
-      this.updatePlaceTrackGhost(world.x, world.y);
-    }
+    this.activeEditorTool?.onPointerMove(world.x, world.y, pointer);
   }
 
   private handlePointerUp(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const shift  = pointer.event ? (pointer.event as MouseEvent).shiftKey : false;
-
-    if (this.activeTool === 'junction') {
-      this.junctionCreator.onPointerUp(pointer);
-    } else if (this.activeTool === 'select') {
-      this.selectionManager.onPointerUp(world.x, world.y, shift);
-    }
+    this.activeEditorTool?.onPointerUp(world.x, world.y, pointer);
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -478,9 +389,8 @@ export default class WorldScene extends Phaser.Scene {
         return;
       }
 
-      if (this.activeTool === 'completer') {
-        this.trackCompleter.onKeyDown(event);
-      }
+      // Delegate to active tool
+      this.activeEditorTool?.onKeyDown(event);
 
       if (event.code === 'Delete') {
         const uuids = this.selectionManager.selectedUUIDs;
@@ -552,22 +462,19 @@ export default class WorldScene extends Phaser.Scene {
     if (!trackUUID || !this.reshapeBeforeDef) {
       this.reshapingTrackUUID = null;
       this.reshapeBeforeDef = null;
+      this.reshapeValidationOverlay.clear();
+      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
       return;
     }
 
     const track = this.trackManager.getTrack(trackUUID);
-    if (!track) return;
+    if (!track) {
+      this.reshapeValidationOverlay.clear();
+      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
+      return;
+    }
 
-    const curve = track.getCurvePath();
-    const afterDef: TrackDef = {
-      uuid: trackUUID,
-      p0: curve.getStartPoint(),
-      p1: curve.getPoint(0.33),
-      p2: curve.getPoint(0.67),
-      p3: curve.getEndPoint(),
-      isTunnel: track.isTunnel,
-      elevation: track.elevation,
-    };
+    const afterDef: TrackDef = TrackSerializer.toTrackDef(track);
 
     const beforeDef = this.reshapeBeforeDef;
     const cmd = new ReshapeTrackCommand(this.trackManager, trackUUID, beforeDef, afterDef);
@@ -581,105 +488,11 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
   }
 
-  // ── Eraser tool ────────────────────────────────────────────────────────────
-
-  private eraseAtPoint(wx: number, wy: number): void {
-    const track = this.trackManager.getClosestTrack({ x: wx, y: wy }, 80);
-    if (!track) return;
-    this.deleteSelectedTracks([track.getUUID()]);
-  }
-
-  // ── Generator tool ─────────────────────────────────────────────────────────
-
-  private runGeneratorAt(wx: number, wy: number): void {
-    const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
-    const params = editorUI?.getGeneratorParams() ?? {
-      sections: GameConfig.GENERATION.MAIN.SECTIONS,
-      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
-      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
-      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
-      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
-    };
-    const generator = new TrackGenerator(this, this.trackManager, WorldManager.world?.seed);
-
-    // Check if we are near an existing track's endpoint — if so, continue from it
-    const SNAP_DIST = 120;
-    let tracks: RailTrack[] = [];
-    let continuedFromEndpoint = false;
-
-    const allTracks = this.trackManager.getAllTracks();
-    for (const track of allTracks) {
-      const curve = track.getCurvePath();
-      const start = curve.getStartPoint();
-      const end   = curve.getEndPoint();
-      if (Phaser.Math.Distance.Between(wx, wy, start.x, start.y) < SNAP_DIST ||
-          Phaser.Math.Distance.Between(wx, wy, end.x,   end.y)   < SNAP_DIST) {
-        // continueFromTrack may not exist in all versions — use generateTracks from endpoint
-        const isStart = Phaser.Math.Distance.Between(wx, wy, start.x, start.y) <
-                        Phaser.Math.Distance.Between(wx, wy, end.x,   end.y);
-        const nearPt   = isStart ? start : end;
-        const farPt    = isStart ? end   : start;
-        const angle    = Math.atan2(nearPt.y - farPt.y, nearPt.x - farPt.x);
-        tracks = generator.generateTracks({
-          startPoint: new Phaser.Math.Vector2(nearPt.x, nearPt.y),
-          startAngle: angle,
-          sections:         params.sections,
-          minLength:        params.minLength,
-          maxLength:        params.maxLength,
-          curveProbability: params.curveProbability,
-          minCurveAngle:    params.minCurveAngle,
-          maxCurveAngle:    params.maxCurveAngle,
-          smoothness:       GameConfig.GENERATION.MAIN.SMOOTHNESS,
-        });
-        continuedFromEndpoint = true;
-        break;
-      }
-    }
-
-    if (!continuedFromEndpoint) {
-      tracks = generator.generateTracks({
-        startPoint: new Phaser.Math.Vector2(wx, wy),
-        startAngle: Phaser.Math.DegToRad(90),
-        sections:         params.sections,
-        minLength:        params.minLength,
-        maxLength:        params.maxLength,
-        curveProbability: params.curveProbability,
-        minCurveAngle:    params.minCurveAngle,
-        maxCurveAngle:    params.maxCurveAngle,
-        smoothness:       GameConfig.GENERATION.MAIN.SMOOTHNESS,
-      });
-    }
-
-    // Filter out any tracks that fail terrain validation
-    const validTracks: RailTrack[] = [];
-    let invalidCount = 0;
-    for (const track of tracks) {
-      const curve = track.getCurvePath();
-      const p0 = curve.getStartPoint();
-      const p3 = curve.getEndPoint();
-      const result = this.terrainValidator.canPlaceTrack(p0, p3);
-      if (result.valid) {
-        WorldManager.addTrackDef(this.trackToDef(track));
-        validTracks.push(track);
-      } else {
-        invalidCount++;
-        this.trackManager.removeTrack(track.getUUID());
-      }
-    }
-
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    const msg = invalidCount > 0
-      ? `Generated ${validTracks.length} tracks (${invalidCount} blocked by terrain)`
-      : `Generated ${validTracks.length} tracks`;
-    EventBus.emit('ui:toast', { message: msg, type: invalidCount > 0 ? 'warning' : 'success' });
-  }
-
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   private deleteSelectedTracks(uuids: string[]): void {
     if (uuids.length === 0) return;
-    const cmd = new DeleteTracksCommand(this.trackManager, uuids);
+    const cmd = new DeleteTracksCommand(this.trackManager, this, uuids);
     this.commandStack.push(cmd);
     this.selectionManager.clearSelection();
     for (const uuid of uuids) {
@@ -698,7 +511,8 @@ export default class WorldScene extends Phaser.Scene {
     } else {
       items = buildEmptyContextItems(pointer.x, pointer.y, (sx, sy) => {
         const world = this.cameras.main.getWorldPoint(sx, sy);
-        this.runGeneratorAt(world.x, world.y);
+        const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
+        generatorTool?.runGeneratorAt(world.x, world.y);
       });
     }
     if (items.length > 0) {
@@ -722,165 +536,6 @@ export default class WorldScene extends Phaser.Scene {
       none:            'default',
     };
     this.cameraController.setCursor(cursors[tool] ?? 'default');
-  }
-
-  // ── Place-track tool ───────────────────────────────────────────────────────
-
-  /**
-   * Handle a click for the place-track tool.
-   * First click: sets the anchor.
-   * Second click: creates a straight cubic Bézier (linearly interpolated control
-   * points) from anchor to cursor, validates against terrain, then adds it.
-   */
-  private handlePlaceTrackDown(wx: number, wy: number): void {
-    if (!this.placeAnchor) {
-      // First click — snap to a nearby endpoint if possible
-      const SNAP = 60;
-      let snappedX = wx;
-      let snappedY = wy;
-      for (const track of this.trackManager.getAllTracks()) {
-        const curve = track.getCurvePath();
-        const s = curve.getStartPoint();
-        const e = curve.getEndPoint();
-        if (Phaser.Math.Distance.Between(wx, wy, s.x, s.y) < SNAP) {
-          snappedX = s.x; snappedY = s.y; break;
-        }
-        if (Phaser.Math.Distance.Between(wx, wy, e.x, e.y) < SNAP) {
-          snappedX = e.x; snappedY = e.y; break;
-        }
-      }
-      this.placeAnchor = new Phaser.Math.Vector2(snappedX, snappedY);
-      // Draw a small dot at the anchor
-      this.placeGhostGraphics.clear();
-      this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
-      this.placeGhostGraphics.fillCircle(snappedX, snappedY, 6);
-    } else {
-      // Second click — commit the track
-      const p0 = this.placeAnchor;
-      const p3 = new Phaser.Math.Vector2(wx, wy);
-      const p1 = new Phaser.Math.Vector2(
-        p0.x + (p3.x - p0.x) / 3,
-        p0.y + (p3.y - p0.y) / 3,
-      );
-      const p2 = new Phaser.Math.Vector2(
-        p0.x + (p3.x - p0.x) * 2 / 3,
-        p0.y + (p3.y - p0.y) * 2 / 3,
-      );
-
-      const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
-      if (!validation.valid) {
-        EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
-      } else {
-        // Snap connection to flush (0°) when a neighbouring endpoint is within
-        // snap distance. Both the new track and the neighbour are slightly
-        // adjusted toward the bisector of their current tangents.
-        const snap = this.terrainValidator.snapToFlushConnection(p0, p1, p2, p3, this.trackManager);
-
-        if (snap.neighbourAdjustment) {
-          const { track: nTrack, p0: nP0, p1: nP1, p2: nP2, p3: nP3 } = snap.neighbourAdjustment;
-          // Validate the adjusted neighbour still satisfies all constraints.
-          const nCheck = this.terrainValidator.canPlaceTrack(nP0, nP1, nP2, nP3, 20, null);
-          if (nCheck.valid) {
-            nTrack.updateTrackVectors(nP0, nP1, nP2, nP3);
-            WorldManager.updateTrackDef(this.trackToDef(nTrack));
-          }
-        }
-
-        const track = new RailTrack(this, snap.p0, snap.p1, snap.p2, snap.p3);
-        WorldManager.addTrackDef(this.trackToDef(track));
-        EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-        EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
-      }
-
-      // Reset for next placement — anchor stays at p3 for chaining
-      this.placeAnchor = new Phaser.Math.Vector2(wx, wy);
-      this.placeGhostGraphics.clear();
-      this.placeGhostGraphics.fillStyle(0x4ad5ff, 0.9);
-      this.placeGhostGraphics.fillCircle(wx, wy, 6);
-    }
-  }
-
-  /** Redraw the ghost preview line from the anchor to the current cursor position. */
-  private updatePlaceTrackGhost(wx: number, wy: number): void {
-    if (!this.placeAnchor) return;
-
-    // Compute straight Bézier control points (same as placement would commit)
-    const p0 = this.placeAnchor;
-    const p3 = new Phaser.Math.Vector2(wx, wy);
-    const dx = p3.x - p0.x;
-    const dy = p3.y - p0.y;
-    const p1 = new Phaser.Math.Vector2(p0.x + dx / 3, p0.y + dy / 3);
-    const p2 = new Phaser.Math.Vector2(p0.x + dx * 2 / 3, p0.y + dy * 2 / 3);
-
-    const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
-    const colour = validation.valid
-      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
-      : 0xff4444;
-
-    this.placeGhostGraphics.clear();
-    // Anchor dot
-    this.placeGhostGraphics.fillStyle(colour, 0.9);
-    this.placeGhostGraphics.fillCircle(p0.x, p0.y, 6);
-    // Ghost line
-    this.placeGhostGraphics.lineStyle(2, colour, 0.6);
-    this.placeGhostGraphics.beginPath();
-    this.placeGhostGraphics.moveTo(p0.x, p0.y);
-    this.placeGhostGraphics.lineTo(wx, wy);
-    this.placeGhostGraphics.strokePath();
-    // Cursor dot
-    this.placeGhostGraphics.fillStyle(colour, 0.7);
-    this.placeGhostGraphics.fillCircle(wx, wy, 4);
-
-    EventBus.emit('ui:validation-hint', { state: validationHintState(validation), message: validation.reason });
-  }
-
-  // ── Minimap ───────────────────────────────────────────────────────────────
-
-  private drawMinimap(): void {
-    const { width, height } = this.scale;
-    const mapW = 180;
-    const mapH = 120;
-    // Offset right to avoid overlapping the properties panel
-    const mapX = width - mapW - 16;
-    const mapY = height - mapH - 16;
-
-    this.minimapGraphics.clear();
-    this.minimapGraphics.fillStyle(0x06131f, 0.85);
-    this.minimapGraphics.fillRect(mapX, mapY, mapW, mapH);
-    this.minimapGraphics.lineStyle(1, 0xffffff, 0.3);
-    this.minimapGraphics.strokeRect(mapX, mapY, mapW, mapH);
-
-    const tracks = this.trackManager.tracks;
-    if (tracks.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const t of tracks) {
-      const mid = t.getCurvePath().getPoint(0.5);
-      minX = Math.min(minX, mid.x); maxX = Math.max(maxX, mid.x);
-      minY = Math.min(minY, mid.y); maxY = Math.max(maxY, mid.y);
-    }
-    const worldW = Math.max(maxX - minX, 1);
-    const worldH = Math.max(maxY - minY, 1);
-
-    const toMap = (x: number, y: number) => ({
-      mx: mapX + ((x - minX) / worldW) * mapW,
-      my: mapY + ((y - minY) / worldH) * mapH,
-    });
-
-    for (const t of tracks) {
-      const isConnected = t.hasNext() || t.hasPrevious();
-      const isSelected  = this.selectionManager.isSelected(t.getUUID());
-      const color = isSelected ? 0xffffff : (isConnected ? 0x00ff88 : 0xff4444);
-      this.minimapGraphics.lineStyle(isSelected ? 2 : 1, color, 0.9);
-      this.minimapGraphics.beginPath();
-      for (let i = 0; i <= 8; i++) {
-        const pt = t.getCurvePath().getPoint(i / 8);
-        const { mx, my } = toMap(pt.x, pt.y);
-        if (i === 0) this.minimapGraphics.moveTo(mx, my);
-        else this.minimapGraphics.lineTo(mx, my);
-      }
-      this.minimapGraphics.strokePath();
-    }
   }
 
   // ── HUD / debug publishing ────────────────────────────────────────────────
@@ -910,18 +565,4 @@ export default class WorldScene extends Phaser.Scene {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private trackToDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
-    return {
-      uuid: track.getUUID(),
-      p0: { x: p0.x, y: p0.y },
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      p3: { x: p3.x, y: p3.y },
-    };
-  }
 }

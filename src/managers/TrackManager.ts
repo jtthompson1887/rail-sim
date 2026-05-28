@@ -262,7 +262,7 @@ export default class TrackManager {
   getClosestTrack(point: Vector2Like, limit: number = 0, currentTrack?: RailTrack): RailTrack | null {
     let closestTrack: RailTrack | null = null;
     let closestDistance = Infinity;
-    const tempTrackable = new Phaser.GameObjects.Sprite(this.scene, point.x, point.y, '');
+    const tempTrackable = { x: point.x, y: point.y, body: { position: { x: point.x, y: point.y } } };
 
     for (const track of this.trackMap.values()) {
       const junctions = this.getJunctionsForTrack(track);
@@ -287,7 +287,6 @@ export default class TrackManager {
       }
     }
 
-    tempTrackable.destroy();
     return closestTrack;
   }
 
