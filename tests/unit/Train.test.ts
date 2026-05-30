@@ -33,6 +33,11 @@ describe('Train', () => {
       expect(t1.getUUID()).not.toBe(t2.getUUID());
     });
 
+    it('accepts an optional existing UUID', () => {
+      const train = new Train(scene, 0, 0, 'preset-uuid');
+      expect(train.getUUID()).toBe('preset-uuid');
+    });
+
     it('starts with enginePower = 0', () => {
       const train = new Train(scene, 0, 0);
       expect(train.enginePower).toBe(0);

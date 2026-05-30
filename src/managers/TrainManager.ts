@@ -30,8 +30,8 @@ export class TrainManager {
     this.cameraController = cameraController;
   }
 
-  createInitialTrain(): Train {
-    const train = new Train(this.scene, 0, 500);
+  createInitialTrain(id?: string): Train {
+    const train = new Train(this.scene, 0, 500, id);
     train.getMatterBody().angle = 90;
     this.trains.push(train);
     this.trackSolvers.set(train, new TrackFlowSolver(this.trackManager, train));

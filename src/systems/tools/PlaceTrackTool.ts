@@ -45,9 +45,17 @@ export class PlaceTrackTool implements IEditorTool {
   }
 
   deactivate(): void {
+    this.cancel();
+  }
+
+  cancel(): void {
     this.placeAnchor = null;
     this.ghostGraphics.clear();
     EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
+  }
+
+  wantsPointerButton(button: number): boolean {
+    return button === 0; // Only left button
   }
 
   onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {

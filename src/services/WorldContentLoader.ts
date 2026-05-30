@@ -6,6 +6,7 @@ import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
 import TrackGenerator from '../systems/TrackGenerator';
 import { TrackSerializer } from '../utils/TrackSerializer';
+import { TrainSerializer } from '../utils/TrainSerializer';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef } from '../config/WorldData';
 
@@ -41,10 +42,14 @@ export class WorldContentLoader {
     for (const def of world.trains) {
       const track = this.trackManager.getTrack(def.trackUUID);
       if (!track) continue;
-      const train = this.trainManager.createInitialTrain();
+      const train = this.trainManager.createInitialTrain(def.id);
       const pt = track.getCurvePath().getPoint(def.trackT);
       train.getMatterBody().setPosition(pt.x, pt.y);
       train.currentTrack = track;
+      train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
+      if (def.passengers > 0) {
+        train.boardPassengers(def.passengers);
+      }
     }
   }
 
@@ -99,5 +104,10 @@ export class WorldContentLoader {
     train.getMatterBody().setPosition(startPt.x, startPt.y);
     train.currentTrack = firstTrack;
     train.getMatterBody().setAngle(firstTrack.getTrackAngle(train.getMatterBody()));
+
+    const trainDef = TrainSerializer.toTrainDef(train);
+    if (trainDef) {
+      WorldManager.addTrainDef(trainDef);
+    }
   }
 }

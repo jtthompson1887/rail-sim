@@ -46,6 +46,7 @@ export class TrackCompleterSystem {
   private firstEndpoint: Endpoint | null = null;
   private pendingTracks: RailTrack[] = [];
   private isAwaitingConfirm: boolean = false;
+  private isActive: boolean = false;
 
   // Pulsing animation accumulator
   private pulseT: number = 0;
@@ -61,7 +62,16 @@ export class TrackCompleterSystem {
 
   // ── Update loop (call from WorldScene.update while in create mode) ─────────
 
+  setActive(active: boolean): void {
+    this.isActive = active;
+    if (!active) {
+      this.endpointDots.clear();
+      this.endpointGraphics.clear();
+    }
+  }
+
   update(delta: number): void {
+    if (!this.isActive) return;
     this.pulseT += delta / 600;
     this.drawOpenEndpoints();
   }

@@ -80,6 +80,25 @@ describe('TrainManager.deselectTrain()', () => {
   });
 });
 
+describe('TrainManager.createInitialTrain()', () => {
+  const { makeScene } = require('../../__mocks__/phaser');
+
+  it('creates a train with a random UUID when no id is provided', () => {
+    const scene = makeScene();
+    const manager = new TrainManager(scene, {} as any, {} as any);
+    const train = manager.createInitialTrain();
+    expect(typeof train.getUUID()).toBe('string');
+    expect(train.getUUID().length).toBeGreaterThan(0);
+  });
+
+  it('creates a train with the provided UUID', () => {
+    const scene = makeScene();
+    const manager = new TrainManager(scene, {} as any, {} as any);
+    const train = manager.createInitialTrain('my-train-id');
+    expect(train.getUUID()).toBe('my-train-id');
+  });
+});
+
 describe('TrainManager.tryRecoverDerailedTrain()', () => {
   it('returns false when train is not derailed', () => {
     const trackManager = { getClosestTrack: jest.fn() } as any;

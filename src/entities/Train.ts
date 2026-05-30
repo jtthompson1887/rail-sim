@@ -24,12 +24,12 @@ export default class Train extends Phaser.GameObjects.Container {
   readonly passengerCapacity: number = 20;
   public debugGraphics!: Phaser.GameObjects.Graphics;
 
-  constructor(scene: Phaser.Scene, x: number, y: number) {
+  constructor(scene: Phaser.Scene, x: number, y: number, id?: string) {
     super(scene);
     this.scene = scene;
     this.scene.add.existing(this);
     this.texture = 'train1';
-    this.uuid = crypto.randomUUID();
+    this.uuid = id ?? crypto.randomUUID();
     this._pidControllerFront = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);

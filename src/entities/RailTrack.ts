@@ -136,12 +136,14 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     return new Phaser.Math.Vector2(this.p2.x, this.p2.y);
   }
 
-  /** Return all four Bézier control points (p0..p3) as world-space vectors. */
+  /** Return all four Bézier control points (p0..p3) as world-space vectors.
+   * Returns the true stored control points (p1, p2), not sampled points.
+   */
   getControlPoints(): { p0: Phaser.Math.Vector2; p1: Phaser.Math.Vector2; p2: Phaser.Math.Vector2; p3: Phaser.Math.Vector2 } {
     return {
-      p0: this.curve.getStartPoint() as Phaser.Math.Vector2,
-      p1: this.curve.getPoint(0.33) as Phaser.Math.Vector2,
-      p2: this.curve.getPoint(0.67) as Phaser.Math.Vector2,
+      p0: new Phaser.Math.Vector2(this.p0.x, this.p0.y),
+      p1: new Phaser.Math.Vector2(this.p1.x, this.p1.y),
+      p2: new Phaser.Math.Vector2(this.p2.x, this.p2.y),
       p3: this.curve.getEndPoint() as Phaser.Math.Vector2,
     };
   }

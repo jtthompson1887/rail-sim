@@ -279,4 +279,190 @@ describe('TrackManager', () => {
       expect(hasConnection).toBe(true);
     });
   });
+
+  describe('graph integrity', () => {
+    describe('removeTrack', () => {
+      it('clears next connection from neighbouring track when removed', () => {
+        const Phaser = require('phaser');
+        // Create two connected tracks
+        const t1 = makeTrack(scene, 0, 0, 100, 0);
+        const t2 = makeTrack(scene, 100, 0, 200, 0);
+        const uuid1 = manager.addTrack(t1);
+        const uuid2 = manager.addTrack(t2);
+
+        // Verify they connected
+        expect(t1.getNext()).toBe(t2);
+        expect(t2.getPrevious()).toBe(t1);
+
+        // Remove the second track
+        manager.removeTrack(uuid2);
+
+        // First track should no longer have t2 as next
+        expect(t1.getNext()).toBeUndefined();
+      });
+
+      it('clears previous connection from neighbouring track when removed', () => {
+        const Phaser = require('phaser');
+        const t1 = makeTrack(scene, 0, 0, 100, 0);
+        const t2 = makeTrack(scene, 100, 0, 200, 0);
+        const uuid1 = manager.addTrack(t1);
+        const uuid2 = manager.addTrack(t2);
+
+        expect(t1.getNext()).toBe(t2);
+        expect(t2.getPrevious()).toBe(t1);
+
+        manager.removeTrack(uuid1);
+
+        expect(t2.getPrevious()).toBeUndefined();
+      });
+
+      it('leaves unconnected tracks unaffected when another track is removed', () => {
+        const t1 = makeTrack(scene, 0, 0, 100, 0);
+        const t2 = makeTrack(scene, 500, 0, 600, 0); // Far away, won't connect
+        const uuid1 = manager.addTrack(t1);
+        const uuid2 = manager.addTrack(t2);
+
+        expect(t1.getNext()).toBeUndefined();
+        expect(t2.getPrevious()).toBeUndefined();
+
+        manager.removeTrack(uuid1);
+
+        // t2 should still exist and have no connections
+        expect(manager.getTrack(uuid2)).toBe(t2);
+        expect(t2.getPrevious()).toBeUndefined();
+      });
+    });
+
+    describe('updateTrackVectors', () => {
+      it('updates track vectors and maintains connections', () => {
+        const Phaser = require('phaser');
+        const t1 = makeTrack(scene, 0, 0, 100, 0);
+        const uuid = manager.addTrack(t1);
+
+        // Update the track
+        const result = manager.updateTrackVectors(
+          uuid,
+          new Phaser.Math.Vector2(200, 0),
+          new Phaser.Math.Vector2(233, 0),
+          new Phaser.Math.Vector2(266, 0),
+          new Phaser.Math.Vector2(300, 0),
+        );
+
+        // Should succeed
+        expect(result).toBe(true);
+
+        // Track should still be retrievable
+        expect(manager.getTrack(uuid)).toBe(t1);
+
+        // Track geometry should be updated
+        const start = t1.getCurvePath().getStartPoint();
+        expect(start.x).toBe(200);
+      });
+
+      it('returns false for unknown UUID', () => {
+        const Phaser = require('phaser');
+        const result = manager.updateTrackVectors(
+          'nonexistent-uuid',
+          new Phaser.Math.Vector2(0, 0),
+          new Phaser.Math.Vector2(33, 0),
+          new Phaser.Math.Vector2(66, 0),
+          new Phaser.Math.Vector2(100, 0),
+        );
+        expect(result).toBe(false);
+      });
+
+      it('reconnects track to new neighbours after moving', () => {
+        const Phaser = require('phaser');
+        // Create two separate tracks far apart (5000px separation)
+        const t1 = makeTrack(scene, 0, 0, 100, 0);
+        const t2 = makeTrack(scene, 5000, 0, 5100, 0);
+        const uuid1 = manager.addTrack(t1);
+        const uuid2 = manager.addTrack(t2);
+
+        // Initially not connected
+        expect(t1.getNext()).not.toBe(t2);
+
+        // Move t1 to connect with t2
+        manager.updateTrackVectors(
+          uuid1,
+          new Phaser.Math.Vector2(4900, 0),
+          new Phaser.Math.Vector2(4933, 0),
+          new Phaser.Math.Vector2(4966, 0),
+          new Phaser.Math.Vector2(5000, 0), // Connects to t2 start
+        );
+
+        // Should now be connected
+        expect(t1.getNext()).toBe(t2);
+        expect(t2.getPrevious()).toBe(t1);
+      });
+    });
+
+    describe('createJunctionFromBranches', () => {
+      it('creates exactly one junction and uses provided branch tracks', () => {
+        const Phaser = require('phaser');
+        // Create main track
+        const mainUuid = manager.createStraightTrack({ x: 0, y: 0 }, { x: 500, y: 0 });
+        const mainTrack = manager.getTrack(mainUuid)!;
+
+        // Create branch tracks manually
+        const splitPoint = new Phaser.Math.Vector2(250, 0);
+        const leftEnd = new Phaser.Math.Vector2(300, -50);
+        const rightEnd = new Phaser.Math.Vector2(300, 50);
+        const leftTrack = new RailTrack(
+          scene,
+          splitPoint,
+          new Phaser.Math.Vector2(260, -15),
+          new Phaser.Math.Vector2(290, -40),
+          leftEnd,
+        );
+        const rightTrack = new RailTrack(
+          scene,
+          splitPoint,
+          new Phaser.Math.Vector2(260, 15),
+          new Phaser.Math.Vector2(290, 40),
+          rightEnd,
+        );
+
+        // Create junction using pre-made branches
+        const junction = manager.createJunctionFromBranches(mainUuid, 0.5, leftTrack, rightTrack);
+
+        expect(junction).not.toBeNull();
+        expect(manager.junctions).toHaveLength(1);
+        expect(manager.getTrack(leftTrack.getUUID())).toBe(leftTrack);
+        expect(manager.getTrack(rightTrack.getUUID())).toBe(rightTrack);
+      });
+
+      it('does not duplicate branch tracks if they are already in manager', () => {
+        const Phaser = require('phaser');
+        const mainUuid = manager.createStraightTrack({ x: 0, y: 0 }, { x: 500, y: 0 });
+
+        const splitPoint = new Phaser.Math.Vector2(250, 0);
+        const leftTrack = new RailTrack(
+          scene,
+          splitPoint,
+          new Phaser.Math.Vector2(260, -15),
+          new Phaser.Math.Vector2(290, -40),
+          new Phaser.Math.Vector2(300, -50),
+        );
+        const rightTrack = new RailTrack(
+          scene,
+          splitPoint,
+          new Phaser.Math.Vector2(260, 15),
+          new Phaser.Math.Vector2(290, 40),
+          new Phaser.Math.Vector2(300, 50),
+        );
+
+        // Add branches to manager first
+        manager.addTrack(leftTrack);
+        manager.addTrack(rightTrack);
+        const trackCount = manager.tracks.length;
+
+        // Create junction - should not add duplicates
+        manager.createJunctionFromBranches(mainUuid, 0.5, leftTrack, rightTrack);
+
+        expect(manager.tracks.length).toBe(trackCount); // No new tracks added
+        expect(manager.junctions).toHaveLength(1);
+      });
+    });
+  });
 });

@@ -166,10 +166,71 @@ export default class TrackManager {
   removeTrack(uuid: string): boolean {
     const track = this.trackMap.get(uuid);
     if (!track) return false;
+
+    // Clear connections from neighbouring tracks before removal
+    const prev = track.getPrevious();
+    const next = track.getNext();
+    if (prev) {
+      if (prev.getNext?.() === track) prev.setNext?.(undefined);
+      if ((prev as any).getNextTrack?.() === track) (prev as any).setNextTrack?.(undefined);
+    }
+    if (next) {
+      if (next.getPrevious?.() === track) next.setPrevious?.(undefined);
+      if ((next as any).getPreviousTrack?.() === track) (next as any).setPreviousTrack?.(undefined);
+    }
+
     this.deindexTrack(track);
     track.destroy();
     this.trackMap.delete(uuid);
     this.visibleTracks.delete(uuid);
+    return true;
+  }
+
+  /**
+   * Update a track's control points and maintain the spatial index.
+   * Call this instead of track.updateTrackVectors() directly to ensure
+   * the chunk index stays consistent when the track moves.
+   */
+  updateTrackVectors(
+    uuid: string,
+    p0: Phaser.Math.Vector2,
+    p1: Phaser.Math.Vector2,
+    p2: Phaser.Math.Vector2,
+    p3: Phaser.Math.Vector2,
+  ): boolean {
+    const track = this.trackMap.get(uuid);
+    if (!track) return false;
+
+    // Compute old chunk key BEFORE updating (while we still have old midpoint)
+    const oldMid = track.getCurvePath().getPoint(0.5);
+    const oldKey = chunkKey(oldMid.x, oldMid.y);
+
+    // Update the track geometry
+    track.updateTrackVectors(p0, p1, p2, p3);
+
+    // Remove from old chunk
+    this.chunkIndex.get(oldKey)?.delete(uuid);
+
+    // Re-index by new midpoint
+    this.indexTrack(track);
+
+    // Reconnect to nearby tracks (in case the endpoints moved)
+    const prev = track.getPrevious();
+    const next = track.getNext();
+
+    // Clear old connections
+    if (prev) {
+      if (prev.getNext?.() === track) prev.setNext?.(undefined);
+    }
+    if (next) {
+      if (next.getPrevious?.() === track) next.setPrevious?.(undefined);
+    }
+    track.setPrevious(undefined);
+    track.setNext(undefined);
+
+    // Re-establish connections
+    this.setupTrackConnections(track);
+
     return true;
   }
 
@@ -247,8 +308,30 @@ export default class TrackManager {
     const rightControl2 = new Phaser.Math.Vector2(rightEnd.x - Math.cos(mainAngle + rightAngle) * length * 0.3, rightEnd.y - Math.sin(mainAngle + rightAngle) * length * 0.3);
     const rightTrack = new RailTrack(this.scene, junctionPoint, rightControl1, rightControl2, rightEnd);
 
-    this.addTrack(leftTrack);
-    this.addTrack(rightTrack);
+    return this.createJunctionFromBranches(trackUUID, position, leftTrack, rightTrack);
+  }
+
+  /**
+   * Create a junction using pre-constructed branch tracks.
+   * Use this when the branch tracks have already been created and validated
+   * (e.g., by JunctionCreatorSystem with optimized angles).
+   */
+  createJunctionFromBranches(
+    trackUUID: string,
+    position: number,
+    leftTrack: RailTrack,
+    rightTrack: RailTrack,
+  ): Junction | null {
+    const track = this.trackMap.get(trackUUID);
+    if (!track) return null;
+
+    // Only add tracks if they're not already in the manager
+    if (!this.trackMap.has(leftTrack.getUUID())) {
+      this.addTrack(leftTrack);
+    }
+    if (!this.trackMap.has(rightTrack.getUUID())) {
+      this.addTrack(rightTrack);
+    }
 
     const junction = new Junction(this.scene, track, leftTrack, rightTrack, position);
     this.addJunction(junction);

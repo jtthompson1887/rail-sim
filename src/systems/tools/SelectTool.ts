@@ -14,6 +14,12 @@ export class SelectTool implements IEditorTool {
 
   activate(): void {}
   deactivate(): void {}
+  cancel(): void {
+    this.selectionManager.clearSelection();
+  }
+  wantsPointerButton(button: number): boolean {
+    return button === 0; // Only left button
+  }
 
   onPointerDown(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void {
     const shift = pointer.event ? (pointer.event as MouseEvent).shiftKey : false;

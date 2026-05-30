@@ -74,6 +74,8 @@ export default class MenuScene extends Phaser.Scene {
     train1.currentTrack = firstTrack;
     train1Body.setAngle(firstTrack.getTrackAngle(train1Body));
     train1.enginePower = 38;
+    train1.setDepth(50);
+    train1.getMatterBody().setDepth(50);
     this.trains.push(train1);
     this.trainStartTracks.push(firstTrack);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train1));
@@ -88,6 +90,8 @@ export default class MenuScene extends Phaser.Scene {
     train2.currentTrack = secondTrack;
     train2Body.setAngle(secondTrack.getTrackAngle(train2Body));
     train2.enginePower = 42;
+    train2.setDepth(50);
+    train2.getMatterBody().setDepth(50);
     this.trains.push(train2);
     this.trainStartTracks.push(secondTrack);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train2));

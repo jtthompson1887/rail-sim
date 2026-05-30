@@ -12,8 +12,18 @@ export class CompleterTool implements IEditorTool {
     this.system = system;
   }
 
-  activate(): void {}
-  deactivate(): void {}
+  activate(): void {
+    this.system.setActive(true);
+  }
+  deactivate(): void {
+    this.system.setActive(false);
+  }
+  cancel(): void {
+    this.system.cancel();
+  }
+  wantsPointerButton(button: number): boolean {
+    return button === 0; // Only left button
+  }
 
   onPointerDown(_worldX: number, _worldY: number, pointer: Phaser.Input.Pointer): void {
     this.system.onPointerDown(pointer);

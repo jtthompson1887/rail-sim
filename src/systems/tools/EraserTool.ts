@@ -29,6 +29,10 @@ export class EraserTool implements IEditorTool {
 
   activate(): void {}
   deactivate(): void {}
+  cancel(): void {}
+  wantsPointerButton(button: number): boolean {
+    return button === 0; // Only left button
+  }
 
   onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
     const track = this.trackManager.getClosestTrack({ x: worldX, y: worldY }, 80);

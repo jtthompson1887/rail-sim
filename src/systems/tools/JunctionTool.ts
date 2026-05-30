@@ -14,6 +14,13 @@ export class JunctionTool implements IEditorTool {
 
   activate(): void {}
   deactivate(): void {}
+  cancel(): void {
+    this.system.cancel();
+  }
+  wantsPointerButton(button: number): boolean {
+    // Junction tool uses right-click for selection rectangle
+    return button === 0 || button === 2;
+  }
 
   onPointerDown(_worldX: number, _worldY: number, pointer: Phaser.Input.Pointer): void {
     this.system.onPointerDown(pointer);

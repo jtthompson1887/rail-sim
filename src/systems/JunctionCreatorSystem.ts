@@ -73,6 +73,12 @@ export class JunctionCreatorSystem {
     this.executeCreation(this.selectionRect);
   }
 
+  cancel(): void {
+    this.isDragging = false;
+    this.selectionGraphics.clear();
+    this.highlightGraphics.clear();
+  }
+
   destroy(): void {
     this.selectionGraphics.destroy();
     this.highlightGraphics.destroy();
@@ -211,7 +217,7 @@ export class JunctionCreatorSystem {
       rightTrack.elevation = rightResult.averageElevation;
     }
 
-    const junction = this.trackManager.createJunction(track.getUUID(), t);
+    const junction = this.trackManager.createJunctionFromBranches(track.getUUID(), t, leftTrack, rightTrack);
     if (!junction) return null;
 
     // Persist to WorldManager

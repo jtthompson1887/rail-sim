@@ -16,6 +16,7 @@ import { CommandStack } from '../systems/CommandStack';
 import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
 import { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
 import { TrackSerializer } from '../utils/TrackSerializer';
+import { TrainSerializer } from '../utils/TrainSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { WorldContentLoader } from '../services/WorldContentLoader';
@@ -90,27 +91,28 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
-    // Deactivate previous tool
+    // Cancel and deactivate previous tool
+    this.activeEditorTool?.cancel();
     this.activeEditorTool?.deactivate();
     this.activeTool = tool;
     this.activeEditorTool = this.toolRegistry.get(tool) ?? null;
     this.activeEditorTool?.activate();
     this.updateToolCursor(tool);
-    // Block camera pan for all tools except pan/none/terrain-view
+    // Set input lock owner: camera owns for free-pan tools, editor-tool owns for editing tools
     const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
-    this.cameraController.setBlockPan(freePanTools.indexOf(tool) === -1);
+    const lockOwner: import('../systems/tools/IEditorTool').InputLockOwner =
+      freePanTools.indexOf(tool) === -1 ? 'editor-tool' : 'camera';
+    this.cameraController.setInputLockOwner(lockOwner);
   };
 
   private readonly undoHandler = () => { this.commandStack.undo(); };
   private readonly redoHandler = () => { this.commandStack.redo(); };
   /** Triggered by the 'Generate' button in PropertiesPanel when generator tool is active. */
   private readonly generatorRunHandler = () => {
-    const ptr = this.input.activePointer;
-    const world = this.cameras.main.getWorldPoint(ptr.x, ptr.y);
     const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
-    generatorTool?.runGeneratorAt(world.x, world.y);
+    generatorTool?.runFromAnchor();
   };
-  private readonly saveHandler = () => { WorldManager.save(); EventBus.emit('ui:toolbar-save-state', { state: 'saved' }); };
+  private readonly saveHandler = () => { this.syncTrainsAndSave(); EventBus.emit('ui:toolbar-save-state', { state: 'saved' }); };
 
   private readonly modeToggleHandler = () => {
     if (GameStateManager.worldMode === 'create') {
@@ -156,7 +158,7 @@ export default class WorldScene extends Phaser.Scene {
     this.trackManager    = new TrackManager(this);
     this.cameraController = new CameraController(this);
     this.trainManager    = new TrainManager(this, this.trackManager, this.cameraController);
-    this.inputManager    = new InputManager(this);
+    this.inputManager    = new InputManager(this, this.cameraController);
     this.audioManager    = new AudioManager(this);
     this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager, this.terrainValidator);
     this.trackCompleter  = new TrackCompleterSystem(this, this.trackManager, this.terrainValidator);
@@ -276,7 +278,7 @@ export default class WorldScene extends Phaser.Scene {
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
-        WorldManager.save();
+        this.syncTrainsAndSave();
         EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
       }
       GameStateManager.tick(delta / 1000);
@@ -309,6 +311,14 @@ export default class WorldScene extends Phaser.Scene {
     }
     this.cameraController.stopFollow();
     EventBus.emit('ui:toolbar-visible', { visible: true });
+    this.syncTrainsAndSave();
+  }
+
+  private syncTrainsAndSave(): void {
+    const trainDefs = this.trainManager.trains
+      .map((t) => TrainSerializer.toTrainDef(t))
+      .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
+    WorldManager.setTrainDefs(trainDefs);
     WorldManager.save();
   }
 
@@ -337,9 +347,14 @@ export default class WorldScene extends Phaser.Scene {
     if (GameStateManager.worldMode !== 'create') return;
     if (this.isPointerOverUI(pointer)) return;
 
-    // Right-click → context menu
+    // Right-click: check if active tool wants it first, otherwise show context menu
     if (pointer.rightButtonDown()) {
-      this.showContextMenu(pointer);
+      if (this.activeEditorTool?.wantsPointerButton(2)) {
+        const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        this.activeEditorTool.onPointerDown(world.x, world.y, pointer);
+      } else {
+        this.showContextMenu(pointer);
+      }
       return;
     }
 
@@ -366,7 +381,7 @@ export default class WorldScene extends Phaser.Scene {
         if (event.code === 'KeyZ') { this.commandStack.undo(); return; }
         if (event.code === 'KeyY') { this.commandStack.redo(); return; }
         if (event.code === 'KeyS') {
-          WorldManager.save();
+          this.syncTrainsAndSave();
           EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
           return;
         }
@@ -384,8 +399,10 @@ export default class WorldScene extends Phaser.Scene {
       }
 
       if (event.code === 'Escape') {
-        EventBus.emit('ui:toolbar-select-tool', { tool: 'none' });
+        // Cancel the active tool first, then clear selection
+        this.activeEditorTool?.cancel();
         this.selectionManager.clearSelection();
+        EventBus.emit('ui:toolbar-select-tool', { tool: 'none' });
         return;
       }
 

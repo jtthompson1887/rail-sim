@@ -165,6 +165,23 @@ describe('WorldManager', () => {
       WorldManager.updateTrainDef({ id: 'upd-train', passengers: 42 });
       expect(WorldManager.world!.trains[0].passengers).toBe(42);
     });
+
+    it('replaces all train definitions via setTrainDefs', () => {
+      WorldManager.createNew('Tr');
+      WorldManager.addTrainDef({ id: 'old', trackUUID: 'abc', trackT: 0, passengers: 0 });
+      WorldManager.setTrainDefs([
+        { id: 'new1', trackUUID: 'x', trackT: 0.5, passengers: 5 },
+        { id: 'new2', trackUUID: 'y', trackT: 0.8, passengers: 3 },
+      ]);
+      expect(WorldManager.world!.trains).toHaveLength(2);
+      expect(WorldManager.world!.trains[0].id).toBe('new1');
+      expect(WorldManager.world!.trains[1].id).toBe('new2');
+    });
+
+    it('setTrainDefs does nothing when no world is loaded', () => {
+      WorldManager.reset();
+      expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0 }])).not.toThrow();
+    });
   });
 
   describe('snapshot() / restore()', () => {

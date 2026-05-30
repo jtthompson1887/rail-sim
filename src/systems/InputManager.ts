@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import type Train from '../entities/Train';
 import { TrainManager } from '../managers/TrainManager';
+import { CameraController } from '../systems/CameraController';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 
 export class InputManager {
   private scene: Phaser.Scene;
+  private cameraController: CameraController;
   private wKey: Phaser.Input.Keyboard.Key;
   private sKey: Phaser.Input.Keyboard.Key;
   private clickedGameObject: boolean = false;
@@ -16,8 +18,9 @@ export class InputManager {
   };
   private clickHandlingSetup: boolean = false;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, cameraController: CameraController) {
     this.scene = scene;
+    this.cameraController = cameraController;
     this.wKey = this.scene.input.keyboard.addKey('W');
     this.sKey = this.scene.input.keyboard.addKey('S');
 
@@ -58,6 +61,14 @@ export class InputManager {
       this.clickedGameObject = false;
     });
 
+    // Set input lock to object-drag when dragging starts to suppress camera panning
+    this.scene.input.on('dragstart', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
+      const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
+      if (draggedTrain && draggedTrain.derailed) {
+        this.cameraController.setInputLockOwner('object-drag');
+      }
+    });
+
     this.scene.input.on(
       'drag',
       (_pointer: Phaser.Input.Pointer, gameObject: any, dragX: number, dragY: number) => {
@@ -73,7 +84,12 @@ export class InputManager {
 
     this.scene.input.on('dragend', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
       const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
+      // Release input lock back to camera
+      this.cameraController.setInputLockOwner('camera');
       if (!draggedTrain || !draggedTrain.derailed) return;
+      // Sync body position to game object position before recovery
+      const body = draggedTrain.getMatterBody();
+      body.setPosition(gameObject.x, gameObject.y);
       const recovered = trainManager.tryRecoverDerailedTrain(draggedTrain);
       if (recovered) {
         EventBus.emit('ui:toast', { message: 'Train re-railed', type: 'success' });

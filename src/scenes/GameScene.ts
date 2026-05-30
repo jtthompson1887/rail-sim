@@ -53,7 +53,7 @@ export default class GameScene extends Phaser.Scene {
     this.trackManager = new TrackManager(this);
     this.cameraController = new CameraController(this);
     this.trainManager = new TrainManager(this, this.trackManager, this.cameraController);
-    this.inputManager = new InputManager(this);
+    this.inputManager = new InputManager(this, this.cameraController);
     this.inputManager.setupClickHandling(this.trainManager);
 
     const train = this.trainManager.createInitialTrain();

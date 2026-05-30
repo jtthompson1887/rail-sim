@@ -120,6 +120,12 @@ class WorldManagerClass {
     if (idx !== -1) this._world.trains[idx] = { ...this._world.trains[idx], ...updated };
   }
 
+  /** Replace the entire trains array (used to sync live train state before saving). */
+  setTrainDefs(defs: TrainDef[]): void {
+    if (!this._world) return;
+    this._world.trains = defs;
+  }
+
   // ── Scenery mutations ──────────────────────────────────────────────────────
 
   addSceneryDef(def: SceneryObjectDef): void {
