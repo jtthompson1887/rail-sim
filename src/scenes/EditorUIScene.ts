@@ -41,6 +41,7 @@ export default class EditorUIScene extends Phaser.Scene {
   private initialVisible = true;
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
+  private initialSaveErrorMessage: string | null = null;
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -82,16 +83,19 @@ export default class EditorUIScene extends Phaser.Scene {
     visible?: boolean;
     companyCash?: number;
     saveState?: 'saved' | 'unsaved' | 'saving';
+    saveErrorMessage?: string;
   }): void {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
     this.initialVisible = data.visible ?? true;
     this.initialCash = data.companyCash ?? 0;
     this.initialSaveState = data.saveState ?? 'saved';
+    this.initialSaveErrorMessage = data.saveErrorMessage ?? null;
   }
 
   create(): void {
     this.toolbar = new EditorToolbar(this);
+    this.toolbar.setSaveIndicator(this.initialSaveState);
     this.propertiesPanel = new PropertiesPanel(
       this,
       this.trackManager,
@@ -113,6 +117,15 @@ export default class EditorUIScene extends Phaser.Scene {
     EventBus.on('ui:toolbar-save-state', this.saveStateHandler);
     EventBus.on('ui:toolbar-visible',    this.visibleHandler);
     EventBus.on('ui:toolbar-select-tool', this.selectToolHandler);
+
+    const startupSaveError = this.initialSaveErrorMessage;
+    this.initialSaveErrorMessage = null;
+    if (startupSaveError) {
+      EventBus.emit('ui:toast', {
+        message: startupSaveError,
+        type: 'error',
+      });
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('ui:toolbar-undo-state',  this.undoStateHandler);

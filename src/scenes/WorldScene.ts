@@ -75,6 +75,7 @@ declare global {
 
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
+const SAVE_FAILURE_MESSAGE = 'Could not save the world. Retry Save is available.';
 type SaveState = 'saved' | 'unsaved' | 'saving';
 
 function deletionBlockingReason(
@@ -129,6 +130,8 @@ export default class WorldScene extends Phaser.Scene {
   private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
   private lastReportedSaveState: SaveState = 'saved';
+  private pendingStartupSaveError: string | null = null;
+  private capturingStartupSaveOutcome = false;
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
 
@@ -275,6 +278,9 @@ export default class WorldScene extends Phaser.Scene {
 
   init(data: { worldId?: string; mode?: 'create' | 'play' }): void {
     this.worldLoadFailed = false;
+    this.lastReportedSaveState = 'saved';
+    this.pendingStartupSaveError = null;
+    this.capturingStartupSaveOutcome = false;
     if (data.worldId && !WorldManager.load(data.worldId)) {
       this.worldLoadFailed = true;
       return;
@@ -344,14 +350,6 @@ export default class WorldScene extends Phaser.Scene {
     ));
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
-    this.scene.launch(EDITOR_UI_SCENE_KEY, {
-      trackManager: this.trackManager,
-      selectionManager: this.selectionManager,
-      visible: GameStateManager.worldMode === 'create',
-      companyCash: world?.company.cash ?? 0,
-      saveState: 'saved',
-    });
-
     this.minimapRenderer = new MinimapRenderer(this, this.trackManager, this.selectionManager);
 
     // Load world content
@@ -437,12 +435,25 @@ export default class WorldScene extends Phaser.Scene {
       }
     });
 
-    // Apply initial mode
+    // Apply initial mode before launching the editor UI so launch data reflects
+    // the completed startup persistence outcome.
+    this.capturingStartupSaveOutcome = true;
     if (GameStateManager.worldMode === 'create') {
       this.activateCreateMode();
     } else {
       this.activatePlayMode();
     }
+    this.capturingStartupSaveOutcome = false;
+
+    this.scene.launch(EDITOR_UI_SCENE_KEY, {
+      trackManager: this.trackManager,
+      selectionManager: this.selectionManager,
+      visible: GameStateManager.worldMode === 'create',
+      companyCash: world?.company.cash ?? 0,
+      saveState: this.lastReportedSaveState,
+      saveErrorMessage: this.pendingStartupSaveError ?? undefined,
+    });
+    this.pendingStartupSaveError = null;
 
     this.renderStarterOpportunitySurvey();
     this.applyStarterOpportunityCamera();
@@ -586,10 +597,14 @@ export default class WorldScene extends Phaser.Scene {
     const saved = persist();
     this.reportSaveState(saved ? 'saved' : 'unsaved');
     if (!saved && showFailureToast) {
-      EventBus.emit('ui:toast', {
-        message: 'Could not save the world. Retry Save is available.',
-        type: 'error',
-      });
+      if (this.capturingStartupSaveOutcome) {
+        this.pendingStartupSaveError = SAVE_FAILURE_MESSAGE;
+      } else {
+        EventBus.emit('ui:toast', {
+          message: SAVE_FAILURE_MESSAGE,
+          type: 'error',
+        });
+      }
     }
     return saved;
   }

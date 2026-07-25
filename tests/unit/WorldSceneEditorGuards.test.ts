@@ -7,7 +7,41 @@ import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
 
 describe('WorldScene disabled construction bypass guards', () => {
+  const startupScenes: any[] = [];
+
+  function createStartupScene(
+    mode: 'create' | 'play',
+    saveResult: boolean,
+  ): {
+    scene: any;
+    save: jest.SpyInstance;
+    launch: jest.Mock;
+  } {
+    const world = WorldManager.createNew(`Startup ${mode}`, `startup-${mode}`);
+    const scene = new WorldScene() as any;
+    const graphics = scene.add.graphics();
+    graphics.setScrollFactor = jest.fn().mockReturnValue(graphics);
+    scene.add.graphics = jest.fn().mockReturnValue(graphics);
+    const launch = jest.fn();
+    scene.scene = {
+      launch,
+      start: jest.fn(),
+      stop: jest.fn(),
+      get: jest.fn(),
+    };
+    scene.cameras.main.setZoom = jest.fn();
+    scene.cameras.main.centerOn = jest.fn();
+    scene.init({ worldId: world.id, mode });
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(saveResult);
+    startupScenes.push(scene);
+    scene.create();
+    return { scene, save, launch };
+  }
+
   afterEach(() => {
+    for (const scene of startupScenes.splice(0)) {
+      for (const [, callback] of scene.events.once.mock.calls) callback();
+    }
     jest.restoreAllMocks();
     WorldManager.reset();
     localStorage.clear();
@@ -701,5 +735,45 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     emitSpy.mockRestore();
     saveSpy.mockRestore();
+  });
+
+  it('launches create UI after a successful initial save with completed state', () => {
+    const { save, launch } = createStartupScene('create', true);
+    const editorLaunchIndex = launch.mock.calls
+      .findIndex(([key]) => key === 'EditorUIScene');
+    const editorLaunch = launch.mock.calls[editorLaunchIndex];
+    const launchData = editorLaunch?.[1];
+
+    expect(launchData?.visible).toBe(true);
+    expect(launchData?.companyCash).toBe(WorldManager.world?.company.cash);
+    expect(launchData?.saveState).toBe('saved');
+    expect(launchData?.saveErrorMessage).toBeUndefined();
+    expect(save.mock.invocationCallOrder[0])
+      .toBeLessThan(launch.mock.invocationCallOrder[editorLaunchIndex]);
+  });
+
+  it('hands a failed initial save to create UI once and clears the pending message', () => {
+    const { scene, launch } = createStartupScene('create', false);
+    const editorLaunch = launch.mock.calls.find(([key]) => key === 'EditorUIScene');
+    const launchData = editorLaunch?.[1];
+
+    expect(launchData?.visible).toBe(true);
+    expect(launchData?.companyCash).toBe(WorldManager.world?.company.cash);
+    expect(launchData?.saveState).toBe('unsaved');
+    expect(launchData?.saveErrorMessage)
+      .toBe('Could not save the world. Retry Save is available.');
+    expect((scene as any).pendingStartupSaveError).toBeNull();
+  });
+
+  it('keeps play startup hidden without running a create-mode save', () => {
+    const { save, launch } = createStartupScene('play', true);
+    const editorLaunch = launch.mock.calls.find(([key]) => key === 'EditorUIScene');
+    const launchData = editorLaunch?.[1];
+
+    expect(save).not.toHaveBeenCalled();
+    expect(launchData?.visible).toBe(false);
+    expect(launchData?.companyCash).toBe(WorldManager.world?.company.cash);
+    expect(launchData?.saveState).toBe('saved');
+    expect(launchData?.saveErrorMessage).toBeUndefined();
   });
 });

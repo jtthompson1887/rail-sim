@@ -107,4 +107,25 @@ describe('EditorToolbar lifecycle', () => {
     toolbar.destroy();
     expect(document.querySelector('[data-testid="editor-retry-save"]')).toBeNull();
   });
+
+  it('shows one handed-off startup save error and removes its toast listener on destroy', () => {
+    const scene = makeScene();
+    const showToast = jest.spyOn(
+      EditorToolbar.prototype as any,
+      'showToast',
+    );
+    const toolbar = new EditorToolbar(scene);
+    const startupError = {
+      message: 'Could not save the world. Retry Save is available.',
+      type: 'error' as const,
+    };
+
+    EventBus.emit('ui:toast', startupError);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(startupError.message, 'error');
+
+    toolbar.destroy();
+    EventBus.emit('ui:toast', startupError);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
 });

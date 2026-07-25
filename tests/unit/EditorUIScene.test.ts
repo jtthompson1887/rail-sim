@@ -1,6 +1,38 @@
 import EditorUIScene from '../../src/scenes/EditorUIScene';
+import { EventBus } from '../../src/services/EventBus';
+import { EditorToolbar } from '../../src/ui/EditorToolbar';
 
 describe('EditorUIScene construction UI boundary', () => {
+  const startedScenes: EditorUIScene[] = [];
+
+  function startEditorUI(data: {
+    visible: boolean;
+    companyCash: number;
+    saveState: 'saved' | 'unsaved' | 'saving';
+    saveErrorMessage?: string;
+  }): EditorUIScene {
+    const scene = new EditorUIScene();
+    (scene.input as any).off = jest.fn();
+    (scene.input.keyboard as any).off = jest.fn();
+    scene.init({
+      trackManager: { getTrack: jest.fn() } as any,
+      selectionManager: { selectedUUIDs: [] } as any,
+      ...data,
+    });
+    scene.create();
+    startedScenes.push(scene);
+    return scene;
+  }
+
+  afterEach(() => {
+    for (const scene of startedScenes.splice(0)) {
+      const shutdown = (scene.events.once as jest.Mock).mock.calls.at(-1)?.[1];
+      shutdown?.();
+    }
+    jest.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
   it('reports every visible editor panel as an input-blocking screen bound', () => {
     const scene = new EditorUIScene();
     (scene as any).toolbar = {
@@ -45,5 +77,68 @@ describe('EditorUIScene construction UI boundary', () => {
     }
     expect((scene as any).constructionInspector.clear).toHaveBeenCalled();
     expect((scene as any).validationHint.clear).toHaveBeenCalled();
+  });
+
+  it('hydrates a failed startup save into the HUD and Retry Save action', () => {
+    startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'unsaved',
+      saveErrorMessage: 'Could not save the world. Retry Save is available.',
+    });
+
+    const retry = document.querySelector(
+      '[data-testid="editor-retry-save"]',
+    ) as HTMLButtonElement | null;
+    expect(retry?.style.display).toBe('block');
+    expect(retry?.disabled).toBe(false);
+    expect(document.querySelector('[data-testid="company-cash"]')?.textContent)
+      .toBe('£875,000');
+    expect(document.querySelector('[data-testid="company-save-state"]')?.textContent)
+      .toBe('Unsaved');
+  });
+
+  it('consumes the startup save error once after toolbar creation and removes its listener on shutdown', () => {
+    const showToast = jest.spyOn(
+      EditorToolbar.prototype as any,
+      'showToast',
+    );
+    const message = 'Could not save the world. Retry Save is available.';
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'unsaved',
+      saveErrorMessage: message,
+    });
+
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(message, 'error');
+    expect((scene as any).initialSaveErrorMessage).toBeNull();
+
+    const shutdown = (scene.events.once as jest.Mock).mock.calls.at(-1)?.[1];
+    shutdown?.();
+    startedScenes.splice(startedScenes.indexOf(scene), 1);
+    EventBus.emit('ui:toast', { message: 'after shutdown', type: 'info' });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps saved startup quiet and play startup controls hidden', () => {
+    const showToast = jest.spyOn(
+      EditorToolbar.prototype as any,
+      'showToast',
+    );
+    startEditorUI({
+      visible: false,
+      companyCash: 875_000,
+      saveState: 'saved',
+    });
+
+    const retry = document.querySelector(
+      '[data-testid="editor-retry-save"]',
+    ) as HTMLButtonElement | null;
+    expect(retry?.style.display).toBe('none');
+    expect(document.querySelector('[data-testid="company-hud"]')
+      ?.getAttribute('aria-hidden')).toBe('true');
+    expect(showToast).not.toHaveBeenCalled();
   });
 });
