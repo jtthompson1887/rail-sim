@@ -49,7 +49,7 @@ const SHORTCUTS: Partial<Record<CreateTool, string>> = {
   completer: 'D',
   junction: 'J',
   generator: 'G',
-  eraser: 'E',
+  eraser: 'X',
   'terrain-view': 'T',
   'place-vehicle': 'N',
 };
@@ -73,7 +73,7 @@ const TOOL_GROUPS: ToolEntry[][] = [
   ],
   [
     { tool: 'generator', icon: '⚙', label: 'Generate', shortcut: 'G' },
-    { tool: 'eraser',    icon: '⌫', label: 'Erase',    shortcut: 'E' },
+    { tool: 'eraser',    icon: '⌫', label: 'Erase',    shortcut: 'X' },
   ],
   [
     { tool: 'place-vehicle', icon: '🚂', label: 'Vehicle', shortcut: 'N' },

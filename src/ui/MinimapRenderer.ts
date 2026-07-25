@@ -2,6 +2,11 @@ import Phaser from 'phaser';
 import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
 
+const MAP_WIDTH = 180;
+const MAP_HEIGHT = 120;
+const MAP_MARGIN = 16;
+const MAP_PADDING = 4;
+
 /**
  * MinimapRenderer – draws a small overview of all tracks in screen-space.
  *
@@ -20,12 +25,27 @@ export class MinimapRenderer {
     this.graphics = scene.add.graphics().setDepth(601);
   }
 
+  get screenBounds(): { left: number; right: number; top: number; bottom: number } {
+    const left = this.scene.scale.width - MAP_WIDTH - MAP_MARGIN;
+    const top = this.scene.scale.height - MAP_HEIGHT - MAP_MARGIN;
+    return {
+      left,
+      right: left + MAP_WIDTH,
+      top,
+      bottom: top + MAP_HEIGHT,
+    };
+  }
+
+  containsScreenPoint(x: number, y: number): boolean {
+    const bounds = this.screenBounds;
+    return x >= bounds.left && x <= bounds.right
+      && y >= bounds.top && y <= bounds.bottom;
+  }
+
   draw(): void {
-    const { width, height } = this.scene.scale;
-    const mapW = 180;
-    const mapH = 120;
-    const mapX = width - mapW - 16;
-    const mapY = height - mapH - 16;
+    const { left: mapX, top: mapY } = this.screenBounds;
+    const mapW = MAP_WIDTH;
+    const mapH = MAP_HEIGHT;
 
     this.graphics.clear();
     this.graphics.fillStyle(0x06131f, 0.85);
@@ -50,12 +70,21 @@ export class MinimapRenderer {
         minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
       }
     }
-    const worldW = Math.max(maxX - minX, 1);
-    const worldH = Math.max(maxY - minY, 1);
+    const worldW = maxX - minX;
+    const worldH = maxY - minY;
+    const innerW = mapW - MAP_PADDING * 2;
+    const innerH = mapH - MAP_PADDING * 2;
+    let scale = Math.min(
+      worldW > 0 ? innerW / worldW : Infinity,
+      worldH > 0 ? innerH / worldH : Infinity,
+    );
+    if (!Number.isFinite(scale)) scale = 1;
+    const originX = mapX + MAP_PADDING + (innerW - worldW * scale) / 2;
+    const originY = mapY + MAP_PADDING + (innerH - worldH * scale) / 2;
 
     const toMap = (x: number, y: number) => ({
-      mx: mapX + ((x - minX) / worldW) * mapW,
-      my: mapY + ((y - minY) / worldH) * mapH,
+      mx: originX + (x - minX) * scale,
+      my: originY + (y - minY) * scale,
     });
 
     for (const { track: t, points } of sampledTracks) {

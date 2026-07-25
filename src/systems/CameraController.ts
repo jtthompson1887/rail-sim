@@ -4,6 +4,14 @@ type Camera = Phaser.Cameras.Scene2D.Camera;
 import { GameConfig } from '../config/GameConfig';
 import type { InputLockOwner } from './tools/IEditorTool';
 
+export function clampCameraZoom(zoom: number): number {
+  return Phaser.Math.Clamp(
+    zoom,
+    GameConfig.CAMERA.MIN_ZOOM,
+    GameConfig.CAMERA.MAX_ZOOM,
+  );
+}
+
 export class CameraController {
   private readonly controlConfig: {
     acceleration: number;
@@ -161,11 +169,7 @@ export class CameraController {
         // Zoom by the ratio of finger distances
         if (this.lastPinchDist > 0) {
           const scale = newDist / this.lastPinchDist;
-          this.cam.zoom = Phaser.Math.Clamp(
-            this.cam.zoom * scale,
-            GameConfig.CAMERA.MIN_ZOOM,
-            GameConfig.CAMERA.MAX_ZOOM,
-          );
+          this.cam.zoom = clampCameraZoom(this.cam.zoom * scale);
         }
 
         this.lastPinchCenter = newCenter;
@@ -189,10 +193,10 @@ export class CameraController {
       // Wheel zoom is suppressed when editor tool owns input
       if (this._inputLockOwner !== 'camera') return;
       const oldZoom = this.cam.zoom;
-      const newZoom = Phaser.Math.Clamp(
-        oldZoom * (deltaY > 0 ? (1 - GameConfig.CAMERA.ZOOM_AMOUNT) : (1 + GameConfig.CAMERA.ZOOM_AMOUNT)),
-        GameConfig.CAMERA.MIN_ZOOM,
-        GameConfig.CAMERA.MAX_ZOOM
+      const newZoom = clampCameraZoom(
+        oldZoom * (deltaY > 0
+          ? (1 - GameConfig.CAMERA.ZOOM_AMOUNT)
+          : (1 + GameConfig.CAMERA.ZOOM_AMOUNT)),
       );
       const mouseX = pointer.x;
       const mouseY = pointer.y;

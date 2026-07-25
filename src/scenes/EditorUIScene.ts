@@ -179,6 +179,7 @@ export default class EditorUIScene extends Phaser.Scene {
     )
       || this.propertiesPanel.containsScreenPoint(x, y)
       || this.constructionInspector.containsScreenPoint(x, y)
-      || this.companyHud.containsScreenPoint(x, y);
+      || this.companyHud.containsScreenPoint(x, y)
+      || (this.minimapVisible && this.minimapRenderer.containsScreenPoint(x, y));
   }
 }

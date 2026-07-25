@@ -110,7 +110,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     ['KeyD', 'Connect unavailable — route completion needs one atomic quote.'],
     ['KeyJ', 'Junction unavailable — track splitting needs one atomic quote.'],
     ['KeyG', 'Generate unavailable — multi-track construction needs one atomic quote.'],
-    ['KeyE', 'Erase unavailable — select tracks to review the exact refund.'],
+    ['KeyX', 'Erase unavailable — select tracks to review the exact refund.'],
   ])(
     'routes disabled shortcut %s to its exact guidance without selection or mutation',
     (code, message) => {

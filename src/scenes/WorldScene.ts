@@ -5,7 +5,10 @@ import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
 import { GameStateManager } from '../managers/GameStateManager';
 import { SceneryManager } from '../managers/SceneryManager';
-import { CameraController } from '../systems/CameraController';
+import {
+  CameraController,
+  clampCameraZoom,
+} from '../systems/CameraController';
 import { InputManager } from '../systems/InputManager';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
@@ -75,6 +78,11 @@ declare global {
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
 const SAVE_FAILURE_MESSAGE = 'Could not save the world. Retry Save is available.';
+const OPPORTUNITY_CORRIDOR_WIDTH_PX = 24;
+const OPPORTUNITY_SITE_RADIUS_PX = 18;
+const OPPORTUNITY_CORRIDOR_LABEL_OFFSET_PX = 34;
+const OPPORTUNITY_CORRIDOR_LABEL_SEPARATION_PX = 24;
+const OPPORTUNITY_SITE_LABEL_OFFSET_PX = 32;
 type SaveState = 'saved' | 'unsaved' | 'saving';
 
 function deletionBlockingReason(
@@ -474,8 +482,8 @@ export default class WorldScene extends Phaser.Scene {
     });
     this.pendingStartupSaveError = null;
 
-    this.renderStarterOpportunitySurvey();
     this.applyStarterOpportunityCamera();
+    this.renderStarterOpportunitySurvey();
   }
 
   /** Frame the persisted planning opportunity without regenerating it. */
@@ -486,7 +494,7 @@ export default class WorldScene extends Phaser.Scene {
       this.scale.width / GameConfig.RESOLUTION.WIDTH,
       this.scale.height / GameConfig.RESOLUTION.HEIGHT,
     );
-    const zoom = recommendation.zoom * viewportScale;
+    const zoom = clampCameraZoom(recommendation.zoom * viewportScale);
     const toolbarInset = GameStateManager.worldMode === 'create'
       ? scalePx(
         72,
@@ -506,11 +514,18 @@ export default class WorldScene extends Phaser.Scene {
   private renderStarterOpportunitySurvey(): void {
     const opportunity = WorldManager.world?.starterOpportunity;
     if (!opportunity) return;
+    const zoom = this.cameras.main.zoom;
+    if (!Number.isFinite(zoom) || zoom <= 0) return;
+    const worldUnitsPerScreenPixel = 1 / zoom;
     this.starterOpportunityLabels.length = 0;
     const graphics = this.add.graphics().setDepth(-20);
     const colours = [0x4ad5ff, 0xffdc7d];
     opportunity.corridors.forEach((corridor, index) => {
-      graphics.lineStyle(24, colours[index], 0.2);
+      graphics.lineStyle(
+        OPPORTUNITY_CORRIDOR_WIDTH_PX * worldUnitsPerScreenPixel,
+        colours[index],
+        0.2,
+      );
       graphics.beginPath();
       graphics.moveTo(corridor.waypoints[0].x, corridor.waypoints[0].y);
       for (const waypoint of corridor.waypoints.slice(1)) {
@@ -525,7 +540,10 @@ export default class WorldScene extends Phaser.Scene {
           : 'Structure-heavy';
       const label = this.add.text(
         labelPoint.x,
-        labelPoint.y + 34 + index * 24,
+        labelPoint.y + (
+          OPPORTUNITY_CORRIDOR_LABEL_OFFSET_PX
+          + index * OPPORTUNITY_CORRIDOR_LABEL_SEPARATION_PX
+        ) * worldUnitsPerScreenPixel,
         `${tradeoff} · est. £${corridor.estimatedCost.toLocaleString()}`,
         {
           fontFamily: 'Verdana',
@@ -539,14 +557,23 @@ export default class WorldScene extends Phaser.Scene {
     });
     graphics.fillStyle(0xffffff, 0.9);
     for (const site of opportunity.sites) {
-      graphics.fillCircle(site.x, site.y, 18);
-      const label = this.add.text(site.x, site.y - 32, site.label, {
+      graphics.fillCircle(
+        site.x,
+        site.y,
+        OPPORTUNITY_SITE_RADIUS_PX * worldUnitsPerScreenPixel,
+      );
+      const label = this.add.text(
+        site.x,
+        site.y - OPPORTUNITY_SITE_LABEL_OFFSET_PX * worldUnitsPerScreenPixel,
+        site.label,
+        {
         fontFamily: 'Verdana',
         fontSize: '18px',
         color: '#ffffff',
         backgroundColor: '#06131fcc',
         padding: { x: 6, y: 3 },
-      }).setOrigin(0.5, 1).setDepth(-19);
+        },
+      ).setOrigin(0.5, 1).setDepth(-19);
       this.starterOpportunityLabels.push(label);
     }
   }
@@ -803,7 +830,7 @@ export default class WorldScene extends Phaser.Scene {
           KeyD: 'completer',
           KeyJ: 'junction',
           KeyG: 'generator',
-          KeyE: 'eraser',
+          KeyX: 'eraser',
         };
         const disabledTool = disabledShortcuts[event.code];
         const disabledReason = disabledTool

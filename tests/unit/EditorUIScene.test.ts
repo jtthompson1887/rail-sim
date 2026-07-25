@@ -47,12 +47,38 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).companyHud = {
       containsScreenPoint: jest.fn((x: number, y: number) => x < 400 && y < 80),
     };
+    (scene as any).minimapRenderer = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x >= 1084 && y >= 584),
+    };
+    (scene as any).minimapVisible = true;
 
     expect(scene.containsScreenPoint(40, 500)).toBe(true);
     expect(scene.containsScreenPoint(1800, 500)).toBe(true);
     expect(scene.containsScreenPoint(900, 800)).toBe(true);
     expect(scene.containsScreenPoint(200, 30)).toBe(true);
+    expect(scene.containsScreenPoint(1174, 644)).toBe(true);
     expect(scene.containsScreenPoint(900, 400)).toBe(false);
+  });
+
+  it('blocks the real minimap interaction boundary only while editor UI is visible', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'saved',
+    });
+    jest.spyOn((scene as any).propertiesPanel, 'containsScreenPoint')
+      .mockReturnValue(false);
+    jest.spyOn((scene as any).constructionInspector, 'containsScreenPoint')
+      .mockReturnValue(false);
+    jest.spyOn((scene as any).companyHud, 'containsScreenPoint')
+      .mockReturnValue(false);
+
+    expect(scene.containsScreenPoint(1814, 1004)).toBe(true);
+    expect(scene.containsScreenPoint(1723, 1004)).toBe(false);
+
+    EventBus.emit('ui:toolbar-visible', { visible: false });
+
+    expect(scene.containsScreenPoint(1814, 1004)).toBe(false);
   });
 
   it('hides, disables, and clears all editor overlays when play mode begins', () => {

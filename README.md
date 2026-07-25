@@ -27,14 +27,15 @@ authoritative construction data.
 | `P` | Track construction |
 | Drag | Survey a route |
 | `Enter` | Confirm an available action |
-| `Escape` | Step back or cancel |
+| `Escape` | Cancel the current placement |
+| Right-click | Step back during placement, or open a context menu |
 | `Delete` | Begin the selected-track demolition review |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+S` | Save or retry a failed save |
 | `H` | Pan tool |
 | `Q` / `E` | Zoom in / out |
 | Mouse wheel | Zoom |
-| Middle/right drag | Pan |
+| Middle drag | Pan |
 
 ## Development
 
