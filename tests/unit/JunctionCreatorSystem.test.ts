@@ -123,6 +123,38 @@ describe('JunctionCreatorSystem', () => {
     });
   });
 
+  describe('terrain validation', () => {
+    it('validates both generated branches with their exact four cubic controls', () => {
+      const terrainValidator = {
+        canPlaceTrack: jest.fn().mockReturnValue({
+          valid: true,
+          reason: '',
+          requiresTunnel: false,
+          averageElevation: 0,
+        }),
+      };
+      system.destroy();
+      system = new JunctionCreatorSystem(scene, trackManager, terrainValidator as any);
+      const mainTrack = makeTrack(scene, 0, 0, 500, 0);
+      trackManager.addTrack(mainTrack);
+
+      (system as any).createJunctionAtSplit(mainTrack, 0.5);
+
+      const branchTracks = trackManager.tracks.filter((track) => track !== mainTrack);
+      expect(branchTracks).toHaveLength(2);
+      expect(terrainValidator.canPlaceTrack).toHaveBeenCalledTimes(2);
+      branchTracks.forEach((branch, index) => {
+        const controls = branch.getControlPoints();
+        expect(terrainValidator.canPlaceTrack.mock.calls[index]).toEqual([
+          controls.p0,
+          controls.p1,
+          controls.p2,
+          controls.p3,
+        ]);
+      });
+    });
+  });
+
   describe('destroy()', () => {
     it('destroys without throwing', () => {
       expect(() => system.destroy()).not.toThrow();

@@ -2,6 +2,25 @@ import { GameConfig } from '../config/GameConfig';
 import type { WorldData, WorldValidationResult } from '../config/WorldData';
 import { validateWorldData } from '../config/WorldData';
 
+function validateStoredWorld(storageId: string, raw: unknown): WorldValidationResult {
+  const result = validateWorldData(raw);
+  if (!('world' in result)) {
+    return { ...result, storageId };
+  }
+  if (result.world.id !== storageId) {
+    return {
+      compatible: false,
+      id: result.world.id,
+      storageId,
+      name: result.world.name,
+      updatedAt: result.world.metadata.updatedAt,
+      message: 'This save is incompatible: storage key does not match embedded world id.',
+      action: 'Start a new world.',
+    };
+  }
+  return result;
+}
+
 export interface SaveData {
   unlockedLevels: string[];
   highScores: Record<string, number>;
@@ -123,7 +142,7 @@ export const SaveService = {
   /** Validate a single saved world, preserving incompatibility details for UI. */
   loadWorldResult(id: string): WorldValidationResult | null {
     const raw = this.loadAllWorlds()[id];
-    return raw === undefined ? null : validateWorldData(raw);
+    return raw === undefined ? null : validateStoredWorld(id, raw);
   },
 
   /** Retrieve a single world by id, or null if not found. */
@@ -142,7 +161,7 @@ export const SaveService = {
   /** List compatible and incompatible saves for the world picker. */
   listWorldResults(): WorldValidationResult[] {
     const all = this.loadAllWorlds();
-    const results = Object.keys(all).map((key) => validateWorldData(all[key]));
+    const results = Object.keys(all).map((key) => validateStoredWorld(key, all[key]));
     return results.sort(
       (a, b) => {
         const aUpdated = 'world' in a ? a.world.metadata.updatedAt : a.updatedAt;

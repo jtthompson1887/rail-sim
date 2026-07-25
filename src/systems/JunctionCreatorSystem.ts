@@ -198,9 +198,20 @@ export class JunctionCreatorSystem {
 
     // Terrain validation for branch tracks
     if (this.terrainValidator) {
-      const leftP0 = new Phaser.Math.Vector2(splitPoint.x, splitPoint.y);
-      const leftResult = this.terrainValidator.canPlaceTrack(leftP0, leftEnd);
-      const rightResult = this.terrainValidator.canPlaceTrack(leftP0, rightEnd);
+      const leftControls = leftTrack.getControlPoints();
+      const rightControls = rightTrack.getControlPoints();
+      const leftResult = this.terrainValidator.canPlaceTrack(
+        leftControls.p0,
+        leftControls.p1,
+        leftControls.p2,
+        leftControls.p3,
+      );
+      const rightResult = this.terrainValidator.canPlaceTrack(
+        rightControls.p0,
+        rightControls.p1,
+        rightControls.p2,
+        rightControls.p3,
+      );
 
       if (!leftResult.valid || !rightResult.valid) {
         const reason = !leftResult.valid ? leftResult.reason : rightResult.reason;

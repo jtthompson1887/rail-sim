@@ -96,6 +96,27 @@ describe('world schema validation', () => {
     ]);
   });
 
+  it('rejects a valid world stored under a key that differs from its embedded id', () => {
+    const world = currentWorld();
+    const storageId = 'actual-storage-key';
+    localStorage.setItem(
+      GameConfig.WORLD.WORLDS_SAVE_KEY,
+      JSON.stringify({ [storageId]: world }),
+    );
+
+    expect(SaveService.loadWorld(storageId)).toBeNull();
+    expect(SaveService.loadWorld(world.id)).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
+    expect(SaveService.listWorldResults()).toEqual([
+      expect.objectContaining({
+        compatible: false,
+        id: world.id,
+        storageId,
+        action: 'Start a new world.',
+      }),
+    ]);
+  });
+
   it('refuses to import or persist incompatible input', () => {
     const incompatible = { ...currentWorld(), schemaVersion: 9 };
     expect(SaveService.importWorld(JSON.stringify(incompatible))).toBeNull();

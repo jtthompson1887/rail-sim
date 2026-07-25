@@ -143,12 +143,12 @@ export default class WorldSelectScene extends Phaser.Scene {
       color: '#ffb0b0',
     }).setOrigin(0, 0.5);
 
-    if (result.id) {
+    if (result.storageId !== null) {
       const del = this.add.text(cx + w / 2 - 24, cy, 'ðŸ—‘', {
         fontFamily: 'Verdana',
         fontSize: '32px',
       }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.deleteWorld(result.id!));
+        .on('pointerdown', () => this.deleteWorld(result.storageId!));
       del.setPadding(8);
     }
   }

@@ -5,6 +5,7 @@
 import { WorldManager } from '../../src/managers/WorldManager';
 import { SaveService } from '../../src/services/SaveService';
 import { createEmptyWorld } from '../../src/config/WorldData';
+import { EventBus } from '../../src/services/EventBus';
 
 describe('WorldManager', () => {
   beforeEach(() => {
@@ -85,6 +86,20 @@ describe('WorldManager', () => {
 
     it('returns null for unknown id', () => {
       expect(WorldManager.load('no-such-id')).toBeNull();
+    });
+
+    it('returns false and does not emit world:saved when persistence rejects the save', () => {
+      WorldManager.createNew('Rejected');
+      const saveSpy = jest.spyOn(SaveService, 'saveWorld').mockReturnValue(false);
+      const emitSpy = jest.spyOn(EventBus, 'emit');
+
+      const result = WorldManager.save();
+      const emittedSaved = emitSpy.mock.calls.some(([event]) => event === 'world:saved');
+      emitSpy.mockRestore();
+      saveSpy.mockRestore();
+
+      expect(result).toBe(false);
+      expect(emittedSaved).toBe(false);
     });
 
     it('clears a stale active world when the requested save is incompatible', () => {

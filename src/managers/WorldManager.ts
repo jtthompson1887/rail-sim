@@ -51,10 +51,12 @@ class WorldManagerClass {
   }
 
   /** Persist the current in-memory world to localStorage. */
-  save(): void {
-    if (!this._world) return;
-    SaveService.saveWorld(this._world);
+  save(): boolean {
+    if (!this._world) return false;
+    const saved = SaveService.saveWorld(this._world);
+    if (!saved) return false;
     EventBus.emit('world:saved', { worldId: this._world.id });
+    return true;
   }
 
   /** Reset – unload the current world without saving. */

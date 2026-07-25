@@ -139,6 +139,8 @@ export interface CompatibleWorldResult {
 export interface IncompatibleWorldResult {
   compatible: false;
   id: string | null;
+  /** Trusted localStorage map key, when validation originated from storage. */
+  storageId: string | null;
   name: string;
   updatedAt: number;
   message: string;
@@ -234,6 +236,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
   return {
     compatible: false,
     id: typeof record.id === 'string' ? record.id : null,
+    storageId: null,
     name: typeof record.name === 'string' ? record.name : 'Incompatible save',
     updatedAt: isFiniteNumber(metadata.updatedAt) ? metadata.updatedAt : 0,
     message: `This save is incompatible: ${reason}`,
