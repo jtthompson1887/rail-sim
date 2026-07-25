@@ -68,8 +68,8 @@ export class TerrainGenerator {
     const x1 = x0 + 1;
     const y1 = y0 + 1;
 
-    const tx = sx - x0;
-    const ty = sy - y0;
+    const tx = Math.max(0, Math.min(1, sx - x0));
+    const ty = Math.max(0, Math.min(1, sy - y0));
 
     const h00 = this.heightmap[y0 * this.widthSamples + x0];
     const h10 = this.heightmap[y0 * this.widthSamples + x1];

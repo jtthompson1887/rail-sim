@@ -9,6 +9,10 @@ const TC  = GameConfig.TERRAIN;
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
 const STEP  = TC.SAMPLE_STEP;
 
+/** Half-extents of the baked heightmap in world-units. */
+const HALF_W = TC.WORLD_WIDTH  / 2;
+const HALF_H = TC.WORLD_HEIGHT / 2;
+
 /** Band-name order for palette lookups. */
 const BAND_ORDER: BandName[] = ['WATER', 'LOWLAND', 'MIDLAND', 'HIGHLAND', 'PEAK'];
 const BAND_MAX: number[] = [
@@ -66,6 +70,14 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
         const wx = this.chunkX + xi * STEP;
         const wy = this.chunkY + yi * STEP;
 
+        // Outside the world bounds: render as deep ocean to avoid stripe artifacts
+        // caused by heightmap clamp-to-edge repeating edge values across whole rows/columns.
+        if (wx < -HALF_W || wx >= HALF_W || wy < -HALF_H || wy >= HALF_H) {
+          this.fillStyle(0x153d5f, 1);
+          this.fillRect(wx, wy, STEP, STEP);
+          continue;
+        }
+
         const h = terrain.getHeightAt(wx, wy);
 
         // Blended colour from band palette
@@ -85,6 +97,8 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
       for (let xi = 0; xi < samplesPerChunk - 1; xi++) {
         const wx = this.chunkX + xi * STEP;
         const wy = this.chunkY + yi * STEP;
+        // Skip out-of-bounds quads (already filled with ocean colour above)
+        if (wx < -HALF_W || wx >= HALF_W || wy < -HALF_H || wy >= HALF_H) continue;
         if (terrain.getHeightAt(wx, wy) < TC.BANDS.WATER.max) {
           this.fillStyle(0x2a6aaa, 0.25);
           this.fillRect(wx, wy, STEP, STEP);
@@ -97,6 +111,8 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
       for (let xi = 0; xi < samplesPerChunk - 1; xi++) {
         const wx = this.chunkX + xi * STEP;
         const wy = this.chunkY + yi * STEP;
+        // Skip out-of-bounds quads
+        if (wx < -HALF_W || wx >= HALF_W || wy < -HALF_H || wy >= HALF_H) continue;
         const slope = terrain.slopeAt(wx, wy);
         if (slope > TC.CLIFF_SLOPE_DEG) {
           this.lineStyle(2, 0x000000, 0.35);
