@@ -43,7 +43,7 @@ describe('ConstructionEconomy', () => {
   it('conserves exact cash across a signed demolition refund undo and redo', () => {
     const company: CompanyConstructionState = { cash: 63 };
     const economy = new ConstructionEconomy(company);
-    const refund = economy.refundDemolition(35)!;
+    const refund = economy.refundDemolition({}, 35)!;
     expect(refund).toEqual({ amount: -17, beforeCash: 63, afterCash: 80 });
     expect(economy.reverse(refund)).toBe(true);
     expect(company.cash).toBe(63);
@@ -51,11 +51,14 @@ describe('ConstructionEconomy', () => {
     expect(company.cash).toBe(80);
   });
 
-  it('rejects repeat application of one refund transaction across lifecycle transitions', () => {
+  it('rejects a second refund for the same demolition lifecycle', () => {
     const company: CompanyConstructionState = { cash: 100 };
     const economy = new ConstructionEconomy(company);
-    const refund = economy.refundDemolition(100)!;
+    const demolition = {};
+    const refund = economy.refundDemolition(demolition, 100)!;
 
+    expect(economy.refundDemolition(demolition, 100)).toBeNull();
+    expect(company.cash).toBe(150);
     expect(economy.reapply(refund)).toBe(false);
     expect(company.cash).toBe(150);
     expect(economy.reverse(refund)).toBe(true);
@@ -92,7 +95,7 @@ describe('ConstructionEconomy', () => {
   it('rejects a refund whose result would exceed safe-integer cash', () => {
     const company: CompanyConstructionState = { cash: Number.MAX_SAFE_INTEGER - 10 };
     const economy = new ConstructionEconomy(company);
-    expect(economy.refundDemolition(100)).toBeNull();
+    expect(economy.refundDemolition({}, 100)).toBeNull();
     expect(company.cash).toBe(Number.MAX_SAFE_INTEGER - 10);
   });
 

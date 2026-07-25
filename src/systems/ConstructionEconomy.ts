@@ -37,7 +37,13 @@ export function demolitionRefund(paidBuildCost: number): number {
 export class ConstructionEconomy {
   private readonly transactionMetadata =
     new WeakMap<ConstructionTransaction, TransactionMetadata>();
+  private readonly demolitionRefunds =
+    new WeakMap<object, ConstructionTransaction>();
 
+  /**
+   * This instance is scoped to the injected company object. Recreate it after
+   * loading or restoring a world, because those operations replace that object.
+   */
   constructor(private readonly company: CompanyConstructionState) {}
 
   canAfford(amount: number): boolean {
@@ -54,10 +60,18 @@ export class ConstructionEconomy {
     return this.applySignedAmount(amount);
   }
 
-  refundDemolition(paidBuildCost: number): ConstructionTransaction | null {
+  refundDemolition(
+    demolitionLifecycle: object,
+    paidBuildCost: number,
+  ): ConstructionTransaction | null {
+    if (this.demolitionRefunds.has(demolitionLifecycle)) return null;
     const refund = demolitionRefund(paidBuildCost);
     if (refund === 0) return null;
-    return this.applySignedAmount(-refund);
+    const transaction = this.applySignedAmount(-refund);
+    if (transaction) {
+      this.demolitionRefunds.set(demolitionLifecycle, transaction);
+    }
+    return transaction;
   }
 
   private applySignedAmount(amount: number): ConstructionTransaction | null {
