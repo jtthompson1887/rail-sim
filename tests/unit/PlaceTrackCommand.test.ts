@@ -11,6 +11,7 @@ import { ConstructionEconomy } from '../../src/systems/ConstructionEconomy';
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { TrackSerializer } from '../../src/utils/TrackSerializer';
+import { clonePlainData } from '../../src/utils/PlainData';
 import { WorldContentLoader } from '../../src/services/WorldContentLoader';
 import { ENDPOINT_CONNECTION_COST } from '../../src/config/ConstructionConfig';
 
@@ -125,6 +126,43 @@ describe('PlaceTrackCommand', () => {
     expect(TrackSerializer.toTrackDef(manager.getTrack('second-built')!)).toEqual(
       world.tracks[1],
     );
+  });
+
+  it('rejects undo against a state-identical replacement sharing the old company', () => {
+    const originalWorld = WorldManager.world!;
+    const quote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'identity-guard',
+    )!;
+    const stack = new CommandStack();
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      new ConstructionEconomy(originalWorld.company),
+      service,
+      quote,
+    ))).toBe(true);
+
+    const replacement = clonePlainData(originalWorld);
+    replacement.company = originalWorld.company;
+    (WorldManager as any)._world = replacement;
+    const replacementBeforeUndo = clonePlainData(replacement);
+    const originalBeforeUndo = clonePlainData(originalWorld);
+    const liveBeforeUndo = TrackSerializer.toTrackDef(manager.getTrack('identity-guard')!);
+    const onChange = jest.fn();
+    stack.onChange = onChange;
+
+    expect(stack.undo()).toBe(false);
+    expect(WorldManager.world).toBe(replacement);
+    expect(replacement).toEqual(replacementBeforeUndo);
+    expect(originalWorld).toEqual(originalBeforeUndo);
+    expect(TrackSerializer.toTrackDef(manager.getTrack('identity-guard')!)).toEqual(
+      liveBeforeUndo,
+    );
+    expect(stack.canUndo).toBe(true);
+    expect(stack.canRedo).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it.each([

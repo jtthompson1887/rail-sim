@@ -159,7 +159,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     } catch {
       liveMatches = false;
     }
-    if (!this.applied || !transaction || !world || !live
+    if (!this.applied || !transaction || !world || world !== this.worldIdentity || !live
       || world.revision !== this.expectedRevision
       || !this.economy.isBoundTo(world.company)
       || !equalPlainData(persisted, this.def)
