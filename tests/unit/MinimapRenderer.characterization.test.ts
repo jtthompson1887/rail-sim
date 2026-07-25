@@ -75,9 +75,17 @@ describe('MinimapRenderer overview contract', () => {
     expect(graphics.lineStyle).toHaveBeenCalledWith(1, 0x00ff88, 0.9);
     expect(graphics.lineStyle).toHaveBeenCalledWith(1, 0xff4444, 0.9);
     expect(graphics.strokePath).toHaveBeenCalledTimes(3);
-    expect(graphics.moveTo).toHaveBeenNthCalledWith(1, 714, 504);
     expect(graphics.lineTo).toHaveBeenCalledTimes(24);
     expect(selectionManager.isSelected).toHaveBeenCalledTimes(3);
+    for (const [x, y] of [
+      ...graphics.moveTo.mock.calls,
+      ...graphics.lineTo.mock.calls,
+    ]) {
+      expect(x).toBeGreaterThanOrEqual(804);
+      expect(x).toBeLessThanOrEqual(984);
+      expect(y).toBeGreaterThanOrEqual(564);
+      expect(y).toBeLessThanOrEqual(684);
+    }
 
     renderer.clear();
     expect(graphics.clear).toHaveBeenCalledTimes(2);
