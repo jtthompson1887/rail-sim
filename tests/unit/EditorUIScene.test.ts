@@ -15,7 +15,7 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene.input as any).off = jest.fn();
     (scene.input.keyboard as any).off = jest.fn();
     scene.init({
-      trackManager: { getTrack: jest.fn() } as any,
+      trackManager: { getTrack: jest.fn(), tracks: [] } as any,
       selectionManager: { selectedUUIDs: [] } as any,
       ...data,
     });
@@ -140,5 +140,24 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(document.querySelector('[data-testid="company-hud"]')
       ?.getAttribute('aria-hidden')).toBe('true');
     expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('draws the minimap in the fixed UI layer only while editor controls are visible', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'saved',
+    });
+    const minimap = (scene as any).minimapRenderer;
+    const draw = jest.spyOn(minimap, 'draw');
+    const clear = jest.spyOn(minimap, 'clear');
+
+    (scene as any).update(0, 16);
+    expect(draw).toHaveBeenCalledTimes(1);
+
+    EventBus.emit('ui:toolbar-visible', { visible: false });
+    (scene as any).update(16, 16);
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(clear).toHaveBeenCalled();
   });
 });

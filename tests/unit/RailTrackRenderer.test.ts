@@ -4,6 +4,41 @@ import RailTrack from '../../src/entities/RailTrack';
 const { makeScene } = require('../../__mocks__/phaser');
 
 describe('RailTrackRenderer mixed engineering structures', () => {
+  it('keeps photographic track textures narrow across the route', () => {
+    const scene = makeScene();
+    const images: any[] = [];
+    scene.add.image.mockImplementation((_x: number, _y: number, texture: string) => {
+      const image: any = {
+        texture,
+        rotation: 0,
+        setOrigin: jest.fn(() => image),
+        setScale: jest.fn(() => image),
+        setDepth: jest.fn(() => image),
+        setAlpha: jest.fn(() => image),
+        setTint: jest.fn(() => image),
+        destroy: jest.fn(),
+      };
+      images.push(image);
+      return image;
+    });
+
+    new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(0, 0),
+      new Phaser.Math.Vector2(133.333333, 0),
+      new Phaser.Math.Vector2(266.666667, 0),
+      new Phaser.Math.Vector2(400, 0),
+    );
+
+    expect(images.length).toBeGreaterThan(0);
+    for (const image of images) {
+      const [alongTrackScale, acrossTrackScale] = image.setScale.mock.calls[0];
+      expect(alongTrackScale).toBe(0.05);
+      expect(acrossTrackScale).toBeGreaterThan(0);
+      expect(acrossTrackScale).toBeLessThanOrEqual(alongTrackScale * 0.5);
+    }
+  });
+
   it('styles only sprites whose own t lies in a tunnel interval', () => {
     const scene = makeScene();
     const images: any[] = [];

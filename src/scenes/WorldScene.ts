@@ -20,7 +20,6 @@ import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { WorldContentLoader } from '../services/WorldContentLoader';
 import { AudioManager } from '../managers/AudioManager';
-import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import {
   GENERATOR_LOCK_REASON,
@@ -103,6 +102,29 @@ function deletionBlockingReason(
   return '';
 }
 
+function polylineMidpoint(
+  points: ReadonlyArray<Readonly<{ x: number; y: number }>>,
+): { x: number; y: number } {
+  const lengths = points.slice(1).map((point, index) => Math.hypot(
+    point.x - points[index].x,
+    point.y - points[index].y,
+  ));
+  let remaining = lengths.reduce((sum, length) => sum + length, 0) / 2;
+  for (let index = 0; index < lengths.length; index++) {
+    const length = lengths[index];
+    if (remaining <= length) {
+      const ratio = length > 0 ? remaining / length : 0;
+      return {
+        x: points[index].x + (points[index + 1].x - points[index].x) * ratio,
+        y: points[index].y + (points[index + 1].y - points[index].y) * ratio,
+      };
+    }
+    remaining -= length;
+  }
+  const fallback = points[points.length - 1] ?? { x: 0, y: 0 };
+  return { x: fallback.x, y: fallback.y };
+}
+
 /**
  * WorldScene – the persistent main scene for the sandbox world.
  *
@@ -126,8 +148,8 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
+  private readonly starterOpportunityLabels: Phaser.GameObjects.Text[] = [];
   private contentLoader!: WorldContentLoader;
-  private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
   private lastReportedSaveState: SaveState = 'saved';
   private pendingStartupSaveError: string | null = null;
@@ -349,9 +371,6 @@ export default class WorldScene extends Phaser.Scene {
       this.commandStack,
     ));
 
-    // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
-    this.minimapRenderer = new MinimapRenderer(this, this.trackManager, this.selectionManager);
-
     // Load world content
     this.contentLoader = new WorldContentLoader(this, this.trackManager, this.trainManager);
     this.contentLoader.load();
@@ -463,14 +482,31 @@ export default class WorldScene extends Phaser.Scene {
   private applyStarterOpportunityCamera(): void {
     const recommendation = WorldManager.world?.starterOpportunity.recommendedCamera;
     if (!recommendation) return;
-    this.cameras.main.setZoom(recommendation.zoom);
-    this.cameras.main.centerOn(recommendation.x, recommendation.y);
+    const viewportScale = Math.min(
+      this.scale.width / GameConfig.RESOLUTION.WIDTH,
+      this.scale.height / GameConfig.RESOLUTION.HEIGHT,
+    );
+    const zoom = recommendation.zoom * viewportScale;
+    const toolbarInset = GameStateManager.worldMode === 'create'
+      ? scalePx(
+        72,
+        this.scale.width,
+        this.scale.height,
+        isMobileWidth(this.scale.width) ? 44 : 56,
+      ) + TOOLBAR_PADDING
+      : 0;
+    this.cameras.main.setZoom(zoom);
+    this.cameras.main.centerOn(
+      recommendation.x - toolbarInset / (2 * zoom),
+      recommendation.y,
+    );
   }
 
   /** Draw survey-only guidance; this deliberately creates no RailTrack objects. */
   private renderStarterOpportunitySurvey(): void {
     const opportunity = WorldManager.world?.starterOpportunity;
     if (!opportunity) return;
+    this.starterOpportunityLabels.length = 0;
     const graphics = this.add.graphics().setDepth(-20);
     const colours = [0x4ad5ff, 0xffdc7d];
     opportunity.corridors.forEach((corridor, index) => {
@@ -481,15 +517,13 @@ export default class WorldScene extends Phaser.Scene {
         graphics.lineTo(waypoint.x, waypoint.y);
       }
       graphics.strokePath();
-      const labelPoint = corridor.waypoints[
-        Math.floor(corridor.waypoints.length / 2)
-      ];
+      const labelPoint = polylineMidpoint(corridor.waypoints);
       const tradeoff = corridor.dominantTradeoff === 'short-steep'
         ? 'Shorter / steeper'
         : corridor.dominantTradeoff === 'long-flat'
           ? 'Longer / flatter'
           : 'Structure-heavy';
-      this.add.text(
+      const label = this.add.text(
         labelPoint.x,
         labelPoint.y + 34 + index * 24,
         `${tradeoff} · est. £${corridor.estimatedCost.toLocaleString()}`,
@@ -501,18 +535,27 @@ export default class WorldScene extends Phaser.Scene {
           padding: { x: 6, y: 3 },
         },
       ).setOrigin(0.5, 0).setDepth(-19);
+      this.starterOpportunityLabels.push(label);
     });
     graphics.fillStyle(0xffffff, 0.9);
     for (const site of opportunity.sites) {
       graphics.fillCircle(site.x, site.y, 18);
-      this.add.text(site.x, site.y - 32, site.label, {
+      const label = this.add.text(site.x, site.y - 32, site.label, {
         fontFamily: 'Verdana',
         fontSize: '18px',
         color: '#ffffff',
         backgroundColor: '#06131fcc',
         padding: { x: 6, y: 3 },
       }).setOrigin(0.5, 1).setDepth(-19);
+      this.starterOpportunityLabels.push(label);
     }
+  }
+
+  private updateStarterOpportunityLabelScale(): void {
+    const zoom = this.cameras.main.zoom;
+    if (!Number.isFinite(zoom) || zoom <= 0) return;
+    const scale = 1 / zoom;
+    for (const label of this.starterOpportunityLabels) label.setScale(scale);
   }
 
   update(time: number, delta: number): void {
@@ -523,6 +566,7 @@ export default class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
     const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
+    this.updateStarterOpportunityLabelScale();
     this.terrainChunkManager.update(camCX, camCY, cam.zoom);
     this.sceneryManager.update(camCX, camCY, cam.zoom);
 
@@ -531,7 +575,6 @@ export default class WorldScene extends Phaser.Scene {
 
     if (GameStateManager.worldMode === 'create') {
       this.activeEditorTool?.update(delta);
-      this.minimapRenderer.draw();
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
@@ -622,7 +665,6 @@ export default class WorldScene extends Phaser.Scene {
 
   private activatePlayMode(): void {
     this.activeEditorTool?.cancel();
-    this.minimapRenderer.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });

@@ -12,6 +12,7 @@ import type { SelectionManager } from '../systems/SelectionManager';
 import type { VehicleType } from '../config/VehicleTypes';
 import { ConstructionInspector } from '../ui/ConstructionInspector';
 import { CompanyHud } from '../ui/CompanyHud';
+import { MinimapRenderer } from '../ui/MinimapRenderer';
 
 /**
  * EditorUIScene
@@ -38,6 +39,8 @@ export default class EditorUIScene extends Phaser.Scene {
   private validationHint!: ValidationHint;
   private constructionInspector!: ConstructionInspector;
   private companyHud!: CompanyHud;
+  private minimapRenderer!: MinimapRenderer;
+  private minimapVisible = true;
   private initialVisible = true;
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
@@ -63,9 +66,11 @@ export default class EditorUIScene extends Phaser.Scene {
     this.constructionInspector.setVisible(visible);
     this.companyHud.setVisible(visible);
     this.validationHint.setVisible(visible);
+    this.minimapVisible = visible;
     if (!visible) {
       this.constructionInspector.clear();
       this.validationHint.clear();
+      this.minimapRenderer?.clear();
     }
   };
 
@@ -106,6 +111,11 @@ export default class EditorUIScene extends Phaser.Scene {
     this.validationHint = new ValidationHint(this);
     this.constructionInspector = new ConstructionInspector();
     this.companyHud = new CompanyHud();
+    this.minimapRenderer = new MinimapRenderer(
+      this,
+      this.trackManager,
+      this.selectionManager,
+    );
     this.companyHud.setState({
       cash: this.initialCash,
       saveState: this.initialSaveState,
@@ -138,7 +148,12 @@ export default class EditorUIScene extends Phaser.Scene {
       this.validationHint.destroy();
       this.constructionInspector.destroy();
       this.companyHud.destroy();
+      this.minimapRenderer.destroy();
     });
+  }
+
+  update(): void {
+    if (this.minimapVisible) this.minimapRenderer.draw();
   }
 
   /**

@@ -4,6 +4,9 @@ import { GameConfig } from '../config/GameConfig';
 
 type Image = Phaser.GameObjects.Image;
 
+/** Compress the source photographs so track reads as a route, not a wide texture strip. */
+const CROSS_TRACK_SCALE_RATIO = 0.45;
+
 /**
  * RailTrackRenderer – responsible for the visual representation of a RailTrack.
  *
@@ -50,7 +53,10 @@ export class RailTrackRenderer {
 
     const img = this.scene.add.image(point.x, point.y, texture);
     img.setOrigin(0, 0.5);
-    img.setScale(this.railTrackScale);
+    img.setScale(
+      this.railTrackScale,
+      this.railTrackScale * CROSS_TRACK_SCALE_RATIO,
+    );
     img.setDepth(0);
     img.rotation = angle;
 

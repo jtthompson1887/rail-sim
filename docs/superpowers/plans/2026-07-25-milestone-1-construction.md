@@ -595,8 +595,9 @@ Prove:
 - two corridors are spatially distinct and have a meaningful cost/engineering
   tradeoff;
 - the cheaper valid route fits starting cash;
-- witness `totalCost` is quote-equivalent; simple blank-world endpoint chaining
-  has explicitly tested zero topology charge;
+- witness `totalCost` is quote-equivalent; the first free-to-free segment has
+  zero topology charge and each subsequent snapped chain connection has the
+  explicitly tested `ENDPOINT_CONNECTION_COST`;
 - player-facing `estimatedCost` equals the witness total exactly;
 - bounded retries always terminate or return an explicit generation error;
 - generation evaluates no more than 12 attempts and 256 site candidates per
@@ -609,8 +610,10 @@ Prove:
 Use the existing terrain generator plus the construction analyser on a coarse
 grid. For each candidate corridor, deterministically produce a chain of
 canonical cubic proposals using Task 1's `deriveAutomaticCubic()` helper and
-retain it as a hidden feasibility witness. Each simple new endpoint-chain
-segment has zero topology charge, making witness totals quote-equivalent.
+retain it as a hidden feasibility witness. The first free-to-free witness
+segment has zero topology charge; every subsequent snapped chain segment adds
+`ENDPOINT_CONNECTION_COST`, keeping witness totals quote-equivalent with the
+live construction service.
 Render only broad survey bands and trade-off summaries so the player receives
 route choices, not a solved railway. Generate only two planning sites and two
 corridor summaries. Do not add industry recipes or production.

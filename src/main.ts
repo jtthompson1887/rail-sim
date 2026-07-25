@@ -27,6 +27,7 @@ window.__railSimRecoverDerailedFollowerOnTrack = recoverDerailedFollowerOnTrack;
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
+  parent: 'game',
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,

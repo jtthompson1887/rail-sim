@@ -17,7 +17,7 @@ export class MinimapRenderer {
     this.scene = scene;
     this.trackManager = trackManager;
     this.selectionManager = selectionManager;
-    this.graphics = scene.add.graphics().setDepth(601).setScrollFactor(0);
+    this.graphics = scene.add.graphics().setDepth(601);
   }
 
   draw(): void {
@@ -36,11 +36,19 @@ export class MinimapRenderer {
     const tracks = this.trackManager.tracks;
     if (tracks.length === 0) return;
 
+    const sampledTracks = tracks.map((track) => ({
+      track,
+      points: Array.from(
+        { length: 9 },
+        (_, index) => track.getCurvePath().getPoint(index / 8),
+      ),
+    }));
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const t of tracks) {
-      const mid = t.getCurvePath().getPoint(0.5);
-      minX = Math.min(minX, mid.x); maxX = Math.max(maxX, mid.x);
-      minY = Math.min(minY, mid.y); maxY = Math.max(maxY, mid.y);
+    for (const { points } of sampledTracks) {
+      for (const point of points) {
+        minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
+        minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
+      }
     }
     const worldW = Math.max(maxX - minX, 1);
     const worldH = Math.max(maxY - minY, 1);
@@ -50,14 +58,14 @@ export class MinimapRenderer {
       my: mapY + ((y - minY) / worldH) * mapH,
     });
 
-    for (const t of tracks) {
+    for (const { track: t, points } of sampledTracks) {
       const isConnected = t.hasNext() || t.hasPrevious();
       const isSelected  = this.selectionManager.isSelected(t.getUUID());
       const color = isSelected ? 0xffffff : (isConnected ? 0x00ff88 : 0xff4444);
       this.graphics.lineStyle(isSelected ? 2 : 1, color, 0.9);
       this.graphics.beginPath();
-      for (let i = 0; i <= 8; i++) {
-        const pt = t.getCurvePath().getPoint(i / 8);
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
         const { mx, my } = toMap(pt.x, pt.y);
         if (i === 0) this.graphics.moveTo(mx, my);
         else this.graphics.lineTo(mx, my);
