@@ -1039,7 +1039,7 @@ refactor: enforce construction rules across editor tools
 - Modify only files required by evidenced failures.
 - Update documentation with player controls and known limits if necessary.
 
-- [ ] **Step 1: Run complete automated gates**
+- [x] **Step 1: Run complete automated gates**
 
 ```powershell
 npm test -- --runInBand
@@ -1058,7 +1058,7 @@ Expected:
 - production build succeeds;
 - no temporary diagnostics or generated output are staged.
 
-- [ ] **Step 2: Perform a focused construction playtest**
+- [x] **Step 2: Perform a focused construction playtest**
 
 Use at least three fixed seeds and cover:
 
@@ -1074,7 +1074,7 @@ Use at least three fixed seeds and cover:
 Record concrete observations and tune only evidenced usability or balance
 problems. Do not add new systems during polish.
 
-- [ ] **Step 3: Run the performance gate**
+- [x] **Step 3: Run the performance gate**
 
 On the documented development reference machine:
 
@@ -1087,13 +1087,13 @@ On the documented development reference machine:
 Portable tests assert operation caps and determinism; timing results are
 playtest evidence and must not be “fixed” by loosening correctness.
 
-- [ ] **Step 4: Request milestone-wide code review**
+- [x] **Step 4: Request milestone-wide code review**
 
 Review the complete Milestone 1 range against this plan and the approved
 long-term design. Fix all Critical and Important findings, record Minor items,
 and re-review corrections.
 
-- [ ] **Step 5: Commit final evidence-driven corrections**
+- [x] **Step 5: Commit final evidence-driven corrections**
 
 Do not create an empty commit.
 

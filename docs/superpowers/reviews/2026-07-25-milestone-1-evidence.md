@@ -65,12 +65,19 @@ The correction range `882b2e8..91513e1` was independently re-reviewed with no
 open Critical or Important findings. The reviewer also reran 64 focused tests
 across minimap, UI input, camera, and opportunity presentation.
 
+The complete Milestone 1 range `65476f6..91513e1` was then independently
+reviewed against both the milestone plan and the approved full-game design.
+That review also found no open Critical or Important findings.
+
 Minor YAGNI deferrals:
 
 - schema validation does not yet enforce globally unique track UUIDs or every
   relational reference;
 - persisted junction restoration remains deferred while the junction editor is
   disabled and generated blank worlds contain no junctions;
+- construction clearance currently checks every existing curve; add cached
+  profiles and a spatial broad phase before mature networks contain hundreds of
+  track segments;
 - legacy source textures and the main bundle are large enough to trigger
   Webpack performance warnings.
 
