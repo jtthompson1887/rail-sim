@@ -233,6 +233,19 @@ describe('SaveService', () => {
       write.mockRestore();
       clock.mockRestore();
     });
+
+    it('returns false without replacing durable data when active metadata is frozen', () => {
+      const prior = makeWorld('prior', 'Prior', '0', 123);
+      expect(SaveService.saveWorld(prior)).toBe(true);
+      const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+      const frozen = makeWorld('frozen', 'Frozen', '1', 456);
+      Object.freeze(frozen.metadata);
+
+      expect(SaveService.saveWorld(frozen)).toBe(false);
+      expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+      expect(frozen.metadata.updatedAt).toBe(456);
+      expect(SaveService.loadWorld('frozen')).toBeNull();
+    });
   });
 
   describe('listWorlds()', () => {

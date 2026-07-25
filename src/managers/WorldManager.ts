@@ -17,6 +17,17 @@ import {
   WorldOpportunityGenerator,
   type OpportunityGenerationResult,
 } from '../systems/WorldOpportunityGenerator';
+import { clonePlainData, equalPlainData } from '../utils/PlainData';
+
+export interface WorldConstructionDraft {
+  getTrack(uuid: string): TrackDef | undefined;
+  getJunction(uuid: string): JunctionDef | undefined;
+  addTrack(def: TrackDef, index?: number): boolean;
+  removeTrack(uuid: string): boolean;
+  updateTrack(def: TrackDef): boolean;
+  addJunction(def: JunctionDef, index?: number): boolean;
+  removeJunction(uuid: string): boolean;
+}
 
 export interface OpportunityGeneratorPort {
   generate(config: WorldGenerationConfigDef): OpportunityGenerationResult;
@@ -62,7 +73,7 @@ class WorldManagerClass {
       && this._world.revision < Number.MAX_SAFE_INTEGER;
   }
 
-  advanceRevision(): boolean {
+  private incrementRevision(): boolean {
     if (!this.canAdvanceRevision()) return false;
     this._world!.revision += 1;
     return true;
@@ -146,52 +157,93 @@ class WorldManagerClass {
 
   // ── Track mutations ────────────────────────────────────────────────────────
 
-  addTrackDef(def: TrackDef, advanceRevision = true): boolean {
-    if (!this._world
-      || this._world.tracks.some((track) => track.uuid === def.uuid)
-      || (advanceRevision && !this.canAdvanceRevision())) return false;
-    this._world.tracks.push(def);
-    if (advanceRevision) this.advanceRevision();
+  applyConstructionBatch(
+    expectedRevision: number,
+    mutate: (draft: WorldConstructionDraft) => boolean,
+  ): boolean {
+    const world = this._world;
+    if (!world || world.revision !== expectedRevision || !this.canAdvanceRevision()) return false;
+    const tracks = clonePlainData(world.tracks);
+    const junctions = clonePlainData(world.junctions);
+    const draft: WorldConstructionDraft = {
+      getTrack: (uuid) => tracks.find((track) => track.uuid === uuid),
+      getJunction: (uuid) => junctions.find((junction) => junction.uuid === uuid),
+      addTrack: (def, index = tracks.length) => {
+        if (tracks.some((track) => track.uuid === def.uuid)) return false;
+        if (!Number.isInteger(index) || index < 0 || index > tracks.length) return false;
+        tracks.splice(index, 0, clonePlainData(def));
+        return true;
+      },
+      removeTrack: (uuid) => {
+        const index = tracks.findIndex((track) => track.uuid === uuid);
+        if (index === -1) return false;
+        tracks.splice(index, 1);
+        return true;
+      },
+      updateTrack: (def) => {
+        const index = tracks.findIndex((track) => track.uuid === def.uuid);
+        if (index === -1 || equalPlainData(tracks[index], def)) return false;
+        tracks[index] = clonePlainData(def);
+        return true;
+      },
+      addJunction: (def, index = junctions.length) => {
+        if (junctions.some((junction) => junction.uuid === def.uuid)) return false;
+        if (!Number.isInteger(index) || index < 0 || index > junctions.length) return false;
+        junctions.splice(index, 0, clonePlainData(def));
+        return true;
+      },
+      removeJunction: (uuid) => {
+        const index = junctions.findIndex((junction) => junction.uuid === uuid);
+        if (index === -1) return false;
+        junctions.splice(index, 1);
+        return true;
+      },
+    };
+    try {
+      if (!mutate(draft)
+        || this._world !== world
+        || world.revision !== expectedRevision
+        || (equalPlainData(tracks, world.tracks)
+          && equalPlainData(junctions, world.junctions))) return false;
+    } catch {
+      return false;
+    }
+    world.tracks = clonePlainData(tracks);
+    world.junctions = clonePlainData(junctions);
+    world.revision += 1;
     return true;
   }
 
-  removeTrackDef(uuid: string, advanceRevision = true): boolean {
-    if (!this._world
-      || !this._world.tracks.some((track) => track.uuid === uuid)
-      || (advanceRevision && !this.canAdvanceRevision())) return false;
-    this._world.tracks = this._world.tracks.filter((t) => t.uuid !== uuid);
-    if (advanceRevision) this.advanceRevision();
-    return true;
+  addTrackDef(def: TrackDef): boolean {
+    const revision = this._world?.revision;
+    return revision !== undefined
+      && this.applyConstructionBatch(revision, (draft) => draft.addTrack(def));
   }
 
-  updateTrackDef(updated: TrackDef, advanceRevision = true): boolean {
-    if (!this._world || (advanceRevision && !this.canAdvanceRevision())) return false;
-    const idx = this._world.tracks.findIndex((t) => t.uuid === updated.uuid);
-    if (idx === -1
-      || JSON.stringify(this._world.tracks[idx]) === JSON.stringify(updated)) return false;
-    this._world.tracks[idx] = updated;
-    if (advanceRevision) this.advanceRevision();
-    return true;
+  removeTrackDef(uuid: string): boolean {
+    const revision = this._world?.revision;
+    return revision !== undefined
+      && this.applyConstructionBatch(revision, (draft) => draft.removeTrack(uuid));
+  }
+
+  updateTrackDef(updated: TrackDef): boolean {
+    const revision = this._world?.revision;
+    return revision !== undefined
+      && this.applyConstructionBatch(revision, (draft) => draft.updateTrack(updated));
   }
 
   // ── Junction mutations ─────────────────────────────────────────────────────
 
-  addJunctionDef(def: JunctionDef, advanceRevision = true): boolean {
-    if (!this._world
-      || this._world.junctions.some((junction) => junction.uuid === def.uuid)
-      || (advanceRevision && !this.canAdvanceRevision())) return false;
-    this._world.junctions.push(def);
-    if (advanceRevision) this.advanceRevision();
-    return true;
+  addJunctionDef(def: JunctionDef): boolean {
+    const revision = this._world?.revision;
+    return revision !== undefined
+      && this.applyConstructionBatch(revision, (draft) => draft.addJunction(def));
   }
 
-  removeJunctionDef(uuid: string, advanceRevision = true): boolean {
-    if (!this._world
-      || !this._world.junctions.some((junction) => junction.uuid === uuid)
-      || (advanceRevision && !this.canAdvanceRevision())) return false;
-    this._world.junctions = this._world.junctions.filter((j) => j.uuid !== uuid);
-    if (advanceRevision) this.advanceRevision();
-    return true;
+  removeJunctionDef(uuid: string): boolean {
+    const revision = this._world?.revision;
+    return revision !== undefined
+      && this.applyConstructionBatch(revision, (draft) => draft.removeJunction(uuid));
   }
 
   // ── Station mutations ──────────────────────────────────────────────────────
@@ -200,14 +252,14 @@ class WorldManagerClass {
     if (!this._world || !this.canAdvanceRevision()
       || this._world.stations.some((station) => station.id === def.id)) return false;
     this._world.stations.push(def);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   removeStationDef(id: string): boolean {
     if (!this._world || !this.canAdvanceRevision()
       || !this._world.stations.some((station) => station.id === id)) return false;
     this._world.stations = this._world.stations.filter((s) => s.id !== id);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   // ── Train mutations ────────────────────────────────────────────────────────
@@ -216,14 +268,14 @@ class WorldManagerClass {
     if (!this._world || !this.canAdvanceRevision()
       || this._world.trains.some((train) => train.id === def.id)) return false;
     this._world.trains.push(def);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   removeTrainDef(id: string): boolean {
     if (!this._world || !this.canAdvanceRevision()
       || !this._world.trains.some((train) => train.id === id)) return false;
     this._world.trains = this._world.trains.filter((t) => t.id !== id);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   updateTrainDef(updated: Partial<TrainDef> & { id: string }): boolean {
@@ -233,7 +285,7 @@ class WorldManagerClass {
     const next = { ...this._world.trains[idx], ...updated };
     if (JSON.stringify(next) === JSON.stringify(this._world.trains[idx])) return false;
     this._world.trains[idx] = next;
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   /** Replace the entire trains array (used to sync live train state before saving). */
@@ -241,7 +293,7 @@ class WorldManagerClass {
     if (!this._world || !this.canAdvanceRevision()
       || JSON.stringify(this._world.trains) === JSON.stringify(defs)) return false;
     this._world.trains = defs;
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   // ── Scenery mutations ──────────────────────────────────────────────────────
@@ -250,14 +302,14 @@ class WorldManagerClass {
     if (!this._world || !this.canAdvanceRevision()
       || this._world.scenery.some((scenery) => scenery.id === def.id)) return false;
     this._world.scenery.push(def);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   removeSceneryDef(id: string): boolean {
     if (!this._world || !this.canAdvanceRevision()
       || !this._world.scenery.some((scenery) => scenery.id === id)) return false;
     this._world.scenery = this._world.scenery.filter((s) => s.id !== id);
-    return this.advanceRevision();
+    return this.incrementRevision();
   }
 
   /** Return all scenery objects whose position falls within the given chunk. */
@@ -277,10 +329,6 @@ class WorldManagerClass {
     return this._world ? JSON.parse(JSON.stringify(this._world)) as WorldData : null;
   }
 
-  /** Restore from a previously taken snapshot. */
-  restore(snapshot: WorldData): void {
-    this._world = snapshot;
-  }
 }
 
 export const WorldManager = new WorldManagerClass();

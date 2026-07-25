@@ -193,6 +193,12 @@ describe('WorldManager', () => {
       expect(WorldManager.addTrackDef(makeTrackDef('two'))).toBe(false);
       expect(WorldManager.world!.tracks.map((track) => track.uuid)).toEqual(['one']);
     });
+
+    it('does not expose a no-revision mutation bypass', () => {
+      WorldManager.createNew('No bypass', 'real-terrain-alpha');
+      expect((WorldManager.addTrackDef as any)(makeTrackDef('one'), false)).toBe(true);
+      expect(WorldManager.world!.revision).toBe(1);
+    });
   });
 
   describe('addJunctionDef() / removeJunctionDef()', () => {
@@ -287,7 +293,7 @@ describe('WorldManager', () => {
     });
   });
 
-  describe('snapshot() / restore()', () => {
+  describe('snapshot()', () => {
     it('captures a deep copy of current state', () => {
       WorldManager.createNew('Snap', 'real-terrain-alpha');
       WorldManager.addTrackDef(makeTrackDef('snap-track'));
@@ -300,13 +306,8 @@ describe('WorldManager', () => {
       expect(WorldManager.snapshot()).toBeNull();
     });
 
-    it('restores a snapshot, overwriting current state', () => {
-      WorldManager.createNew('Restore', 'real-terrain-alpha');
-      const snap = WorldManager.snapshot()!;
-      WorldManager.addTrackDef(makeTrackDef('extra'));
-      expect(WorldManager.world!.tracks).toHaveLength(1);
-      WorldManager.restore(snap);
-      expect(WorldManager.world!.tracks).toHaveLength(0);
+    it('does not expose a revision-rewinding restore operation', () => {
+      expect((WorldManager as any).restore).toBeUndefined();
     });
 
     it('is a deep copy (mutation does not affect snapshot)', () => {

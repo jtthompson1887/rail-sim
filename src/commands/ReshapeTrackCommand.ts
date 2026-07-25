@@ -10,6 +10,7 @@ export class ReshapeTrackCommand implements Command {
   private uuid: string;
   private beforeDef: TrackDef;
   private afterDef: TrackDef;
+  private expectedRevision: number;
 
   constructor(
     trackManager: TrackManager,
@@ -21,6 +22,7 @@ export class ReshapeTrackCommand implements Command {
     this.uuid = uuid;
     this.beforeDef = before;
     this.afterDef = after;
+    this.expectedRevision = WorldManager.world?.revision ?? -1;
   }
 
   execute(): boolean { return this.apply(this.afterDef); }
@@ -28,16 +30,18 @@ export class ReshapeTrackCommand implements Command {
 
   private apply(def: TrackDef): boolean {
     const track = this.trackManager.getTrack(this.uuid);
-    if (!track || !WorldManager.canAdvanceRevision()) return false;
+    if (!track || WorldManager.world?.revision !== this.expectedRevision
+      || !WorldManager.canAdvanceRevision()) return false;
     const current = WorldManager.world!.tracks.find((item) => item.uuid === this.uuid);
     if (!current || !this.trackManager.applyTrackDef(def)) return false;
-    if (!WorldManager.updateTrackDef(def, false)) {
+    if (!WorldManager.applyConstructionBatch(
+      this.expectedRevision,
+      (draft) => draft.updateTrack(def),
+    )) {
       this.trackManager.applyTrackDef(current);
       return false;
     }
-    if (WorldManager.advanceRevision()) return true;
-    WorldManager.updateTrackDef(current, false);
-    this.trackManager.applyTrackDef(current);
-    return false;
+    this.expectedRevision += 1;
+    return true;
   }
 }

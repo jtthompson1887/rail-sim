@@ -78,6 +78,17 @@ export class ConstructionEconomy {
     return transaction;
   }
 
+  cancelDemolitionRefund(
+    demolitionLifecycle: object,
+    transaction: ConstructionTransaction,
+  ): boolean {
+    if (this.demolitionRefunds.get(demolitionLifecycle) !== transaction
+      || this.transactionMetadata.get(transaction)?.state !== 'reversed') return false;
+    this.demolitionRefunds.delete(demolitionLifecycle);
+    this.transactionMetadata.delete(transaction);
+    return true;
+  }
+
   private applySignedAmount(amount: number): ConstructionTransaction | null {
     if (!isValidCash(this.company.cash)
       || !isValidAmount(amount)

@@ -13,6 +13,7 @@ import {
   type ConstructionQuote,
 } from '../systems/ConstructionService';
 import { TrackSerializer } from '../utils/TrackSerializer';
+import { clonePlainData, equalPlainData } from '../utils/PlainData';
 
 export type PlaceTrackCommitStage =
   | 'after-debit'
@@ -27,9 +28,9 @@ export type PlaceTrackFailureInjector = (stage: PlaceTrackCommitStage) => void;
 function trackDefFromQuote(quote: ConstructionQuote): TrackDef {
   return {
     uuid: quote.newTrackUUID,
-    ...JSON.parse(JSON.stringify(quote.proposal.geometry)),
-    verticalProfile: JSON.parse(JSON.stringify(quote.proposal.verticalProfile)),
-    structures: JSON.parse(JSON.stringify(quote.proposal.structures)),
+    ...clonePlainData(quote.proposal.geometry),
+    verticalProfile: clonePlainData(quote.proposal.verticalProfile),
+    structures: clonePlainData(quote.proposal.structures),
     paidBuildCost: quote.totalCost,
   };
 }
@@ -44,8 +45,8 @@ function railTrackFromDef(scene: Phaser.Scene, def: TrackDef): RailTrack {
   );
   track.setUUID(def.uuid);
   track.setConstructionData(
-    JSON.parse(JSON.stringify(def.verticalProfile)),
-    JSON.parse(JSON.stringify(def.structures)),
+    clonePlainData(def.verticalProfile),
+    clonePlainData(def.structures),
     def.paidBuildCost,
   );
   return track;
@@ -57,6 +58,7 @@ export class PlaceTrackCommand implements Command {
   private readonly def: TrackDef;
   private transaction: ConstructionTransaction | null = null;
   private applied = false;
+  private expectedRevision: number;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -67,11 +69,13 @@ export class PlaceTrackCommand implements Command {
     private readonly injectFailure?: PlaceTrackFailureInjector,
   ) {
     this.def = trackDefFromQuote(quote);
+    this.expectedRevision = quote.worldRevision;
   }
 
   execute(): boolean {
     if (this.applied) return false;
     if (!WorldManager.world
+      || WorldManager.world.revision !== this.expectedRevision
       || !this.economy.isBoundTo(WorldManager.world.company)) return false;
     const isRedo = this.transaction !== null;
     const valid = isRedo
@@ -84,7 +88,6 @@ export class PlaceTrackCommand implements Command {
 
     let debited = false;
     let liveAdded = false;
-    let worldAdded = false;
     let createdTrack: RailTrack | null = null;
     let transaction: ConstructionTransaction | null = this.transaction;
     try {
@@ -102,20 +105,20 @@ export class PlaceTrackCommand implements Command {
       liveAdded = true;
       this.injectFailure?.('after-live-track');
 
-      if (!WorldManager.addTrackDef(this.def, false)) {
-        throw new Error('persisted track insertion failed');
-      }
-      worldAdded = true;
-      this.injectFailure?.('after-world-def');
-
-      if (!WorldManager.advanceRevision()) {
-        throw new Error('world revision advance failed');
-      }
+      const committed = WorldManager.applyConstructionBatch(
+        this.expectedRevision,
+        (draft) => {
+          if (!draft.addTrack(this.def)) return false;
+          this.injectFailure?.('after-world-def');
+          return true;
+        },
+      );
+      if (!committed) throw new Error('persisted track transaction failed');
+      this.expectedRevision += 1;
       this.transaction = transaction;
       this.applied = true;
       return true;
     } catch {
-      if (worldAdded) WorldManager.removeTrackDef(this.def.uuid, false);
       if (liveAdded) this.trackManager.removeTrack(this.def.uuid);
       else createdTrack?.destroy();
       if (debited && transaction) this.economy.reverse(transaction);
@@ -132,29 +135,23 @@ export class PlaceTrackCommand implements Command {
     let liveMatches = false;
     try {
       liveMatches = !!live
-        && JSON.stringify(TrackSerializer.toTrackDef(live)) === JSON.stringify(this.def);
+        && equalPlainData(TrackSerializer.toTrackDef(live), this.def);
     } catch {
       liveMatches = false;
     }
     if (!this.applied || !transaction || !world || !live
+      || world.revision !== this.expectedRevision
       || !this.economy.isBoundTo(world.company)
-      || JSON.stringify(persisted) !== JSON.stringify(this.def)
+      || !equalPlainData(persisted, this.def)
       || !liveMatches
       || !WorldManager.canAdvanceRevision()) return false;
 
     let liveRemoved = false;
-    let worldRemoved = false;
     let cashRestored = false;
     try {
       if (!this.trackManager.removeTrack(this.def.uuid)) return false;
       liveRemoved = true;
       this.injectFailure?.('undo-after-live-track');
-
-      if (!WorldManager.removeTrackDef(this.def.uuid, false)) {
-        throw new Error('persisted track removal failed');
-      }
-      worldRemoved = true;
-      this.injectFailure?.('undo-after-world-def');
 
       if (!this.economy.reverse(transaction)) {
         throw new Error('cash reversal failed');
@@ -162,14 +159,20 @@ export class PlaceTrackCommand implements Command {
       cashRestored = true;
       this.injectFailure?.('undo-after-refund');
 
-      if (!WorldManager.advanceRevision()) {
-        throw new Error('world revision advance failed');
-      }
+      const committed = WorldManager.applyConstructionBatch(
+        this.expectedRevision,
+        (draft) => {
+          if (!draft.removeTrack(this.def.uuid)) return false;
+          this.injectFailure?.('undo-after-world-def');
+          return true;
+        },
+      );
+      if (!committed) throw new Error('persisted track transaction failed');
+      this.expectedRevision += 1;
       this.applied = false;
       return true;
     } catch {
       if (cashRestored) this.economy.reapply(transaction);
-      if (worldRemoved) WorldManager.addTrackDef(this.def, false);
       if (liveRemoved) {
         try {
           this.trackManager.addTrack(railTrackFromDef(this.scene, this.def));

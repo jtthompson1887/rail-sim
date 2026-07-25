@@ -1,15 +1,42 @@
 import Phaser from 'phaser';
 import type { Command } from '../systems/CommandStack';
-import type { JunctionDef, TrackDef } from '../config/WorldData';
+import type { JunctionDef, TrackDef, WorldData } from '../config/WorldData';
 import Junction from '../entities/Junction';
 import RailTrack from '../entities/RailTrack';
-import TrackManager from '../managers/TrackManager';
+import TrackManager, {
+  type TrackTopologySnapshot,
+} from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 import {
   ConstructionEconomy,
+  demolitionRefund,
   type ConstructionTransaction,
 } from '../systems/ConstructionEconomy';
 import { TrackSerializer } from '../utils/TrackSerializer';
+import { clonePlainData, equalPlainData } from '../utils/PlainData';
+
+export type DeleteTracksStage =
+  | 'after-live-removal'
+  | 'after-draft-removal'
+  | 'after-live-restore'
+  | 'after-draft-restore';
+
+export type DeleteTracksFailureInjector = (stage: DeleteTracksStage) => void;
+
+interface IndexedTrackDef {
+  index: number;
+  def: TrackDef;
+}
+
+interface IndexedJunctionDef {
+  index: number;
+  def: JunctionDef;
+}
+
+interface RefundRecord {
+  snapshotIndex: number;
+  transaction: ConstructionTransaction;
+}
 
 function restoreTrack(scene: Phaser.Scene, def: TrackDef): RailTrack {
   const track = new RailTrack(
@@ -21,8 +48,8 @@ function restoreTrack(scene: Phaser.Scene, def: TrackDef): RailTrack {
   );
   track.setUUID(def.uuid);
   track.setConstructionData(
-    JSON.parse(JSON.stringify(def.verticalProfile)),
-    JSON.parse(JSON.stringify(def.structures)),
+    clonePlainData(def.verticalProfile),
+    clonePlainData(def.structures),
     def.paidBuildCost,
   );
   return track;
@@ -32,13 +59,20 @@ function restoreTrack(scene: Phaser.Scene, def: TrackDef): RailTrack {
 export class DeleteTracksCommand implements Command {
   readonly description = 'Delete track(s)';
   private readonly uuids: string[];
-  private readonly snapshots: TrackDef[];
-  private readonly junctionSnapshots: JunctionDef[];
-  private readonly junctionBranchStates = new Map<string, 'left' | 'right'>();
+  private readonly snapshots: IndexedTrackDef[];
+  private readonly junctionSnapshots: IndexedJunctionDef[];
   private readonly refundLifecycles: object[];
-  private readonly worldIdentity = WorldManager.world;
-  private transactions: ConstructionTransaction[] | null = null;
+  private readonly worldIdentity: WorldData | null;
+  private readonly worldTracksBefore: TrackDef[];
+  private readonly worldJunctionsBefore: JunctionDef[];
+  private readonly worldTracksAfter: TrackDef[];
+  private readonly worldJunctionsAfter: JunctionDef[];
+  private readonly topologyBefore: TrackTopologySnapshot;
+  private readonly junctionBranchStates = new Map<string, 'left' | 'right'>();
+  private transactions: RefundRecord[] | null = null;
+  private topologyAfter: TrackTopologySnapshot | null = null;
   private applied = false;
+  private expectedRevision: number;
 
   constructor(
     private readonly trackManager: TrackManager,
@@ -47,138 +81,227 @@ export class DeleteTracksCommand implements Command {
     private readonly economy: ConstructionEconomy = new ConstructionEconomy(
       WorldManager.world?.company ?? { cash: 0 },
     ),
+    private readonly injectFailure?: DeleteTracksFailureInjector,
   ) {
     this.uuids = Array.from(new Set(uuids));
     const world = WorldManager.world;
+    this.worldIdentity = world;
+    this.expectedRevision = world?.revision ?? -1;
+    this.worldTracksBefore = clonePlainData(world?.tracks ?? []);
+    this.worldJunctionsBefore = clonePlainData(world?.junctions ?? []);
     this.snapshots = this.uuids
-      .map((uuid) => world?.tracks.find((track) => track.uuid === uuid))
-      .filter((track): track is TrackDef => track !== undefined)
-      .map((track) => JSON.parse(JSON.stringify(track)) as TrackDef);
-    this.junctionSnapshots = (world?.junctions ?? [])
-      .filter((junction) => this.uuids.some((uuid) => (
-        junction.mainTrackUUID === uuid
-        || junction.leftTrackUUID === uuid
-        || junction.rightTrackUUID === uuid
+      .map((uuid) => {
+        const index = this.worldTracksBefore.findIndex((track) => track.uuid === uuid);
+        return index === -1 ? null : { index, def: clonePlainData(this.worldTracksBefore[index]) };
+      })
+      .filter((snapshot): snapshot is IndexedTrackDef => snapshot !== null);
+    this.junctionSnapshots = this.worldJunctionsBefore
+      .map((junction, index) => ({ index, def: junction }))
+      .filter(({ def }) => this.uuids.some((uuid) => (
+        def.mainTrackUUID === uuid
+        || def.leftTrackUUID === uuid
+        || def.rightTrackUUID === uuid
       )))
-      .map((junction) => JSON.parse(JSON.stringify(junction)) as JunctionDef);
-    for (const junction of this.junctionSnapshots) {
-      const live = this.trackManager.getJunction(junction.uuid);
-      if (live) this.junctionBranchStates.set(junction.uuid, live.branchState);
-    }
+      .map(({ index, def }) => ({ index, def: clonePlainData(def) }));
+    const deletedTrackIds = new Set(this.uuids);
+    const deletedJunctionIds = new Set(
+      this.junctionSnapshots.map((snapshot) => snapshot.def.uuid),
+    );
+    this.worldTracksAfter = this.worldTracksBefore
+      .filter((track) => !deletedTrackIds.has(track.uuid));
+    this.worldJunctionsAfter = this.worldJunctionsBefore
+      .filter((junction) => !deletedJunctionIds.has(junction.uuid));
     this.refundLifecycles = this.snapshots.map(() => ({}));
+    this.topologyBefore = this.trackManager.captureTopology();
+    for (const { def } of this.junctionSnapshots) {
+      const live = this.trackManager.getJunction(def.uuid);
+      if (live) this.junctionBranchStates.set(def.uuid, live.branchState);
+    }
   }
 
   execute(): boolean {
     const world = WorldManager.world;
     if (this.applied || !world || world !== this.worldIdentity
+      || world.revision !== this.expectedRevision
       || !this.economy.isBoundTo(world.company)
       || this.uuids.length === 0
       || this.snapshots.length !== this.uuids.length
-      || !WorldManager.canAdvanceRevision()
-      || !this.uuids.every((uuid) => this.trackManager.getTrack(uuid))
-      || !this.liveTracksMatchSnapshots()
-      || !this.junctionSnapshots.every((junction) => this.trackManager.getJunction(junction.uuid))
-      || !this.snapshots.every((snapshot) => JSON.stringify(
-        world.tracks.find((track) => track.uuid === snapshot.uuid),
-      ) === JSON.stringify(snapshot))
-      || this.hasGameplayReferences()) return false;
+      || !equalPlainData(world.tracks, this.worldTracksBefore)
+      || !equalPlainData(world.junctions, this.worldJunctionsBefore)
+      || !equalPlainData(this.trackManager.captureTopology(), this.topologyBefore)
+      || !this.liveStateMatchesBefore()
+      || this.hasGameplayReferences()
+      || !this.canApplyRefunds(world.company.cash)) return false;
 
-    const removedJunctions: JunctionDef[] = [];
-    const removedTracks: TrackDef[] = [];
-    const appliedTransactions: ConstructionTransaction[] = [];
+    const removedTracks: IndexedTrackDef[] = [];
+    const removedJunctions: IndexedJunctionDef[] = [];
+    const appliedRefunds: RefundRecord[] = [];
+    const firstExecution = this.transactions === null;
     try {
-      for (const junction of this.junctionSnapshots) {
-        if (!this.trackManager.removeJunction(junction.uuid)) {
-          throw new Error('junction removal failed');
-        }
-        removedJunctions.push(junction);
-        if (!WorldManager.removeJunctionDef(junction.uuid, false)) {
-          throw new Error('junction definition removal failed');
-        }
-      }
-      for (const snapshot of this.snapshots) {
-        if (!this.trackManager.removeTrack(snapshot.uuid)) {
-          throw new Error('track removal failed');
-        }
-        removedTracks.push(snapshot);
-        if (!WorldManager.removeTrackDef(snapshot.uuid, false)) {
-          throw new Error('track definition removal failed');
-        }
-      }
-
       if (this.transactions) {
-        for (const transaction of this.transactions) {
-          if (!this.economy.reapply(transaction)) throw new Error('refund reapply failed');
-          appliedTransactions.push(transaction);
+        for (const refund of this.transactions) {
+          if (!this.economy.reapply(refund.transaction)) {
+            throw new Error('refund reapply failed');
+          }
+          appliedRefunds.push(refund);
         }
       } else {
         for (let index = 0; index < this.snapshots.length; index++) {
-          const paid = this.snapshots[index].paidBuildCost;
-          if (paid === 0) continue;
+          const refundAmount = demolitionRefund(this.snapshots[index].def.paidBuildCost);
+          if (refundAmount === 0) continue;
           const transaction = this.economy.refundDemolition(
             this.refundLifecycles[index],
-            paid,
+            this.snapshots[index].def.paidBuildCost,
           );
           if (!transaction) throw new Error('refund failed');
-          appliedTransactions.push(transaction);
+          appliedRefunds.push({ snapshotIndex: index, transaction });
         }
       }
 
-      if (!WorldManager.advanceRevision()) throw new Error('revision failed');
-      if (!this.transactions) this.transactions = appliedTransactions;
+      for (const snapshot of this.junctionSnapshots) {
+        if (!this.trackManager.removeJunction(snapshot.def.uuid)) {
+          throw new Error('junction removal failed');
+        }
+        removedJunctions.push(snapshot);
+      }
+      for (const snapshot of this.snapshots) {
+        if (!this.trackManager.removeTrack(snapshot.def.uuid)) {
+          throw new Error('track removal failed');
+        }
+        removedTracks.push(snapshot);
+      }
+      this.injectFailure?.('after-live-removal');
+
+      const committed = WorldManager.applyConstructionBatch(
+        this.expectedRevision,
+        (draft) => {
+          for (const snapshot of this.junctionSnapshots) {
+            if (!draft.removeJunction(snapshot.def.uuid)) return false;
+          }
+          for (const snapshot of this.snapshots) {
+            if (!draft.removeTrack(snapshot.def.uuid)) return false;
+          }
+          this.injectFailure?.('after-draft-removal');
+          return true;
+        },
+      );
+      if (!committed) throw new Error('persisted demolition transaction failed');
+
+      this.expectedRevision += 1;
+      if (firstExecution) this.transactions = appliedRefunds;
+      this.topologyAfter = this.trackManager.captureTopology();
       this.applied = true;
       return true;
     } catch {
-      for (let index = appliedTransactions.length - 1; index >= 0; index--) {
-        this.economy.reverse(appliedTransactions[index]);
-      }
-      this.restoreTracks(removedTracks);
-      this.restoreJunctions(removedJunctions);
+      this.reverseAppliedRefunds(appliedRefunds, firstExecution);
+      this.restoreRemovedLive(removedTracks, removedJunctions);
+      this.trackManager.restoreTopology(this.topologyBefore);
       return false;
     }
   }
 
   undo(): boolean {
-    if (!this.applied || !this.transactions
-      || WorldManager.world !== this.worldIdentity
-      || !WorldManager.world
-      || !this.economy.isBoundTo(WorldManager.world.company)
-      || !WorldManager.canAdvanceRevision()) return false;
-    const reversed: ConstructionTransaction[] = [];
-    const restoredTracks: TrackDef[] = [];
-    const restoredJunctions: JunctionDef[] = [];
+    const world = WorldManager.world;
+    if (!this.applied || !this.transactions || !world
+      || world !== this.worldIdentity
+      || world.revision !== this.expectedRevision
+      || !this.economy.isBoundTo(world.company)
+      || !equalPlainData(world.tracks, this.worldTracksAfter)
+      || !equalPlainData(world.junctions, this.worldJunctionsAfter)
+      || !this.topologyAfter
+      || !equalPlainData(this.trackManager.captureTopology(), this.topologyAfter)
+      || this.snapshots.some(({ def }) => this.trackManager.getTrack(def.uuid))
+      || this.junctionSnapshots.some(({ def }) => this.trackManager.getJunction(def.uuid))) {
+      return false;
+    }
+
+    const reversed: RefundRecord[] = [];
+    const restoredTracks: IndexedTrackDef[] = [];
+    const restoredJunctions: IndexedJunctionDef[] = [];
     try {
       for (let index = this.transactions.length - 1; index >= 0; index--) {
-        if (!this.economy.reverse(this.transactions[index])) {
+        const refund = this.transactions[index];
+        if (!this.economy.reverse(refund.transaction)) {
           throw new Error('refund reversal failed');
         }
-        reversed.push(this.transactions[index]);
+        reversed.push(refund);
       }
       for (const snapshot of this.snapshots) {
-        this.trackManager.addTrack(restoreTrack(this.scene, snapshot));
+        this.trackManager.addTrack(restoreTrack(this.scene, snapshot.def));
         restoredTracks.push(snapshot);
-        if (!WorldManager.addTrackDef(snapshot, false)) throw new Error('track restore failed');
       }
-      for (const junction of this.junctionSnapshots) {
-        this.restoreJunction(junction);
-        restoredJunctions.push(junction);
-        if (!WorldManager.addJunctionDef(junction, false)) throw new Error('junction restore failed');
+      for (const snapshot of this.junctionSnapshots) {
+        this.restoreJunction(snapshot.def);
+        restoredJunctions.push(snapshot);
       }
-      if (!WorldManager.advanceRevision()) throw new Error('revision failed');
+      if (!this.trackManager.restoreTopology(this.topologyBefore)) {
+        throw new Error('topology restore failed');
+      }
+      this.injectFailure?.('after-live-restore');
+
+      const committed = WorldManager.applyConstructionBatch(
+        this.expectedRevision,
+        (draft) => {
+          for (const snapshot of [...this.snapshots].sort((a, b) => a.index - b.index)) {
+            if (!draft.addTrack(snapshot.def, snapshot.index)) return false;
+          }
+          for (const snapshot of [...this.junctionSnapshots].sort((a, b) => a.index - b.index)) {
+            if (!draft.addJunction(snapshot.def, snapshot.index)) return false;
+          }
+          this.injectFailure?.('after-draft-restore');
+          return true;
+        },
+      );
+      if (!committed) throw new Error('persisted demolition undo transaction failed');
+
+      this.expectedRevision += 1;
       this.applied = false;
       return true;
     } catch {
-      for (const junction of restoredJunctions) {
-        this.trackManager.removeJunction(junction.uuid);
-        WorldManager.removeJunctionDef(junction.uuid, false);
+      for (const snapshot of restoredJunctions) {
+        this.trackManager.removeJunction(snapshot.def.uuid);
       }
-      for (const track of restoredTracks) {
-        this.trackManager.removeTrack(track.uuid);
-        WorldManager.removeTrackDef(track.uuid, false);
+      for (const snapshot of restoredTracks) {
+        this.trackManager.removeTrack(snapshot.def.uuid);
       }
       for (let index = reversed.length - 1; index >= 0; index--) {
-        this.economy.reapply(reversed[index]);
+        this.economy.reapply(reversed[index].transaction);
       }
+      if (this.topologyAfter) this.trackManager.restoreTopology(this.topologyAfter);
+      return false;
+    }
+  }
+
+  private canApplyRefunds(cash: number): boolean {
+    if (!Number.isSafeInteger(cash) || cash < 0) return false;
+    let projectedCash = cash;
+    for (const { def } of this.snapshots) {
+      const refund = demolitionRefund(def.paidBuildCost);
+      if (!Number.isSafeInteger(projectedCash + refund)) return false;
+      projectedCash += refund;
+    }
+    return true;
+  }
+
+  private reverseAppliedRefunds(refunds: RefundRecord[], cancel: boolean): void {
+    for (let index = refunds.length - 1; index >= 0; index--) {
+      const refund = refunds[index];
+      if (this.economy.reverse(refund.transaction) && cancel) {
+        this.economy.cancelDemolitionRefund(
+          this.refundLifecycles[refund.snapshotIndex],
+          refund.transaction,
+        );
+      }
+    }
+  }
+
+  private liveStateMatchesBefore(): boolean {
+    try {
+      return this.snapshots.every(({ def }) => {
+        const live = this.trackManager.getTrack(def.uuid);
+        return !!live && equalPlainData(TrackSerializer.toTrackDef(live), def);
+      }) && this.junctionSnapshots.every(({ def }) => this.trackManager.getJunction(def.uuid));
+    } catch {
       return false;
     }
   }
@@ -198,34 +321,18 @@ export class DeleteTracksCommand implements Command {
       ));
   }
 
-  private liveTracksMatchSnapshots(): boolean {
-    try {
-      return this.snapshots.every((snapshot) => {
-        const live = this.trackManager.getTrack(snapshot.uuid);
-        return !!live
-          && JSON.stringify(TrackSerializer.toTrackDef(live)) === JSON.stringify(snapshot);
-      });
-    } catch {
-      return false;
-    }
-  }
-
-  private restoreTracks(snapshots: TrackDef[]): void {
-    for (const snapshot of snapshots) {
-      if (!this.trackManager.getTrack(snapshot.uuid)) {
-        this.trackManager.addTrack(restoreTrack(this.scene, snapshot));
-      }
-      if (!WorldManager.world?.tracks.some((track) => track.uuid === snapshot.uuid)) {
-        WorldManager.addTrackDef(snapshot, false);
+  private restoreRemovedLive(
+    tracks: IndexedTrackDef[],
+    junctions: IndexedJunctionDef[],
+  ): void {
+    for (const snapshot of tracks) {
+      if (!this.trackManager.getTrack(snapshot.def.uuid)) {
+        this.trackManager.addTrack(restoreTrack(this.scene, snapshot.def));
       }
     }
-  }
-
-  private restoreJunctions(junctions: JunctionDef[]): void {
-    for (const junction of junctions) {
-      if (!this.trackManager.getJunction(junction.uuid)) this.restoreJunction(junction);
-      if (!WorldManager.world?.junctions.some((item) => item.uuid === junction.uuid)) {
-        WorldManager.addJunctionDef(junction, false);
+    for (const snapshot of junctions) {
+      if (!this.trackManager.getJunction(snapshot.def.uuid)) {
+        this.restoreJunction(snapshot.def);
       }
     }
   }

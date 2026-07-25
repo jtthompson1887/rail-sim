@@ -27,7 +27,7 @@ function addTrack(manager: TrackManager, scene: Phaser.Scene): RailTrack {
     100,
   );
   manager.addTrack(track);
-  WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+  WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
   return track;
 }
 
@@ -63,6 +63,13 @@ describe('ConstructionService', () => {
     expect(quote!.totalCost).toBe(quote!.proposal.costs.total + ENDPOINT_CONNECTION_COST);
     expect(Object.isFrozen(quote)).toBe(true);
     expect(Object.isFrozen(quote!.proposal.geometry.p0)).toBe(true);
+  });
+
+  it('preserves Infinity in a straight proposal without JSON coercion', () => {
+    const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'straight');
+    expect(quote).not.toBeNull();
+    expect(quote!.proposal.minimumRadius).toBe(Infinity);
+    expect(service.revalidateQuote(quote!)).toBe(true);
   });
 
   it('rejects a quote after revision, cash, or affected geometry changes', () => {

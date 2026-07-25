@@ -6,6 +6,7 @@ import type { WorldData } from '../config/WorldData';
 import TrackManager from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 import { TrackSerializer } from '../utils/TrackSerializer';
+import { clonePlainData, equalPlainData } from '../utils/PlainData';
 import {
   ConstructionAnalyzer,
   type ConstructionProposal,
@@ -52,7 +53,7 @@ function deepFreeze<T>(value: T): T {
 }
 
 function exact(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return equalPlainData(left, right);
 }
 
 function geometryOf(trackUUID: string, trackManager: TrackManager): TrackGeometryDef | null {
@@ -167,7 +168,7 @@ export class ConstructionService {
       newTrackUUID,
       worldRevision: world.revision,
       expectedCash: world.company.cash,
-      proposal: JSON.parse(JSON.stringify(analyzed)) as ConstructionProposal,
+      proposal: clonePlainData(analyzed),
       expectedAffectedTracks,
       predictedConnections,
       topologyCost,

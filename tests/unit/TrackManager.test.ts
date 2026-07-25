@@ -289,9 +289,45 @@ describe('TrackManager', () => {
       const hasConnection = tracks.some((t) => t.hasNext() || t.hasPrevious());
       expect(hasConnection).toBe(true);
     });
+
+    it('does not connect endpoints that differ by any coordinate amount', () => {
+      const exact = makeTrack(scene, 0, 0, 100, 0);
+      const near = makeTrack(scene, 100 + 5e-7, 0, 200, 0);
+      manager.addTrack(exact);
+      manager.addTrack(near);
+      expect(exact.getNext()).toBeUndefined();
+      expect(near.getPrevious()).toBeUndefined();
+    });
+
+    it('connects exactly equal endpoints bidirectionally', () => {
+      const first = makeTrack(scene, 0, 0, 100, 0);
+      const second = makeTrack(scene, 100, 0, 200, 0);
+      manager.addTrack(first);
+      manager.addTrack(second);
+      expect(first.getNext()).toBe(second);
+      expect(second.getPrevious()).toBe(first);
+    });
   });
 
   describe('graph integrity', () => {
+    describe('removeJunction', () => {
+      it('clears reciprocal neighbours outside the junction-owned tracks', () => {
+        const main = makeTrack(scene, 0, 0, 100, 0);
+        const left = makeTrack(scene, 200, 0, 300, -100);
+        const right = makeTrack(scene, 200, 0, 300, 100);
+        const tail = makeTrack(scene, 500, 0, 600, 0);
+        for (const track of [main, left, right, tail]) manager.addTrack(track);
+        const junction = new Junction(scene, main, left, right, 0.5);
+        junction.setUUID('remove-junction');
+        manager.addJunction(junction);
+        junction.setNext(tail);
+        tail.setPrevious(junction);
+
+        expect(manager.removeJunction(junction.getUUID())).toBe(true);
+        expect(tail.getPrevious()).toBeUndefined();
+      });
+    });
+
     describe('removeTrack', () => {
       it('clears next connection from neighbouring track when removed', () => {
         const Phaser = require('phaser');

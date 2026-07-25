@@ -136,6 +136,31 @@ describe('PlaceTrackCommand', () => {
     expect(manager.getTrack('stale')).toBeUndefined();
   });
 
+  it('rejects redo after an intervening authoritative revision', () => {
+    const world = WorldManager.world!;
+    const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'redo-stale')!;
+    const command = new PlaceTrackCommand(
+      scene,
+      manager,
+      new ConstructionEconomy(world.company),
+      service,
+      quote,
+    );
+    expect(command.execute()).toBe(true);
+    expect(command.undo()).toBe(true);
+    WorldManager.addSceneryDef({
+      id: 'intervening',
+      type: 'tree_oak',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    });
+    expect(command.execute()).toBe(false);
+    expect(manager.getTrack('redo-stale')).toBeUndefined();
+  });
+
   it('charges both endpoint connections and reloads the exact graph and engineering data', () => {
     const addNeighbour = (
       uuid: string,
@@ -155,7 +180,7 @@ describe('PlaceTrackCommand', () => {
         100,
       );
       manager.addTrack(track);
-      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
       return track;
     };
     const left = addNeighbour('left', [-300, -200, -100, 0]);

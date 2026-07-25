@@ -9,6 +9,18 @@ import type { TrackDef } from '../config/WorldData';
 /** Chunk coordinate key for the spatial index. */
 type ChunkKey = string;
 
+export interface TrackTopologyNodeRef {
+  kind: 'track' | 'junction';
+  uuid: string;
+}
+
+export interface TrackTopologyNodeSnapshot extends TrackTopologyNodeRef {
+  previous: TrackTopologyNodeRef | null;
+  next: TrackTopologyNodeRef | null;
+}
+
+export type TrackTopologySnapshot = TrackTopologyNodeSnapshot[];
+
 function chunkKey(x: number, y: number): ChunkKey {
   const cx = Math.floor(x / GameConfig.WORLD.CHUNK_SIZE);
   const cy = Math.floor(y / GameConfig.WORLD.CHUNK_SIZE);
@@ -92,11 +104,7 @@ export default class TrackManager {
       const startPoint = track.getCurvePath().getStartPoint();
       const endPoint = track.getCurvePath().getEndPoint();
 
-      const previous = this.findEndpointNear(
-        new Phaser.Math.Vector2(startPoint),
-        1e-6,
-        track.getUUID(),
-      );
+      const previous = this.findExactEndpoint(startPoint, track.getUUID());
       if (previous && !track.getPrevious()
         && !this.endpointHasConnection(previous.track, previous.isStart)) {
         track.setPrevious(previous.track);
@@ -104,11 +112,7 @@ export default class TrackManager {
         else previous.track.setNext(track);
       }
 
-      const next = this.findEndpointNear(
-        new Phaser.Math.Vector2(endPoint),
-        1e-6,
-        track.getUUID(),
-      );
+      const next = this.findExactEndpoint(endPoint, track.getUUID());
       if (next
         && !(next.track === previous?.track && next.isStart === previous.isStart)
         && !track.getNext()
@@ -191,10 +195,18 @@ export default class TrackManager {
   removeJunction(uuid: string): boolean {
     const junction = this.junctionMap.get(uuid);
     if (!junction) return false;
-    for (const track of junction.getAllTracks()) {
-      if (track.getNext() === junction) track.setNext(undefined);
-      if (track.getPrevious() === junction) track.setPrevious(undefined);
+    const neighbours = new Set<TrackNode>([
+      ...junction.getAllTracks(),
+      ...[junction.getPrevious(), junction.getNext()].filter(
+        (node): node is TrackNode => node !== undefined,
+      ),
+    ]);
+    for (const neighbour of neighbours) {
+      if (neighbour.getNext() === junction) neighbour.setNext(undefined);
+      if (neighbour.getPrevious() === junction) neighbour.setPrevious(undefined);
     }
+    junction.setPrevious(undefined);
+    junction.setNext(undefined);
     junction.destroy();
     this.junctionMap.delete(uuid);
     return true;
@@ -480,8 +492,66 @@ export default class TrackManager {
     return best;
   }
 
+  captureTopology(): TrackTopologySnapshot {
+    const nodes: TrackNode[] = [...this.trackMap.values(), ...this.junctionMap.values()];
+    const refFor = (node: TrackNode | undefined): TrackTopologyNodeRef | null => (
+      node
+        ? { kind: node.isJunction() ? 'junction' : 'track', uuid: node.getUUID() }
+        : null
+    );
+    return nodes
+      .map((node) => ({
+        kind: node.isJunction() ? 'junction' as const : 'track' as const,
+        uuid: node.getUUID(),
+        previous: refFor(node.getPrevious()),
+        next: refFor(node.getNext()),
+      }))
+      .sort((left, right) => (
+        `${left.kind}:${left.uuid}`.localeCompare(`${right.kind}:${right.uuid}`)
+      ));
+  }
+
+  restoreTopology(snapshot: TrackTopologySnapshot): boolean {
+    const resolve = (ref: TrackTopologyNodeRef): TrackNode | undefined => (
+      ref.kind === 'track'
+        ? this.trackMap.get(ref.uuid)
+        : this.junctionMap.get(ref.uuid)
+    );
+    if (snapshot.some((node) => !resolve(node))) return false;
+    for (const node of snapshot) {
+      const live = resolve(node)!;
+      live.setPrevious(undefined);
+      live.setNext(undefined);
+    }
+    for (const node of snapshot) {
+      const live = resolve(node)!;
+      live.setPrevious(node.previous ? resolve(node.previous) : undefined);
+      live.setNext(node.next ? resolve(node.next) : undefined);
+    }
+    return true;
+  }
+
   endpointHasConnection(track: RailTrack, isStart: boolean): boolean {
     return isStart ? track.hasPrevious() : track.hasNext();
+  }
+
+  private findExactEndpoint(
+    point: Vector2Like,
+    excludeUUID: string,
+  ): { track: RailTrack; isStart: boolean } | null {
+    for (const track of this.trackMap.values()) {
+      if (track.getUUID() === excludeUUID) continue;
+      const curve = track.getCurvePath();
+      const start = curve.getStartPoint();
+      if (start.x === point.x && start.y === point.y) {
+        return { track, isStart: true };
+      }
+      const end = curve.getEndPoint();
+      if (end.x === point.x && end.y === point.y) {
+        return { track, isStart: false };
+      }
+    }
+    return null;
   }
 
   updateVisibleTracks(cameraViewBounds: Phaser.Geom.Rectangle): void {

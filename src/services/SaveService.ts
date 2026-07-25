@@ -128,6 +128,13 @@ export const SaveService = {
   saveWorld(world: WorldData): boolean {
     try {
       if (!validateWorldData(world).compatible) return false;
+      const updatedAtDescriptor = Object.getOwnPropertyDescriptor(
+        world.metadata,
+        'updatedAt',
+      );
+      if (!updatedAtDescriptor
+        || ('writable' in updatedAtDescriptor && !updatedAtDescriptor.writable)
+        || ('set' in updatedAtDescriptor && !updatedAtDescriptor.set)) return false;
       const all = this.loadAllWorlds();
       const savedAt = Date.now();
       const snapshot = JSON.parse(JSON.stringify(world)) as WorldData;
