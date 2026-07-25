@@ -102,6 +102,7 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
+    if (GameStateManager.worldMode !== 'create') return;
     // Cancel and deactivate previous tool
     this.activeEditorTool?.cancel();
     this.activeEditorTool?.deactivate();
@@ -116,14 +117,23 @@ export default class WorldScene extends Phaser.Scene {
     this.cameraController.setInputLockOwner(lockOwner);
   };
 
-  private readonly undoHandler = () => { this.commandStack.undo(); };
-  private readonly redoHandler = () => { this.commandStack.redo(); };
+  private readonly undoHandler = () => {
+    if (GameStateManager.worldMode === 'create') this.commandStack.undo();
+  };
+  private readonly redoHandler = () => {
+    if (GameStateManager.worldMode === 'create') this.commandStack.redo();
+  };
   /** Triggered by the 'Generate' button in PropertiesPanel when generator tool is active. */
   private readonly generatorRunHandler = () => {
+    if (GameStateManager.worldMode !== 'create') return;
     const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
     generatorTool?.runFromAnchor();
   };
-  private readonly saveHandler = () => { this.syncTrainsAndSave(); EventBus.emit('ui:toolbar-save-state', { state: 'saved' }); };
+  private readonly saveHandler = () => {
+    if (GameStateManager.worldMode !== 'create') return;
+    this.syncTrainsAndSave();
+    EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+  };
 
   private readonly modeToggleHandler = () => {
     if (GameStateManager.worldMode === 'create') {
@@ -134,10 +144,12 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly editorDeleteHandler = ({ uuids }: { uuids: string[] }) => {
+    if (GameStateManager.worldMode !== 'create') return;
     this.deleteSelectedTracks(uuids);
   };
 
   private readonly vehicleTypeChangedHandler = ({ type }: { type: import('../config/VehicleTypes').VehicleType }) => {
+    if (GameStateManager.worldMode !== 'create') return;
     const placeVehicleTool = this.toolRegistry.get('place-vehicle') as PlaceVehicleTool | undefined;
     placeVehicleTool?.setVehicleType(type);
   };

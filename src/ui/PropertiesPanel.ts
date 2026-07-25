@@ -35,6 +35,7 @@ export class PropertiesPanel {
   private trackManager: TrackManager;
   private selectionManager: SelectionManager;
 
+  private container!: Phaser.GameObjects.Container;
   private panel!: Phaser.GameObjects.Rectangle;
   private border!: Phaser.GameObjects.Rectangle;
   private lines: Phaser.GameObjects.Text[] = [];
@@ -47,6 +48,7 @@ export class PropertiesPanel {
 
   readonly panelWidth: number;
   private isVisible: boolean = false;
+  private editorEnabled: boolean = true;
   private currentActiveTool: string = 'none';
 
   /** Mutable generator parameters; edited via the panel UI. */
@@ -67,6 +69,7 @@ export class PropertiesPanel {
   private onDeleteCallback: ((uuids: string[]) => void) | null = null;
 
   private readonly selectionChangedHandler = (data: { uuids: string[] }) => {
+    if (!this.editorEnabled) return;
     if (this.currentActiveTool !== 'generator' && this.currentActiveTool !== 'place-vehicle') {
       this.refresh(data.uuids);
     }
@@ -74,6 +77,7 @@ export class PropertiesPanel {
 
   private readonly toolChangedHandler = (data: { tool: string }) => {
     this.currentActiveTool = data.tool;
+    if (!this.editorEnabled) return;
     if (data.tool === 'generator') {
       this.showGeneratorParams();
     } else if (data.tool === 'place-vehicle') {
@@ -116,6 +120,23 @@ export class PropertiesPanel {
     return this.activeVehicleType;
   }
 
+  setVisible(visible: boolean): void {
+    this.editorEnabled = visible;
+    this.container.setVisible(visible).setActive(visible);
+    if (!visible) {
+      this.setInteractionsEnabled(false);
+      return;
+    }
+
+    if (this.currentActiveTool === 'generator') {
+      this.showGeneratorParams();
+    } else if (this.currentActiveTool === 'place-vehicle') {
+      this.showVehicleParams();
+    } else {
+      this.refresh(this.selectionManager.selectedUUIDs);
+    }
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   private build(): void {
@@ -126,6 +147,8 @@ export class PropertiesPanel {
     const btnW = pw - 16;
     const fs = responsiveFontSize(11, width, height, 9, 11);
     const fsSm = responsiveFontSize(10, width, height, 8, 10);
+
+    this.container = this.scene.add.container(0, 0).setDepth(598).setScrollFactor(0);
 
     this.panel = this.scene.add.rectangle(
       px - pw / 2, height / 2,
@@ -171,6 +194,14 @@ export class PropertiesPanel {
       fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
 
+    this.container.add([
+      this.panel,
+      this.border,
+      this.deleteBtn,
+      this.deleteBtnText,
+      this.tunnelBtn,
+      this.tunnelBtnText,
+    ]);
     this.setPanelOffscreen();
     this.refresh([]);
   }
@@ -279,6 +310,7 @@ export class PropertiesPanel {
       fontFamily: 'Verdana', fontSize: fs, color: '#4ade80',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
     this.paramObjects.push(runText);
+    this.container.add([...this.lines, ...this.paramObjects]);
   }
 
   private formatParam(key: keyof GeneratorParams, format?: (v: number) => string): string {
@@ -354,6 +386,7 @@ export class PropertiesPanel {
 
       rowY += btnH + 8;
     }
+    this.container.add([...this.lines, ...this.vehicleTypeObjects]);
   }
 
   // ── Selection properties UI ────────────────────────────────────────────────
@@ -362,8 +395,10 @@ export class PropertiesPanel {
     this.clearLines();
     this.clearParamObjects();
     this.clearVehicleObjects();
-    this.deleteBtn.setVisible(true);
-    this.deleteBtnText.setVisible(true);
+    this.deleteBtn.setVisible(false);
+    this.deleteBtnText.setVisible(false);
+    this.tunnelBtn.setVisible(false);
+    this.tunnelBtnText.setVisible(false);
 
     const count = uuids.length;
     if (count === 0) {
@@ -372,6 +407,8 @@ export class PropertiesPanel {
     }
 
     this.slideIn();
+    this.deleteBtn.setVisible(true).setInteractive({ useHandCursor: true });
+    this.deleteBtnText.setVisible(true);
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
     const fs = responsiveFontSize(11, width, height, 9, 11);
@@ -420,6 +457,8 @@ export class PropertiesPanel {
       this.tunnelBtn.setVisible(true);
       this.tunnelBtnText.setVisible(true);
     }
+    this.tunnelBtn.setInteractive({ useHandCursor: true });
+    this.container.add(this.lines);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -430,19 +469,16 @@ export class PropertiesPanel {
   }
 
   private setPanelOffscreen(): void {
-    const { width, height } = this.scene.scale;
-    this.panel.setPosition(width + this.panelWidth / 2, height / 2);
-    this.border.setPosition(width, height / 2);
+    this.container.setPosition(this.panelWidth, 0);
   }
 
   private slideIn(): void {
+    if (!this.editorEnabled) return;
     if (this.isVisible) return;
     this.isVisible = true;
-    const { width, height } = this.scene.scale;
-    const targetX = width - this.panelWidth / 2;
     this.scene.tweens.add({
-      targets: [this.panel, this.border],
-      x: targetX,
+      targets: this.container,
+      x: 0,
       duration: 200,
       ease: 'Power2',
     });
@@ -451,10 +487,9 @@ export class PropertiesPanel {
   private slideOut(): void {
     if (!this.isVisible) return;
     this.isVisible = false;
-    const { width, height } = this.scene.scale;
     this.scene.tweens.add({
-      targets: [this.panel, this.border],
-      x: width + this.panelWidth / 2,
+      targets: this.container,
+      x: this.panelWidth,
       duration: 200,
       ease: 'Power2',
     });
@@ -473,6 +508,19 @@ export class PropertiesPanel {
   private clearVehicleObjects(): void {
     for (const obj of this.vehicleTypeObjects) obj.destroy();
     this.vehicleTypeObjects = [];
+  }
+
+  private setInteractionsEnabled(enabled: boolean): void {
+    const objects = [
+      this.deleteBtn,
+      this.tunnelBtn,
+      ...this.paramObjects,
+      ...this.vehicleTypeObjects,
+    ];
+    for (const object of objects) {
+      if (enabled) object.setInteractive();
+      else object.disableInteractive();
+    }
   }
 
   private onDelete(): void {
@@ -515,5 +563,6 @@ export class PropertiesPanel {
     this.deleteBtnText.destroy();
     this.tunnelBtn.destroy();
     this.tunnelBtnText.destroy();
+    this.container.destroy();
   }
 }

@@ -13,13 +13,17 @@ import PreloadScene from './scenes/PreloadScene';
 import SettingsScene from './scenes/SettingsScene';
 import WorldSelectScene from './scenes/WorldSelectScene';
 import WorldScene from './scenes/WorldScene';
+import { recoverDerailedFollowerOnTrack } from './managers/TrainManager';
 
 /** Expose game instance for Playwright / E2E tests. */
 declare global {
   interface Window {
     __railSimGame: Phaser.Game;
+    __railSimRecoverDerailedFollowerOnTrack: typeof recoverDerailedFollowerOnTrack;
   }
 }
+
+window.__railSimRecoverDerailedFollowerOnTrack = recoverDerailedFollowerOnTrack;
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,

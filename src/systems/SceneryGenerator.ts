@@ -6,6 +6,8 @@ import type { SceneryObjectDef, SceneryType, BiomeType } from '../config/WorldDa
 
 const TC = GameConfig.TERRAIN;
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
+const HALF_W = TC.WORLD_WIDTH / 2;
+const HALF_H = TC.WORLD_HEIGHT / 2;
 
 /**
  * SceneryGenerator
@@ -41,6 +43,13 @@ export class SceneryGenerator {
     seed: string,
     biome: BiomeType,
   ): SceneryObjectDef[] {
+    if (
+      chunkX >= HALF_W || chunkX + CHUNK <= -HALF_W ||
+      chunkY >= HALF_H || chunkY + CHUNK <= -HALF_H
+    ) {
+      return [];
+    }
+
     // Seed includes chunk coordinates so adjacent chunks are independent
     const chunkSeed = `${seed}:${chunkX}:${chunkY}`;
     const rng = new Phaser.Math.RandomDataGenerator([chunkSeed]);
@@ -49,6 +58,7 @@ export class SceneryGenerator {
     const defs: SceneryObjectDef[] = [];
 
     for (const { x, y } of candidates) {
+      if (x < -HALF_W || x >= HALF_W || y < -HALF_H || y >= HALF_H) continue;
       if (rng.frac() > TC.SCENERY_DENSITY) continue;
 
       const band  = this.terrain.getBandAt(x, y);

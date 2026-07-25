@@ -3,17 +3,12 @@ import { EventBus } from '../../src/services/EventBus';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
-describe('PropertiesPanel vehicle selector', () => {
+describe('PropertiesPanel', () => {
   let panel: PropertiesPanel;
+  let scene: any;
 
   beforeEach(() => {
-    const scene = makeScene();
-    const makeRectangle = scene.add.rectangle;
-    scene.add.rectangle = jest.fn().mockImplementation(() => {
-      const rectangle = makeRectangle();
-      rectangle.setPosition = jest.fn().mockReturnValue(rectangle);
-      return rectangle;
-    });
+    scene = makeScene();
     const trackManager = { getTrack: jest.fn() };
     const selectionManager = { selectedUUIDs: [] };
     panel = new PropertiesPanel(
@@ -42,5 +37,41 @@ describe('PropertiesPanel vehicle selector', () => {
       expect(object.destroy).toHaveBeenCalled();
     }
     expect((panel as any).vehicleTypeObjects).toHaveLength(initialObjects.length);
+  });
+
+  it('keeps selection-only actions hidden for an empty selection', () => {
+    expect((panel as any).deleteBtn.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).deleteBtnText.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).tunnelBtnText.setVisible).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    ['generator', 'paramObjects'],
+    ['place-vehicle', 'vehicleTypeObjects'],
+  ])('hides and disables %s controls in play, then restores them in create', (tool, objectsKey) => {
+    EventBus.emit('tool:changed', { tool: tool as any });
+    const beforePlay = [...(panel as any)[objectsKey]];
+    expect(beforePlay.length).toBeGreaterThan(0);
+
+    (panel as any).setVisible(false);
+
+    const container = scene.add.container.mock.results[0].value;
+    expect(container.setVisible).toHaveBeenLastCalledWith(false);
+    const interactiveObjects = beforePlay.filter((object: any) =>
+      object.setInteractive.mock.calls.length > 0,
+    );
+    expect(interactiveObjects.length).toBeGreaterThan(0);
+    for (const object of interactiveObjects) {
+      expect(object.disableInteractive).toHaveBeenCalled();
+    }
+
+    EventBus.emit('selection:changed', { uuids: [] });
+    (panel as any).setVisible(true);
+
+    const afterCreate = (panel as any)[objectsKey];
+    expect(afterCreate.length).toBeGreaterThan(0);
+    expect(container.setVisible).toHaveBeenLastCalledWith(true);
+    expect((panel as any).deleteBtn.setVisible).toHaveBeenLastCalledWith(false);
   });
 });

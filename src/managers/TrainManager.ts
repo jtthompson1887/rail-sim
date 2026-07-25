@@ -8,11 +8,29 @@ import { EventBus } from '../services/EventBus';
 import TrackFlowSolver from '../systems/TrackFlowSolver';
 import { GameConfig } from '../config/GameConfig';
 import type { ITrackFollower } from '../config/VehicleTypes';
+import type RailTrack from '../entities/RailTrack';
 
 interface Bounds {
   min: { x: number; y: number };
   max: { x: number; y: number };
   corners: Array<{ x: number; y: number }>;
+}
+
+/** Shared snap-and-reset transition for recovering any derailed vehicle. */
+export function recoverDerailedFollowerOnTrack(
+  follower: ITrackFollower,
+  track: RailTrack,
+): void {
+  const body = follower.getMatterBody();
+  const snappedPoint = track.getTrackPoint(body);
+  const snappedAngle = track.getTrackAngle(body);
+  body.setPosition(snappedPoint.x, snappedPoint.y);
+  body.setAngle(snappedAngle);
+  follower.currentTrack = track;
+  follower.recover();
+  follower.pidControllerFront.reset();
+  follower.pidControllerRear.reset();
+  follower.enginePower = 0;
 }
 
 export class TrainManager {
@@ -103,15 +121,7 @@ export class TrainManager {
       return false;
     }
 
-    const snappedPoint = closestTrack.getTrackPoint(trainBody);
-    const snappedAngle = closestTrack.getTrackAngle(trainBody);
-    trainBody.setPosition(snappedPoint.x, snappedPoint.y);
-    trainBody.setAngle(snappedAngle);
-    follower.currentTrack = closestTrack;
-    follower.recover();
-    follower.pidControllerFront.reset();
-    follower.pidControllerRear.reset();
-    follower.enginePower = 0;
+    recoverDerailedFollowerOnTrack(follower, closestTrack);
     return true;
   }
 

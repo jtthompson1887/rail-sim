@@ -61,17 +61,9 @@ test.describe('MenuScene – derailed train recovery', () => {
       train.derailed = true;
       train.currentTrack = null;
 
-      // Recover using the same state sequence as
-      // TrainManager.tryRecoverDerailedTrain().
-      const snappedPoint = track.getTrackPoint(body);
-      const snappedAngle = track.getTrackAngle(body);
-      body.setPosition(snappedPoint.x, snappedPoint.y);
-      body.setAngle(snappedAngle);
-      train.currentTrack = track;
-      train.recover();
-      train.pidControllerFront.reset();
-      train.pidControllerRear.reset();
-      train.enginePower = 0;
+      const recover = (window as any).__railSimRecoverDerailedFollowerOnTrack;
+      if (!recover) throw new Error('Production recovery routine is not exposed');
+      recover(train, track);
 
       return { pre, postAngle: body.angle };
     });
@@ -149,17 +141,9 @@ test.describe('MenuScene – derailed train recovery', () => {
       train.derailed = true;
       train.currentTrack = null;
 
-      // Recover using the same state sequence as
-      // TrainManager.tryRecoverDerailedTrain().
-      const snappedPoint = track.getTrackPoint(body);
-      const snappedAngle = track.getTrackAngle(body);
-      body.setPosition(snappedPoint.x, snappedPoint.y);
-      body.setAngle(snappedAngle);
-      train.currentTrack = track;
-      train.recover();
-      train.pidControllerFront.reset();
-      train.pidControllerRear.reset();
-      train.enginePower = 0;
+      const recover = (window as any).__railSimRecoverDerailedFollowerOnTrack;
+      if (!recover) throw new Error('Production recovery routine is not exposed');
+      recover(train, track);
     });
 
     // Check immediately after recovery

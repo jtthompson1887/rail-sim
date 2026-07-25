@@ -7,6 +7,8 @@ import type { SceneryObjectDef, BiomeType } from '../config/WorldData';
 import { WorldManager } from './WorldManager';
 
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
+const HALF_W = GameConfig.TERRAIN.WORLD_WIDTH / 2;
+const HALF_H = GameConfig.TERRAIN.WORLD_HEIGHT / 2;
 
 /**
  * SceneryManager
@@ -128,10 +130,19 @@ export class SceneryManager {
     const chunkY = cy * CHUNK;
     const world  = WorldManager.world;
 
+    if (
+      chunkX >= HALF_W || chunkX + CHUNK <= -HALF_W ||
+      chunkY >= HALF_H || chunkY + CHUNK <= -HALF_H
+    ) {
+      return [];
+    }
+
     // Use persisted defs if the player has manually edited this chunk
     if (world && world.scenery.length > 0) {
       const persisted = world.scenery.filter(
-        (s) => s.x >= chunkX && s.x < chunkX + CHUNK &&
+        (s) => s.x >= -HALF_W && s.x < HALF_W &&
+                s.y >= -HALF_H && s.y < HALF_H &&
+                s.x >= chunkX && s.x < chunkX + CHUNK &&
                 s.y >= chunkY && s.y < chunkY + CHUNK,
       );
       if (persisted.length > 0) return persisted;

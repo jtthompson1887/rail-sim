@@ -1,6 +1,7 @@
 import { TerrainChunk } from '../../src/entities/TerrainChunk';
 import { GameConfig } from '../../src/config/GameConfig';
 import { makeScene as createMockScene } from '../../__mocks__/phaser';
+import Phaser from 'phaser';
 
 const TC    = GameConfig.TERRAIN;
 const HALF_W = TC.WORLD_WIDTH  / 2;   // 8192
@@ -83,6 +84,31 @@ describe('TerrainChunk', () => {
   });
 
   describe('fillStyle call inspection', () => {
+    it('renders a fully out-of-bounds chunk only as deep ocean with no overlays', () => {
+      const fillStyle = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'fillStyle');
+      const strokeRect = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'strokeRect');
+      const terrain = {
+        getHeightAt: jest.fn(),
+        getBandAt: jest.fn(),
+        slopeAt: jest.fn(),
+      } as any;
+
+      const { scene } = makeScene();
+      new TerrainChunk(scene, HALF_W + CHUNK, 0, terrain, 'temperate');
+
+      expect(fillStyle).toHaveBeenCalled();
+      expect(fillStyle.mock.calls.every(([colour, alpha]) =>
+        colour === 0x153d5f && alpha === 1,
+      )).toBe(true);
+      expect(fillStyle).not.toHaveBeenCalledWith(0x2a6aaa, 0.25);
+      expect(strokeRect).not.toHaveBeenCalled();
+      expect(terrain.getHeightAt).not.toHaveBeenCalled();
+      expect(terrain.slopeAt).not.toHaveBeenCalled();
+
+      fillStyle.mockRestore();
+      strokeRect.mockRestore();
+    });
+
     it('does NOT call getHeightAt for quads that are out of bounds', () => {
       // A terrain whose getHeightAt would throw if called for OOB coords gives us
       // hard proof that OOB quads bypass heightmap sampling.

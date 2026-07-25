@@ -51,6 +51,7 @@ export default class EditorUIScene extends Phaser.Scene {
 
   private readonly visibleHandler = ({ visible }: { visible: boolean }) => {
     this.toolbar.setVisible(visible);
+    this.propertiesPanel.setVisible(visible);
   };
 
   private readonly selectToolHandler = ({ tool }: { tool: string }) => {

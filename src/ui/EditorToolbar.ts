@@ -81,7 +81,6 @@ interface ButtonRef {
  */
 export class EditorToolbar {
   private scene: Phaser.Scene;
-  private container: Phaser.GameObjects.Container;
   private background: Phaser.GameObjects.Rectangle;
   private border: Phaser.GameObjects.Rectangle;
 
@@ -118,8 +117,6 @@ export class EditorToolbar {
     const { width, height } = scene.scale;
     // Scale panel width with the viewport, clamped to a touch-safe minimum
     this.panelWidth = scalePx(72, width, height, isMobileWidth(width) ? 44 : 56);
-    this.container = scene.add.container(0, 0).setDepth(599).setScrollFactor(0);
-
     this.background = scene.add.rectangle(
       this.panelWidth / 2, height / 2,
       this.panelWidth, height,
@@ -132,6 +129,7 @@ export class EditorToolbar {
       0xffffff, 0.15,
     ).setScrollFactor(0).setDepth(599);
 
+    this.allObjects.push(this.background, this.border);
     this.build();
 
     EventBus.on('ui:toast', this.toastHandler);

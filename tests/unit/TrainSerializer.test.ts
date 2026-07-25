@@ -1,5 +1,8 @@
 import { TrainSerializer } from '../../src/utils/TrainSerializer';
 import type { IVehicle } from '../../src/config/VehicleTypes';
+import Train from '../../src/entities/Train';
+
+const { makeScene } = require('../../__mocks__/phaser');
 
 describe('TrainSerializer', () => {
   describe('toTrainDef', () => {
@@ -66,6 +69,17 @@ describe('TrainSerializer', () => {
       } as unknown as IVehicle;
 
       expect(TrainSerializer.toTrainDef(carriage)?.type).toBe('passenger-carriage');
+    });
+
+    it('serialises a concrete Train instance as a locomotive', () => {
+      const train = new Train(makeScene(), 10, 20, 'concrete-train');
+      train.currentTrack = {
+        getUUID: () => 'track-1',
+        getTrackPosition: () => 0.5,
+      } as any;
+
+      expect(train.vehicleType).toBe('locomotive');
+      expect(TrainSerializer.toTrainDef(train)?.type).toBe('locomotive');
     });
   });
 });
