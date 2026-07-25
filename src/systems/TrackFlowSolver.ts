@@ -1,18 +1,18 @@
 import Phaser from 'phaser';
 import RailTrack from '../entities/RailTrack';
-import type Train from '../entities/Train';
+import type { ITrackFollower } from '../config/VehicleTypes';
 import { applyForceToGameObject, guideForceTowardsPoint, limitForceToLateralApplication } from '../utils/physics';
 import TrackManager from '../managers/TrackManager';
 import { GameConfig } from '../config/GameConfig';
 
 export default class TrackFlowSolver {
   private trackProvider: TrackManager | RailTrack[];
-  private train: Train;
+  private train: ITrackFollower;
   private debugArrow: Phaser.GameObjects.Graphics;
   /** Timestamp (performance.now) of the last automatic track switch, used to enforce SWITCH_COOLDOWN_MS. */
   private _lastSwitchTime: number = -Infinity;
 
-  constructor(trackProvider: TrackManager | RailTrack[], train: Train) {
+  constructor(trackProvider: TrackManager | RailTrack[], train: ITrackFollower) {
     this.trackProvider = trackProvider;
     this.train = train;
     this.debugArrow = this.train.debugGraphics || this.train.scene.add.graphics();
@@ -29,8 +29,27 @@ export default class TrackFlowSolver {
    */
   private _switchToTrack(track: RailTrack): void {
     this.train.currentTrack = track;
-    this.train.pidControllerFront.reset();
-    this.train.pidControllerRear.reset();
+
+    // Soft-reset PIDs to the current error on the new track so the derivative
+    // term does not spike on the first frame after the switch.  A hard reset
+    // (previousError = 0) would make the D term compute kd*(error-0)/delta,
+    // causing an overshoot and the 'shake' when switching segments.
+    const trainBody = this.train.getMatterBody();
+    const mass = trainBody.body?.mass ?? 1;
+    const forceConstant = 0.0020;
+
+    const frontPoint = this.getFrontContactPoint();
+    const rearPoint = this.getRearContactPoint();
+    const frontTrackPoint = track.getTrackPoint(frontPoint);
+    const rearTrackPoint = track.getTrackPoint(rearPoint);
+    const frontDist = new Phaser.Math.Vector2(frontTrackPoint.x - frontPoint.x, frontTrackPoint.y - frontPoint.y).length();
+    const rearDist = new Phaser.Math.Vector2(rearTrackPoint.x - rearPoint.x, rearTrackPoint.y - rearPoint.y).length();
+
+    const frontError = mass * forceConstant * frontDist;
+    const rearError = mass * forceConstant * rearDist;
+    this.train.pidControllerFront.resetToError(frontError);
+    this.train.pidControllerRear.resetToError(rearError);
+
     this._lastSwitchTime = performance.now();
   }
 
@@ -78,7 +97,19 @@ export default class TrackFlowSolver {
       return true;
     }
 
+    // When operating on a plain RailTrack[] (e.g. the menu preview loop) there
+    // are no junctions to oscillate across, so the cooldown, hysteresis, and
+    // parallel-deadband guards are unnecessary and actively harmful: they prevent
+    // the solver from following the train onto the next segment, causing the
+    // train to overrun its segment endpoint and fly off track.
+    if (!this.isTrackManager(this.trackProvider)) {
+      this._switchToTrack(closestTrack);
+      return true;
+    }
+
     // --- General proximity switching with hysteresis + cooldown + deadband ---
+    // These guards only make sense for TrackManager mode (main game) where there
+    // are junction oscillation risks.
 
     // Enforce cooldown: do not switch again so soon after the last switch.
     const now = performance.now();
@@ -267,6 +298,15 @@ export default class TrackFlowSolver {
     const rearPoint = this.getRearContactPoint();
     const mainForce = this.getTrackForces(currentTrack, frontPoint, rearPoint, 1);
     const repulsionForce = new Phaser.Math.Vector2(0, 0);
+    const body = trainBody.body as any;
+
+    // Scale damping by the active physics timestep so it remains stable
+    // across frame rates.
+    const matterWorld = (trainBody.scene as any)?.matter?.world as any;
+    const engineTiming = matterWorld?.engine?.timing;
+    const dt = engineTiming?.lastDelta ?? (engineTiming?.timeScale ? 1000 / 60 : 16.667);
+    const dtSq = dt * dt;
+    const mass = body?.mass ?? 1;
 
     if (this.isTrackManager(this.trackProvider)) {
       const junctions = this.trackProvider.getJunctionsForTrack(currentTrack);
@@ -316,13 +356,19 @@ export default class TrackFlowSolver {
 
     // Lateral velocity damping: oppose any sideways motion that is not caused by
     // the current track force to damp out residual oscillation.
-    const velocity = new Phaser.Math.Vector2(trainBody.body.velocity.x, trainBody.body.velocity.y);
-    const forwardDir = new Phaser.Math.Vector2(Math.cos(trainBody.rotation), Math.sin(trainBody.rotation));
+    const velocity = new Phaser.Math.Vector2(trainBody.body?.velocity?.x ?? 0, trainBody.body?.velocity?.y ?? 0);
+    const forwardDir = new Phaser.Math.Vector2(Math.cos(trainBody.rotation ?? 0), Math.sin(trainBody.rotation ?? 0));
     const lateralDir = new Phaser.Math.Vector2(-forwardDir.y, forwardDir.x);
     const lateralVelocity = velocity.dot(lateralDir);
-    const dampingForce = lateralDir.clone().scale(-trainBody.body.mass * lateralVelocity * 0.08);
+    // FIX: Matter.js integrates force as:
+    //   new_disp = old_disp * (1 - frictionAir) + (force/mass) * dt^2
+    // So a force produces a displacement change proportional to dt^2.
+    // To achieve an ~8% reduction of lateral displacement per frame, we must
+    // divide by dt^2 so the coefficient is consistent across framerates.
+    const dampingCoefficient = dtSq > 0 ? 0.08 / dtSq : 0;
+    const dampingForce = lateralDir.clone().scale(-mass * lateralVelocity * dampingCoefficient);
 
-    this.drawForceArrow(new Phaser.Math.Vector2(trainBody.body.position.x, trainBody.body.position.y), lateralForce, 0x0000ff);
+    this.drawForceArrow(new Phaser.Math.Vector2(trainBody.body?.position?.x ?? 0, trainBody.body?.position?.y ?? 0), lateralForce, 0x0000ff);
     applyForceToGameObject(trainBody, lateralForce);
     applyForceToGameObject(trainBody, dampingForce);
   }

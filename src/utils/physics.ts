@@ -22,7 +22,7 @@ export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.
         // history fresh and avoid artificial spikes on the next non-zero frame.
         let newMagnitude = pidController.calculate(error);
         if (error > 0) {
-            // Clamp to zero so the force can never flip direction (pull → push)
+            // Clamp to zero so the force can never flip direction (pull -> push)
             let multiplier = Math.max(0, newMagnitude) / error;
             forceVector = forceVector.scale(multiplier);
         }
@@ -65,6 +65,8 @@ export function matterScaling(gameObject: Phaser.Physics.Matter.Image, newScaleX
     newBody.friction = bodyOptions.friction;
     newBody.restitution = bodyOptions.restitution;
     newBody.frictionAir = bodyOptions.frictionAir;
+    newBody.force.x = 0;
+    newBody.force.y = 0;
 
     // Update the Phaser game object to use the new body
     gameObject.setExistingBody(newBody);

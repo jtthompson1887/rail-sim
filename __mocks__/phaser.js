@@ -81,12 +81,28 @@ class CurvePath {
 function makeMatterBody(x = 0, y = 0) {
   return {
     position: { x, y },
+    positionPrev: { x, y },
     mass: 1000,
+    inertia: 1000,
     force: { x: 0, y: 0 },
+    torque: 0,
+    velocity: { x: 0, y: 0 },
+    speed: 0,
+    angularVelocity: 0,
+    angularSpeed: 0,
+    frictionAir: 0.01,
+    deltaTime: 16.666,
+    timeScale: 1,
     isStatic: false,
     friction: 0,
     restitution: 0,
     angle: 0,
+    anglePrev: 0,
+    parts: [{
+      position: { x, y },
+      vertices: [],
+      bounds: { min: { x: x - 50, y: y - 25 }, max: { x: x + 50, y: y + 25 } },
+    }],
   };
 }
 
@@ -178,8 +194,19 @@ class Sprite extends GameObject {
   setTint() { return this; }
   clearTint() { return this; }
   setMass(m) { this.body.mass = m; return this; }
-  setFrictionAir() { return this; }
-  setAngle(a) { this.angle = a; this.rotation = a * (Math.PI / 180); return this; }
+  setFrictionAir(fa) { if (this.body) this.body.frictionAir = fa; return this; }
+  setAngle(a) {
+    this.angle = a;
+    this.rotation = a * (Math.PI / 180);
+    if (this.body) {
+      this.body.angle = this.rotation;
+      // Real Phaser Body.setAngle updates anglePrev; our mock does too for setAngle
+      if (this.body.anglePrev !== undefined) {
+        this.body.anglePrev = this.body.angle;
+      }
+    }
+    return this;
+  }
   setExistingBody(body) { this.body = body; return this; }
   setScale(x, y) {
     this.displayWidth = (x || 1) * 100;
@@ -187,20 +214,43 @@ class Sprite extends GameObject {
     return this;
   }
   setPosition(x, y) {
-    this.x = x;
-    this.y = y;
     if (this.body && this.body.position) {
+      const dx = x - this.body.position.x;
+      const dy = y - this.body.position.y;
       this.body.position.x = x;
       this.body.position.y = y;
+      if (this.body.positionPrev) {
+        this.body.positionPrev.x += dx;
+        this.body.positionPrev.y += dy;
+      }
+      if (this.body.parts && this.body.parts[0]) {
+        this.body.parts[0].position.x += dx;
+        this.body.parts[0].position.y += dy;
+      }
     }
+    this.x = x;
+    this.y = y;
     return this;
   }
   setVelocity(x, y) {
-    this._velocity = { x, y };
+    if (this.body && this.body.velocity) {
+      this.body.velocity.x = x;
+      this.body.velocity.y = y;
+      this.body.speed = Math.sqrt(x * x + y * y);
+      if (this.body.positionPrev) {
+        this.body.positionPrev.x = this.body.position.x - x;
+        this.body.positionPrev.y = this.body.position.y - y;
+      }
+    }
     return this;
   }
   setAngularVelocity(v) {
-    this._angularVelocity = v;
+    if (this.body) {
+      this.body.angularVelocity = v;
+      this.body.angularSpeed = Math.abs(v);
+      // Real Phaser Body.setAngularVelocity does NOT update anglePrev.
+      // Only Body.setAngle does.
+    }
     return this;
   }
 }
@@ -212,6 +262,21 @@ class MatterImage extends Sprite {
   constructor(scene, x, y, key) {
     super(scene, x, y, key);
     this.parentTrain = undefined;
+  }
+  get angle() {
+    if (this.body) {
+      return Math.round(this.body.angle * (180 / Math.PI) * 100) / 100;
+    }
+    return 0;
+  }
+  set angle(value) {
+    if (this.body) {
+      // Real Phaser Matter.Transform angle setter ONLY updates body.angle,
+      // NOT body.anglePrev — this causes an angular velocity spike on the
+      // next physics step (Body.update computes angularVelocity from
+      // angle - anglePrev).
+      this.body.angle = value * (Math.PI / 180);
+    }
   }
 }
 
@@ -257,6 +322,7 @@ class Graphics extends GameObject {
   beginPath() { return this; }
   moveTo() { return this; }
   lineTo() { return this; }
+  closePath() { return this; }
   strokePath() { return this; }
   fillPath() { return this; }
   fillCircle() { return this; }
@@ -346,7 +412,7 @@ function makeScene(overrides = {}) {
         }),
       },
       bodies: {
-        rectangle: jest.fn().mockImplementation(() => makeMatterBody()),
+        rectangle: jest.fn().mockImplementation((x, y) => makeMatterBody(x || 0, y || 0)),
       },
       world: {
         remove: jest.fn(),
@@ -484,6 +550,44 @@ const Phaser = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Matter physics step simulation (approximates Body.update + force reset)
+// ---------------------------------------------------------------------------
+function simulateMatterUpdate(body, deltaTime = 16.666) {
+  if (!body || body.isStatic) return;
+  const dt = deltaTime * (body.timeScale || 1);
+  const dtSq = dt * dt;
+  const baseDelta = 16.666;
+  const frictionAir = 1 - (body.frictionAir || 0) * (dt / baseDelta);
+
+  // Verlet velocity from position delta
+  const vx = (body.position.x - body.positionPrev.x);
+  const vy = (body.position.y - body.positionPrev.y);
+
+  // Apply force -> velocity
+  body.velocity.x = (vx * frictionAir) + ((body.force.x || 0) / body.mass) * dtSq;
+  body.velocity.y = (vy * frictionAir) + ((body.force.y || 0) / body.mass) * dtSq;
+  body.speed = Math.sqrt(body.velocity.x * body.velocity.x + body.velocity.y * body.velocity.y);
+
+  // Advance position
+  body.positionPrev.x = body.position.x;
+  body.positionPrev.y = body.position.y;
+  body.position.x += body.velocity.x;
+  body.position.y += body.velocity.y;
+  body.deltaTime = dt;
+
+  // Angular
+  body.angularVelocity = ((body.angle - body.anglePrev) * frictionAir) + ((body.torque || 0) / body.inertia) * dtSq;
+  body.angularSpeed = Math.abs(body.angularVelocity);
+  body.anglePrev = body.angle;
+  body.angle += body.angularVelocity;
+
+  // Reset forces for next step (Phaser/Matter clears forces each frame)
+  body.force.x = 0;
+  body.force.y = 0;
+  body.torque = 0;
+}
+
 module.exports = Phaser;
 module.exports.default = Phaser;
 module.exports.makeScene = makeScene;
@@ -493,3 +597,4 @@ module.exports.Vector2 = Vector2;
 module.exports.MatterImage = MatterImage;
 module.exports.Container = Container;
 module.exports.Sprite = Sprite;
+module.exports.simulateMatterUpdate = simulateMatterUpdate;

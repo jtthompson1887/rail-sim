@@ -332,27 +332,12 @@ describe('REGRESSION: recovered derailed train should not be flung off the track
     // The mock's angle setter ONLY writes body.angle, leaving anglePrev at 0.
     buggyBody.angle = 45 * (Math.PI / 180); // 0.785 rad
 
-    const beforeBug = {
-      angle: buggyBody.angle.toFixed(3),
-      anglePrev: buggyBody.anglePrev.toFixed(3),
-      angularVelocity: buggyBody.angularVelocity.toFixed(3),
-    };
-
     simUpdate(buggyBody, 16.666);
-
-    const afterBug = {
-      angle: buggyBody.angle.toFixed(3),
-      anglePrev: buggyBody.anglePrev.toFixed(3),
-      angularVelocity: buggyBody.angularVelocity.toFixed(3),
-      speed: buggyBody.speed.toFixed(3),
-    };
-
-    console.log('[NUMERIC PROOF] BUGGY approach:', beforeBug, '->', afterBug);
 
     // With angle=0.785 and anglePrev=0, Verlet computes
     // angularVelocity approx (0.785 - 0) * frictionAir approx 0.77 rad/frame.
     // This is the root cause of the fling -- massive instantaneous spin.
-    expect(parseFloat(afterBug.angularVelocity)).toBeGreaterThan(0.5);
+    expect(buggyBody.angularVelocity).toBeGreaterThan(0.5);
 
     // FIXED approach: setAngle syncs both angle and anglePrev.
     const fixedBody = makeMatterBody(250, 250);
@@ -363,30 +348,13 @@ describe('REGRESSION: recovered derailed train should not be flung off the track
     fixedBody.angle = targetAngle;
     fixedBody.anglePrev = targetAngle;
 
-    const beforeFix = {
-      angle: fixedBody.angle.toFixed(3),
-      anglePrev: fixedBody.anglePrev.toFixed(3),
-      angularVelocity: fixedBody.angularVelocity.toFixed(3),
-    };
-
     simUpdate(fixedBody, 16.666);
 
-    const afterFix = {
-      angle: fixedBody.angle.toFixed(3),
-      anglePrev: fixedBody.anglePrev.toFixed(3),
-      angularVelocity: fixedBody.angularVelocity.toFixed(3),
-      speed: fixedBody.speed.toFixed(3),
-    };
-
-    console.log('[NUMERIC PROOF] FIXED approach:', beforeFix, '->', afterFix);
-
     // With angle === anglePrev, angularVelocity stays near zero.
-    expect(parseFloat(afterFix.angularVelocity)).toBeLessThan(0.1);
+    expect(fixedBody.angularVelocity).toBeLessThan(0.1);
 
     // Quantitative proof: buggy angular velocity is >0.5 rad/frame,
     // fixed angular velocity is <0.1 rad/frame.
-    const buggyAngVel = parseFloat(afterBug.angularVelocity);
-    const fixedAngVel = parseFloat(afterFix.angularVelocity);
-    expect(buggyAngVel / fixedAngVel).toBeGreaterThan(5);
+    expect(buggyBody.angularVelocity / fixedBody.angularVelocity).toBeGreaterThan(5);
   });
 });

@@ -28,8 +28,8 @@ function makeMockTrain(scene: any, x = 0, y = 0) {
     debugGraphics: graphics,
     derailed: false,
     currentTrack: null as RailTrack | null,
-  pidControllerFront: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn() },
-  pidControllerRear: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn() },
+  pidControllerFront: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn(), resetToError: jest.fn() },
+  pidControllerRear: { calculate: jest.fn().mockReturnValue(0), setCurrentDelta: jest.fn(), reset: jest.fn(), resetToError: jest.fn() },
     getMatterBody: jest.fn().mockReturnValue(body),
   };
 }
@@ -371,7 +371,7 @@ describe('TrackFlowSolver — hysteresis & parallel-deadband (oscillation preven
     jest.restoreAllMocks();
   });
 
-  it('Given a track switch, When _switchToTrack is called, Then PID controllers are reset', () => {
+  it('Given a track switch, When _switchToTrack is called, Then PID controllers are soft-reset to current error', () => {
     const currentTrack = makeTrack(scene, 0, 0, 500, 0);
     const betterTrack  = makeTrack(scene, 0, 50, 500, 50);
 
@@ -388,8 +388,8 @@ describe('TrackFlowSolver — hysteresis & parallel-deadband (oscillation preven
     const solver = new TrackFlowSolver(mockManager as any, train as any);
     solver.applyTrackFlowForces();
 
-    expect(train.pidControllerFront.reset).toHaveBeenCalled();
-    expect(train.pidControllerRear.reset).toHaveBeenCalled();
+    expect(train.pidControllerFront.resetToError).toHaveBeenCalled();
+    expect(train.pidControllerRear.resetToError).toHaveBeenCalled();
 
     jest.restoreAllMocks();
   });
