@@ -106,6 +106,39 @@ describe('world schema validation', () => {
     }));
   });
 
+  it.each([
+    ['fractional paid cost', (track: any) => { track.paidBuildCost = 100.5; }],
+    ['profile-inconsistent structure elevation', (track: any) => {
+      track.structures[0].endElevation = 5;
+    }],
+  ])('rejects a track with %s', (_label, mutate) => {
+    const raw = currentWorld() as any;
+    const track: any = {
+      geometryVersion: 1,
+      uuid: 'track-1',
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 100,
+    };
+    mutate(track);
+    raw.tracks.push(track);
+
+    expect(validateWorldData(raw).compatible).toBe(false);
+  });
+
   it('rejects unsupported generation configuration versions', () => {
     const raw = currentWorld() as any;
     raw.generationConfig.generationConfigVersion = 2;

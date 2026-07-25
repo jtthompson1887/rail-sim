@@ -149,6 +149,23 @@ function derivatives(
 }
 
 export function minimumRadiusForGeometry(def: TrackGeometryDef): number {
+  const sampledPoints = createTrackGeometry(def).sample(MAX_ANALYSIS_SAMPLES);
+  let previousDirection: { x: number; y: number } | null = null;
+  for (let index = 1; index < sampledPoints.length; index++) {
+    const x = sampledPoints[index].point.x - sampledPoints[index - 1].point.x;
+    const y = sampledPoints[index].point.y - sampledPoints[index - 1].point.y;
+    const length = Math.hypot(x, y);
+    if (length < LENGTH_EPSILON) return 0;
+    const direction = { x: x / length, y: y / length };
+    if (
+      previousDirection
+      && previousDirection.x * direction.x + previousDirection.y * direction.y <= 0
+    ) {
+      return 0;
+    }
+    previousDirection = direction;
+  }
+
   let minimumRadius = Infinity;
   for (let index = 0; index <= MAX_ANALYSIS_SAMPLES; index++) {
     const { dx, dy, ddx, ddy } = derivatives(
@@ -223,9 +240,10 @@ function calculateCosts(length: number, segments: AnalysedSegment[]): Constructi
   let tunnelLength = 0;
 
   for (const segment of segments) {
-    if (segment.type === 'cut' || segment.type === 'fill') {
+    if (segment.type !== 'surface') {
       earthworksQuantity += segment.length * segment.averageDepth;
-    } else if (segment.type === 'bridge') {
+    }
+    if (segment.type === 'bridge') {
       bridgeLength += segment.length;
     } else if (segment.type === 'tunnel') {
       tunnelLength += segment.length;

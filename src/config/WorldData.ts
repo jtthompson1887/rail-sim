@@ -230,6 +230,30 @@ function isStructureSequence(value: unknown): value is StructureInterval[] {
   return true;
 }
 
+function profileElevationAt(profile: VerticalProfileDef, t: number): number {
+  if (t <= profile.knots[0].t) return profile.knots[0].elevation;
+  for (let index = 1; index < profile.knots.length; index++) {
+    const end = profile.knots[index];
+    if (t <= end.t) {
+      const start = profile.knots[index - 1];
+      const ratio = (t - start.t) / (end.t - start.t);
+      return start.elevation + (end.elevation - start.elevation) * ratio;
+    }
+  }
+  return profile.knots[profile.knots.length - 1].elevation;
+}
+
+function structureElevationsMatchProfile(
+  structures: StructureInterval[],
+  profile: VerticalProfileDef,
+): boolean {
+  const epsilon = 1e-6;
+  return structures.every((interval) => (
+    Math.abs(interval.startElevation - profileElevationAt(profile, interval.startT)) <= epsilon
+    && Math.abs(interval.endElevation - profileElevationAt(profile, interval.endT)) <= epsilon
+  ));
+}
+
 function isTrack(value: unknown): value is TrackDef {
   if (!isRecord(value)) return false;
   return value.geometryVersion === 1
@@ -240,7 +264,9 @@ function isTrack(value: unknown): value is TrackDef {
     && isVec2(value.p3)
     && isVerticalProfile(value.verticalProfile)
     && isStructureSequence(value.structures)
+    && structureElevationsMatchProfile(value.structures, value.verticalProfile)
     && isFiniteNumber(value.paidBuildCost)
+    && Number.isInteger(value.paidBuildCost)
     && value.paidBuildCost >= 0
     && !('isTunnel' in value)
     && !('elevation' in value);

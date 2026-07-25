@@ -34,6 +34,20 @@ describe('deriveVerticalAlignment', () => {
     }
   });
 
+  it('rejects samples that do not cover the complete 0-to-1 profile domain', () => {
+    const incompleteStart = samples([0, 0, 0]);
+    incompleteStart[0].t = 0.1;
+    const incompleteEnd = samples([0, 0, 0]);
+    incompleteEnd[incompleteEnd.length - 1].t = 0.9;
+
+    expect(() => deriveVerticalAlignment(incompleteStart)).toThrow(
+      'start at t=0 and end at t=1',
+    );
+    expect(() => deriveVerticalAlignment(incompleteEnd)).toThrow(
+      'start at t=0 and end at t=1',
+    );
+  });
+
   it('smooths rolling terrain while keeping every adjacent grade bounded', () => {
     const terrain = samples([0, 30, 0, -30, 0, 30, 0]);
     const result = deriveVerticalAlignment(terrain);

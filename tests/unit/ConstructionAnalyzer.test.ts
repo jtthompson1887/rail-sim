@@ -108,6 +108,20 @@ describe('ConstructionAnalyzer', () => {
     expect(proposal.minimumRadius).toBeLessThan(ConstructionConfig.MINIMUM_RADIUS);
   });
 
+  it('rejects a collinear cubic that reverses through a zero-speed cusp', () => {
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 1000, y: 0 },
+      p2: { x: -1000, y: 0 },
+      p3: { x: 300, y: 0 },
+    }, () => 0);
+
+    expect(proposal.valid).toBe(false);
+    expect(proposal.reasonCode).toBe('curvature');
+    expect(proposal.minimumRadius).toBe(0);
+  });
+
   it('accepts the exact maximum length and rejects any longer segment', () => {
     const maximum = analyse(straight(MAX_SEGMENT_LENGTH), () => 0);
     const over = analyse(straight(MAX_SEGMENT_LENGTH + 1), () => 0);
@@ -192,6 +206,14 @@ describe('ConstructionAnalyzer', () => {
       straight(640, 0),
       (x) => (x >= 128 && x <= 512 ? -180 : 0),
     );
+    const thresholdFill = analyse(
+      straight(640, 0),
+      (x) => (x >= 192 && x <= 448 ? -50 : 0),
+    );
+    const deeperBridge = analyse(
+      straight(640, 0),
+      (x) => (x >= 192 && x <= 448 ? -60 : 0),
+    );
 
     expect(flat.costs.track).toBe(Math.round(flat.length * ConstructionConfig.TRACK_COST_PER_UNIT));
     expect(flat.costs).toEqual({
@@ -213,6 +235,9 @@ describe('ConstructionAnalyzer', () => {
       shallowEarthworks.costs.earthworks,
     );
     expect(longBridge.costs.bridge).toBeGreaterThan(shortBridge.costs.bridge);
+    expect(deeperBridge.costs.total).toBeGreaterThanOrEqual(
+      thresholdFill.costs.total,
+    );
     expect([
       ConstructionConfig.TRACK_COST_PER_UNIT,
       ConstructionConfig.EARTHWORKS_COST_PER_DEPTH_UNIT,

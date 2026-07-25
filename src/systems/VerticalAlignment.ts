@@ -33,6 +33,9 @@ function assertSamples(samples: TerrainProfileSample[]): void {
       throw new RangeError('Vertical alignment samples must be finite and strictly ordered.');
     }
   }
+  if (samples[0].t !== 0 || samples[samples.length - 1].t !== 1) {
+    throw new RangeError('Vertical alignment samples must start at t=0 and end at t=1.');
+  }
 }
 
 function linearEndpointProfile(samples: TerrainProfileSample[]): number[] {

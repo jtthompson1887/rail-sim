@@ -124,8 +124,7 @@ export default class WorldScene extends Phaser.Scene {
   };
   private readonly saveHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
-    this.syncTrainsAndSave();
-    EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+    this.syncTrainsSaveAndReport();
   };
 
   private readonly modeToggleHandler = () => {
@@ -303,8 +302,7 @@ export default class WorldScene extends Phaser.Scene {
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
-        this.syncTrainsAndSave();
-        EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+        this.syncTrainsSaveAndReport();
       }
       GameStateManager.tick(delta / 1000);
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
@@ -339,7 +337,7 @@ export default class WorldScene extends Phaser.Scene {
     this.syncTrainsAndSave();
   }
 
-  private syncTrainsAndSave(): void {
+  private syncTrainsAndSave(): boolean {
     const trainDefs = this.trainManager.trains
       .map((t) => TrainSerializer.toTrainDef(t))
       .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
@@ -347,7 +345,19 @@ export default class WorldScene extends Phaser.Scene {
       .map((c) => TrainSerializer.toTrainDef(c))
       .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
     WorldManager.setTrainDefs([...trainDefs, ...carriageDefs]);
-    WorldManager.save();
+    return WorldManager.save();
+  }
+
+  private syncTrainsSaveAndReport(): void {
+    if (this.syncTrainsAndSave()) {
+      EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+      return;
+    }
+    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    EventBus.emit('ui:toast', {
+      message: 'Could not save the world.',
+      type: 'error',
+    });
   }
 
   private activatePlayMode(): void {
@@ -409,8 +419,7 @@ export default class WorldScene extends Phaser.Scene {
         if (event.code === 'KeyZ') { this.commandStack.undo(); return; }
         if (event.code === 'KeyY') { this.commandStack.redo(); return; }
         if (event.code === 'KeyS') {
-          this.syncTrainsAndSave();
-          EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+          this.syncTrainsSaveAndReport();
           return;
         }
       }
