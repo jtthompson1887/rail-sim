@@ -88,6 +88,15 @@ not functioning Milestone 2 industries.
    distance is a deterministic clamped fraction of chord length. Curves emerge
    from continuation and port alignment, keeping the first construction
    interaction understandable.
+
+   Task 1 adds:
+
+   ```ts
+   GameConfig.TRACK.MIN_CONTROL_DISTANCE_PX = 50;
+   GameConfig.TRACK.MAX_CONTROL_DISTANCE_PX = 400;
+   ```
+
+   These match the current snap-grid and short generated-section/junction scale.
 8. **Performance budgets:** analysis and generation use configured operation
    caps. A live proposal samples at most 96 curve/profile positions; generation
    tries at most 12 attempts and 256 site candidates per attempt. Task 9
@@ -362,7 +371,7 @@ Define:
 
 ```ts
 MAX_ANALYSIS_SAMPLES = 96;
-TERRAIN_ANALYSIS_SPACING = GameConfig.TERRAIN.CELL_SIZE / 2;
+TERRAIN_ANALYSIS_SPACING = GameConfig.TERRAIN.SAMPLE_STEP / 2;
 MAX_SEGMENT_LENGTH =
   TERRAIN_ANALYSIS_SPACING * (MAX_ANALYSIS_SAMPLES - 1);
 ```
