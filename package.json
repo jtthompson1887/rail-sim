@@ -7,7 +7,8 @@
     "start": "webpack-dev-server --open --mode=development",
     "build": "webpack --mode production",
     "test": "jest --coverage",
-    "test:e2e": "npm run build && npx playwright test"
+    "test:e2e": "npm run build && npx playwright test",
+    "benchmark:construction-drag": "node tests/performance/run-construction-drag-browser.js"
   },
   "keywords": [
     "train",

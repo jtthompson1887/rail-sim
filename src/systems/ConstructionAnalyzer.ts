@@ -83,10 +83,10 @@ function remedyFor(reasonCode: ConstructionReasonCode): string {
   const remedies: Record<ConstructionReasonCode, string> = {
     ok: '',
     'too-short': 'Extend the segment to at least 64 world units.',
-    'too-long': 'Split the route into shorter construction segments.',
+    'too-long': 'Section too long to survey safely — build a shorter section.',
     'out-of-bounds': 'Keep the entire route inside the terrain boundary.',
-    grade: 'Choose endpoints with less elevation difference.',
-    curvature: 'Use a broader curve with a larger radius.',
+    grade: 'Too steep here — move the endpoint downhill or use a shorter section.',
+    curvature: 'Curve radius too tight — widen the approach.',
     clearance: 'Move the route away from existing infrastructure.',
     misaligned: 'Align the new route with the connected track tangent.',
   };

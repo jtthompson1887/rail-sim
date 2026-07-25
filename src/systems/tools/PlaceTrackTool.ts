@@ -1,54 +1,398 @@
 import Phaser from 'phaser';
-import type { IEditorTool } from './IEditorTool';
+import { PlaceTrackCommand } from '../../commands/PlaceTrackCommand';
 import type TrackManager from '../../managers/TrackManager';
-import type { SnapSystem } from '../SnapSystem';
-import type { TerrainValidator } from '../TerrainValidator';
+import { WorldManager } from '../../managers/WorldManager';
 import { EventBus } from '../../services/EventBus';
-import { CONSTRUCTION_ECONOMY_LOCK_REASON } from '../../ui/EditorToolbar';
+import type { CommandStack } from '../CommandStack';
+import type { ConstructionEconomy } from '../ConstructionEconomy';
+import type {
+  ConstructionPreview,
+  ConstructionService,
+} from '../ConstructionService';
+import type { SnapResult, SnapSystem } from '../SnapSystem';
+import {
+  ConstructionPreviewOverlay,
+  type ConstructionPreviewModel,
+  type ConstructionToolPhase,
+} from '../../ui/ConstructionPreviewOverlay';
+import type { IEditorTool } from './IEditorTool';
+
+interface PreviewOverlay {
+  render(model: ConstructionPreviewModel): void;
+  clear(): void;
+  destroy(): void;
+}
+
+interface PreviewCache {
+  readonly key: string;
+  readonly preview: ConstructionPreview;
+}
+
+function semanticAnchor(anchor: SnapResult): string {
+  const outward = anchor.outward
+    ? `${anchor.outward.x},${anchor.outward.y}`
+    : '';
+  return [
+    anchor.x,
+    anchor.y,
+    anchor.type,
+    anchor.trackUUID ?? '',
+    anchor.endpoint ?? '',
+    outward,
+    anchor.open ?? '',
+  ].join(':');
+}
+
+function outwardFromGeometry(
+  geometry: ConstructionPreview['proposal']['geometry'],
+): { x: number; y: number } {
+  const dx = geometry.p3.x - geometry.p2.x;
+  const dy = geometry.p3.y - geometry.p2.y;
+  const length = Math.hypot(dx, dy);
+  return length > 0
+    ? { x: dx / length, y: dy / length }
+    : { x: 1, y: 0 };
+}
 
 /**
- * Compatibility shell retained until the authoritative economy-aware
- * construction command replaces the old two-click placement path.
+ * Terrain-aware placement state machine. Pointer movement produces one cached
+ * immutable preview; review confirms only its stored quote via CommandStack.
  */
 export class PlaceTrackTool implements IEditorTool {
-  private readonly ghostGraphics: Phaser.GameObjects.Graphics;
+  private currentPhase: ConstructionToolPhase = 'idle';
+  private start: SnapResult | null = null;
+  private currentPreview: ConstructionPreview | null = null;
+  private currentModel: ConstructionPreviewModel | null = null;
+  private cache: PreviewCache | null = null;
+  private pendingUUID: string | null = null;
+  private activePointerId: number | null = null;
+  private suppressNextPointerUp = false;
+  private lastHintKey = '';
 
   constructor(
-    scene: Phaser.Scene,
-    _trackManager: TrackManager,
-    _snapSystem: SnapSystem,
-    _terrainValidator: TerrainValidator,
-  ) {
-    this.ghostGraphics = scene.add.graphics().setDepth(598);
+    private readonly scene: Phaser.Scene,
+    private readonly trackManager: TrackManager,
+    private readonly snapSystem: SnapSystem,
+    private readonly constructionService: ConstructionService,
+    private readonly economy: ConstructionEconomy,
+    private readonly commandStack: CommandStack,
+    private readonly overlay: PreviewOverlay = new ConstructionPreviewOverlay(scene),
+  ) {}
+
+  get phase(): ConstructionToolPhase {
+    return this.currentPhase;
   }
 
-  activate(): void {
-    this.reportLocked();
+  get startAnchor(): SnapResult | null {
+    return this.start;
   }
+
+  get previewModel(): ConstructionPreviewModel | null {
+    return this.currentModel;
+  }
+
+  activate(): void {}
+
   deactivate(): void {
-    this.ghostGraphics.clear();
-  }
-  cancel(): void {
-    this.ghostGraphics.clear();
-  }
-  wantsPointerButton(button: number): boolean {
-    return button === 0;
-  }
-  onPointerDown(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {
-    this.reportLocked();
-  }
-  onPointerMove(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {}
-  onPointerUp(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {}
-  onKeyDown(_event: KeyboardEvent): void {}
-  update(_delta: number): void {}
-  destroy(): void {
-    this.ghostGraphics.destroy();
+    this.resetToIdle();
   }
 
-  private reportLocked(): void {
-    EventBus.emit('ui:toast', {
-      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
-      type: 'info',
+  cancel(): void {
+    this.resetToIdle();
+  }
+
+  wantsPointerButton(button: number): boolean {
+    return button === 0 || button === 2;
+  }
+
+  onPointerDown(
+    worldX: number,
+    worldY: number,
+    pointer: Phaser.Input.Pointer,
+  ): void {
+    if (pointer.button === 2 || pointer.rightButtonDown()) {
+      this.backstep();
+      return;
+    }
+    if (pointer.button !== 0) return;
+    if (this.currentPhase === 'review') {
+      this.suppressNextPointerUp = true;
+      this.confirm();
+      return;
+    }
+    if (this.currentPhase !== 'idle') return;
+
+    this.start = this.snapConstructionPoint(worldX, worldY);
+    this.pendingUUID = crypto.randomUUID();
+    this.activePointerId = Number.isFinite(pointer.id) ? pointer.id : null;
+    this.setPhase('dragging');
+  }
+
+  onPointerMove(
+    worldX: number,
+    worldY: number,
+    pointer: Phaser.Input.Pointer,
+  ): void {
+    if (this.currentPhase !== 'dragging' && this.currentPhase !== 'chained') return;
+    if (this.activePointerId !== null && pointer.id !== this.activePointerId) return;
+    if (!this.start || !this.pendingUUID) return;
+
+    const end = this.snapConstructionPoint(worldX, worldY);
+    const key = this.previewKey(this.start, end, this.pendingUUID);
+    let preview: ConstructionPreview | null;
+    if (this.cache?.key === key) {
+      preview = this.cache.preview;
+    } else {
+      preview = this.constructionService.createPreview(
+        this.start,
+        end,
+        this.pendingUUID,
+      );
+      if (preview) this.cache = { key, preview };
+    }
+    if (!preview) {
+      this.currentPreview = null;
+      this.currentModel = null;
+      this.overlay.clear();
+      this.dispatchPreview();
+      this.dispatchHint('error', 'Construction preview is unavailable — move the endpoint.');
+      return;
+    }
+    this.currentPreview = preview;
+    this.publishModel(false);
+  }
+
+  onPointerUp(
+    worldX: number,
+    worldY: number,
+    pointer: Phaser.Input.Pointer,
+  ): void {
+    if (this.suppressNextPointerUp) {
+      this.suppressNextPointerUp = false;
+      return;
+    }
+    if (pointer.button !== 0) return;
+    if (this.currentPhase !== 'dragging' && this.currentPhase !== 'chained') return;
+    if (this.activePointerId !== null && pointer.id !== this.activePointerId) return;
+    this.onPointerMove(worldX, worldY, pointer);
+    if (!this.currentPreview) return;
+    this.activePointerId = null;
+    this.setPhase('review');
+    this.publishModel(false);
+  }
+
+  onKeyDown(event: KeyboardEvent): void {
+    if (event.code === 'Enter' || event.code === 'Space') {
+      this.confirm();
+      return;
+    }
+    if (event.code === 'Escape') this.cancel();
+  }
+
+  update(_delta: number): void {}
+
+  confirm(): boolean {
+    const model = this.currentModel;
+    const preview = this.currentPreview;
+    if (this.currentPhase !== 'review'
+      || !model?.canConfirm
+      || !preview?.quote) return false;
+
+    const command = new PlaceTrackCommand(
+      this.scene,
+      this.trackManager,
+      this.economy,
+      this.constructionService,
+      preview.quote,
+    );
+    if (!this.commandStack.push(command)) {
+      this.publishModel(true);
+      return false;
+    }
+
+    this.setPhase('committed');
+    this.publishModel(false);
+    EventBus.emit('track:placed', { trackUUID: preview.quote.newTrackUUID });
+    this.beginChain(preview);
+    return true;
+  }
+
+  backstep(): void {
+    if (this.currentPhase === 'review') {
+      this.setPhase('dragging');
+      this.publishModel(false);
+      return;
+    }
+    if (this.currentPhase === 'dragging' || this.currentPhase === 'chained') {
+      this.resetToIdle();
+    }
+  }
+
+  destroy(): void {
+    this.overlay.destroy();
+    this.currentPreview = null;
+    this.currentModel = null;
+    this.cache = null;
+  }
+
+  private beginChain(preview: ConstructionPreview): void {
+    const quote = preview.quote!;
+    const geometry = quote.proposal.geometry;
+    const endWasConnected = quote.predictedConnections.some(
+      (connection) => connection.newEndpoint === 'end',
+    );
+    if (endWasConnected) {
+      this.resetToIdle();
+      return;
+    }
+
+    const liveTrack = this.trackManager.getTrack?.(quote.newTrackUUID);
+    if (liveTrack && this.trackManager.endpointHasConnection(liveTrack, false)) {
+      this.resetToIdle();
+      return;
+    }
+    const curveTangent = liveTrack?.getCurvePath().getTangent(1);
+    const outward = curveTangent
+      ? { x: curveTangent.x, y: curveTangent.y }
+      : outwardFromGeometry(geometry);
+    this.start = {
+      x: geometry.p3.x,
+      y: geometry.p3.y,
+      snapped: true,
+      type: 'endpoint',
+      trackUUID: quote.newTrackUUID,
+      endpoint: 'end',
+      outward,
+      open: true,
+    };
+    this.pendingUUID = crypto.randomUUID();
+    this.currentPreview = null;
+    this.currentModel = null;
+    this.cache = null;
+    this.activePointerId = null;
+    this.overlay.clear();
+    this.setPhase('chained');
+    this.dispatchPreview();
+    this.dispatchHint('ok', '');
+  }
+
+  private publishModel(stale: boolean): void {
+    const preview = this.currentPreview;
+    if (!preview) return;
+    const affordable = preview.affordable !== false
+      && this.economy.canAfford(preview.totalCost);
+    const engineeringReady = !stale
+      && preview.proposal.valid
+      && affordable
+      && preview.quote !== null;
+    const canConfirm = engineeringReady && this.currentPhase === 'review';
+    let message = '';
+    if (stale) {
+      message = 'Route changed — move the endpoint to refresh the quote.';
+    } else if (!preview.proposal.valid) {
+      message = preview.proposal.remedy;
+    } else if (!affordable) {
+      message = preview.proposal.structures.some(({ type }) => type === 'tunnel')
+        ? 'Tunnel section exceeds your cash.'
+        : 'This section exceeds your cash — shorten or simplify the route.';
+    } else if (preview.status === 'endpoint-unavailable') {
+      message = preview.message;
+    } else if (engineeringReady && this.currentPhase === 'review') {
+      message = 'Click or press Enter to build this section.';
+    } else if (
+      engineeringReady
+      && (this.currentPhase === 'dragging' || this.currentPhase === 'chained')
+    ) {
+      message = 'Release to review this section.';
+    }
+    const actions: ConstructionPreviewModel['actions'] = Object.freeze([
+      ...(canConfirm ? ['confirm' as const] : []),
+      'backstep' as const,
+      'cancel' as const,
+    ]);
+    this.currentModel = Object.freeze({
+      phase: this.currentPhase,
+      proposal: preview.proposal,
+      predictedConnections: preview.predictedConnections,
+      totalCost: preview.totalCost,
+      affordable,
+      canConfirm,
+      stale,
+      message,
+      actions,
     });
+    this.overlay.render(this.currentModel);
+    this.dispatchPreview();
+    this.dispatchHint(
+      engineeringReady ? 'ok' : 'error',
+      message,
+    );
+  }
+
+  private setPhase(phase: ConstructionToolPhase): void {
+    this.currentPhase = phase;
+  }
+
+  private resetToIdle(): void {
+    this.currentPhase = 'idle';
+    this.start = null;
+    this.currentPreview = null;
+    this.currentModel = null;
+    this.cache = null;
+    this.pendingUUID = null;
+    this.activePointerId = null;
+    this.suppressNextPointerUp = false;
+    this.overlay.clear();
+    this.dispatchPreview();
+    this.dispatchHint('ok', '');
+  }
+
+  private snapConstructionPoint(worldX: number, worldY: number): SnapResult {
+    const snap = this.snapSystem as SnapSystem & {
+      snapConstructionPoint?: (
+        x: number,
+        y: number,
+        excluded?: string[],
+      ) => SnapResult;
+    };
+    return snap.snapConstructionPoint
+      ? snap.snapConstructionPoint(worldX, worldY)
+      : snap.snapPoint(worldX, worldY);
+  }
+
+  private previewKey(
+    start: SnapResult,
+    end: SnapResult,
+    pendingUUID: string,
+  ): string {
+    const world = WorldManager.world;
+    return [
+      pendingUUID,
+      semanticAnchor(start),
+      semanticAnchor(end),
+      this.snapSystem.endpointEnabled,
+      this.snapSystem.gridEnabled,
+      this.snapSystem.gridSize,
+      this.snapSystem.snapRadius,
+      world?.revision ?? 'none',
+      world?.company.cash ?? 'none',
+    ].join('|');
+  }
+
+  private dispatchPreview(): void {
+    EventBus.emit('construction:preview', {
+      phase: this.currentPhase,
+      preview: this.currentModel,
+    });
+  }
+
+  private dispatchHint(
+    state: 'ok' | 'warning' | 'error',
+    message: string,
+  ): void {
+    const key = `${state}:${message}`;
+    if (key === this.lastHintKey) return;
+    this.lastHintKey = key;
+    EventBus.emit('ui:validation-hint', { state, message });
   }
 }

@@ -24,7 +24,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     },
   );
 
-  it.each(['place-track', 'eraser'] as const)(
+  it.each(['eraser'] as const)(
     'ignores programmatic economy-bypassing %s activation',
     (tool) => {
       const scene = new WorldScene();
@@ -39,6 +39,28 @@ describe('WorldScene disabled construction bypass guards', () => {
       expect((scene as any).activeEditorTool).toBeNull();
     },
   );
+
+  it('activates the economy-aware place-track tool programmatically', () => {
+    const scene = new WorldScene();
+    const place = {
+      activate: jest.fn(),
+      cancel: jest.fn(),
+      deactivate: jest.fn(),
+    };
+    (scene as any).toolRegistry = new Map([['place-track', place]]);
+    (scene as any).cameraController = {
+      setInputLockOwner: jest.fn(),
+      setCursor: jest.fn(),
+    };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).toolChangedHandler({ tool: 'place-track' });
+
+    expect(place.activate).toHaveBeenCalledTimes(1);
+    expect((scene as any).activeEditorTool).toBe(place);
+    expect((scene as any).cameraController.setInputLockOwner)
+      .toHaveBeenCalledWith('editor-tool');
+  });
 
   it.each(['KeyG', 'KeyD', 'KeyJ'])(
     'does not emit a toolbar-selection event for disabled shortcut %s',
@@ -56,7 +78,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     },
   );
 
-  it.each(['KeyP', 'KeyE', 'Delete'])(
+  it.each(['KeyE', 'Delete'])(
     'does not mutate or select a cash-bypassing action for %s',
     (code) => {
       const scene = new WorldScene();
@@ -79,6 +101,122 @@ describe('WorldScene disabled construction bypass guards', () => {
       emitSpy.mockRestore();
     },
   );
+
+  it('emits toolbar selection for the P shortcut', () => {
+    const scene = new WorldScene();
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handleKeyDown({
+      code: 'KeyP',
+      ctrlKey: false,
+      altKey: false,
+    });
+
+    expect(emitSpy).toHaveBeenCalledWith(
+      'ui:toolbar-select-tool',
+      { tool: 'place-track' },
+    );
+    emitSpy.mockRestore();
+  });
+
+  it('keeps Place selected when Escape cancels its pending proposal', () => {
+    const scene = new WorldScene();
+    const cancel = jest.fn();
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = { cancel, onKeyDown: jest.fn() };
+    (scene as any).selectionManager = { clearSelection: jest.fn() };
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handleKeyDown({
+      code: 'Escape',
+      ctrlKey: false,
+      altKey: false,
+    });
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(emitSpy).not.toHaveBeenCalledWith(
+      'ui:toolbar-select-tool',
+      { tool: 'none' },
+    );
+    emitSpy.mockRestore();
+  });
+
+  it('cancels pending construction before undo changes the authority revision', () => {
+    const scene = new WorldScene();
+    const cancel = jest.fn();
+    const undo = jest.fn();
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = { cancel };
+    (scene as any).commandStack = { undo };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handleKeyDown({
+      code: 'KeyZ',
+      ctrlKey: true,
+      altKey: false,
+    });
+
+    expect(cancel.mock.invocationCallOrder[0])
+      .toBeLessThan(undo.mock.invocationCallOrder[0]);
+  });
+
+  it('cancels pending construction before toolbar undo/redo changes authority', () => {
+    const scene = new WorldScene();
+    const cancel = jest.fn();
+    const undo = jest.fn();
+    const redo = jest.fn();
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = { cancel };
+    (scene as any).commandStack = { undo, redo };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).undoHandler();
+    (scene as any).redoHandler();
+
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(cancel.mock.invocationCallOrder[0])
+      .toBeLessThan(undo.mock.invocationCallOrder[0]);
+    expect(cancel.mock.invocationCallOrder[1])
+      .toBeLessThan(redo.mock.invocationCallOrder[0]);
+  });
+
+  it('routes editor pointers through the camera world transform only in create mode', () => {
+    const scene = new WorldScene();
+    const onPointerDown = jest.fn();
+    (scene as any).activeEditorTool = { onPointerDown };
+    (scene as any).inputManager = {
+      toWorldPoint: jest.fn().mockReturnValue({ x: 712, y: -84 }),
+    };
+    (scene as any).scale = { width: 1920, height: 1080 };
+    const pointer = {
+      x: 400,
+      y: 200,
+      button: 0,
+      rightButtonDown: () => false,
+    };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handlePointerDown(pointer);
+    expect((scene as any).inputManager.toWorldPoint).toHaveBeenCalledWith(pointer);
+    expect(onPointerDown).toHaveBeenCalledWith(712, -84, pointer);
+
+    GameStateManager.enterPlay('test-world');
+    (scene as any).handlePointerDown(pointer);
+    expect(onPointerDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels pending construction on a pointer-cancel lifecycle event', () => {
+    const scene = new WorldScene();
+    const cancel = jest.fn();
+    (scene as any).activeEditorTool = { cancel };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handlePointerCancel();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 
   it('rejects editor delete events and the direct scene deletion path', () => {
     const scene = new WorldScene();

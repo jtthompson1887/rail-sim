@@ -9,6 +9,9 @@ import { InputManager } from '../systems/InputManager';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
+import { ConstructionAnalyzer } from '../systems/ConstructionAnalyzer';
+import { ConstructionService } from '../systems/ConstructionService';
+import { ConstructionEconomy } from '../systems/ConstructionEconomy';
 import { SnapSystem } from '../systems/SnapSystem';
 import { CommandStack } from '../systems/CommandStack';
 import { TrainSerializer } from '../utils/TrainSerializer';
@@ -30,6 +33,7 @@ import { isMobileWidth, scalePx } from '../utils/responsive';
 import type { IEditorTool } from '../systems/tools/IEditorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
+import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -108,10 +112,14 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly undoHandler = () => {
-    if (GameStateManager.worldMode === 'create') this.commandStack.undo();
+    if (GameStateManager.worldMode !== 'create') return;
+    if (this.activeTool === 'place-track') this.activeEditorTool?.cancel();
+    this.commandStack.undo();
   };
   private readonly redoHandler = () => {
-    if (GameStateManager.worldMode === 'create') this.commandStack.redo();
+    if (GameStateManager.worldMode !== 'create') return;
+    if (this.activeTool === 'place-track') this.activeEditorTool?.cancel();
+    this.commandStack.redo();
   };
   private readonly generatorRunHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
@@ -201,7 +209,26 @@ export default class WorldScene extends Phaser.Scene {
     // ── Tool registry ──────────────────────────────────────────────────────
     this.toolRegistry = new Map<CreateTool, IEditorTool>();
     this.toolRegistry.set('select', new SelectTool(this.selectionManager));
-    this.toolRegistry.set('place-vehicle', new PlaceVehicleTool(this, this.trackManager, this.trainManager));
+    if (world) {
+      const constructionService = new ConstructionService(
+        this.trackManager,
+        new ConstructionAnalyzer(this.terrainGenerator),
+      );
+      this.toolRegistry.set('place-track', new PlaceTrackTool(
+        this,
+        this.trackManager,
+        this.snapSystem,
+        constructionService,
+        new ConstructionEconomy(world.company),
+        this.commandStack,
+      ));
+    }
+    this.toolRegistry.set('place-vehicle', new PlaceVehicleTool(
+      this,
+      this.trackManager,
+      this.trainManager,
+      this.commandStack,
+    ));
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
     this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
@@ -254,6 +281,8 @@ export default class WorldScene extends Phaser.Scene {
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.input.on('pointermove', this.handlePointerMove, this);
     this.input.on('pointerup',   this.handlePointerUp,   this);
+    this.input.on('pointerupoutside', this.handlePointerUp, this);
+    this.input.on('pointercancel', this.handlePointerCancel, this);
     this.input.keyboard.on('keydown', (event: KeyboardEvent) => {
       this.handleKeyDown(event);
     });
@@ -413,6 +442,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private activatePlayMode(): void {
+    this.activeEditorTool?.cancel();
     this.minimapRenderer.clear();
     this.selectionManager.clearSelection();
     this.inputManager.setupClickHandling(this.trainManager);
@@ -440,7 +470,7 @@ export default class WorldScene extends Phaser.Scene {
     // Right-click: check if active tool wants it first, otherwise show context menu
     if (pointer.rightButtonDown()) {
       if (this.activeEditorTool?.wantsPointerButton(2)) {
-        const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        const world = this.inputManager.toWorldPoint(pointer);
         this.activeEditorTool.onPointerDown(world.x, world.y, pointer);
       } else {
         this.showContextMenu(pointer);
@@ -448,28 +478,41 @@ export default class WorldScene extends Phaser.Scene {
       return;
     }
 
-    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const world = this.inputManager.toWorldPoint(pointer);
     this.activeEditorTool?.onPointerDown(world.x, world.y, pointer);
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
-    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const world = this.inputManager.toWorldPoint(pointer);
     this.activeEditorTool?.onPointerMove(world.x, world.y, pointer);
   }
 
   private handlePointerUp(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
-    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const world = this.inputManager.toWorldPoint(pointer);
     this.activeEditorTool?.onPointerUp(world.x, world.y, pointer);
+  }
+
+  private handlePointerCancel(): void {
+    if (GameStateManager.worldMode !== 'create') return;
+    this.activeEditorTool?.cancel();
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
       if (event.ctrlKey) {
-        if (event.code === 'KeyZ') { this.commandStack.undo(); return; }
-        if (event.code === 'KeyY') { this.commandStack.redo(); return; }
+        if (event.code === 'KeyZ') {
+          if (this.activeTool === 'place-track') this.activeEditorTool?.cancel();
+          this.commandStack.undo();
+          return;
+        }
+        if (event.code === 'KeyY') {
+          if (this.activeTool === 'place-track') this.activeEditorTool?.cancel();
+          this.commandStack.redo();
+          return;
+        }
         if (event.code === 'KeyS') {
           this.syncTrainsSaveAndReport();
           return;
@@ -480,13 +523,17 @@ export default class WorldScene extends Phaser.Scene {
       if (!event.ctrlKey && !event.altKey) {
         const shortcuts: Record<string, CreateTool> = {
           KeyV: 'select', KeyH: 'pan', KeyT: 'terrain-view',
-          KeyN: 'place-vehicle',
+          KeyN: 'place-vehicle', KeyP: 'place-track',
         };
         const mapped = shortcuts[event.code];
         if (mapped) { EventBus.emit('ui:toolbar-select-tool', { tool: mapped }); return; }
       }
 
       if (event.code === 'Escape') {
+        if (this.activeTool === 'place-track') {
+          this.activeEditorTool?.cancel();
+          return;
+        }
         // Cancel the active tool first, then clear selection
         this.activeEditorTool?.cancel();
         this.selectionManager.clearSelection();

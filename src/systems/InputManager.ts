@@ -104,6 +104,11 @@ export class InputManager {
     return follower.vehicleType === 'locomotive';
   }
 
+  /** Convert a screen-space pointer through the authoritative main camera. */
+  toWorldPoint(pointer: Pick<Phaser.Input.Pointer, 'x' | 'y'>): Phaser.Math.Vector2 {
+    return this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+  }
+
   handleTrainMovement(selectedTrain: Train | null): void {
     if (!selectedTrain) return;
     // Keyboard input takes priority over mobile throttle buttons

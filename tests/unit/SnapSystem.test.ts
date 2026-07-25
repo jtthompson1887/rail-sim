@@ -110,6 +110,30 @@ describe('SnapSystem', () => {
       const result = snap.snapPoint(115, 108);
       expect(result.snapped).toBe(false);
     });
+
+    it('returns deterministic endpoint identity and the outward tangent', () => {
+      snap.gridEnabled = false;
+      const track = makeTrack(scene, 100, 100, 200, 100);
+      track.setUUID('eastbound');
+      trackManager.addTrack(track);
+
+      expect(snap.snapPoint(105, 100)).toEqual(expect.objectContaining({
+        x: 100,
+        y: 100,
+        type: 'endpoint',
+        trackUUID: 'eastbound',
+        endpoint: 'start',
+        outward: { x: -1, y: 0 },
+      }));
+      expect(snap.snapPoint(195, 100)).toEqual(expect.objectContaining({
+        x: 200,
+        y: 100,
+        type: 'endpoint',
+        trackUUID: 'eastbound',
+        endpoint: 'end',
+        outward: { x: 1, y: 0 },
+      }));
+    });
   });
 
   describe('Midpoint snap', () => {

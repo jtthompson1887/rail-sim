@@ -1,4 +1,3 @@
-import Phaser from 'phaser';
 import { ENDPOINT_CONNECTION_COST } from '../config/ConstructionConfig';
 import { GameConfig } from '../config/GameConfig';
 import type { Vec2Def } from '../config/WorldData';
@@ -15,6 +14,10 @@ import {
   deriveAutomaticCubic,
   type TrackGeometryDef,
 } from './TrackGeometry';
+import {
+  resolveTrackEndpoint,
+  type ResolvedTrackEndpoint,
+} from './SnapSystem';
 
 export type TrackEndpoint = 'start' | 'end';
 
@@ -39,6 +42,44 @@ export interface ConstructionQuote {
   readonly predictedConnections: ReadonlyArray<PredictedEndpointConnectionDef>;
   readonly topologyCost: number;
   readonly totalCost: number;
+}
+
+export type ConstructionPreviewStatus =
+  | 'committable'
+  | 'engineering-invalid'
+  | 'endpoint-unavailable'
+  | 'unaffordable';
+
+export interface ConstructionPreviewAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly endpoint: ResolvedTrackEndpoint | null;
+}
+
+export interface ConstructionInputAnchor extends Vec2Def {
+  readonly snapped?: boolean;
+  readonly type?: 'none' | 'grid' | 'endpoint' | 'midpoint';
+  readonly trackUUID?: string;
+  readonly endpoint?: 'start' | 'end';
+  readonly outward?: Readonly<Vec2Def>;
+  readonly open?: boolean;
+}
+
+/**
+ * One immutable analysis result for one semantic pointer position. A valid,
+ * affordable result owns the exact quote object later handed to the command.
+ */
+export interface ConstructionPreview {
+  readonly status: ConstructionPreviewStatus;
+  readonly startAnchor: ConstructionPreviewAnchor;
+  readonly endAnchor: ConstructionPreviewAnchor;
+  readonly proposal: ConstructionProposal;
+  readonly quote: ConstructionQuote | null;
+  readonly predictedConnections: ReadonlyArray<PredictedEndpointConnectionDef>;
+  readonly topologyCost: number;
+  readonly totalCost: number;
+  readonly affordable: boolean;
+  readonly message: string;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -90,52 +131,53 @@ export class ConstructionService {
     end: Vec2Def,
     newTrackUUID: string = crypto.randomUUID(),
   ): ConstructionQuote | null {
+    return this.createPreview(start, end, newTrackUUID)?.quote ?? null;
+  }
+
+  createPreview(
+    start: ConstructionInputAnchor,
+    end: ConstructionInputAnchor,
+    newTrackUUID: string = crypto.randomUUID(),
+  ): ConstructionPreview | null {
     const world = WorldManager.world;
     if (!world || !WorldManager.canAdvanceRevision()
       || !newTrackUUID || this.trackManager.getTrack(newTrackUUID)
       || world.tracks.some((track) => track.uuid === newTrackUUID)) return null;
 
-    const startSnap = this.trackManager.findEndpointNear(
-      new Phaser.Math.Vector2(start.x, start.y),
-      GameConfig.TRACK.SNAP_RADIUS_PX,
-    );
-    const endSnap = this.trackManager.findEndpointNear(
-      new Phaser.Math.Vector2(end.x, end.y),
-      GameConfig.TRACK.SNAP_RADIUS_PX,
-    );
-    if ((startSnap && this.trackManager.endpointHasConnection(startSnap.track, startSnap.isStart))
-      || (endSnap && this.trackManager.endpointHasConnection(endSnap.track, endSnap.isStart))) {
-      return null;
-    }
+    const startSnap = this.resolveInputEndpoint(start);
+    const endSnap = this.resolveInputEndpoint(end);
+    const startEndpointStale = start.type === 'endpoint' && !startSnap;
+    const endEndpointStale = end.type === 'endpoint' && !endSnap;
     if (startSnap && endSnap
-      && startSnap.track === endSnap.track
-      && startSnap.isStart === endSnap.isStart) return null;
+      && startSnap.trackUUID === endSnap.trackUUID
+      && startSnap.endpoint === endSnap.endpoint) return null;
 
     const snappedStart = startSnap
-      ? startSnap.track.getCurvePath()[startSnap.isStart ? 'getStartPoint' : 'getEndPoint']()
+      ? startSnap
       : start;
     const snappedEnd = endSnap
-      ? endSnap.track.getCurvePath()[endSnap.isStart ? 'getStartPoint' : 'getEndPoint']()
+      ? endSnap
       : end;
     const geometry = deriveAutomaticCubic({
       start: { x: snappedStart.x, y: snappedStart.y },
       end: { x: snappedEnd.x, y: snappedEnd.y },
       startOutward: startSnap
-        ? { x: startSnap.tangent.x, y: startSnap.tangent.y }
-        : undefined,
+        ? { ...startSnap.outward }
+        : start.outward ? { ...start.outward } : undefined,
       endOutward: endSnap
-        ? { x: endSnap.tangent.x, y: endSnap.tangent.y }
-        : undefined,
+        ? { ...endSnap.outward }
+        : end.outward ? { ...end.outward } : undefined,
     });
     const analyzed = this.safeAnalyze(geometry);
-    if (!analyzed?.valid) return null;
+    if (!analyzed) return null;
+    const proposal = clonePlainData(analyzed);
 
     const predictedConnections: PredictedEndpointConnectionDef[] = [];
     if (startSnap) {
       predictedConnections.push({
         kind: 'endpoint-connection',
-        existingTrackUUID: startSnap.track.getUUID(),
-        existingEndpoint: startSnap.isStart ? 'start' : 'end',
+        existingTrackUUID: startSnap.trackUUID,
+        existingEndpoint: startSnap.endpoint,
         newEndpoint: 'start',
         point: { ...geometry.p0 },
       });
@@ -143,8 +185,8 @@ export class ConstructionService {
     if (endSnap) {
       predictedConnections.push({
         kind: 'endpoint-connection',
-        existingTrackUUID: endSnap.track.getUUID(),
-        existingEndpoint: endSnap.isStart ? 'start' : 'end',
+        existingTrackUUID: endSnap.trackUUID,
+        existingEndpoint: endSnap.endpoint,
         newEndpoint: 'end',
         point: { ...geometry.p3 },
       });
@@ -160,22 +202,70 @@ export class ConstructionService {
       expectedAffectedTracks.push({ trackUUID, geometry: affectedGeometry });
     }
     const topologyCost = predictedConnections.length * ENDPOINT_CONNECTION_COST;
-    const totalCost = analyzed.costs.total + topologyCost;
-    if (!Number.isSafeInteger(totalCost) || totalCost <= 0) return null;
+    const totalCost = proposal.costs.total + topologyCost;
+    if (!Number.isSafeInteger(totalCost) || totalCost < 0) return null;
+    const endpointUnavailable = !!(
+      (startSnap && !startSnap.open)
+      || (endSnap && !endSnap.open)
+      || startEndpointStale
+      || endEndpointStale
+    );
+    const affordable = totalCost > 0 && world.company.cash >= totalCost;
+    const committable = proposal.valid
+      && !endpointUnavailable
+      && affordable
+      && totalCost > 0;
 
-    const quote = deepFreeze({
-      quoteId: crypto.randomUUID(),
-      newTrackUUID,
-      worldRevision: world.revision,
-      expectedCash: world.company.cash,
-      proposal: clonePlainData(analyzed),
-      expectedAffectedTracks,
+    let quote: ConstructionQuote | null = null;
+    if (committable) {
+      quote = deepFreeze({
+        quoteId: crypto.randomUUID(),
+        newTrackUUID,
+        worldRevision: world.revision,
+        expectedCash: world.company.cash,
+        proposal,
+        expectedAffectedTracks,
+        predictedConnections,
+        topologyCost,
+        totalCost,
+      });
+      this.quoteWorlds.set(quote, world);
+    }
+
+    const status: ConstructionPreviewStatus = endpointUnavailable
+      ? 'endpoint-unavailable'
+      : !proposal.valid
+        ? 'engineering-invalid'
+        : !affordable
+          ? 'unaffordable'
+          : 'committable';
+    const message = status === 'endpoint-unavailable'
+      ? 'That endpoint is already connected — choose an open endpoint.'
+      : status === 'engineering-invalid'
+        ? proposal.remedy
+        : status === 'unaffordable'
+          ? 'This section exceeds your available cash.'
+          : '';
+    return deepFreeze({
+      status,
+      startAnchor: {
+        x: geometry.p0.x,
+        y: geometry.p0.y,
+        endpoint: startSnap,
+      },
+      endAnchor: {
+        x: geometry.p3.x,
+        y: geometry.p3.y,
+        endpoint: endSnap,
+      },
+      proposal,
+      quote,
       predictedConnections,
       topologyCost,
       totalCost,
+      affordable,
+      message,
     });
-    this.quoteWorlds.set(quote, world);
-    return quote;
   }
 
   revalidateQuote(quote: ConstructionQuote): boolean {
@@ -248,5 +338,22 @@ export class ConstructionService {
     } catch {
       return null;
     }
+  }
+
+  private resolveInputEndpoint(
+    anchor: ConstructionInputAnchor,
+  ): ResolvedTrackEndpoint | null {
+    if (anchor.type !== undefined && anchor.type !== 'endpoint') return null;
+    const resolved = resolveTrackEndpoint(
+      this.trackManager,
+      anchor.x,
+      anchor.y,
+      anchor.type === 'endpoint' ? 1e-6 : GameConfig.TRACK.SNAP_RADIUS_PX,
+    );
+    if (!resolved || anchor.type !== 'endpoint') return resolved;
+    return resolved.trackUUID === anchor.trackUUID
+      && resolved.endpoint === anchor.endpoint
+      ? resolved
+      : null;
   }
 }

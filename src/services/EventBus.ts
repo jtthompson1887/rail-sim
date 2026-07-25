@@ -1,4 +1,5 @@
 type EventCallback<T = unknown> = (data: T) => void;
+import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -49,6 +50,7 @@ interface EventMap {
   'editor:delete-tracks': { uuids: string[] };
   /** Emitted by editor tools during track placement / reshaping to show live validation feedback. */
   'ui:validation-hint': { state: 'ok' | 'warning' | 'error'; message: string };
+  'construction:preview': ConstructionPreviewEvent;
 }
 
 class EventBusClass {

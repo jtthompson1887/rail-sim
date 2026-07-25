@@ -7,6 +7,7 @@ import { EventBus } from '../../services/EventBus';
 import { VehicleType, getVehicleTypeInfo } from '../../config/VehicleTypes';
 import { TrainSerializer } from '../../utils/TrainSerializer';
 import { WorldManager } from '../../managers/WorldManager';
+import type { CommandStack } from '../CommandStack';
 
 /**
  * PlaceVehicleTool – click on an existing track to place a locomotive or carriage.
@@ -28,6 +29,7 @@ export class PlaceVehicleTool implements IEditorTool {
     scene: Phaser.Scene,
     trackManager: TrackManager,
     trainManager: TrainManager,
+    private readonly commandStack?: CommandStack,
   ) {
     this.scene = scene;
     this.trackManager = trackManager;
@@ -81,8 +83,10 @@ export class PlaceVehicleTool implements IEditorTool {
     vehicle.currentTrack = track;
 
     const def = TrainSerializer.toTrainDef(vehicle);
-    if (def) {
-      WorldManager.addTrainDef(def);
+    if (def && WorldManager.addTrainDef(def)) {
+      // Vehicle placement is not yet a command. Explicitly invalidate prior
+      // revision-aware history so a later construction push is not stale.
+      this.commandStack?.clear();
     }
 
     EventBus.emit('ui:toast', {

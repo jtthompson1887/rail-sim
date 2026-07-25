@@ -225,4 +225,15 @@ describe('InputManager drag recovery regression', () => {
       expect(callbacks).toHaveLength(1);
     }
   });
+
+  it('uses the main camera transform for editor world coordinates', () => {
+    scene.cameras.main.getWorldPoint.mockReturnValue({ x: 712, y: -84 });
+    const pointer = { x: 400, y: 200 };
+
+    expect(inputManager.toWorldPoint(pointer as any)).toEqual({
+      x: 712,
+      y: -84,
+    });
+    expect(scene.cameras.main.getWorldPoint).toHaveBeenCalledWith(400, 200);
+  });
 });

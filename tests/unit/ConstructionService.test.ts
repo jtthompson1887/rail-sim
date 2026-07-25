@@ -65,6 +65,51 @@ describe('ConstructionService', () => {
     expect(Object.isFrozen(quote!.proposal.geometry.p0)).toBe(true);
   });
 
+  it('returns one immutable preview whose valid quote shares the exact proposal', () => {
+    const analyzed = jest.spyOn(
+      (service as any).analyzer,
+      'analyze',
+    );
+    const result = service.createPreview(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'preview-track',
+    );
+
+    expect(result).not.toBeNull();
+    expect(analyzed).toHaveBeenCalledTimes(1);
+    expect(result!.quote!.proposal).toBe(result!.proposal);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result!.proposal)).toBe(true);
+  });
+
+  it('keeps invalid analysis available without manufacturing a quote', () => {
+    const result = service.createPreview(
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      'invalid-preview',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.proposal.valid).toBe(false);
+    expect(result!.quote).toBeNull();
+    expect(result!.proposal.remedy).not.toBe('');
+  });
+
+  it('respects an explicit free/grid anchor when endpoint snapping is disabled', () => {
+    addTrack(manager, scene);
+    const result = service.createPreview(
+      { x: 5, y: 0, snapped: false, type: 'none' },
+      { x: 300, y: 0, snapped: true, type: 'grid' },
+      'explicit-free',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.proposal.geometry.p0).toEqual({ x: 5, y: 0 });
+    expect(result!.proposal.geometry.p3).toEqual({ x: 300, y: 0 });
+    expect(result!.predictedConnections).toEqual([]);
+  });
+
   it('preserves Infinity in a straight proposal without JSON coercion', () => {
     const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'straight');
     expect(quote).not.toBeNull();

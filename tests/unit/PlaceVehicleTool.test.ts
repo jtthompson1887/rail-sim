@@ -7,6 +7,7 @@ import Phaser from 'phaser';
 import { PlaceVehicleTool } from '../../src/systems/tools/PlaceVehicleTool';
 import { EventBus } from '../../src/services/EventBus';
 import RailTrack from '../../src/entities/RailTrack';
+import { WorldManager } from '../../src/managers/WorldManager';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -131,6 +132,25 @@ describe('PlaceVehicleTool', () => {
       tool.onPointerDown(250, 0, { button: 0 } as any);
 
       expect(vehicle.currentTrack).toBe(track);
+    });
+
+    it('invalidates construction history after a successful out-of-stack world mutation', () => {
+      const clear = jest.fn();
+      const addTrainDef = jest.spyOn(WorldManager, 'addTrainDef').mockReturnValue(true);
+      const historyAwareTool = new PlaceVehicleTool(
+        scene,
+        trackManager,
+        trainManager,
+        { clear } as any,
+      );
+      const track = makeTrack(scene);
+      trackManager.getClosestTrack.mockReturnValue(track);
+
+      historyAwareTool.onPointerDown(250, 0, { button: 0 } as any);
+
+      expect(clear).toHaveBeenCalledTimes(1);
+      historyAwareTool.destroy();
+      addTrainDef.mockRestore();
     });
   });
 

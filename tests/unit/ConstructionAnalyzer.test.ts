@@ -92,6 +92,9 @@ describe('ConstructionAnalyzer', () => {
       ConstructionConfig.MAX_GRADE_PERCENT,
     );
     expect(proposal.maximumGradeT).toBeGreaterThan(0);
+    expect(proposal.remedy).toBe(
+      'Too steep here — move the endpoint downhill or use a shorter section.',
+    );
   });
 
   it('rejects a cubic whose minimum radius is below the configured limit', () => {
@@ -106,6 +109,9 @@ describe('ConstructionAnalyzer', () => {
     expect(proposal.valid).toBe(false);
     expect(proposal.reasonCode).toBe('curvature');
     expect(proposal.minimumRadius).toBeLessThan(ConstructionConfig.MINIMUM_RADIUS);
+    expect(proposal.remedy).toBe(
+      'Curve radius too tight — widen the approach.',
+    );
   });
 
   it('rejects a collinear cubic that reverses through a zero-speed cusp', () => {
@@ -145,6 +151,9 @@ describe('ConstructionAnalyzer', () => {
     expect(maximum.valid).toBe(true);
     expect(over.valid).toBe(false);
     expect(over.reasonCode).toBe('too-long');
+    expect(over.remedy).toBe(
+      'Section too long to survey safely — build a shorter section.',
+    );
   });
 
   it('rejects geometry outside the terrain world bounds', () => {

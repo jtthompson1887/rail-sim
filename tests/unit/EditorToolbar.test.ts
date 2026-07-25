@@ -28,7 +28,7 @@ describe('EditorToolbar lifecycle', () => {
     expect(scene.add.container).not.toHaveBeenCalled();
   });
 
-  it.each(['generator', 'completer', 'junction', 'place-track', 'eraser'] as const)(
+  it.each(['generator', 'completer', 'junction', 'eraser'] as const)(
     'refuses disabled %s selection with the engineering-lock reason',
     (tool) => {
       const scene = makeScene();
@@ -46,4 +46,19 @@ describe('EditorToolbar lifecycle', () => {
       toolbar.destroy();
     },
   );
+
+  it('enables the economy-aware place-track tool', () => {
+    const scene = makeScene();
+    const toolbar = new EditorToolbar(scene);
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+
+    toolbar.selectTool('place-track');
+
+    expect(toolbar.currentTool).toBe('place-track');
+    expect(emitSpy).toHaveBeenCalledWith('tool:changed', {
+      tool: 'place-track',
+    });
+    toolbar.destroy();
+    emitSpy.mockRestore();
+  });
 });
