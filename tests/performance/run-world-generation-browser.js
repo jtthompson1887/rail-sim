@@ -84,12 +84,11 @@ function startHarnessServer() {
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const exactFailure = measurement.result.ok === false
-      && measurement.result.error.code === 'opportunity-exhausted'
-      && measurement.result.error.seed === 'playtest-082'
-      && measurement.result.error.attemptsEvaluated === 12
-      && measurement.result.error.maxSiteCandidatesEvaluated === 256;
-    if (!exactFailure
+    const exactObservedWorstCase = measurement.result.ok === true
+      && measurement.result.opportunity.resolvedAttempt === 11
+      && measurement.result.diagnostics.attemptsEvaluated === 11
+      && measurement.result.diagnostics.maxSiteCandidatesEvaluated === 256;
+    if (!exactObservedWorstCase
       || measurement.attemptsCap !== 12
       || measurement.candidatesCap !== 256
       || measurement.analysisSamplesCap !== 96

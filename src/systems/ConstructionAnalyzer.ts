@@ -1,9 +1,7 @@
 import { GameConfig } from '../config/GameConfig';
 import {
   ConstructionConfig,
-  MAX_ANALYSIS_SAMPLES,
   MAX_SEGMENT_LENGTH,
-  TERRAIN_ANALYSIS_SPACING,
 } from '../config/ConstructionConfig';
 import type {
   ConstructionCostBreakdown,
@@ -15,6 +13,10 @@ import {
   createTrackGeometry,
   type TrackGeometryDef,
 } from './TrackGeometry';
+import {
+  sampleConstructionCurve,
+  type ConstructionCurveSample,
+} from './ConstructionCurveSampler';
 import {
   deriveVerticalAlignment,
   type TerrainProfileSample,
@@ -97,7 +99,6 @@ function structureLengthsFor(
 
 const CURVATURE_EPSILON = 1e-10;
 const LENGTH_EPSILON = 1e-6;
-const ARC_LOOKUP_INTERVALS = MAX_ANALYSIS_SAMPLES * 16;
 
 function remedyFor(reasonCode: ConstructionReasonCode): string {
   const remedies: Record<ConstructionReasonCode, string> = {
@@ -218,10 +219,12 @@ function hasStationaryPoint(def: TrackGeometryDef): boolean {
   });
 }
 
-export function minimumRadiusForGeometry(def: TrackGeometryDef): number {
+export function minimumRadiusForGeometry(
+  def: TrackGeometryDef,
+  sampledPoints: readonly ConstructionCurveSample[],
+): number {
   if (hasStationaryPoint(def)) return 0;
 
-  const sampledPoints = createTrackGeometry(def).sample(MAX_ANALYSIS_SAMPLES);
   let previousDirection: { x: number; y: number } | null = null;
   for (let index = 1; index < sampledPoints.length; index++) {
     const x = sampledPoints[index].point.x - sampledPoints[index - 1].point.x;
@@ -239,11 +242,8 @@ export function minimumRadiusForGeometry(def: TrackGeometryDef): number {
   }
 
   let minimumRadius = Infinity;
-  for (let index = 0; index <= MAX_ANALYSIS_SAMPLES; index++) {
-    const { dx, dy, ddx, ddy } = derivatives(
-      def,
-      index / MAX_ANALYSIS_SAMPLES,
-    );
+  for (const { t } of sampledPoints) {
+    const { dx, dy, ddx, ddy } = derivatives(def, t);
     const denominator = Math.pow(dx * dx + dy * dy, 1.5);
     if (denominator < CURVATURE_EPSILON) continue;
     const curvature = Math.abs(dx * ddy - dy * ddx) / denominator;
@@ -336,77 +336,34 @@ function calculateCosts(length: number, segments: AnalysedSegment[]): Constructi
   };
 }
 
-function buildArcLookup(geometry: ReturnType<typeof createTrackGeometry>): {
-  samples: Array<{ t: number; point: { x: number; y: number }; distance: number }>;
-  length: number;
-} {
-  let distance = 0;
-  const samples = geometry.sample(ARC_LOOKUP_INTERVALS).map((sample, index, all) => {
-    if (index > 0) {
-      distance += Math.hypot(
-        sample.point.x - all[index - 1].point.x,
-        sample.point.y - all[index - 1].point.y,
-      );
-    }
-    return { ...sample, distance };
-  });
-  return { samples, length: distance };
-}
-
-function sampleAtArcDistances(
-  geometry: ReturnType<typeof createTrackGeometry>,
-  lookup: ReturnType<typeof buildArcLookup>,
-  sampleCount: number,
-): Array<{ t: number; point: { x: number; y: number }; distance: number }> {
-  let lookupIndex = 1;
-  return Array.from({ length: sampleCount }, (_, index) => {
-    if (index === 0) {
-      return { t: 0, point: geometry.pointAt(0), distance: 0 };
-    }
-    if (index === sampleCount - 1) {
-      return { t: 1, point: geometry.pointAt(1), distance: lookup.length };
-    }
-    const distance = lookup.length * index / (sampleCount - 1);
-    while (
-      lookupIndex < lookup.samples.length - 1
-      && lookup.samples[lookupIndex].distance < distance
-    ) {
-      lookupIndex++;
-    }
-    const end = lookup.samples[lookupIndex];
-    const start = lookup.samples[lookupIndex - 1];
-    const span = end.distance - start.distance;
-    const ratio = span > 0 ? (distance - start.distance) / span : 0;
-    const t = start.t + (end.t - start.t) * ratio;
-    return { t, point: geometry.pointAt(t), distance };
-  });
-}
-
-function refineOversizedGaps(
-  geometry: ReturnType<typeof createTrackGeometry>,
-  samples: Array<{ t: number; point: { x: number; y: number }; distance: number }>,
-): Array<{ t: number; point: { x: number; y: number }; distance: number }> {
-  const refined = [...samples];
-  let index = 1;
-  while (index < refined.length && refined.length < MAX_ANALYSIS_SAMPLES) {
-    const previous = refined[index - 1];
-    const current = refined[index];
-    const gap = Math.hypot(
-      current.point.x - previous.point.x,
-      current.point.y - previous.point.y,
-    );
-    if (gap > TERRAIN_ANALYSIS_SPACING + LENGTH_EPSILON) {
-      const t = (previous.t + current.t) / 2;
-      refined.splice(index, 0, {
-        t,
-        point: geometry.pointAt(t),
-        distance: (previous.distance + current.distance) / 2,
-      });
-    } else {
-      index++;
-    }
+function geometryIsOutsideBounds(def: TrackGeometryDef): boolean {
+  const halfWidth = GameConfig.TERRAIN.WORLD_WIDTH / 2;
+  const halfHeight = GameConfig.TERRAIN.WORLD_HEIGHT / 2;
+  const candidateTs = [0, 1];
+  for (const coordinates of [
+    [def.p0.x, def.p1.x, def.p2.x, def.p3.x],
+    [def.p0.y, def.p1.y, def.p2.y, def.p3.y],
+  ]) {
+    const polynomial = derivativePolynomial(...coordinates as [number, number, number, number]);
+    candidateTs.push(...realQuadraticRoots(
+      polynomial.a,
+      polynomial.b,
+      polynomial.c,
+    ).filter((t) => t > 0 && t < 1));
   }
-  return refined;
+  const geometry = createTrackGeometry(def);
+  return candidateTs.some((t) => {
+    const point = geometry.pointAt(t);
+    return point.x < -halfWidth
+      || point.x > halfWidth
+      || point.y < -halfHeight
+      || point.y > halfHeight;
+  });
+}
+
+export interface ConstructionAnalysisDetail {
+  readonly proposal: ConstructionProposal;
+  readonly curveSamples: readonly ConstructionCurveSample[];
 }
 
 export class ConstructionAnalyzer {
@@ -416,62 +373,89 @@ export class ConstructionAnalyzer {
     geometryDef: TrackGeometryDef,
     options: ConstructionAnalysisOptions = {},
   ): ConstructionProposal {
-    const geometry = createTrackGeometry(geometryDef);
-    const arcLookup = buildArcLookup(geometry);
-    const estimatedLength = arcLookup.length;
+    return this.analyzeDetailed(geometryDef, options).proposal;
+  }
+
+  analyzeDetailed(
+    geometryDef: TrackGeometryDef,
+    options: ConstructionAnalysisOptions = {},
+  ): ConstructionAnalysisDetail {
+    const curveProfile = sampleConstructionCurve(geometryDef);
+    if (curveProfile.ok === false) {
+      if (hasStationaryPoint(geometryDef)) {
+        return {
+          proposal: invalidProposal(
+            geometryDef,
+            curveProfile.lowerBoundLength,
+            'curvature',
+            0,
+          ),
+          curveSamples: Object.freeze([]),
+        };
+      }
+      return {
+        proposal: invalidProposal(
+          geometryDef,
+          curveProfile.lowerBoundLength,
+          'too-long',
+        ),
+        curveSamples: Object.freeze([]),
+      };
+    }
+    const estimatedLength = curveProfile.length;
 
     if (estimatedLength < ConstructionConfig.MIN_SEGMENT_LENGTH - LENGTH_EPSILON) {
-      return invalidProposal(geometryDef, estimatedLength, 'too-short');
+      return {
+        proposal: invalidProposal(geometryDef, estimatedLength, 'too-short'),
+        curveSamples: curveProfile.samples,
+      };
     }
     if (estimatedLength > MAX_SEGMENT_LENGTH + LENGTH_EPSILON) {
-      return invalidProposal(geometryDef, estimatedLength, 'too-long');
+      return {
+        proposal: invalidProposal(geometryDef, estimatedLength, 'too-long'),
+        curveSamples: curveProfile.samples,
+      };
     }
 
-    const halfWidth = GameConfig.TERRAIN.WORLD_WIDTH / 2;
-    const halfHeight = GameConfig.TERRAIN.WORLD_HEIGHT / 2;
-    if (arcLookup.samples.some(({ point }) => (
-      point.x < -halfWidth
-      || point.x > halfWidth
-      || point.y < -halfHeight
-      || point.y > halfHeight
-    ))) {
-      return invalidProposal(geometryDef, estimatedLength, 'out-of-bounds');
+    if (geometryIsOutsideBounds(geometryDef)) {
+      return {
+        proposal: invalidProposal(geometryDef, estimatedLength, 'out-of-bounds'),
+        curveSamples: curveProfile.samples,
+      };
     }
 
-    const minimumRadius = minimumRadiusForGeometry(geometryDef);
+    const minimumRadius = minimumRadiusForGeometry(geometryDef, curveProfile.samples);
     if (minimumRadius < ConstructionConfig.MINIMUM_RADIUS) {
-      return invalidProposal(
-        geometryDef,
-        estimatedLength,
-        'curvature',
-        minimumRadius,
-      );
+      return {
+        proposal: invalidProposal(
+          geometryDef,
+          estimatedLength,
+          'curvature',
+          minimumRadius,
+        ),
+        curveSamples: curveProfile.samples,
+      };
     }
     if ((options.connectionAngleDeg ?? 0) > GameConfig.TRACK.ALIGNMENT_ANGLE_DEG) {
-      return invalidProposal(
-        geometryDef,
-        estimatedLength,
-        'misaligned',
-        minimumRadius,
-      );
+      return {
+        proposal: invalidProposal(
+          geometryDef,
+          estimatedLength,
+          'misaligned',
+          minimumRadius,
+        ),
+        curveSamples: curveProfile.samples,
+      };
     }
 
-    const sampleCount = Math.min(
-      MAX_ANALYSIS_SAMPLES,
-      Math.ceil((estimatedLength - LENGTH_EPSILON) / TERRAIN_ANALYSIS_SPACING) + 1,
-    );
-    const curveSamples = refineOversizedGaps(
-      geometry,
-      sampleAtArcDistances(geometry, arcLookup, sampleCount),
-    );
-    const totalLength = arcLookup.length;
-    const terrainSamples: TerrainProfileSample[] = curveSamples.map(
+    const totalLength = curveProfile.length;
+    const terrainSamples: TerrainProfileSample[] = curveProfile.samples.map(
       ({ t, point, distance }, index) => ({
         t,
         distance,
         terrainElevation: this.terrain.getHeightAt(point.x, point.y),
         point,
-        segmentLength: index === 0 ? 0 : distance - curveSamples[index - 1].distance,
+        segmentLength: curveProfile.samples[index].segmentLength,
         totalLength,
       }),
     );
@@ -486,19 +470,22 @@ export class ConstructionAnalyzer {
     const reasonCode: ConstructionReasonCode = valid ? 'ok' : 'grade';
 
     return {
-      geometry: geometryDef,
-      verticalProfile: alignment.verticalProfile,
-      length: totalLength,
-      minimumRadius,
-      maximumGradePercent: alignment.maximumGradePercent,
-      maximumGradeT: alignment.maximumGradeT,
-      maximumGradeDistance,
-      structures: classified.structures,
-      structureLengths: structureLengthsFor(classified.segments),
-      costs,
-      valid,
-      reasonCode,
-      remedy: remedyFor(reasonCode),
+      proposal: {
+        geometry: geometryDef,
+        verticalProfile: alignment.verticalProfile,
+        length: totalLength,
+        minimumRadius,
+        maximumGradePercent: alignment.maximumGradePercent,
+        maximumGradeT: alignment.maximumGradeT,
+        maximumGradeDistance,
+        structures: classified.structures,
+        structureLengths: structureLengthsFor(classified.segments),
+        costs,
+        valid,
+        reasonCode,
+        remedy: remedyFor(reasonCode),
+      },
+      curveSamples: curveProfile.samples,
     };
   }
 }

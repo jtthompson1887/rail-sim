@@ -7,12 +7,17 @@ import {
   WorldOpportunityGenerator,
 } from '../../src/systems/WorldOpportunityGenerator';
 import {
+  ConstructionConfig,
   ENDPOINT_CONNECTION_COST,
   STANDARD_STARTING_CASH,
 } from '../../src/config/ConstructionConfig';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
 import { GameConfig } from '../../src/config/GameConfig';
+import {
+  ENGINEERED_GRADE_COMPARISON_EPSILON,
+  meanAbsoluteEngineeredGrade,
+} from '../../src/systems/ConstructionGradeMetrics';
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -108,13 +113,22 @@ describe('WorldOpportunityGenerator', () => {
     expect(shortLength).toBeLessThan(flatLength);
     expect(short.estimatedCost).not.toBe(flat.estimatedCost);
     const analyzer = new ConstructionAnalyzer(variedTerrain);
-    const shortMaximumGrade = Math.max(...short.feasibilityWitness.segments.map(
-      (segment) => analyzer.analyze(segment.geometry).maximumGradePercent,
-    ));
-    const flatMaximumGrade = Math.max(...flat.feasibilityWitness.segments.map(
-      (segment) => analyzer.analyze(segment.geometry).maximumGradePercent,
-    ));
-    expect(shortMaximumGrade).toBeGreaterThan(flatMaximumGrade);
+    const shortDetails = short.feasibilityWitness.segments.map(
+      (segment) => analyzer.analyzeDetailed(segment.geometry),
+    );
+    const flatDetails = flat.feasibilityWitness.segments.map(
+      (segment) => analyzer.analyzeDetailed(segment.geometry),
+    );
+    const shortMeanGrade = meanAbsoluteEngineeredGrade(shortDetails);
+    const flatMeanGrade = meanAbsoluteEngineeredGrade(flatDetails);
+    expect(shortMeanGrade - flatMeanGrade)
+      .toBeGreaterThan(ENGINEERED_GRADE_COMPARISON_EPSILON);
+    expect(Math.max(...shortDetails.map(
+      ({ proposal }) => proposal.maximumGradePercent,
+    ))).toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
+    expect(Math.max(...flatDetails.map(
+      ({ proposal }) => proposal.maximumGradePercent,
+    ))).toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
   });
 
   it('keeps estimates quote-equivalent, chain-priced, and affordable', () => {

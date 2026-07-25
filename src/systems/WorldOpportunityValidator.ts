@@ -13,8 +13,13 @@ import type {
 } from '../config/WorldData';
 import {
   ConstructionAnalyzer,
+  type ConstructionAnalysisDetail,
   type TerrainHeightSource,
 } from './ConstructionAnalyzer';
+import {
+  ENGINEERED_GRADE_COMPARISON_EPSILON,
+  meanAbsoluteEngineeredGrade,
+} from './ConstructionGradeMetrics';
 
 export type OpportunityValidationResult =
   | { valid: true }
@@ -42,12 +47,12 @@ function siteRelief(
 function corridorMetrics(
   corridor: OpportunityCorridorDef,
   analyzer: ConstructionAnalyzer,
-): { length: number; maximumGrade: number } | null {
+): { length: number; meanAbsoluteGrade: number } | null {
   if (corridor.feasibilityWitness.segments.length !== corridor.waypoints.length - 1) {
     return null;
   }
   let length = 0;
-  let maximumGrade = 0;
+  const details: ConstructionAnalysisDetail[] = [];
   for (
     let index = 0;
     index < corridor.feasibilityWitness.segments.length;
@@ -79,7 +84,8 @@ function corridorMetrics(
     }
     const expectedTopologyCost = index === 0 ? 0 : ENDPOINT_CONNECTION_COST;
     if (segment.topologyCost !== expectedTopologyCost) return null;
-    const proposal = analyzer.analyze(segment.geometry);
+    const detail = analyzer.analyzeDetailed(segment.geometry);
+    const proposal = detail.proposal;
     if (!proposal.valid
       || JSON.stringify(proposal.verticalProfile) !== JSON.stringify(segment.verticalProfile)
       || JSON.stringify(proposal.structures) !== JSON.stringify(segment.structures)
@@ -87,12 +93,12 @@ function corridorMetrics(
       return null;
     }
     length += proposal.length;
-    maximumGrade = Math.max(maximumGrade, proposal.maximumGradePercent);
+    details.push(detail);
   }
   if (length <= 0) return null;
   return {
     length,
-    maximumGrade,
+    meanAbsoluteGrade: meanAbsoluteEngineeredGrade(details),
   };
 }
 
@@ -192,7 +198,9 @@ export class WorldOpportunityValidator {
     }
     const short = metrics[shortIndex]!;
     const flat = metrics[flatIndex]!;
-    if (short.length >= flat.length || short.maximumGrade <= flat.maximumGrade) {
+    if (short.length >= flat.length
+      || short.meanAbsoluteGrade
+        <= flat.meanAbsoluteGrade + ENGINEERED_GRADE_COMPARISON_EPSILON) {
       return invalid('trade-off labels do not match engineering');
     }
 

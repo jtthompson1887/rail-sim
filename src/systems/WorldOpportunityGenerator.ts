@@ -21,6 +21,10 @@ import {
   type ConstructionProposal,
   type TerrainHeightSource,
 } from './ConstructionAnalyzer';
+import {
+  ENGINEERED_GRADE_COMPARISON_EPSILON,
+  meanAbsoluteEngineeredGrade,
+} from './ConstructionGradeMetrics';
 import { deriveAutomaticCubic } from './TrackGeometry';
 import { WorldOpportunityValidator } from './WorldOpportunityValidator';
 
@@ -226,9 +230,10 @@ export class WorldOpportunityGenerator {
 
     const start = { x: first.x, y: first.y };
     const end = { x: second.x, y: second.y };
-    const directProposal = this.analyzer.analyze(
+    const directDetail = this.analyzer.analyzeDetailed(
       deriveAutomaticCubic({ start, end }),
     );
+    const directProposal = directDetail.proposal;
     if (!directProposal.valid) return null;
 
     const dx = (second.x - first.x) / distance;
@@ -247,29 +252,33 @@ export class WorldOpportunityGenerator {
         continue;
       }
       const through = { x: dx, y: dy };
-      const firstLeg = this.analyzer.analyze(
+      const firstDetail = this.analyzer.analyzeDetailed(
         deriveAutomaticCubic({
           start,
           end: waypoint,
           endOutward: { x: -through.x, y: -through.y },
         }),
       );
-      const secondLeg = this.analyzer.analyze(
+      const secondDetail = this.analyzer.analyzeDetailed(
         deriveAutomaticCubic({
           start: waypoint,
           end,
           startOutward: through,
         }),
       );
+      const firstLeg = firstDetail.proposal;
+      const secondLeg = secondDetail.proposal;
       if (!firstLeg.valid || !secondLeg.valid) continue;
 
       const detourLength = firstLeg.length + secondLeg.length;
-      const detourMaximumGrade = Math.max(
-        firstLeg.maximumGradePercent,
-        secondLeg.maximumGradePercent,
-      );
+      const directMeanGrade = meanAbsoluteEngineeredGrade([directDetail]);
+      const detourMeanGrade = meanAbsoluteEngineeredGrade([
+        firstDetail,
+        secondDetail,
+      ]);
       if (detourLength <= directProposal.length
-        || detourMaximumGrade >= directProposal.maximumGradePercent) {
+        || detourMeanGrade
+          >= directMeanGrade - ENGINEERED_GRADE_COMPARISON_EPSILON) {
         continue;
       }
 

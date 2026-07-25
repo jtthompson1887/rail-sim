@@ -450,7 +450,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
   it('uses pure persistence for Retry Save and Ctrl+S without changing revision or cash', () => {
     const scene = new WorldScene();
-    const world = WorldManager.createNew('Manual save', 'manual-seed');
+    const world = WorldManager.createNew('Manual save', 'real-terrain-alpha');
     const revision = world.revision;
     const cash = world.company.cash;
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);

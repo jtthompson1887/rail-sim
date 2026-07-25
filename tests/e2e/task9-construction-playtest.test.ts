@@ -210,21 +210,21 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   const terrainCases = [
     {
       name: 'cheap low-earthworks route',
-      seed: 'playtest-132',
-      attempt: 3,
+      seed: 'playtest-078',
+      attempt: 1,
       direct: {
-        estimatedTotal: 28_002,
-        total: 28_002,
-        track: 17_716,
-        earthworks: 10_286,
+        estimatedTotal: 28_208,
+        total: 28_208,
+        track: 19_025,
+        earthworks: 9_183,
         bridge: 0,
         tunnel: 0,
       },
       detour: {
-        estimatedTotal: 47_651,
-        total: 45_151,
-        track: 22_380,
-        earthworks: 22_771,
+        estimatedTotal: 60_432,
+        total: 57_932,
+        track: 23_426,
+        earthworks: 34_506,
         bridge: 0,
         tunnel: 0,
       },
@@ -245,10 +245,10 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
         tunnel: 0,
       },
       detour: {
-        estimatedTotal: 106_416,
-        total: 103_916,
-        track: 38_186,
-        earthworks: 65_730,
+        estimatedTotal: 131_159,
+        total: 128_659,
+        track: 35_934,
+        earthworks: 92_725,
         bridge: 0,
         tunnel: 0,
       },
@@ -269,11 +269,11 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
         tunnel: 69_186,
       },
       detour: {
-        estimatedTotal: 192_615,
-        total: 190_115,
+        estimatedTotal: 192_653,
+        total: 190_153,
         track: 37_620,
-        earthworks: 129_923,
-        bridge: 22_572,
+        earthworks: 129_996,
+        bridge: 22_537,
         tunnel: 0,
       },
       expectedPreviewStructure: 'tunnel',
@@ -369,25 +369,25 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   }
 
   test('shows natural unaffordability and readable blocking UI on mobile', async ({ page }) => {
-    await createFixedSeedWorld(page, 'playtest-513');
+    await createFixedSeedWorld(page, 'playtest-216');
     const generated = await snapshot(page);
     const [direct, detour] = generated.world.starterOpportunity.corridors;
 
     expect(generated.world.company.cash).toBe(1_000_000);
-    expect(generated.world.starterOpportunity.resolvedAttempt).toBe(5);
-    expect(direct.estimatedCost).toBe(1_335_093);
+    expect(generated.world.starterOpportunity.resolvedAttempt).toBe(9);
+    expect(direct.estimatedCost).toBe(1_109_791);
     expect(aggregateWitnessCosts(direct)).toEqual({
-      total: 1_335_093,
-      track: 39_429,
-      earthworks: 1_101_061,
-      bridge: 194_603,
-      tunnel: 0,
+      total: 1_109_791,
+      track: 41_292,
+      earthworks: 842_348,
+      bridge: 156_273,
+      tunnel: 69_878,
     });
     expect(direct.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0]);
-    expect(detour.estimatedCost).toBe(518_328);
-    expect(detour.feasibilityWitness.totalCost).toBe(518_328);
+    expect(detour.estimatedCost).toBe(411_945);
+    expect(detour.feasibilityWitness.totalCost).toBe(411_945);
     expect(detour.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0, 2_500]);

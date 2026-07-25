@@ -6,17 +6,18 @@ import {
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 
-const WORST_CASE_SEED = 'playtest-082';
+// Highest observed attempt count in the bounded playtest-000..600 browser audit.
+const AUDITED_WORST_CASE_SEED = 'playtest-150';
 const GENERATION_CONFIG = {
   generationConfigVersion: 1 as const,
-  seed: WORST_CASE_SEED,
+  seed: AUDITED_WORST_CASE_SEED,
   biome: 'temperate' as const,
   constructionDifficultyId: 'standard' as const,
 };
 
 function generate() {
   return new WorldOpportunityGenerator(
-    new TerrainGenerator(WORST_CASE_SEED),
+    new TerrainGenerator(AUDITED_WORST_CASE_SEED),
   ).generate(GENERATION_CONFIG);
 }
 
@@ -40,7 +41,7 @@ window.__runWorldGenerationBenchmark = () => {
   const durationMs = performance.now() - startedAt;
   const replay = generate();
   return {
-    seed: WORST_CASE_SEED,
+    seed: AUDITED_WORST_CASE_SEED,
     durationMs,
     attemptsCap: MAX_OPPORTUNITY_ATTEMPTS,
     candidatesCap: MAX_SITE_CANDIDATES_PER_ATTEMPT,

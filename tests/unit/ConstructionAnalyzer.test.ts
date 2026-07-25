@@ -292,6 +292,75 @@ describe('ConstructionAnalyzer', () => {
     expect(getHeightAt.mock.calls.length).toBe(96);
   });
 
+  it('uses one frozen curve profile for terrain, length, grade, curvature, structures, and costs', () => {
+    const terrainReads: Array<{ x: number; y: number }> = [];
+    const geometry: TrackGeometryDef = {
+      geometryVersion: 1,
+      p0: { x: -700, y: 0 },
+      p1: { x: -250, y: 260 },
+      p2: { x: 250, y: 260 },
+      p3: { x: 700, y: 0 },
+    };
+    const analyzer = new ConstructionAnalyzer({
+      getHeightAt: (x, y) => {
+        terrainReads.push({ x, y });
+        return x * 0.02 + (y > 150 ? 30 : 0);
+      },
+    });
+
+    const detailed = analyzer.analyzeDetailed(geometry);
+
+    expect(Object.isFrozen(detailed.curveSamples)).toBe(true);
+    expect(detailed.curveSamples.every(Object.isFrozen)).toBe(true);
+    expect(terrainReads).toEqual(detailed.curveSamples.map(({ point }) => point));
+    expect(detailed.curveSamples.length).toBeLessThanOrEqual(MAX_ANALYSIS_SAMPLES);
+    expect(detailed.proposal.length).toBeCloseTo(
+      detailed.curveSamples.reduce((sum, sample) => sum + sample.segmentLength, 0),
+      10,
+    );
+    expect(detailed.curveSamples.map(({ distance }) => distance))
+      .toContain(detailed.proposal.maximumGradeDistance);
+    expect(Object.values(detailed.proposal.structureLengths).reduce(
+      (sum, length) => sum + length,
+      0,
+    )).toBeCloseTo(detailed.proposal.length, 10);
+    expect(detailed.proposal.costs.total).toBe(
+      detailed.proposal.costs.track
+        + detailed.proposal.costs.earthworks
+        + detailed.proposal.costs.bridge
+        + detailed.proposal.costs.tunnel,
+    );
+
+    const sampledMinimumRadius = detailed.curveSamples.reduce((minimum, { t }) => {
+      const inverse = 1 - t;
+      const dx = 3 * (
+        inverse ** 2 * (geometry.p1.x - geometry.p0.x)
+        + 2 * inverse * t * (geometry.p2.x - geometry.p1.x)
+        + t ** 2 * (geometry.p3.x - geometry.p2.x)
+      );
+      const dy = 3 * (
+        inverse ** 2 * (geometry.p1.y - geometry.p0.y)
+        + 2 * inverse * t * (geometry.p2.y - geometry.p1.y)
+        + t ** 2 * (geometry.p3.y - geometry.p2.y)
+      );
+      const ddx = 6 * (
+        inverse * (geometry.p2.x - 2 * geometry.p1.x + geometry.p0.x)
+        + t * (geometry.p3.x - 2 * geometry.p2.x + geometry.p1.x)
+      );
+      const ddy = 6 * (
+        inverse * (geometry.p2.y - 2 * geometry.p1.y + geometry.p0.y)
+        + t * (geometry.p3.y - 2 * geometry.p2.y + geometry.p1.y)
+      );
+      const denominator = Math.pow(dx * dx + dy * dy, 1.5);
+      const curvature = denominator < 1e-10
+        ? 0
+        : Math.abs(dx * ddy - dy * ddx) / denominator;
+      return curvature > 1e-10 ? Math.min(minimum, 1 / curvature) : minimum;
+    }, Infinity);
+    expect(detailed.proposal.minimumRadius).toBeCloseTo(sampledMinimumRadius, 10);
+    expect(analyzer.analyze(geometry)).toEqual(detailed.proposal);
+  });
+
   it('keeps actual curve-space terrain sample gaps within the configured spacing', () => {
     const sampledPoints: Array<{ x: number; y: number }> = [];
     const geometry: TrackGeometryDef = {

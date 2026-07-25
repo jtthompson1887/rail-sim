@@ -181,8 +181,10 @@ function extendLiveTangent(
 
 function chainedCandidates(
   track: ConstructionSnapshot['world']['tracks'][number],
+  persistedWitnessEnd: Point,
 ): Point[] {
   return [
+    persistedWitnessEnd,
     extendLiveTangent(track, 600),
     { x: track.p3.x + 1_600, y: track.p3.y },
     { x: track.p3.x + 1_800, y: track.p3.y + 600 },
@@ -273,7 +275,13 @@ test.describe('fixed-seed construction decision loop', () => {
 
     const chainStart = await toScreen(page, firstBuilt.world.tracks[0].p3, firstBuilt);
     let secondReview: ConstructionSnapshot | null = null;
-    for (const candidate of chainedCandidates(firstBuilt.world.tracks[0])) {
+    const persistedWitnessEnd =
+      blank.world.starterOpportunity.corridors[1].feasibilityWitness.segments[1]
+        .geometry.p3;
+    for (const candidate of chainedCandidates(
+      firstBuilt.world.tracks[0],
+      persistedWitnessEnd,
+    )) {
       await dragRoute(
         page,
         chainStart,
