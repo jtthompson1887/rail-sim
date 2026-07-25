@@ -1,9 +1,12 @@
 import Phaser from 'phaser';
-import type { TrackDef } from '../config/WorldData';
+import type { TrackDef, WorldData } from '../config/WorldData';
 import RailTrack from '../entities/RailTrack';
 import TrackManager from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
-import type { Command } from '../systems/CommandStack';
+import type {
+  CommandRevisionContext,
+  RevisionAwareCommand,
+} from '../systems/CommandStack';
 import {
   ConstructionEconomy,
   type ConstructionTransaction,
@@ -53,9 +56,10 @@ function railTrackFromDef(scene: Phaser.Scene, def: TrackDef): RailTrack {
 }
 
 /** Atomically commits one immutable construction quote across graph, world, and cash. */
-export class PlaceTrackCommand implements Command {
+export class PlaceTrackCommand implements RevisionAwareCommand {
   readonly description = 'Place track';
   private readonly def: TrackDef;
+  private readonly worldIdentity: WorldData | null;
   private transaction: ConstructionTransaction | null = null;
   private applied = false;
   private expectedRevision: number;
@@ -69,12 +73,28 @@ export class PlaceTrackCommand implements Command {
     private readonly injectFailure?: PlaceTrackFailureInjector,
   ) {
     this.def = trackDefFromQuote(quote);
+    this.worldIdentity = WorldManager.world;
     this.expectedRevision = quote.worldRevision;
+  }
+
+  getRevisionContext(): CommandRevisionContext | null {
+    return this.worldIdentity
+      ? { authority: this.worldIdentity, revision: this.expectedRevision }
+      : null;
+  }
+
+  rebaseRevisionContext(context: CommandRevisionContext): boolean {
+    if (context.authority !== this.worldIdentity
+      || !Number.isSafeInteger(context.revision)
+      || context.revision < 0) return false;
+    this.expectedRevision = context.revision;
+    return true;
   }
 
   execute(): boolean {
     if (this.applied) return false;
     if (!WorldManager.world
+      || WorldManager.world !== this.worldIdentity
       || WorldManager.world.revision !== this.expectedRevision
       || !this.economy.isBoundTo(WorldManager.world.company)) return false;
     const isRedo = this.transaction !== null;

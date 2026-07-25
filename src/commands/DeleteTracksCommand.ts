@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
-import type { Command } from '../systems/CommandStack';
+import type {
+  CommandRevisionContext,
+  RevisionAwareCommand,
+} from '../systems/CommandStack';
 import type { JunctionDef, TrackDef, WorldData } from '../config/WorldData';
 import Junction from '../entities/Junction';
 import RailTrack from '../entities/RailTrack';
@@ -56,7 +59,7 @@ function restoreTrack(scene: Phaser.Scene, def: TrackDef): RailTrack {
 }
 
 /** Remove tracks as one reversible demolition lifecycle with per-track refunds. */
-export class DeleteTracksCommand implements Command {
+export class DeleteTracksCommand implements RevisionAwareCommand {
   readonly description = 'Delete track(s)';
   private readonly uuids: string[];
   private readonly snapshots: IndexedTrackDef[];
@@ -117,6 +120,20 @@ export class DeleteTracksCommand implements Command {
       const live = this.trackManager.getJunction(def.uuid);
       if (live) this.junctionBranchStates.set(def.uuid, live.branchState);
     }
+  }
+
+  getRevisionContext(): CommandRevisionContext | null {
+    return this.worldIdentity
+      ? { authority: this.worldIdentity, revision: this.expectedRevision }
+      : null;
+  }
+
+  rebaseRevisionContext(context: CommandRevisionContext): boolean {
+    if (context.authority !== this.worldIdentity
+      || !Number.isSafeInteger(context.revision)
+      || context.revision < 0) return false;
+    this.expectedRevision = context.revision;
+    return true;
   }
 
   execute(): boolean {

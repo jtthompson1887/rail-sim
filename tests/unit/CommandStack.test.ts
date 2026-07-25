@@ -237,6 +237,134 @@ describe('CommandStack', () => {
   });
 });
 
+describe('CommandStack revision-aware history', () => {
+  let scene: any;
+  let trackManager: TrackManager;
+  let stack: CommandStack;
+  let uuid: string;
+  let first: TrackDef;
+  let second: TrackDef;
+  let third: TrackDef;
+
+  beforeEach(() => {
+    scene = makeScene();
+    trackManager = new TrackManager(scene);
+    stack = new CommandStack();
+    WorldManager.createNew('Revision history', 'revision-history');
+    const track = makeTrack(scene, 0, 0, 100, 0);
+    trackManager.addTrack(track);
+    uuid = track.getUUID();
+    first = withConstruction({
+      geometryVersion: 1,
+      uuid,
+      p0: { x: 0, y: 0 },
+      p1: { x: 33, y: 0 },
+      p2: { x: 67, y: 0 },
+      p3: { x: 100, y: 0 },
+    });
+    second = {
+      ...clonePlainData(first),
+      p1: { x: 33, y: 25 },
+      p2: { x: 67, y: 25 },
+    };
+    third = {
+      ...clonePlainData(first),
+      p1: { x: 33, y: 50 },
+      p2: { x: 67, y: 50 },
+    };
+    expect(WorldManager.addTrackDef(first)).toBe(true);
+  });
+
+  afterEach(() => WorldManager.reset());
+
+  it('undoes and redoes two sequential reshape commands in strict LIFO order', () => {
+    const world = WorldManager.world!;
+    const initialRevision = world.revision;
+    expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
+    expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, second, third))).toBe(true);
+    expect(world.revision).toBe(initialRevision + 2);
+    expect(world.tracks[0]).toEqual(third);
+
+    expect(stack.undo()).toBe(true);
+    expect(world.tracks[0]).toEqual(second);
+    expect(stack.undo()).toBe(true);
+    expect(world.tracks[0]).toEqual(first);
+    expect(world.revision).toBe(initialRevision + 4);
+
+    expect(stack.redo()).toBe(true);
+    expect(world.tracks[0]).toEqual(second);
+    expect(stack.redo()).toBe(true);
+    expect(world.tracks[0]).toEqual(third);
+    expect(world.revision).toBe(initialRevision + 6);
+  });
+
+  it('records an already-executed revision-aware command and continues LIFO history', () => {
+    const world = WorldManager.world!;
+    const firstCommand = new ReshapeTrackCommand(trackManager, uuid, first, second);
+    expect(stack.push(firstCommand)).toBe(true);
+    const alreadyExecuted = new ReshapeTrackCommand(trackManager, uuid, second, third);
+    expect(alreadyExecuted.execute()).toBe(true);
+
+    expect(stack.record(alreadyExecuted)).toBe(true);
+    expect(stack.undo()).toBe(true);
+    expect(world.tracks[0]).toEqual(second);
+    expect(stack.undo()).toBe(true);
+    expect(world.tracks[0]).toEqual(first);
+  });
+
+  it('preserves history and notifications when an external mutation blocks undo', () => {
+    expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
+    expect(WorldManager.addSceneryDef({
+      id: 'external-before-undo',
+      type: 'tree_oak',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    })).toBe(true);
+    const revisionAfterExternalMutation = WorldManager.world!.revision;
+    const onChange = jest.fn();
+    stack.onChange = onChange;
+
+    expect(stack.undo()).toBe(false);
+    expect(stack.canUndo).toBe(true);
+    expect(stack.canRedo).toBe(false);
+    expect(WorldManager.world!.revision).toBe(revisionAfterExternalMutation);
+    expect(WorldManager.world!.tracks[0]).toEqual(second);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('does not let a current-revision push launder an external mutation into old history', () => {
+    expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
+    expect(WorldManager.addSceneryDef({
+      id: 'external-before-push',
+      type: 'tree_oak',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    })).toBe(true);
+    const revisionAfterExternalMutation = WorldManager.world!.revision;
+    const onChange = jest.fn();
+    stack.onChange = onChange;
+    const currentRevisionCommand = new ReshapeTrackCommand(
+      trackManager,
+      uuid,
+      second,
+      third,
+    );
+
+    expect(stack.push(currentRevisionCommand)).toBe(false);
+    expect(stack.canUndo).toBe(true);
+    expect(stack.canRedo).toBe(false);
+    expect(WorldManager.world!.revision).toBe(revisionAfterExternalMutation);
+    expect(WorldManager.world!.tracks[0]).toEqual(second);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 describe('DeleteTracksCommand', () => {
   let scene: any;
   let trackManager: TrackManager;

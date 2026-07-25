@@ -133,8 +133,8 @@ export const SaveService = {
         'updatedAt',
       );
       if (!updatedAtDescriptor
-        || ('writable' in updatedAtDescriptor && !updatedAtDescriptor.writable)
-        || ('set' in updatedAtDescriptor && !updatedAtDescriptor.set)) return false;
+        || !('value' in updatedAtDescriptor)
+        || !updatedAtDescriptor.writable) return false;
       const all = this.loadAllWorlds();
       const savedAt = Date.now();
       const snapshot = JSON.parse(JSON.stringify(world)) as WorldData;

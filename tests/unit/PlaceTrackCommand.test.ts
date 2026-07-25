@@ -68,6 +68,65 @@ describe('PlaceTrackCommand', () => {
     expect(world.tracks[0].uuid).toBe('built');
   });
 
+  it('conserves exact cash, geometry, and revision through a two-placement LIFO chain', () => {
+    const world = WorldManager.world!;
+    const initialCash = world.company.cash;
+    const stack = new CommandStack();
+    const economy = new ConstructionEconomy(world.company);
+    const firstQuote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'first-built',
+    )!;
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      economy,
+      service,
+      firstQuote,
+    ))).toBe(true);
+    const secondQuote = service.createQuote(
+      { x: 0, y: 200 },
+      { x: 300, y: 200 },
+      'second-built',
+    )!;
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      economy,
+      service,
+      secondQuote,
+    ))).toBe(true);
+    expect(world.revision).toBe(2);
+    expect(world.company.cash).toBe(
+      initialCash - firstQuote.totalCost - secondQuote.totalCost,
+    );
+
+    expect(stack.undo()).toBe(true);
+    expect(stack.undo()).toBe(true);
+    expect(world.revision).toBe(4);
+    expect(world.company.cash).toBe(initialCash);
+    expect(world.tracks).toEqual([]);
+    expect(manager.tracks).toEqual([]);
+
+    expect(stack.redo()).toBe(true);
+    expect(stack.redo()).toBe(true);
+    expect(world.revision).toBe(6);
+    expect(world.company.cash).toBe(
+      initialCash - firstQuote.totalCost - secondQuote.totalCost,
+    );
+    expect(world.tracks.map((track) => track.uuid)).toEqual([
+      'first-built',
+      'second-built',
+    ]);
+    expect(TrackSerializer.toTrackDef(manager.getTrack('first-built')!)).toEqual(
+      world.tracks[0],
+    );
+    expect(TrackSerializer.toTrackDef(manager.getTrack('second-built')!)).toEqual(
+      world.tracks[1],
+    );
+  });
+
   it.each([
     'after-debit',
     'after-live-track',

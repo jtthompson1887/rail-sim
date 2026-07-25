@@ -246,6 +246,32 @@ describe('SaveService', () => {
       expect(frozen.metadata.updatedAt).toBe(456);
       expect(SaveService.loadWorld('frozen')).toBeNull();
     });
+
+    it.each(['throwing', 'no-op'] as const)(
+      'rejects an updatedAt %s accessor without changing active or durable state',
+      (setterBehavior) => {
+        const prior = makeWorld('prior-accessor', 'Prior accessor', '0', 123);
+        expect(SaveService.saveWorld(prior)).toBe(true);
+        const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+        const accessorWorld = makeWorld('accessor', 'Accessor', '1', 456);
+        let activeUpdatedAt = accessorWorld.metadata.updatedAt;
+        Object.defineProperty(accessorWorld.metadata, 'updatedAt', {
+          configurable: true,
+          enumerable: true,
+          get: () => activeUpdatedAt,
+          set: (value: number) => {
+            if (setterBehavior === 'throwing') throw new Error('setter rejected');
+            void value;
+          },
+        });
+
+        expect(SaveService.saveWorld(accessorWorld)).toBe(false);
+        expect(activeUpdatedAt).toBe(456);
+        expect(accessorWorld.metadata.updatedAt).toBe(456);
+        expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+        expect(SaveService.loadWorld('accessor')).toBeNull();
+      },
+    );
   });
 
   describe('listWorlds()', () => {
