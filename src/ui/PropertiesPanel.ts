@@ -15,6 +15,10 @@ export interface DeleteTracksIntent {
   expectedRevision: number;
 }
 
+export interface DeleteReviewRequest {
+  readonly uuids: ReadonlyArray<string>;
+}
+
 export interface DeletionReviewDTO {
   readonly uuids: ReadonlyArray<string>;
   readonly expectedRefund: number;
@@ -101,6 +105,10 @@ export class PropertiesPanel {
     this.refresh(this.selectionManager.selectedUUIDs);
   };
 
+  private readonly deletionRequestHandler = ({ uuids }: DeleteReviewRequest) => {
+    this.requestDelete(uuids);
+  };
+
   constructor(
     scene: Phaser.Scene,
     trackManager: TrackManager,
@@ -117,10 +125,12 @@ export class PropertiesPanel {
     EventBus.on('selection:changed', this.selectionChangedHandler);
     EventBus.on('tool:changed', this.toolChangedHandler);
     EventBus.on('ui:deletion-review', this.deletionReviewHandler);
+    EventBus.on('ui:delete-request', this.deletionRequestHandler);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('selection:changed', this.selectionChangedHandler);
       EventBus.off('tool:changed', this.toolChangedHandler);
       EventBus.off('ui:deletion-review', this.deletionReviewHandler);
+      EventBus.off('ui:delete-request', this.deletionRequestHandler);
     });
   }
 
@@ -191,7 +201,7 @@ export class PropertiesPanel {
       .setInteractive({ useHandCursor: true })
       .on('pointerover', () => this.deleteBtn.setFillStyle(0xaa2222, 1))
       .on('pointerout',  () => this.deleteBtn.setFillStyle(0x7a1a1a, 0.9))
-      .on('pointerdown', () => this.onDelete());
+      .on('pointerdown', () => this.requestDelete(this.selectionManager.selectedUUIDs));
 
     this.deleteBtnText = this.scene.add.text(px - pw / 2, height - (btnH + 12), '🗑 Delete', {
       fontFamily: 'Verdana', fontSize: fs, color: '#ff8080',
@@ -440,11 +450,23 @@ export class PropertiesPanel {
     }
   }
 
-  private onDelete(): void {
-    const uuids = [...this.selectionManager.selectedUUIDs];
-    if (!this.editorEnabled || uuids.length === 0) return;
+  private requestDelete(requestedUUIDs: ReadonlyArray<string>): void {
+    const selected = this.selectionManager.selectedUUIDs;
+    const exactSelection = selected.length === requestedUUIDs.length
+      && selected.every((uuid, index) => uuid === requestedUUIDs[index]);
+    if (!this.editorEnabled || !this.isVisible
+      || selected.length === 0 || !exactSelection) {
+      this.disarmDelete();
+      if (this.editorEnabled && selected.length > 0) this.refresh(selected);
+      return;
+    }
+    const uuids = [...requestedUUIDs];
     const review = this.reviewFor(uuids);
-    if (!review?.available) return;
+    if (!review?.available) {
+      this.disarmDelete();
+      this.refresh(selected);
+      return;
+    }
     const intent: DeleteTracksIntent = {
       uuids,
       expectedRefund: review.expectedRefund,
@@ -469,7 +491,6 @@ export class PropertiesPanel {
       return;
     }
     this.onDeleteCallback?.(intent);
-    this.refresh(uuids);
   }
 
   private reviewFor(uuids: ReadonlyArray<string>): DeletionReviewDTO | null {
@@ -489,6 +510,7 @@ export class PropertiesPanel {
     EventBus.off('selection:changed', this.selectionChangedHandler);
     EventBus.off('tool:changed', this.toolChangedHandler);
     EventBus.off('ui:deletion-review', this.deletionReviewHandler);
+    EventBus.off('ui:delete-request', this.deletionRequestHandler);
     this.clearLines();
     this.clearVehicleObjects();
     this.panel.destroy();

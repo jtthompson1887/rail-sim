@@ -168,6 +168,33 @@ describe('ConstructionInspector', () => {
     ) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('renders a live chained preview but clears an empty chained state', () => {
+    const chained = preview({
+      phase: 'chained',
+      canConfirm: false,
+      message: 'Release to review this section.',
+      actions: ['backstep', 'cancel'],
+    });
+
+    EventBus.emit('construction:preview', {
+      phase: 'chained',
+      preview: chained.preview,
+    });
+
+    expect(document.querySelector('[data-testid="construction-inspector"]')
+      ?.getAttribute('aria-hidden')).toBe('false');
+    expect(document.querySelector('[data-testid="construction-primary"]')?.textContent)
+      .toContain('Build £2,800');
+    expect(document.querySelector('[data-testid="construction-remedy"]')?.textContent)
+      .toBe('Release to review this section.');
+
+    EventBus.emit('construction:preview', { phase: 'chained', preview: null });
+    expect(document.querySelector('[data-testid="construction-inspector"]')
+      ?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelector('[data-testid="construction-primary"]')?.textContent)
+      .toBe('');
+  });
+
   it('keeps the primary decision and blocking reason in the compact mobile hierarchy', () => {
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true });
     window.dispatchEvent(new Event('resize'));

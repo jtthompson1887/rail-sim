@@ -184,6 +184,128 @@ describe('PropertiesPanel', () => {
     }));
   });
 
+  it('uses the same exact two-step confirmation for keyboard and context requests', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 101,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedRevision: 4,
+      available: true,
+      blockingReason: '',
+    });
+
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
+    expect(onDelete).not.toHaveBeenCalled();
+    expect((panel as any).deleteBtnText.setText).toHaveBeenLastCalledWith(
+      'Confirm delete · Refund £50',
+    );
+
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
+    expect(onDelete).toHaveBeenCalledWith({
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedRevision: 4,
+    });
+  });
+
+  it('disarms on revision change and ignores a request for a different selection', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 101,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedRevision: 4,
+      available: true,
+      blockingReason: '',
+    });
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
+    expect((panel as any).deleteArmed).toBe(true);
+
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedRevision: 5,
+      available: true,
+      blockingReason: '',
+    });
+    expect((panel as any).deleteArmed).toBe(false);
+
+    (EventBus as any).emit('ui:delete-request', { uuids: ['b'] });
+    expect((panel as any).deleteArmed).toBe(false);
+    expect(onDelete).not.toHaveBeenCalled();
+
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
+    expect(onDelete).not.toHaveBeenCalled();
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRevision: 5,
+    }));
+  });
+
+  it('closes a multi-track panel after synchronous deletion without refreshing old UUIDs', () => {
+    const tracks: Record<string, any> = {
+      a: {
+        getUUID: () => 'a',
+        getCurvePath: () => ({ getLength: () => 100 }),
+        paidBuildCost: 101,
+      },
+      b: {
+        getUUID: () => 'b',
+        getCurvePath: () => ({ getLength: () => 100 }),
+        paidBuildCost: 103,
+      },
+    };
+    trackManager.getTrack.mockImplementation((uuid: string) => tracks[uuid]);
+    selectionManager.selectedUUIDs = ['a', 'b'];
+    EventBus.emit('selection:changed', { uuids: ['a', 'b'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a', 'b'],
+      expectedRefund: 101,
+      expectedRevision: 7,
+      available: true,
+      blockingReason: '',
+    });
+    onDelete.mockImplementation(() => {
+      delete tracks.a;
+      delete tracks.b;
+      selectionManager.selectedUUIDs = [];
+      EventBus.emit('selection:changed', { uuids: [] });
+    });
+
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a', 'b'] });
+    trackManager.getTrack.mockClear();
+    (EventBus as any).emit('ui:delete-request', { uuids: ['a', 'b'] });
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(trackManager.getTrack).not.toHaveBeenCalled();
+    expect((panel as any).isVisible).toBe(false);
+  });
+
   it('disarms deletion confirmation when selection, tool, or play state changes', () => {
     trackManager.getTrack.mockReturnValue({
       getUUID: () => 'a',

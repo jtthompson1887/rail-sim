@@ -3,7 +3,6 @@ import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
 import {
   CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  CONSTRUCTION_ECONOMY_LOCK_REASON,
 } from './EditorToolbar';
 
 export interface MenuItem {
@@ -170,14 +169,8 @@ export function buildTrackContextItems(
   }
 
   items.push({
-    label: 'Deletion requires an economy-aware command',
-    action: () => {
-      void onDelete;
-      EventBus.emit('ui:toast', {
-        message: CONSTRUCTION_ECONOMY_LOCK_REASON,
-        type: 'info',
-      });
-    },
+    label: 'Delete · Review exact refund',
+    action: () => onDelete([...selectedUUIDs]),
   });
 
   return items;

@@ -41,8 +41,7 @@ export class ConstructionInspector {
   private enabled = true;
 
   private readonly previewHandler = (event: ConstructionPreviewEvent) => {
-    if (!event.preview || event.phase === 'idle'
-      || event.phase === 'committed' || event.phase === 'chained') {
+    if (!event.preview || event.phase === 'idle' || event.phase === 'committed') {
       this.clear();
       return;
     }

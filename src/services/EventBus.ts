@@ -1,6 +1,7 @@
 type EventCallback<T = unknown> = (data: T) => void;
 import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
 import type {
+  DeleteReviewRequest,
   DeletionReviewDTO,
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
@@ -52,6 +53,7 @@ interface EventMap {
   'ui:toolbar-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
   'editor:delete-tracks': DeleteTracksIntent;
+  'ui:delete-request': DeleteReviewRequest;
   'ui:deletion-review': DeletionReviewDTO;
   /** Emitted by editor tools during track placement / reshaping to show live validation feedback. */
   'ui:validation-hint': { state: 'ok' | 'warning' | 'error'; message: string };

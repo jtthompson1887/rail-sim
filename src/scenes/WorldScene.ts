@@ -23,7 +23,6 @@ import { AudioManager } from '../managers/AudioManager';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import {
-  ERASER_LOCK_REASON,
   GENERATOR_LOCK_REASON,
   disabledConstructionToolReason,
   type CreateTool,
@@ -148,6 +147,8 @@ export default class WorldScene extends Phaser.Scene {
       this.activeEditorTool?.deactivate();
       this.activeTool = 'none';
       this.activeEditorTool = null;
+      this.updateToolCursor('none');
+      this.cameraController.setInputLockOwner('camera');
       EventBus.emit('ui:toast', { message: disabledReason, type: 'info' });
       return;
     }
@@ -719,6 +720,20 @@ export default class WorldScene extends Phaser.Scene {
 
       // Keyboard tool shortcuts (only when no modifier)
       if (!event.ctrlKey && !event.altKey) {
+        const disabledShortcuts: Record<string, CreateTool> = {
+          KeyD: 'completer',
+          KeyJ: 'junction',
+          KeyG: 'generator',
+          KeyE: 'eraser',
+        };
+        const disabledTool = disabledShortcuts[event.code];
+        const disabledReason = disabledTool
+          ? disabledConstructionToolReason(disabledTool)
+          : null;
+        if (disabledReason) {
+          EventBus.emit('ui:toast', { message: disabledReason, type: 'info' });
+          return;
+        }
         const shortcuts: Record<string, CreateTool> = {
           KeyV: 'select', KeyH: 'pan', KeyT: 'terrain-view',
           KeyN: 'place-vehicle', KeyP: 'place-track',
@@ -743,9 +758,7 @@ export default class WorldScene extends Phaser.Scene {
       this.activeEditorTool?.onKeyDown(event);
 
       if (event.code === 'Delete') {
-        if (this.selectionManager.selectedUUIDs.length > 0) {
-          this.reportEconomyLock();
-        }
+        this.requestDeletionReview(this.selectionManager.selectedUUIDs);
       }
     }
   }
@@ -753,15 +766,12 @@ export default class WorldScene extends Phaser.Scene {
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   private deleteSelectedTracks(uuids: string[]): void {
-    if (uuids.length === 0) return;
-    this.reportEconomyLock();
+    this.requestDeletionReview(uuids);
   }
 
-  private reportEconomyLock(): void {
-    EventBus.emit('ui:toast', {
-      message: ERASER_LOCK_REASON,
-      type: 'info',
-    });
+  private requestDeletionReview(uuids: ReadonlyArray<string>): void {
+    if (GameStateManager.worldMode !== 'create' || uuids.length === 0) return;
+    EventBus.emit('ui:delete-request', { uuids: [...uuids] });
   }
 
   // ── Context menu ───────────────────────────────────────────────────────────

@@ -8,19 +8,33 @@ describe('WorldScene disabled construction bypass guards', () => {
     GameStateManager.enterCreate('test-world');
   });
 
-  it.each(['generator', 'completer', 'junction'] as const)(
-    'ignores programmatic %s tool activation',
+  it.each(['generator', 'completer', 'junction', 'eraser'] as const)(
+    'rejects programmatic %s activation and restores camera interaction',
     (tool) => {
       const scene = new WorldScene();
       const activate = jest.fn();
+      const cancel = jest.fn();
+      const deactivate = jest.fn();
       (scene as any).toolRegistry = new Map([[tool, { activate }]]);
-      (scene as any).cameraController = { setInputLockOwner: jest.fn() };
+      (scene as any).activeTool = 'place-track';
+      (scene as any).activeEditorTool = { cancel, deactivate };
+      (scene as any).cameraController = {
+        setInputLockOwner: jest.fn(),
+        setCursor: jest.fn(),
+      };
       GameStateManager.enterCreate('test-world');
 
       (scene as any).toolChangedHandler({ tool });
 
       expect(activate).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(deactivate).toHaveBeenCalledTimes(1);
       expect((scene as any).activeEditorTool).toBeNull();
+      expect((scene as any).activeTool).toBe('none');
+      expect((scene as any).cameraController.setCursor)
+        .toHaveBeenCalledWith('default');
+      expect((scene as any).cameraController.setInputLockOwner)
+        .toHaveBeenCalledWith('camera');
     },
   );
 
@@ -29,22 +43,6 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(commands.ReshapeTrackCommand).toBeUndefined();
   });
-
-  it.each(['eraser'] as const)(
-    'ignores programmatic economy-bypassing %s activation',
-    (tool) => {
-      const scene = new WorldScene();
-      const activate = jest.fn();
-      (scene as any).toolRegistry = new Map([[tool, { activate }]]);
-      (scene as any).cameraController = { setInputLockOwner: jest.fn() };
-      GameStateManager.enterCreate('test-world');
-
-      (scene as any).toolChangedHandler({ tool });
-
-      expect(activate).not.toHaveBeenCalled();
-      expect((scene as any).activeEditorTool).toBeNull();
-    },
-  );
 
   it('activates the economy-aware place-track tool programmatically', () => {
     const scene = new WorldScene();
@@ -68,45 +66,63 @@ describe('WorldScene disabled construction bypass guards', () => {
       .toHaveBeenCalledWith('editor-tool');
   });
 
-  it.each(['KeyG', 'KeyD', 'KeyJ'])(
-    'does not emit a toolbar-selection event for disabled shortcut %s',
-    (code) => {
+  it.each([
+    ['KeyD', 'Connect unavailable — route completion needs one atomic quote.'],
+    ['KeyJ', 'Junction unavailable — track splitting needs one atomic quote.'],
+    ['KeyG', 'Generate unavailable — multi-track construction needs one atomic quote.'],
+    ['KeyE', 'Erase unavailable — select tracks to review the exact refund.'],
+  ])(
+    'routes disabled shortcut %s to its exact guidance without selection or mutation',
+    (code, message) => {
       const scene = new WorldScene();
+      const onKeyDown = jest.fn();
+      const push = jest.fn();
+      (scene as any).activeEditorTool = { onKeyDown };
+      (scene as any).commandStack = { push };
       const emitSpy = jest.spyOn(EventBus, 'emit');
       GameStateManager.enterCreate('test-world');
 
       (scene as any).handleKeyDown({ code, ctrlKey: false, altKey: false });
 
+      expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
+        message,
+        type: 'info',
+      });
       expect(emitSpy.mock.calls.some(
         ([event]) => event === 'ui:toolbar-select-tool',
       )).toBe(false);
-      emitSpy.mockRestore();
-    },
-  );
-
-  it.each(['KeyE', 'Delete'])(
-    'does not mutate or select a cash-bypassing action for %s',
-    (code) => {
-      const scene = new WorldScene();
-      const push = jest.fn();
-      (scene as any).commandStack = { push };
-      (scene as any).selectionManager = {
-        selectedUUIDs: ['paid-track'],
-        clearSelection: jest.fn(),
-      };
-      const emitSpy = jest.spyOn(EventBus, 'emit');
-      GameStateManager.enterCreate('test-world');
-
-      (scene as any).handleKeyDown({ code, ctrlKey: false, altKey: false });
-
+      expect(onKeyDown).not.toHaveBeenCalled();
       expect(push).not.toHaveBeenCalled();
-      expect(emitSpy.mock.calls.some(
-        ([event, payload]) => event === 'ui:toolbar-select-tool'
-          && (((payload as any).tool === 'place-track') || ((payload as any).tool === 'eraser')),
-      )).toBe(false);
       emitSpy.mockRestore();
     },
   );
+
+  it('routes repeated Delete keys to the exact selected refund review without direct mutation', () => {
+    const scene = new WorldScene();
+    const push = jest.fn();
+    const clearSelection = jest.fn();
+    (scene as any).commandStack = { push };
+    (scene as any).selectionManager = {
+      selectedUUIDs: ['paid-a', 'paid-b'],
+      clearSelection,
+    };
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handleKeyDown({ code: 'Delete', ctrlKey: false, altKey: false });
+    (scene as any).handleKeyDown({ code: 'Delete', ctrlKey: false, altKey: false });
+
+    const requests = emitSpy.mock.calls.filter(
+      ([event]) => String(event) === 'ui:delete-request',
+    );
+    expect(requests).toEqual([
+      ['ui:delete-request', { uuids: ['paid-a', 'paid-b'] }],
+      ['ui:delete-request', { uuids: ['paid-a', 'paid-b'] }],
+    ]);
+    expect(push).not.toHaveBeenCalled();
+    expect(clearSelection).not.toHaveBeenCalled();
+    emitSpy.mockRestore();
+  });
 
   it('emits toolbar selection for the P shortcut', () => {
     const scene = new WorldScene();
