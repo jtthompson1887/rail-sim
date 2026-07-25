@@ -29,9 +29,22 @@ function endpoint(track: RailTrack, isStart: boolean) {
   return { track, isStart, point, tangent };
 }
 
+function makeGraphicsFake(scene: any) {
+  const graphics = new Phaser.GameObjects.Graphics(scene) as any;
+  for (const method of [
+    'clear', 'fillStyle', 'fillCircle', 'lineStyle', 'beginPath',
+    'moveTo', 'lineTo', 'strokePath', 'destroy',
+  ]) {
+    graphics[method] = jest.fn().mockReturnValue(graphics);
+  }
+  return graphics;
+}
+
 describe('TrackCompleterSystem construction behavior', () => {
   let scene: any;
-  let graphics: any;
+  let ghostGraphics: any;
+  let endpointGraphics: any;
+  let endpointDots: any;
   let trackManager: any;
   let terrainValidator: any;
   let system: TrackCompleterSystem;
@@ -39,13 +52,7 @@ describe('TrackCompleterSystem construction behavior', () => {
 
   beforeEach(() => {
     scene = makeScene();
-    graphics = scene.add.graphics();
-    for (const method of [
-      'clear', 'fillStyle', 'fillCircle', 'lineStyle', 'beginPath',
-      'moveTo', 'lineTo', 'strokePath', 'destroy',
-    ]) {
-      graphics[method] = jest.fn().mockReturnValue(graphics);
-    }
+    scene.add.graphics = jest.fn().mockImplementation(() => makeGraphicsFake(scene));
     trackManager = {
       tracks: [],
       addTrack: jest.fn((track) => trackManager.tracks.push(track)),
@@ -54,6 +61,9 @@ describe('TrackCompleterSystem construction behavior', () => {
     WorldManager.createNew('Completer construction');
     emitSpy = jest.spyOn(EventBus, 'emit');
     system = new TrackCompleterSystem(scene, trackManager, terrainValidator);
+    ghostGraphics = (system as any).ghostGraphics;
+    endpointGraphics = (system as any).endpointGraphics;
+    endpointDots = (system as any).endpointDots;
   });
 
   afterEach(() => {
@@ -69,17 +79,19 @@ describe('TrackCompleterSystem construction behavior', () => {
     trackManager.tracks = [open, connected];
 
     system.update(100);
-    expect(graphics.fillCircle).not.toHaveBeenCalled();
+    expect(endpointDots.fillCircle).not.toHaveBeenCalled();
 
     system.setActive(true);
     system.update(300);
-    expect(graphics.fillCircle).toHaveBeenCalledTimes(2);
-    expect(graphics.fillCircle).toHaveBeenCalledWith(0, 0, 12);
-    expect(graphics.fillCircle).toHaveBeenCalledWith(200, 0, 12);
+    expect(endpointDots.fillCircle).toHaveBeenCalledTimes(2);
+    expect(endpointDots.fillCircle).toHaveBeenCalledWith(0, 0, 12);
+    expect(endpointDots.fillCircle).toHaveBeenCalledWith(200, 0, 12);
 
-    const clearsBeforeDisable = graphics.clear.mock.calls.length;
+    const dotClearsBeforeDisable = endpointDots.clear.mock.calls.length;
+    const lineClearsBeforeDisable = endpointGraphics.clear.mock.calls.length;
     system.setActive(false);
-    expect(graphics.clear.mock.calls.length).toBeGreaterThan(clearsBeforeDisable);
+    expect(endpointDots.clear.mock.calls.length).toBeGreaterThan(dotClearsBeforeDisable);
+    expect(endpointGraphics.clear.mock.calls.length).toBeGreaterThan(lineClearsBeforeDisable);
   });
 
   it('selects an endpoint, rejects the other endpoint of the same track, and supports Escape cleanup', () => {
@@ -113,7 +125,7 @@ describe('TrackCompleterSystem construction behavior', () => {
 
     expect((system as any).isAwaitingConfirm).toBe(true);
     expect((system as any).pendingTracks.length).toBeGreaterThan(0);
-    expect(graphics.strokePath).toHaveBeenCalled();
+    expect(ghostGraphics.strokePath).toHaveBeenCalled();
 
     system.onKeyDown({ code: 'Enter' } as KeyboardEvent);
 
@@ -234,7 +246,16 @@ describe('TrackCompleterSystem construction behavior', () => {
     expect((system as any).pendingTracks).toEqual([]);
     expect((system as any).isAwaitingConfirm).toBe(false);
 
+    const ownedGraphics = [
+      ghostGraphics,
+      endpointGraphics,
+      endpointDots,
+    ];
+    expect(new Set(ownedGraphics).size).toBe(3);
+
     system.destroy();
-    expect(graphics.destroy).toHaveBeenCalledTimes(3);
+    for (const ownedGraphic of ownedGraphics) {
+      expect(ownedGraphic.destroy).toHaveBeenCalledTimes(1);
+    }
   });
 });
