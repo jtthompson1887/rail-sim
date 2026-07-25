@@ -1,16 +1,42 @@
 import { SaveService } from '../services/SaveService';
 import { EventBus } from '../services/EventBus';
 import { createEmptyWorld } from '../config/WorldData';
-import type { WorldData, TrackDef, JunctionDef, WorldStationDef, TrainDef, SceneryObjectDef, BiomeType } from '../config/WorldData';
+import type {
+  WorldData,
+  TrackDef,
+  JunctionDef,
+  WorldStationDef,
+  TrainDef,
+  SceneryObjectDef,
+  BiomeType,
+  WorldGenerationConfigDef,
+} from '../config/WorldData';
 import { GameConfig } from '../config/GameConfig';
+import { TerrainGenerator } from '../systems/TerrainGenerator';
+import {
+  WorldOpportunityGenerator,
+  type OpportunityGenerationResult,
+} from '../systems/WorldOpportunityGenerator';
+
+export interface OpportunityGeneratorPort {
+  generate(config: WorldGenerationConfigDef): OpportunityGenerationResult;
+}
+
+export type GeneratedWorldCreationResult =
+  | { ok: true; world: WorldData }
+  | {
+    ok: false;
+    error: Extract<OpportunityGenerationResult, { ok: false }>['error']
+      | { code: 'world-save-failed'; seed: string };
+  };
 
 /**
  * WorldManager – singleton that holds the live in-memory world state and
  * synchronises it with persistent storage via SaveService.
  *
- * All create-mode edits are recorded here first; the world is only written
- * to localStorage when `save()` is explicitly called (or triggered by the
- * auto-save timer in WorldScene).
+ * Initial world generation is persisted atomically before installation.
+ * Later create-mode edits are recorded here first and written when `save()`
+ * is explicitly called (or by the WorldScene auto-save timer).
  */
 class WorldManagerClass {
   private _world: WorldData | null = null;
@@ -32,10 +58,53 @@ class WorldManagerClass {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  /**
+   * Generate and persist a brand-new blank world before installing it as the
+   * active world. A failed generation or write leaves no half-created world.
+   */
+  tryCreateNew(
+    name: string,
+    seed: string = crypto.randomUUID(),
+    biome: BiomeType = 'temperate',
+    opportunityGenerator?: OpportunityGeneratorPort,
+  ): GeneratedWorldCreationResult {
+    this._world = null;
+    const generationConfig: WorldGenerationConfigDef = {
+      generationConfigVersion: 1,
+      seed,
+      biome,
+      constructionDifficultyId: 'standard',
+    };
+    const generator = opportunityGenerator
+      ?? new WorldOpportunityGenerator(new TerrainGenerator(seed));
+    const generated = generator.generate(generationConfig);
+    if (generated.ok === false) {
+      return { ok: false, error: generated.error };
+    }
+
+    const detachedWorld = createEmptyWorld(
+      name,
+      seed,
+      biome,
+      generated.opportunity,
+    );
+    if (!SaveService.saveWorld(detachedWorld)) {
+      return {
+        ok: false,
+        error: { code: 'world-save-failed', seed },
+      };
+    }
+    this._world = detachedWorld;
+    return { ok: true, world: detachedWorld };
+  }
+
   /** Create a brand-new empty world and set it as the active world. */
   createNew(name: string, seed?: string, biome: BiomeType = 'temperate'): WorldData {
-    this._world = createEmptyWorld(name, seed, biome);
-    return this._world;
+    const result = this.tryCreateNew(name, seed, biome);
+    if (result.ok === false) {
+      throw new Error(`World creation failed: ${result.error.code}`);
+    }
+    return result.world;
   }
 
   /** Load an existing world from storage by id. Returns null if not found. */

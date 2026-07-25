@@ -39,7 +39,7 @@ describe('WorldContentLoader exact track restoration', () => {
       proposal.costs.total,
     );
     const original = TrackSerializer.toTrackDef(sourceTrack);
-    const world = WorldManager.createNew('Exact restore');
+    const world = WorldManager.createNew('Exact restore', 'real-terrain-alpha');
     world.tracks = [original];
     const restoredTracks: any[] = [];
     const trackManager = {
@@ -71,7 +71,10 @@ describe('WorldContentLoader exact track restoration', () => {
   });
 
   it('restores a zero paid build cost exactly', () => {
-    const world = WorldManager.createNew('Zero cost restore');
+    const world = WorldManager.createNew(
+      'Zero cost restore',
+      'real-terrain-alpha',
+    );
     world.tracks = [{
       geometryVersion: 1,
       uuid: 'zero-cost',
@@ -109,7 +112,7 @@ describe('WorldContentLoader exact track restoration', () => {
   });
 
   it('does not generate starter content for an empty schema-2 world', () => {
-    WorldManager.createNew('Empty world');
+    WorldManager.createNew('Empty world', 'real-terrain-alpha');
     const trackManager = { addTrack: jest.fn(), getTrack: jest.fn() };
     const trainManager = {
       createInitialTrain: jest.fn(),

@@ -13,7 +13,7 @@ describe('PlaceTrackTool economy guard', () => {
     const snapSystem = { snapPoint: jest.fn((x, y) => ({ x, y })) };
     const terrainValidator = { canPlaceTrack: jest.fn() };
     const emitSpy = jest.spyOn(EventBus, 'emit');
-    WorldManager.createNew('Guarded placement');
+    WorldManager.createNew('Guarded placement', 'real-terrain-alpha');
     const tool = new PlaceTrackTool(
       scene,
       trackManager as any,

@@ -6,6 +6,7 @@ import {
   TERRAIN_ANALYSIS_SPACING,
 } from '../config/ConstructionConfig';
 import type {
+  ConstructionCostBreakdown,
   StructureInterval,
   StructureType,
   VerticalProfileDef,
@@ -26,14 +27,6 @@ export interface TerrainHeightSource {
 
 export interface ConstructionAnalysisOptions {
   connectionAngleDeg?: number;
-}
-
-export interface ConstructionCostBreakdown {
-  track: number;
-  earthworks: number;
-  bridge: number;
-  tunnel: number;
-  total: number;
 }
 
 export type ConstructionReasonCode =
@@ -345,6 +338,12 @@ function sampleAtArcDistances(
 ): Array<{ t: number; point: { x: number; y: number }; distance: number }> {
   let lookupIndex = 1;
   return Array.from({ length: sampleCount }, (_, index) => {
+    if (index === 0) {
+      return { t: 0, point: geometry.pointAt(0), distance: 0 };
+    }
+    if (index === sampleCount - 1) {
+      return { t: 1, point: geometry.pointAt(1), distance: lookup.length };
+    }
     const distance = lookup.length * index / (sampleCount - 1);
     while (
       lookupIndex < lookup.samples.length - 1

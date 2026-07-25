@@ -4,10 +4,11 @@
 import { SaveService, SaveData } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
 import type { WorldData } from '../../src/config/WorldData';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id,
     name,
     generationConfig: {
@@ -17,6 +18,7 @@ function makeWorld(id: string, name: string, seed: string, timestamp: number): W
       constructionDifficultyId: 'standard',
     },
     company: { cash: 876_543 },
+    starterOpportunity: makeStarterOpportunity(seed),
     tracks: [],
     junctions: [],
     stations: [],
@@ -32,7 +34,7 @@ describe('SaveService', () => {
     localStorage.clear();
   });
 
-  it('preserves schema-3 company cash and paid track value exactly', () => {
+  it('preserves schema-4 company cash and paid track value exactly', () => {
     const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
     world.tracks.push({
       geometryVersion: 1,

@@ -30,7 +30,7 @@ describe('JunctionCreatorSystem', () => {
   beforeEach(() => {
     scene = makeScene();
     trackManager = new TrackManager(scene);
-    WorldManager.createNew('JctTest');
+    WorldManager.createNew('JctTest', 'real-terrain-alpha');
     system = new JunctionCreatorSystem(scene, trackManager);
   });
 

@@ -274,9 +274,64 @@ export default class WorldScene extends Phaser.Scene {
       this.activatePlayMode();
     }
 
-    this.cameras.main.zoom = 0.5;
-    this.cameras.main.scrollX = -400;
-    this.cameras.main.scrollY = 600;
+    this.renderStarterOpportunitySurvey();
+    this.applyStarterOpportunityCamera();
+  }
+
+  /** Frame the persisted planning opportunity without regenerating it. */
+  private applyStarterOpportunityCamera(): void {
+    const recommendation = WorldManager.world?.starterOpportunity.recommendedCamera;
+    if (!recommendation) return;
+    this.cameras.main.setZoom(recommendation.zoom);
+    this.cameras.main.centerOn(recommendation.x, recommendation.y);
+  }
+
+  /** Draw survey-only guidance; this deliberately creates no RailTrack objects. */
+  private renderStarterOpportunitySurvey(): void {
+    const opportunity = WorldManager.world?.starterOpportunity;
+    if (!opportunity) return;
+    const graphics = this.add.graphics().setDepth(-20);
+    const colours = [0x4ad5ff, 0xffdc7d];
+    opportunity.corridors.forEach((corridor, index) => {
+      graphics.lineStyle(24, colours[index], 0.2);
+      graphics.beginPath();
+      graphics.moveTo(corridor.waypoints[0].x, corridor.waypoints[0].y);
+      for (const waypoint of corridor.waypoints.slice(1)) {
+        graphics.lineTo(waypoint.x, waypoint.y);
+      }
+      graphics.strokePath();
+      const labelPoint = corridor.waypoints[
+        Math.floor(corridor.waypoints.length / 2)
+      ];
+      const tradeoff = corridor.dominantTradeoff === 'short-steep'
+        ? 'Shorter / steeper'
+        : corridor.dominantTradeoff === 'long-flat'
+          ? 'Longer / flatter'
+          : 'Structure-heavy';
+      this.add.text(
+        labelPoint.x,
+        labelPoint.y + 34 + index * 24,
+        `${tradeoff} · est. £${corridor.estimatedCost.toLocaleString()}`,
+        {
+          fontFamily: 'Verdana',
+          fontSize: '16px',
+          color: index === 0 ? '#9feaff' : '#ffe8a6',
+          backgroundColor: '#06131fcc',
+          padding: { x: 6, y: 3 },
+        },
+      ).setOrigin(0.5, 0).setDepth(-19);
+    });
+    graphics.fillStyle(0xffffff, 0.9);
+    for (const site of opportunity.sites) {
+      graphics.fillCircle(site.x, site.y, 18);
+      this.add.text(site.x, site.y - 32, site.label, {
+        fontFamily: 'Verdana',
+        fontSize: '18px',
+        color: '#ffffff',
+        backgroundColor: '#06131fcc',
+        padding: { x: 6, y: 3 },
+      }).setOrigin(0.5, 1).setDepth(-19);
+    }
   }
 
   update(time: number, delta: number): void {

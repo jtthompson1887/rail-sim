@@ -1,6 +1,7 @@
 import { GameConfig } from '../../src/config/GameConfig';
 import { LEVELS } from '../../src/config/LevelData';
 import { createEmptyWorld, validateWorldData } from '../../src/config/WorldData';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 
 describe('GameConfig', () => {
   it('has valid resolution settings', () => {
@@ -199,7 +200,12 @@ describe('LevelData', () => {
 
 describe('WorldData current-schema validation', () => {
   it('rejects a vehicle without a type instead of backfilling it', () => {
-    const world = createEmptyWorld('Current world', 'current-seed');
+    const world = createEmptyWorld(
+      'Current world',
+      'current-seed',
+      'temperate',
+      makeStarterOpportunity('current-seed'),
+    );
     (world.trains as any) = [{
         id: 'legacy-train',
         trackUUID: 'track-1',
@@ -213,7 +219,12 @@ describe('WorldData current-schema validation', () => {
   });
 
   it('preserves an explicit passenger carriage type', () => {
-    const world = createEmptyWorld('Current world', 'current-seed');
+    const world = createEmptyWorld(
+      'Current world',
+      'current-seed',
+      'temperate',
+      makeStarterOpportunity('current-seed'),
+    );
     world.trains = [{
         id: 'carriage-1',
         trackUUID: 'track-1',

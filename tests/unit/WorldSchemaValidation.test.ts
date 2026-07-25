@@ -11,7 +11,131 @@ import { GameConfig } from '../../src/config/GameConfig';
 import { SaveService } from '../../src/services/SaveService';
 
 function currentWorld() {
-  return createEmptyWorld('Schema test', 'schema-seed', 'alpine');
+  const world = createEmptyWorld(
+    'Schema test',
+    'schema-seed',
+    'alpine',
+    undefined as any,
+  ) as any;
+  world.schemaVersion = 4;
+  world.starterOpportunity = {
+    opportunityVersion: 1,
+    resolvedAttempt: 1,
+    sites: [
+      { id: 'site-a', label: 'A', x: -500, y: 0, footprintRadius: 192 },
+      { id: 'site-b', label: 'B', x: 500, y: 0, footprintRadius: 192 },
+    ],
+    corridors: [
+      {
+        id: 'direct',
+        waypoints: [{ x: -500, y: 0 }, { x: 500, y: 0 }],
+        estimatedCost: 10_000,
+        dominantTradeoff: 'short-steep',
+        feasibilityWitness: {
+          witnessVersion: 1,
+          segments: [{
+            geometry: {
+              geometryVersion: 1,
+              p0: { x: -500, y: 0 },
+              p1: { x: -167, y: 0 },
+              p2: { x: 167, y: 0 },
+              p3: { x: 500, y: 0 },
+            },
+            verticalProfile: {
+              profileVersion: 1,
+              knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+            },
+            structures: [{
+              type: 'surface',
+              startT: 0,
+              endT: 1,
+              startElevation: 0,
+              endElevation: 0,
+            }],
+            costs: {
+              track: 10_000,
+              earthworks: 0,
+              bridge: 0,
+              tunnel: 0,
+              total: 10_000,
+            },
+            topologyCost: 0,
+          }],
+          totalCost: 10_000,
+        },
+      },
+      {
+        id: 'detour',
+        waypoints: [{ x: -500, y: 0 }, { x: 0, y: 500 }, { x: 500, y: 0 }],
+        estimatedCost: 20_000,
+        dominantTradeoff: 'long-flat',
+        feasibilityWitness: {
+          witnessVersion: 1,
+          segments: [
+            {
+              geometry: {
+                geometryVersion: 1,
+                p0: { x: -500, y: 0 },
+                p1: { x: -333, y: 0 },
+                p2: { x: -167, y: 500 },
+                p3: { x: 0, y: 500 },
+              },
+              verticalProfile: {
+                profileVersion: 1,
+                knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+              },
+              structures: [{
+                type: 'surface',
+                startT: 0,
+                endT: 1,
+                startElevation: 0,
+                endElevation: 0,
+              }],
+              costs: {
+                track: 10_000,
+                earthworks: 0,
+                bridge: 0,
+                tunnel: 0,
+                total: 10_000,
+              },
+              topologyCost: 0,
+            },
+            {
+              geometry: {
+                geometryVersion: 1,
+                p0: { x: 0, y: 500 },
+                p1: { x: 167, y: 500 },
+                p2: { x: 333, y: 0 },
+                p3: { x: 500, y: 0 },
+              },
+              verticalProfile: {
+                profileVersion: 1,
+                knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+              },
+              structures: [{
+                type: 'surface',
+                startT: 0,
+                endT: 1,
+                startElevation: 0,
+                endElevation: 0,
+              }],
+              costs: {
+                track: 10_000,
+                earthworks: 0,
+                bridge: 0,
+                tunnel: 0,
+                total: 10_000,
+              },
+              topologyCost: 0,
+            },
+          ],
+          totalCost: 20_000,
+        },
+      },
+    ],
+    recommendedCamera: { x: 0, y: 0, zoom: 0.5 },
+  };
+  return world;
 }
 
 describe('world schema validation', () => {
@@ -19,7 +143,7 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('accepts schema 3 without converting or copying it', () => {
+  it('accepts schema 4 without converting or copying it', () => {
     const world = currentWorld();
     const result = validateWorldData(world);
     expect(result).toEqual({ compatible: true, world });
@@ -30,11 +154,59 @@ describe('world schema validation', () => {
     ['missing', undefined],
     ['legacy', 1],
     ['engineering-only', 2],
-    ['unsupported', 4],
+    ['company-only', 3],
+    ['unsupported', 5],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
     expect(result).toEqual(expect.objectContaining({
+      compatible: false,
+      action: INCOMPATIBLE_WORLD_ACTION,
+    }));
+  });
+
+  it.each([
+    ['missing opportunity', (world: any) => { delete world.starterOpportunity; }],
+    ['wrong opportunity version', (world: any) => {
+      world.starterOpportunity.opportunityVersion = 2;
+    }],
+    ['not exactly two sites', (world: any) => {
+      world.starterOpportunity.sites.pop();
+    }],
+    ['not exactly two corridors', (world: any) => {
+      world.starterOpportunity.corridors.pop();
+    }],
+    ['spatially duplicate corridors', (world: any) => {
+      world.starterOpportunity.corridors[1].waypoints = JSON.parse(
+        JSON.stringify(world.starterOpportunity.corridors[0].waypoints),
+      );
+      world.starterOpportunity.corridors[1].feasibilityWitness = JSON.parse(
+        JSON.stringify(
+          world.starterOpportunity.corridors[0].feasibilityWitness,
+        ),
+      );
+      world.starterOpportunity.corridors[1].estimatedCost =
+        world.starterOpportunity.corridors[0].estimatedCost;
+    }],
+    ['out-of-bounds corridor guidance', (world: any) => {
+      world.starterOpportunity.corridors[0].waypoints[0].x = 9000;
+      world.starterOpportunity.corridors[0]
+        .feasibilityWitness.segments[0].geometry.p0.x = 9000;
+    }],
+    ['estimate mismatch', (world: any) => {
+      world.starterOpportunity.corridors[0].estimatedCost += 1;
+    }],
+    ['non-zero topology', (world: any) => {
+      world.starterOpportunity.corridors[0]
+        .feasibilityWitness.segments[0].topologyCost = 1;
+    }],
+    ['invalid camera', (world: any) => {
+      world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
+    }],
+  ])('rejects schema 4 with %s', (_label, mutate) => {
+    const raw = currentWorld();
+    mutate(raw);
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
       compatible: false,
       action: INCOMPATIBLE_WORLD_ACTION,
     }));
@@ -46,7 +218,7 @@ describe('world schema validation', () => {
     ['negative cash', (world: any) => { world.company.cash = -1; }],
     ['unsafe cash', (world: any) => { world.company.cash = Number.MAX_SAFE_INTEGER + 1; }],
     ['extra company state', (world: any) => { world.company.ledger = []; }],
-  ])('rejects schema 3 with %s', (_label, mutate) => {
+  ])('rejects schema 4 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -91,7 +263,7 @@ describe('world schema validation', () => {
     ['verticalProfile'],
     ['structures'],
     ['paidBuildCost'],
-  ])('rejects a schema-3 track missing required %s', (field) => {
+  ])('rejects a schema-4 track missing required %s', (field) => {
     const raw = currentWorld() as any;
     const track: any = {
       geometryVersion: 1,

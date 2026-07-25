@@ -39,7 +39,7 @@ describe('TrackCompleterSystem', () => {
       },
     };
     trackManager = new TrackManager(scene);
-    WorldManager.createNew('CompleterTest');
+    WorldManager.createNew('CompleterTest', 'real-terrain-alpha');
     system = new TrackCompleterSystem(scene, trackManager);
   });
 

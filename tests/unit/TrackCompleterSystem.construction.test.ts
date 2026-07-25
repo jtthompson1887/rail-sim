@@ -94,7 +94,7 @@ describe('TrackCompleterSystem construction behavior', () => {
       addTrack: jest.fn((track) => trackManager.tracks.push(track)),
     };
     terrainValidator = { canPlaceTrack: jest.fn() };
-    WorldManager.createNew('Completer construction');
+    WorldManager.createNew('Completer construction', 'real-terrain-alpha');
     emitSpy = jest.spyOn(EventBus, 'emit');
     system = new TrackCompleterSystem(scene, trackManager, terrainValidator);
     ghostGraphics = (system as any).ghostGraphics;

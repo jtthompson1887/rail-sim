@@ -1,6 +1,10 @@
 import type { VehicleType } from './VehicleTypes';
 import type { TrackGeometryDef } from '../systems/TrackGeometry';
 import { startingCashForDifficulty } from './ConstructionConfig';
+import {
+  MAX_OPPORTUNITY_ATTEMPTS,
+  WorldGenerationConfig,
+} from './WorldGeneration';
 
 export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
 
@@ -18,6 +22,14 @@ export interface StructureInterval {
   endT: number;
   startElevation: number;
   endElevation: number;
+}
+
+export interface ConstructionCostBreakdown {
+  track: number;
+  earthworks: number;
+  bridge: number;
+  tunnel: number;
+  total: number;
 }
 
 /** Serialised control point (Bézier p0–p3) */
@@ -108,13 +120,48 @@ export interface WorldGenerationConfigDef {
   constructionDifficultyId: ConstructionDifficultyId;
 }
 
+export interface PlanningSiteDef {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  footprintRadius: number;
+}
+
+export interface OpportunityCorridorDef {
+  id: string;
+  waypoints: Vec2Def[];
+  estimatedCost: number;
+  dominantTradeoff: 'short-steep' | 'long-flat' | 'structure-heavy';
+  feasibilityWitness: {
+    witnessVersion: 1;
+    segments: Array<{
+      geometry: TrackGeometryDef;
+      verticalProfile: VerticalProfileDef;
+      structures: StructureInterval[];
+      costs: ConstructionCostBreakdown;
+      topologyCost: 0;
+    }>;
+    totalCost: number;
+  };
+}
+
+export interface StarterOpportunityDef {
+  opportunityVersion: 1;
+  resolvedAttempt: number;
+  sites: [PlanningSiteDef, PlanningSiteDef];
+  corridors: [OpportunityCorridorDef, OpportunityCorridorDef];
+  recommendedCamera: { x: number; y: number; zoom: number };
+}
+
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 3;
+  schemaVersion: 4;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
   company: CompanyConstructionState;
+  starterOpportunity: StarterOpportunityDef;
   tracks: TrackDef[];
   junctions: JunctionDef[];
   stations: WorldStationDef[];
@@ -129,21 +176,26 @@ export interface WorldData {
 }
 
 /** Create a blank world with sane defaults. */
-export function createEmptyWorld(name: string, seed?: string, biome: BiomeType = 'temperate'): WorldData {
+export function createEmptyWorld(
+  name: string,
+  seed: string,
+  biome: BiomeType,
+  starterOpportunity: StarterOpportunityDef,
+): WorldData {
   const now = Date.now();
-  const resolvedSeed = seed ?? now.toString();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
       generationConfigVersion: 1,
-      seed: resolvedSeed,
+      seed,
       biome,
       constructionDifficultyId,
     },
     company: { cash: startingCashForDifficulty(constructionDifficultyId) },
+    starterOpportunity,
     tracks: [],
     junctions: [],
     stations: [],
@@ -186,6 +238,15 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isVec2(value: unknown): value is Vec2Def {
   return isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.y);
+}
+
+function isGeometry(value: unknown): value is TrackGeometryDef {
+  return isRecord(value)
+    && value.geometryVersion === 1
+    && isVec2(value.p0)
+    && isVec2(value.p1)
+    && isVec2(value.p2)
+    && isVec2(value.p3);
 }
 
 function isVerticalProfile(value: unknown): value is VerticalProfileDef {
@@ -264,12 +325,8 @@ function structureElevationsMatchProfile(
 
 function isTrack(value: unknown): value is TrackDef {
   if (!isRecord(value)) return false;
-  return value.geometryVersion === 1
+  return isGeometry(value)
     && typeof value.uuid === 'string'
-    && isVec2(value.p0)
-    && isVec2(value.p1)
-    && isVec2(value.p2)
-    && isVec2(value.p3)
     && isVerticalProfile(value.verticalProfile)
     && isStructureSequence(value.structures)
     && structureElevationsMatchProfile(value.structures, value.verticalProfile)
@@ -278,6 +335,152 @@ function isTrack(value: unknown): value is TrackDef {
     && value.paidBuildCost >= 0
     && !('isTunnel' in value)
     && !('elevation' in value);
+}
+
+function isConstructionCosts(value: unknown): value is ConstructionCostBreakdown {
+  if (!isRecord(value)) return false;
+  const components = [value.track, value.earthworks, value.bridge, value.tunnel];
+  if (!components.every((component) => (
+    typeof component === 'number'
+    && Number.isSafeInteger(component)
+    && component >= 0
+  ))) return false;
+  return typeof value.total === 'number'
+    && Number.isSafeInteger(value.total)
+    && value.total === (value.track as number)
+      + (value.earthworks as number)
+      + (value.bridge as number)
+      + (value.tunnel as number);
+}
+
+function isOpportunitySegment(value: unknown): boolean {
+  return isRecord(value)
+    && isGeometry(value.geometry)
+    && isVerticalProfile(value.verticalProfile)
+    && isStructureSequence(value.structures)
+    && structureElevationsMatchProfile(value.structures, value.verticalProfile)
+    && isConstructionCosts(value.costs)
+    && value.topologyCost === 0;
+}
+
+function isOpportunityCorridor(value: unknown): value is OpportunityCorridorDef {
+  if (!isRecord(value)
+    || typeof value.id !== 'string'
+    || !Array.isArray(value.waypoints)
+    || value.waypoints.length < 2
+    || !value.waypoints.every(isVec2)
+    || value.waypoints.some((waypoint) => (
+      Math.abs((waypoint as Vec2Def).x) > WorldGenerationConfig.WORLD_HALF_WIDTH
+      || Math.abs((waypoint as Vec2Def).y) > WorldGenerationConfig.WORLD_HALF_HEIGHT
+    ))
+    || !Number.isSafeInteger(value.estimatedCost)
+    || (value.estimatedCost as number) < 0
+    || ['short-steep', 'long-flat', 'structure-heavy'].indexOf(
+      value.dominantTradeoff as string,
+    ) === -1
+    || !isRecord(value.feasibilityWitness)
+    || value.feasibilityWitness.witnessVersion !== 1
+    || !Array.isArray(value.feasibilityWitness.segments)
+    || value.feasibilityWitness.segments.length === 0
+    || !value.feasibilityWitness.segments.every(isOpportunitySegment)
+    || !Number.isSafeInteger(value.feasibilityWitness.totalCost)) {
+    return false;
+  }
+  const waypoints = value.waypoints as Vec2Def[];
+  const segments = value.feasibilityWitness.segments as Array<{
+    geometry: TrackGeometryDef;
+    costs: ConstructionCostBreakdown;
+    topologyCost: 0;
+  }>;
+  if (segments.length !== waypoints.length - 1) return false;
+  for (let index = 0; index < segments.length; index++) {
+    const geometry = segments[index].geometry;
+    const start = waypoints[index];
+    const end = waypoints[index + 1];
+    if (geometry.p0.x !== start.x
+      || geometry.p0.y !== start.y
+      || geometry.p3.x !== end.x
+      || geometry.p3.y !== end.y) {
+      return false;
+    }
+    if (index > 0) {
+      const previous = segments[index - 1].geometry;
+      const incomingX = previous.p3.x - previous.p2.x;
+      const incomingY = previous.p3.y - previous.p2.y;
+      const outgoingX = geometry.p1.x - geometry.p0.x;
+      const outgoingY = geometry.p1.y - geometry.p0.y;
+      const lengths = Math.hypot(incomingX, incomingY)
+        * Math.hypot(outgoingX, outgoingY);
+      const cross = incomingX * outgoingY - incomingY * outgoingX;
+      const dot = incomingX * outgoingX + incomingY * outgoingY;
+      if (lengths === 0 || Math.abs(cross) > lengths * 1e-10 || dot <= 0) {
+        return false;
+      }
+    }
+  }
+  const total = value.feasibilityWitness.segments.reduce(
+    (sum, segment) => sum + (segment as {
+      costs: ConstructionCostBreakdown;
+      topologyCost: 0;
+    }).costs.total,
+    0,
+  );
+  return value.feasibilityWitness.totalCost === total
+    && value.estimatedCost === total;
+}
+
+function isStarterOpportunity(value: unknown): value is StarterOpportunityDef {
+  if (!isRecord(value)
+    || value.opportunityVersion !== 1
+    || !Number.isInteger(value.resolvedAttempt)
+    || (value.resolvedAttempt as number) < 1
+    || (value.resolvedAttempt as number) > MAX_OPPORTUNITY_ATTEMPTS
+    || !Array.isArray(value.sites)
+    || value.sites.length !== 2
+    || !value.sites.every((site) => (
+      isRecord(site)
+      && typeof site.id === 'string'
+      && typeof site.label === 'string'
+      && isFiniteNumber(site.x)
+      && isFiniteNumber(site.y)
+      && isFiniteNumber(site.footprintRadius)
+      && site.footprintRadius === WorldGenerationConfig.SITE_FOOTPRINT_RADIUS
+      && Math.abs(site.x as number) + (site.footprintRadius as number)
+        <= WorldGenerationConfig.WORLD_HALF_WIDTH
+      && Math.abs(site.y as number) + (site.footprintRadius as number)
+        <= WorldGenerationConfig.WORLD_HALF_HEIGHT
+    ))
+    || !Array.isArray(value.corridors)
+    || value.corridors.length !== 2
+    || !value.corridors.every(isOpportunityCorridor)
+    || !isRecord(value.recommendedCamera)
+    || !isFiniteNumber(value.recommendedCamera.x)
+    || !isFiniteNumber(value.recommendedCamera.y)
+    || !isFiniteNumber(value.recommendedCamera.zoom)
+    || value.recommendedCamera.zoom <= 0) {
+    return false;
+  }
+  const firstSite = value.sites[0] as PlanningSiteDef;
+  const secondSite = value.sites[1] as PlanningSiteDef;
+  const corridors = value.corridors as [
+    OpportunityCorridorDef,
+    OpportunityCorridorDef,
+  ];
+  const endpointsMatchSites = corridors.every((corridor) => {
+    const first = corridor.waypoints[0];
+    const last = corridor.waypoints[corridor.waypoints.length - 1];
+    return first.x === firstSite.x
+      && first.y === firstSite.y
+      && last.x === secondSite.x
+      && last.y === secondSite.y;
+  });
+  return value.sites[0].id !== value.sites[1].id
+    && value.corridors[0].id !== value.corridors[1].id
+    && value.corridors[0].dominantTradeoff !== value.corridors[1].dominantTradeoff
+    && value.corridors[0].estimatedCost !== value.corridors[1].estimatedCost
+    && JSON.stringify(value.corridors[0].waypoints)
+      !== JSON.stringify(value.corridors[1].waypoints)
+    && endpointsMatchSites;
 }
 
 function isJunction(value: unknown): value is JunctionDef {
@@ -355,7 +558,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 3) {
+  if (raw.schemaVersion !== 4) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -389,10 +592,11 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || Object.keys(company).length !== 1
     || !Number.isSafeInteger(company.cash)
     || (company.cash as number) < 0
+    || !isStarterOpportunity(raw.starterOpportunity)
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 3.');
+    return incompatible(raw, 'data does not match schema version 4.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

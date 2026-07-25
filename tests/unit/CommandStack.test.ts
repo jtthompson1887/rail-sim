@@ -181,7 +181,7 @@ describe('DeleteTracksCommand', () => {
   beforeEach(() => {
     scene = makeScene();
     trackManager = new TrackManager(scene);
-    WorldManager.createNew('CmdTest');
+    WorldManager.createNew('CmdTest', 'real-terrain-alpha');
   });
 
   afterEach(() => {
@@ -224,7 +224,7 @@ describe('ReshapeTrackCommand', () => {
   beforeEach(() => {
     scene = makeScene();
     trackManager = new TrackManager(scene);
-    WorldManager.createNew('ReshapeTest');
+    WorldManager.createNew('ReshapeTest', 'real-terrain-alpha');
   });
 
   afterEach(() => {
