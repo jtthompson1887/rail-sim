@@ -64,6 +64,11 @@ export interface FacilityEconomyDef {
   recipeProgressTicks: number;
 }
 
+export interface MarketStateDef {
+  constructionIndexBps: number;
+  regionalDemandBpsByProduct: Record<ProductId, number>;
+}
+
 export type IndustryBlocker =
   | 'idle'
   | 'waiting-input'

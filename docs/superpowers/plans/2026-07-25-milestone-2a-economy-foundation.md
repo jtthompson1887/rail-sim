@@ -445,7 +445,7 @@ git commit -m "feat: conserve facility inventory and production"
 - Produces:
   `advanceMarketTick(market, seed, economyTick): MarketStateDef`
 
-- [ ] **Step 1: Write failing quote-bound tests**
+- [x] **Step 1: Write failing quote-bound tests**
 
 Cover exact factor bounds, deterministic rounding, low/high inventory pressure,
 unknown products, unsafe multiplication, factor explanations, and identical
@@ -459,7 +459,7 @@ expect(quote.factors).toEqual([
 ]);
 ```
 
-- [ ] **Step 2: Run the market test and verify failure**
+- [x] **Step 2: Run the market test and verify failure**
 
 ```powershell
 npx jest tests/unit/MarketSystem.test.ts --runInBand --coverage=false
@@ -467,7 +467,7 @@ npx jest tests/unit/MarketSystem.test.ts --runInBand --coverage=false
 
 Expected: fail because `MarketSystem.ts` does not exist.
 
-- [ ] **Step 3: Add persisted market state**
+- [x] **Step 3: Add persisted market state**
 
 ```ts
 export interface MarketStateDef {
@@ -482,7 +482,7 @@ Use these inclusive bounds:
 - regional demand: `8_000..12_000`;
 - inventory pressure: `7_500..13_000`.
 
-- [ ] **Step 4: Define exact quote results and inventory pressure**
+- [x] **Step 4: Define exact quote results and inventory pressure**
 
 Use:
 
@@ -528,7 +528,7 @@ Content validation requires `targetStock > 0`. At target stock pressure is
 exactly `10_000`; empty stock is `13_000`; stock at or above twice target is
 clamped to `7_500`.
 
-- [ ] **Step 5: Implement checked sequential pricing**
+- [x] **Step 5: Implement checked sequential pricing**
 
 Calculate:
 
@@ -543,14 +543,14 @@ Round to the nearest whole pound after each factor. Reject an intermediate
 value before multiplication when it would exceed `Number.MAX_SAFE_INTEGER`.
 Return the three named factor explanations with the quote.
 
-- [ ] **Step 6: Implement small deterministic index drift**
+- [x] **Step 6: Implement small deterministic index drift**
 
 Key the existing seeded random helper with
 `${seed}:construction-market:${economyTick}`. Move by `-25`, `0`, or `25`
 basis points once per 24 economy ticks and clamp to `8_500..11_500`. Do not add
 shocks or price history in this task.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 ```powershell
 npx jest tests/unit/MarketSystem.test.ts tests/unit/SeededRandom.test.ts --runInBand --coverage=false
@@ -559,7 +559,7 @@ npx jest tests/unit/MarketSystem.test.ts tests/unit/SeededRandom.test.ts --runIn
 If `tests/unit/SeededRandom.test.ts` does not exist, run only
 `MarketSystem.test.ts` plus the full suite at Task 9. Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add src/economy/EconomyData.ts src/economy/MarketSystem.ts tests/unit/MarketSystem.test.ts
