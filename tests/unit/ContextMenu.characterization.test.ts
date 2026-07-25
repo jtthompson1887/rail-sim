@@ -133,7 +133,7 @@ describe('ContextMenu interaction and cleanup', () => {
 describe('Context menu factories', () => {
   afterEach(() => WorldManager.reset());
 
-  it('disables manual structure mutation while retaining deletion', () => {
+  it('disables manual structure mutation and deletion', () => {
     WorldManager.createNew('Context fixture', 'context-seed');
     WorldManager.addTrackDef({
       geometryVersion: 1,
@@ -165,7 +165,7 @@ describe('Context menu factories', () => {
     const items = buildTrackContextItems(trackManager as any, ['track-1'], onDelete);
     expect(items.map((item) => item.label)).toEqual([
       'Structures locked to engineering analysis',
-      '🗑 Delete (1)',
+      'Deletion requires an economy-aware command',
     ]);
 
     items[0].action();
@@ -175,17 +175,19 @@ describe('Context menu factories', () => {
       .toBe('Structures locked to engineering analysis');
 
     items[1].action();
-    expect(onDelete).toHaveBeenCalledWith(['track-1']);
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
-  it('offers only batch deletion for multiple tracks and no actions for an empty selection', () => {
+  it('offers a disabled deletion reason for multiple tracks and no actions for an empty selection', () => {
     const onDelete = jest.fn();
     const trackManager = { getTrack: jest.fn() };
 
     const items = buildTrackContextItems(trackManager as any, ['a', 'b'], onDelete);
-    expect(items.map((item) => item.label)).toEqual(['🗑 Delete (2)']);
+    expect(items.map((item) => item.label)).toEqual([
+      'Deletion requires an economy-aware command',
+    ]);
     items[0].action();
-    expect(onDelete).toHaveBeenCalledWith(['a', 'b']);
+    expect(onDelete).not.toHaveBeenCalled();
     expect(buildTrackContextItems(trackManager as any, [], onDelete)).toEqual([]);
     expect(trackManager.getTrack).not.toHaveBeenCalled();
   });

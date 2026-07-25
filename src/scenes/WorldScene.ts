@@ -11,7 +11,6 @@ import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
 import { SnapSystem } from '../systems/SnapSystem';
 import { CommandStack } from '../systems/CommandStack';
-import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
 import { TrainSerializer } from '../utils/TrainSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
@@ -21,6 +20,7 @@ import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import {
   CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  CONSTRUCTION_ECONOMY_LOCK_REASON,
   disabledConstructionToolReason,
   type CreateTool,
 } from '../ui/EditorToolbar';
@@ -28,8 +28,6 @@ import { GameConfig } from '../config/GameConfig';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
 import type { IEditorTool } from '../systems/tools/IEditorTool';
-import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
-import { EraserTool } from '../systems/tools/EraserTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
 
@@ -137,7 +135,8 @@ export default class WorldScene extends Phaser.Scene {
 
   private readonly editorDeleteHandler = ({ uuids }: { uuids: string[] }) => {
     if (GameStateManager.worldMode !== 'create') return;
-    this.deleteSelectedTracks(uuids);
+    void uuids;
+    this.reportEconomyLock();
   };
 
   private readonly vehicleTypeChangedHandler = ({ type }: { type: import('../config/VehicleTypes').VehicleType }) => {
@@ -201,8 +200,6 @@ export default class WorldScene extends Phaser.Scene {
 
     // ── Tool registry ──────────────────────────────────────────────────────
     this.toolRegistry = new Map<CreateTool, IEditorTool>();
-    this.toolRegistry.set('place-track', new PlaceTrackTool(this, this.trackManager, this.snapSystem, this.terrainValidator));
-    this.toolRegistry.set('eraser', new EraserTool(this, this.trackManager, this.commandStack, this.selectionManager));
     this.toolRegistry.set('select', new SelectTool(this.selectionManager));
     this.toolRegistry.set('place-vehicle', new PlaceVehicleTool(this, this.trackManager, this.trainManager));
 
@@ -427,8 +424,7 @@ export default class WorldScene extends Phaser.Scene {
       // Keyboard tool shortcuts (only when no modifier)
       if (!event.ctrlKey && !event.altKey) {
         const shortcuts: Record<string, CreateTool> = {
-          KeyV: 'select', KeyH: 'pan', KeyE: 'eraser', KeyT: 'terrain-view',
-          KeyP: 'place-track',
+          KeyV: 'select', KeyH: 'pan', KeyT: 'terrain-view',
           KeyN: 'place-vehicle',
         };
         const mapped = shortcuts[event.code];
@@ -447,8 +443,9 @@ export default class WorldScene extends Phaser.Scene {
       this.activeEditorTool?.onKeyDown(event);
 
       if (event.code === 'Delete') {
-        const uuids = this.selectionManager.selectedUUIDs;
-        if (uuids.length > 0) this.deleteSelectedTracks(uuids);
+        if (this.selectionManager.selectedUUIDs.length > 0) {
+          this.reportEconomyLock();
+        }
       }
     }
   }
@@ -457,13 +454,14 @@ export default class WorldScene extends Phaser.Scene {
 
   private deleteSelectedTracks(uuids: string[]): void {
     if (uuids.length === 0) return;
-    const cmd = new DeleteTracksCommand(this.trackManager, this, uuids);
-    this.commandStack.push(cmd);
-    this.selectionManager.clearSelection();
-    for (const uuid of uuids) {
-      EventBus.emit('track:removed', { trackUUID: uuid });
-    }
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    this.reportEconomyLock();
+  }
+
+  private reportEconomyLock(): void {
+    EventBus.emit('ui:toast', {
+      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+      type: 'info',
+    });
   }
 
   // ── Context menu ───────────────────────────────────────────────────────────

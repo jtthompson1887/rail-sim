@@ -4,6 +4,17 @@ export const MAX_ANALYSIS_SAMPLES = 96;
 export const TERRAIN_ANALYSIS_SPACING = GameConfig.TERRAIN.SAMPLE_STEP / 2;
 export const MAX_SEGMENT_LENGTH =
   TERRAIN_ANALYSIS_SPACING * (MAX_ANALYSIS_SAMPLES - 1);
+export const STANDARD_STARTING_CASH = 1_000_000;
+export const DEMOLITION_REFUND_RATE = 0.5;
+
+export function startingCashForDifficulty(
+  difficultyId: 'standard',
+): number {
+  if (difficultyId !== 'standard') {
+    throw new Error(`Unsupported construction difficulty: ${String(difficultyId)}`);
+  }
+  return STANDARD_STARTING_CASH;
+}
 
 export const ConstructionConfig = {
   MIN_SEGMENT_LENGTH: TERRAIN_ANALYSIS_SPACING,

@@ -1,53 +1,44 @@
 import Phaser from 'phaser';
 import type { IEditorTool } from './IEditorTool';
-import TrackManager from '../../managers/TrackManager';
-import { CommandStack } from '../CommandStack';
-import { DeleteTracksCommand } from '../../commands/DeleteTracksCommand';
-import { SelectionManager } from '../SelectionManager';
+import type TrackManager from '../../managers/TrackManager';
+import type { CommandStack } from '../CommandStack';
+import type { SelectionManager } from '../SelectionManager';
 import { EventBus } from '../../services/EventBus';
+import { CONSTRUCTION_ECONOMY_LOCK_REASON } from '../../ui/EditorToolbar';
 
 /**
- * EraserTool – click to delete the nearest track within range.
+ * Compatibility shell retained until deletion can refund paid construction
+ * value through an economy-aware command.
  */
 export class EraserTool implements IEditorTool {
-  private scene: Phaser.Scene;
-  private trackManager: TrackManager;
-  private commandStack: CommandStack;
-  private selectionManager: SelectionManager;
-
   constructor(
-    scene: Phaser.Scene,
-    trackManager: TrackManager,
-    commandStack: CommandStack,
-    selectionManager: SelectionManager,
-  ) {
-    this.scene = scene;
-    this.trackManager = trackManager;
-    this.commandStack = commandStack;
-    this.selectionManager = selectionManager;
-  }
+    _scene: Phaser.Scene,
+    _trackManager: TrackManager,
+    _commandStack: CommandStack,
+    _selectionManager: SelectionManager,
+  ) {}
 
-  activate(): void {}
+  activate(): void {
+    this.reportLocked();
+  }
   deactivate(): void {}
   cancel(): void {}
   wantsPointerButton(button: number): boolean {
-    return button === 0; // Only left button
+    return button === 0;
   }
-
-  onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
-    const track = this.trackManager.getClosestTrack({ x: worldX, y: worldY }, 80);
-    if (!track) return;
-    const uuid = track.getUUID();
-    const cmd = new DeleteTracksCommand(this.trackManager, this.scene, [uuid]);
-    this.commandStack.push(cmd);
-    this.selectionManager.clearSelection();
-    EventBus.emit('track:removed', { trackUUID: uuid });
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+  onPointerDown(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {
+    this.reportLocked();
   }
-
   onPointerMove(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {}
   onPointerUp(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {}
   onKeyDown(_event: KeyboardEvent): void {}
   update(_delta: number): void {}
   destroy(): void {}
+
+  private reportLocked(): void {
+    EventBus.emit('ui:toast', {
+      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+      type: 'info',
+    });
+  }
 }

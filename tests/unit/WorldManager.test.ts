@@ -7,6 +7,7 @@ import { SaveService } from '../../src/services/SaveService';
 import { createEmptyWorld } from '../../src/config/WorldData';
 import type { TrackDef } from '../../src/config/WorldData';
 import { EventBus } from '../../src/services/EventBus';
+import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 
 function makeTrackDef(
   uuid: string,
@@ -74,15 +75,16 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 2 with one authoritative generation configuration', () => {
+    it('creates schema 3 with deterministic company cash from the authoritative difficulty', () => {
       const w = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(2);
+      expect(w.schemaVersion).toBe(3);
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
         biome: 'alpine',
         constructionDifficultyId: 'standard',
       });
+      expect(w.company).toEqual({ cash: STANDARD_STARTING_CASH });
       expect(w).not.toHaveProperty('seed');
       expect(w).not.toHaveProperty('terrainSeed');
       expect(w).not.toHaveProperty('biome');
@@ -133,7 +135,7 @@ describe('WorldManager', () => {
     });
 
     it('clears a stale active world when the requested save is incompatible', () => {
-      const incompatible = { ...createEmptyWorld('Old'), schemaVersion: 1 };
+      const incompatible = { ...createEmptyWorld('Old'), schemaVersion: 2 };
       localStorage.setItem(
         'rail-sim-worlds',
         JSON.stringify({ [incompatible.id]: incompatible }),

@@ -28,7 +28,7 @@ describe('EditorToolbar lifecycle', () => {
     expect(scene.add.container).not.toHaveBeenCalled();
   });
 
-  it.each(['generator', 'completer', 'junction'] as const)(
+  it.each(['generator', 'completer', 'junction', 'place-track', 'eraser'] as const)(
     'refuses disabled %s selection with the engineering-lock reason',
     (tool) => {
       const scene = makeScene();
@@ -39,7 +39,7 @@ describe('EditorToolbar lifecycle', () => {
 
       expect(toolbar.currentTool).toBe('none');
       expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
-        message: expect.stringContaining('engineering analysis'),
+        message: expect.stringMatching(/engineering analysis|economy-aware/),
         type: 'info',
       });
       emitSpy.mockRestore();

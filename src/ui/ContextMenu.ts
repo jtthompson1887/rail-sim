@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
-import { CONSTRUCTION_ANALYSIS_LOCK_REASON } from './EditorToolbar';
+import {
+  CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  CONSTRUCTION_ECONOMY_LOCK_REASON,
+} from './EditorToolbar';
 
 export interface MenuItem {
   label: string;
@@ -167,9 +170,14 @@ export function buildTrackContextItems(
   }
 
   items.push({
-    label: `🗑 Delete (${selectedUUIDs.length})`,
-    color: '#ff8080',
-    action: () => onDelete(selectedUUIDs),
+    label: 'Deletion requires an economy-aware command',
+    action: () => {
+      void onDelete;
+      EventBus.emit('ui:toast', {
+        message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+        type: 'info',
+      });
+    },
   });
 
   return items;

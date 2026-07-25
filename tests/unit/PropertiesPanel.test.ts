@@ -122,5 +122,9 @@ describe('PropertiesPanel', () => {
     expect((panel as any).tunnelBtnText.setText).toHaveBeenCalledWith(
       expect.stringContaining('analysis'),
     );
+    expect((panel as any).deleteBtn.disableInteractive).toHaveBeenCalled();
+    expect((panel as any).deleteBtnText.setText).toHaveBeenCalledWith(
+      expect.stringContaining('Deletion'),
+    );
   });
 });

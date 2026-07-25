@@ -17,11 +17,15 @@ export type CreateTool =
 
 export const CONSTRUCTION_ANALYSIS_LOCK_REASON =
   'Unavailable until this tool routes through construction engineering analysis.';
+export const CONSTRUCTION_ECONOMY_LOCK_REASON =
+  'Unavailable until this action uses an economy-aware construction command.';
 
 const DISABLED_CONSTRUCTION_TOOLS: Partial<Record<CreateTool, string>> = {
   completer: CONSTRUCTION_ANALYSIS_LOCK_REASON,
   junction: CONSTRUCTION_ANALYSIS_LOCK_REASON,
   generator: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  'place-track': CONSTRUCTION_ECONOMY_LOCK_REASON,
+  eraser: CONSTRUCTION_ECONOMY_LOCK_REASON,
 };
 
 export function disabledConstructionToolReason(tool: CreateTool): string | null {

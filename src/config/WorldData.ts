@@ -1,5 +1,6 @@
 import type { VehicleType } from './VehicleTypes';
 import type { TrackGeometryDef } from '../systems/TrackGeometry';
+import { startingCashForDifficulty } from './ConstructionConfig';
 
 export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
 
@@ -94,7 +95,11 @@ export interface SceneryObjectDef {
 /** Biome types that control terrain colour palette and scenery asset weights. */
 export type BiomeType = 'temperate' | 'alpine' | 'arid' | 'tropical';
 
-export type ConstructionDifficultyId = 'relaxed' | 'standard' | 'challenging';
+export type ConstructionDifficultyId = 'standard';
+
+export interface CompanyConstructionState {
+  cash: number;
+}
 
 export interface WorldGenerationConfigDef {
   generationConfigVersion: 1;
@@ -105,10 +110,11 @@ export interface WorldGenerationConfigDef {
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
+  company: CompanyConstructionState;
   tracks: TrackDef[];
   junctions: JunctionDef[];
   stations: WorldStationDef[];
@@ -126,16 +132,18 @@ export interface WorldData {
 export function createEmptyWorld(name: string, seed?: string, biome: BiomeType = 'temperate'): WorldData {
   const now = Date.now();
   const resolvedSeed = seed ?? now.toString();
+  const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
       generationConfigVersion: 1,
       seed: resolvedSeed,
       biome,
-      constructionDifficultyId: 'standard',
+      constructionDifficultyId,
     },
+    company: { cash: startingCashForDifficulty(constructionDifficultyId) },
     tracks: [],
     junctions: [],
     stations: [],
@@ -347,7 +355,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 2) {
+  if (raw.schemaVersion !== 3) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -358,7 +366,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
 
   const generationConfig = raw.generationConfig;
   const biomes: BiomeType[] = ['temperate', 'alpine', 'arid', 'tropical'];
-  const difficulties: ConstructionDifficultyId[] = ['relaxed', 'standard', 'challenging'];
+  const difficulties: ConstructionDifficultyId[] = ['standard'];
   if (!isRecord(generationConfig)
     || generationConfig.generationConfigVersion !== 1
     || typeof generationConfig.seed !== 'string'
@@ -367,6 +375,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     return incompatible(raw, 'invalid generation configuration.');
   }
 
+  const company = raw.company;
   const metadata = raw.metadata;
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
@@ -376,10 +385,14 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !Array.isArray(raw.trains) || !raw.trains.every(isTrain)
     || !Array.isArray(raw.scenarios) || !raw.scenarios.every(isScenario)
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
+    || !isRecord(company)
+    || Object.keys(company).length !== 1
+    || !Number.isSafeInteger(company.cash)
+    || (company.cash as number) < 0
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 2.');
+    return incompatible(raw, 'data does not match schema version 3.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

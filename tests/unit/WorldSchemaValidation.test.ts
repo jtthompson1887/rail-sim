@@ -19,7 +19,7 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('accepts schema 2 without converting or copying it', () => {
+  it('accepts schema 3 without converting or copying it', () => {
     const world = currentWorld();
     const result = validateWorldData(world);
     expect(result).toEqual({ compatible: true, world });
@@ -29,11 +29,27 @@ describe('world schema validation', () => {
   it.each([
     ['missing', undefined],
     ['legacy', 1],
-    ['unsupported', 3],
+    ['engineering-only', 2],
+    ['unsupported', 4],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
     expect(result).toEqual(expect.objectContaining({
+      compatible: false,
+      action: INCOMPATIBLE_WORLD_ACTION,
+    }));
+  });
+
+  it.each([
+    ['missing company', (world: any) => { delete world.company; }],
+    ['fractional cash', (world: any) => { world.company.cash = 1.5; }],
+    ['negative cash', (world: any) => { world.company.cash = -1; }],
+    ['unsafe cash', (world: any) => { world.company.cash = Number.MAX_SAFE_INTEGER + 1; }],
+    ['extra company state', (world: any) => { world.company.ledger = []; }],
+  ])('rejects schema 3 with %s', (_label, mutate) => {
+    const raw = currentWorld() as any;
+    mutate(raw);
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
       compatible: false,
       action: INCOMPATIBLE_WORLD_ACTION,
     }));
@@ -75,7 +91,7 @@ describe('world schema validation', () => {
     ['verticalProfile'],
     ['structures'],
     ['paidBuildCost'],
-  ])('rejects a schema-2 track missing required %s', (field) => {
+  ])('rejects a schema-3 track missing required %s', (field) => {
     const raw = currentWorld() as any;
     const track: any = {
       geometryVersion: 1,

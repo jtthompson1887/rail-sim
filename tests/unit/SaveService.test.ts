@@ -7,7 +7,7 @@ import type { WorldData } from '../../src/config/WorldData';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id,
     name,
     generationConfig: {
@@ -16,6 +16,7 @@ function makeWorld(id: string, name: string, seed: string, timestamp: number): W
       biome: 'temperate',
       constructionDifficultyId: 'standard',
     },
+    company: { cash: 876_543 },
     tracks: [],
     junctions: [],
     stations: [],
@@ -29,6 +30,35 @@ function makeWorld(id: string, name: string, seed: string, timestamp: number): W
 describe('SaveService', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it('preserves schema-3 company cash and paid track value exactly', () => {
+    const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
+    world.tracks.push({
+      geometryVersion: 1,
+      uuid: 'paid-track',
+      p0: { x: 0, y: 0 },
+      p1: { x: 1, y: 0 },
+      p2: { x: 2, y: 0 },
+      p3: { x: 3, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 12_345,
+    });
+
+    expect(SaveService.saveWorld(world)).toBe(true);
+    const loaded = SaveService.loadWorld(world.id)!;
+    expect(loaded.company.cash).toBe(876_543);
+    expect(loaded.tracks[0].paidBuildCost).toBe(12_345);
   });
 
   describe('load()', () => {

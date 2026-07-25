@@ -5,7 +5,10 @@ import { scalePx, responsiveFontSize } from '../utils/responsive';
 import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
 import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
-import { CONSTRUCTION_ANALYSIS_LOCK_REASON } from './EditorToolbar';
+import {
+  CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  CONSTRUCTION_ECONOMY_LOCK_REASON,
+} from './EditorToolbar';
 
 /** Generator configuration exposed to the caller via getGeneratorParams(). */
 export interface GeneratorParams {
@@ -340,8 +343,9 @@ export class PropertiesPanel {
     }
 
     this.slideIn();
-    this.deleteBtn.setVisible(true).setInteractive({ useHandCursor: true });
+    this.deleteBtn.setVisible(true).disableInteractive();
     this.deleteBtnText.setVisible(true);
+    this.deleteBtnText.setText('Deletion locked');
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
     const fs = responsiveFontSize(11, width, height, 9, 11);
@@ -455,15 +459,18 @@ export class PropertiesPanel {
       ...this.vehicleTypeObjects,
     ];
     for (const object of objects) {
-      if (!enabled || object === this.tunnelBtn) object.disableInteractive();
+      if (!enabled || object === this.tunnelBtn || object === this.deleteBtn) {
+        object.disableInteractive();
+      }
       else object.setInteractive();
     }
   }
 
   private onDelete(): void {
-    if (this.onDeleteCallback) {
-      this.onDeleteCallback(this.selectionManager.selectedUUIDs);
-    }
+    EventBus.emit('ui:toast', {
+      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+      type: 'info',
+    });
   }
 
   destroy(): void {

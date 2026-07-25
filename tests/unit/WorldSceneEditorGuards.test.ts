@@ -24,6 +24,22 @@ describe('WorldScene disabled construction bypass guards', () => {
     },
   );
 
+  it.each(['place-track', 'eraser'] as const)(
+    'ignores programmatic economy-bypassing %s activation',
+    (tool) => {
+      const scene = new WorldScene();
+      const activate = jest.fn();
+      (scene as any).toolRegistry = new Map([[tool, { activate }]]);
+      (scene as any).cameraController = { setInputLockOwner: jest.fn() };
+      GameStateManager.enterCreate('test-world');
+
+      (scene as any).toolChangedHandler({ tool });
+
+      expect(activate).not.toHaveBeenCalled();
+      expect((scene as any).activeEditorTool).toBeNull();
+    },
+  );
+
   it.each(['KeyG', 'KeyD', 'KeyJ'])(
     'does not emit a toolbar-selection event for disabled shortcut %s',
     (code) => {
@@ -39,6 +55,47 @@ describe('WorldScene disabled construction bypass guards', () => {
       emitSpy.mockRestore();
     },
   );
+
+  it.each(['KeyP', 'KeyE', 'Delete'])(
+    'does not mutate or select a cash-bypassing action for %s',
+    (code) => {
+      const scene = new WorldScene();
+      const push = jest.fn();
+      (scene as any).commandStack = { push };
+      (scene as any).selectionManager = {
+        selectedUUIDs: ['paid-track'],
+        clearSelection: jest.fn(),
+      };
+      const emitSpy = jest.spyOn(EventBus, 'emit');
+      GameStateManager.enterCreate('test-world');
+
+      (scene as any).handleKeyDown({ code, ctrlKey: false, altKey: false });
+
+      expect(push).not.toHaveBeenCalled();
+      expect(emitSpy.mock.calls.some(
+        ([event, payload]) => event === 'ui:toolbar-select-tool'
+          && (((payload as any).tool === 'place-track') || ((payload as any).tool === 'eraser')),
+      )).toBe(false);
+      emitSpy.mockRestore();
+    },
+  );
+
+  it('rejects editor delete events and the direct scene deletion path', () => {
+    const scene = new WorldScene();
+    const push = jest.fn();
+    (scene as any).commandStack = { push };
+    (scene as any).selectionManager = {
+      selectedUUIDs: ['paid-track'],
+      clearSelection: jest.fn(),
+    };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).editorDeleteHandler({ uuids: ['paid-track'] });
+    (scene as any).deleteSelectedTracks(['paid-track']);
+
+    expect(push).not.toHaveBeenCalled();
+    expect((scene as any).selectionManager.clearSelection).not.toHaveBeenCalled();
+  });
 
   it('refuses generator run events even in create mode', () => {
     const scene = new WorldScene();
