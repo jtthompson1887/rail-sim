@@ -35,6 +35,7 @@ function proposal(
     minimumRadius: Infinity,
     maximumGradePercent: valid ? 2 : 14,
     maximumGradeT: 0.5,
+    maximumGradeDistance: 150,
     structures: [{
       type: 'surface',
       startT: 0,
@@ -42,6 +43,13 @@ function proposal(
       startElevation: 0,
       endElevation: 0,
     }],
+    structureLengths: {
+      surface: 300,
+      cut: 0,
+      fill: 0,
+      bridge: 0,
+      tunnel: 0,
+    },
     costs: {
       track: 300,
       earthworks: 0,
@@ -82,6 +90,8 @@ function preview(valid = true): ConstructionPreview {
     predictedConnections: [],
     topologyCost: 0,
     totalCost: 300,
+    cashBefore: 10_000,
+    cashAfter: 9_700,
     affordable: true,
     message: analyzed.remedy,
   };
@@ -142,6 +152,37 @@ function makeHarness(options: {
 }
 
 describe('PlaceTrackTool live construction workflow', () => {
+  it('publishes one immutable authoritative decision DTO with exact finances', () => {
+    const analyzed = preview() as any;
+    analyzed.topologyCost = 2_500;
+    analyzed.totalCost = 2_800;
+    analyzed.quote.topologyCost = 2_500;
+    analyzed.quote.totalCost = 2_800;
+    analyzed.cashAfter = 7_200;
+    const harness = makeHarness({ analyzed });
+
+    harness.tool.onPointerDown(0, 0, { ...pointer(), id: 1 });
+    harness.tool.onPointerMove(300, 0, { ...pointer(), id: 1 });
+    harness.tool.onPointerUp(300, 0, { ...pointer(), id: 1 });
+
+    expect(harness.tool.previewModel).toEqual(expect.objectContaining({
+      engineeringSubtotal: 300,
+      topologyCost: 2_500,
+      totalCost: 2_800,
+      cashBefore: 10_000,
+      cashAfter: 7_200,
+      structureLengths: {
+        surface: 300,
+        cut: 0,
+        fill: 0,
+        bridge: 0,
+        tunnel: 0,
+      },
+    }));
+    expect(Object.isFrozen(harness.tool.previewModel)).toBe(true);
+    expect(Object.isFrozen(harness.tool.previewModel!.structureLengths)).toBe(true);
+  });
+
   it('moves idle → dragging → review and caches unchanged geometry/config input', () => {
     const harness = makeHarness();
 
@@ -273,6 +314,23 @@ describe('PlaceTrackTool live construction workflow', () => {
     }));
   });
 
+  it('publishes the construction remedy only in the decision DTO', () => {
+    const harness = makeHarness({ analyzed: preview(false) });
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    harness.tool.onPointerDown(0, 0, pointer());
+    harness.tool.onPointerMove(300, 0, pointer());
+
+    const validationEvents = emit.mock.calls
+      .filter(([event]) => event === 'ui:validation-hint');
+    expect(validationEvents[validationEvents.length - 1]?.[1]).toEqual({
+      state: 'ok',
+      message: '',
+    });
+    expect(harness.tool.previewModel?.message).toContain('Too steep');
+    emit.mockRestore();
+  });
+
   it('right-click steps review back to dragging and Escape cancels to idle', () => {
     const harness = makeHarness();
     harness.tool.onPointerDown(0, 0, pointer());
@@ -367,8 +425,8 @@ describe('PlaceTrackTool live construction workflow', () => {
     const startingCash = world.company.cash;
 
     tool.onPointerDown(0, 0, pointer());
-    tool.onPointerMove(300, 0, pointer());
-    tool.onPointerUp(300, 0, pointer());
+    tool.onPointerMove(300, 100, pointer());
+    tool.onPointerUp(300, 100, pointer());
     const displayed = tool.previewModel!;
     expect(trackManager.tracks).toHaveLength(0);
     expect(world.tracks).toHaveLength(0);
@@ -383,8 +441,8 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(world.company.cash).toBe(startingCash - displayed.totalCost);
 
     const firstGeometry = world.tracks[0];
-    tool.onPointerMove(600, 0, pointer());
-    tool.onPointerUp(600, 0, pointer());
+    tool.onPointerMove(600, 200, pointer());
+    tool.onPointerUp(600, 200, pointer());
     const chainedGeometry = tool.previewModel!.proposal.geometry;
     const incoming = {
       x: firstGeometry.p3.x - firstGeometry.p2.x,
@@ -395,6 +453,15 @@ describe('PlaceTrackTool live construction workflow', () => {
       y: chainedGeometry.p1.y - chainedGeometry.p0.y,
     };
     expect(chainedGeometry.p0).toEqual(firstGeometry.p3);
+    expect(tool.previewModel).toEqual(expect.objectContaining({
+      canConfirm: true,
+      topologyCost: 2_500,
+      predictedConnections: [expect.objectContaining({
+        existingTrackUUID: firstGeometry.uuid,
+        existingEndpoint: 'end',
+        newEndpoint: 'start',
+      })],
+    }));
     expect(incoming.x * outgoing.y - incoming.y * outgoing.x).toBeCloseTo(0);
     expect(incoming.x * outgoing.x + incoming.y * outgoing.y).toBeGreaterThan(0);
 

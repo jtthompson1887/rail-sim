@@ -7,8 +7,21 @@ import type { SelectionManager } from '../systems/SelectionManager';
 import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
 import {
   CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  CONSTRUCTION_ECONOMY_LOCK_REASON,
 } from './EditorToolbar';
+
+export interface DeleteTracksIntent {
+  uuids: string[];
+  expectedRefund: number;
+  expectedRevision: number;
+}
+
+export interface DeletionReviewDTO {
+  readonly uuids: ReadonlyArray<string>;
+  readonly expectedRefund: number;
+  readonly expectedRevision: number;
+  readonly available: boolean;
+  readonly blockingReason: string;
+}
 
 /** Generator configuration exposed to the caller via getGeneratorParams(). */
 export interface GeneratorParams {
@@ -69,9 +82,13 @@ export class PropertiesPanel {
   /** Buttons created for vehicle-type selection. */
   private vehicleTypeObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text)[] = [];
 
-  private onDeleteCallback: ((uuids: string[]) => void) | null = null;
+  private onDeleteCallback: ((intent: DeleteTracksIntent) => void) | null = null;
+  private deleteArmed = false;
+  private armedDelete: DeleteTracksIntent | null = null;
+  private deletionReview: DeletionReviewDTO | null = null;
 
   private readonly selectionChangedHandler = (data: { uuids: string[] }) => {
+    this.disarmDelete();
     if (!this.editorEnabled) return;
     if (this.currentActiveTool !== 'generator' && this.currentActiveTool !== 'place-vehicle') {
       this.refresh(data.uuids);
@@ -79,12 +96,15 @@ export class PropertiesPanel {
   };
 
   private readonly toolChangedHandler = (data: { tool: string }) => {
+    this.disarmDelete();
     this.currentActiveTool = data.tool;
     if (!this.editorEnabled) return;
     if (data.tool === 'generator') {
       this.showGeneratorParams();
     } else if (data.tool === 'place-vehicle') {
       this.showVehicleParams();
+    } else if (data.tool === 'place-track') {
+      this.slideOut();
     } else if (this.selectionManager.selectedUUIDs.length === 0) {
       this.slideOut();
     } else {
@@ -92,11 +112,24 @@ export class PropertiesPanel {
     }
   };
 
+  private readonly deletionReviewHandler = (review: DeletionReviewDTO) => {
+    this.disarmDelete();
+    this.deletionReview = Object.freeze({
+      ...review,
+      uuids: Object.freeze([...review.uuids]),
+    });
+    if (!this.editorEnabled
+      || this.currentActiveTool === 'generator'
+      || this.currentActiveTool === 'place-vehicle'
+      || this.currentActiveTool === 'place-track') return;
+    this.refresh(this.selectionManager.selectedUUIDs);
+  };
+
   constructor(
     scene: Phaser.Scene,
     trackManager: TrackManager,
     selectionManager: SelectionManager,
-    onDelete: (uuids: string[]) => void,
+    onDelete: (intent: DeleteTracksIntent) => void,
   ) {
     this.scene = scene;
     this.trackManager = trackManager;
@@ -107,9 +140,11 @@ export class PropertiesPanel {
     this.build();
     EventBus.on('selection:changed', this.selectionChangedHandler);
     EventBus.on('tool:changed', this.toolChangedHandler);
+    EventBus.on('ui:deletion-review', this.deletionReviewHandler);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('selection:changed', this.selectionChangedHandler);
       EventBus.off('tool:changed', this.toolChangedHandler);
+      EventBus.off('ui:deletion-review', this.deletionReviewHandler);
     });
   }
 
@@ -123,7 +158,16 @@ export class PropertiesPanel {
     return this.activeVehicleType;
   }
 
+  containsScreenPoint(x: number, y: number): boolean {
+    if (!this.editorEnabled || !this.isVisible) return false;
+    return x >= this.scene.scale.width - this.panelWidth
+      && x <= this.scene.scale.width
+      && y >= 0
+      && y <= this.scene.scale.height;
+  }
+
   setVisible(visible: boolean): void {
+    this.disarmDelete();
     this.editorEnabled = visible;
     this.container.setVisible(visible).setActive(visible);
     if (!visible) {
@@ -135,6 +179,8 @@ export class PropertiesPanel {
       this.showGeneratorParams();
     } else if (this.currentActiveTool === 'place-vehicle') {
       this.showVehicleParams();
+    } else if (this.currentActiveTool === 'place-track') {
+      this.slideOut();
     } else {
       this.refresh(this.selectionManager.selectedUUIDs);
     }
@@ -328,6 +374,7 @@ export class PropertiesPanel {
   // ── Selection properties UI ────────────────────────────────────────────────
 
   private refresh(uuids: string[]): void {
+    this.disarmDelete();
     this.clearLines();
     this.clearParamObjects();
     this.clearVehicleObjects();
@@ -343,9 +390,21 @@ export class PropertiesPanel {
     }
 
     this.slideIn();
-    this.deleteBtn.setVisible(true).disableInteractive();
+    const review = this.reviewFor(uuids);
+    this.deleteBtn.setVisible(true);
     this.deleteBtnText.setVisible(true);
-    this.deleteBtnText.setText('Deletion locked');
+    if (!review) {
+      this.deleteBtn.disableInteractive();
+      this.deleteBtnText.setText('Delete · Review unavailable');
+    } else if (!review.available) {
+      this.deleteBtn.disableInteractive();
+      this.deleteBtnText.setText(review.blockingReason);
+    } else {
+      this.deleteBtn.setInteractive({ useHandCursor: true });
+      this.deleteBtnText.setText(
+        `Delete · Refund £${review.expectedRefund.toLocaleString('en-GB')} (50%)`,
+      );
+    }
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
     const fs = responsiveFontSize(11, width, height, 9, 11);
@@ -367,6 +426,7 @@ export class PropertiesPanel {
         `Length: ${Math.round(length)}`,
         `Structures: ${structureSummary}`,
         `Paid build: ${track.paidBuildCost ?? 'unavailable'}`,
+        'Reshape unavailable — cost-delta quote required',
         `p0: (${Math.round(p0.x)}, ${Math.round(p0.y)})`,
         `p3: (${Math.round(p3.x)}, ${Math.round(p3.y)})`,
       ];
@@ -378,10 +438,8 @@ export class PropertiesPanel {
         this.lines.push(txt);
         y += 18;
       }
-      this.tunnelBtn.setVisible(true);
-      this.tunnelBtnText.setVisible(true);
-      this.tunnelBtn.disableInteractive();
-      this.tunnelBtnText.setText('Structures set by analysis');
+      this.tunnelBtn.setVisible(false);
+      this.tunnelBtnText.setVisible(false);
     } else {
       let totalLength = 0;
       for (const uuid of uuids) {
@@ -459,7 +517,10 @@ export class PropertiesPanel {
       ...this.vehicleTypeObjects,
     ];
     for (const object of objects) {
-      if (!enabled || object === this.tunnelBtn || object === this.deleteBtn) {
+      if (!enabled
+        || object === this.tunnelBtn
+        || (object === this.deleteBtn
+          && this.reviewFor(this.selectionManager.selectedUUIDs)?.available !== true)) {
         object.disableInteractive();
       }
       else object.setInteractive();
@@ -467,15 +528,54 @@ export class PropertiesPanel {
   }
 
   private onDelete(): void {
-    EventBus.emit('ui:toast', {
-      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
-      type: 'info',
-    });
+    const uuids = [...this.selectionManager.selectedUUIDs];
+    if (!this.editorEnabled || uuids.length === 0) return;
+    const review = this.reviewFor(uuids);
+    if (!review?.available) return;
+    const intent: DeleteTracksIntent = {
+      uuids,
+      expectedRefund: review.expectedRefund,
+      expectedRevision: review.expectedRevision,
+    };
+    if (!this.deleteArmed) {
+      this.deleteArmed = true;
+      this.armedDelete = intent;
+      this.deleteBtnText.setText(
+        `Confirm delete · Refund £${intent.expectedRefund.toLocaleString('en-GB')}`,
+      );
+      return;
+    }
+    const armed = this.armedDelete;
+    this.disarmDelete();
+    if (!armed
+      || armed.expectedRevision !== intent.expectedRevision
+      || armed.expectedRefund !== intent.expectedRefund
+      || armed.uuids.length !== intent.uuids.length
+      || armed.uuids.some((uuid, index) => uuid !== intent.uuids[index])) {
+      this.refresh(uuids);
+      return;
+    }
+    this.onDeleteCallback?.(intent);
+    this.refresh(uuids);
+  }
+
+  private reviewFor(uuids: ReadonlyArray<string>): DeletionReviewDTO | null {
+    const review = this.deletionReview;
+    if (!review
+      || review.uuids.length !== uuids.length
+      || review.uuids.some((uuid, index) => uuid !== uuids[index])) return null;
+    return review;
+  }
+
+  private disarmDelete(): void {
+    this.deleteArmed = false;
+    this.armedDelete = null;
   }
 
   destroy(): void {
     EventBus.off('selection:changed', this.selectionChangedHandler);
     EventBus.off('tool:changed', this.toolChangedHandler);
+    EventBus.off('ui:deletion-review', this.deletionReviewHandler);
     this.clearLines();
     this.clearParamObjects();
     this.clearVehicleObjects();

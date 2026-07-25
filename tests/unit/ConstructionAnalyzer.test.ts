@@ -92,6 +92,8 @@ describe('ConstructionAnalyzer', () => {
       ConstructionConfig.MAX_GRADE_PERCENT,
     );
     expect(proposal.maximumGradeT).toBeGreaterThan(0);
+    expect(proposal.maximumGradeDistance).toBeGreaterThan(0);
+    expect(proposal.maximumGradeDistance).toBeLessThanOrEqual(proposal.length);
     expect(proposal.remedy).toBe(
       'Too steep here — move the endpoint downhill or use a shorter section.',
     );
@@ -209,6 +211,15 @@ describe('ConstructionAnalyzer', () => {
         10,
       );
     }
+    expect(proposal.structureLengths.surface).toBeGreaterThan(0);
+    expect(proposal.structureLengths.bridge).toBeGreaterThan(0);
+    expect(proposal.structureLengths.tunnel).toBeGreaterThan(0);
+    expect(proposal.structureLengths.cut).toBe(0);
+    expect(proposal.structureLengths.fill).toBe(0);
+    expect(Object.values(proposal.structureLengths).reduce(
+      (sum, length) => sum + length,
+      0,
+    )).toBeCloseTo(proposal.length, 8);
   });
 
   it('calculates exact component summation and monotonic construction costs', () => {

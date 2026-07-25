@@ -143,6 +143,24 @@ describe('WorldScene disabled construction bypass guards', () => {
     emitSpy.mockRestore();
   });
 
+  it('ignores gameplay shortcuts originating from an interactive DOM control', () => {
+    const scene = new WorldScene();
+    const confirm = jest.fn();
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = { onKeyDown: confirm };
+    GameStateManager.enterCreate('test-world');
+    const button = document.createElement('button');
+
+    (scene as any).handleKeyDown({
+      code: 'Enter',
+      ctrlKey: false,
+      altKey: false,
+      target: button,
+    });
+
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it('cancels pending construction before undo changes the authority revision', () => {
     const scene = new WorldScene();
     const cancel = jest.fn();
@@ -207,6 +225,77 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(onPointerDown).toHaveBeenCalledTimes(1);
   });
 
+  it('does not leak an inspector or HUD click into the active construction tool', () => {
+    const scene = new WorldScene();
+    const onPointerDown = jest.fn();
+    (scene as any).activeEditorTool = { onPointerDown };
+    (scene as any).inputManager = {
+      toWorldPoint: jest.fn().mockReturnValue({ x: 712, y: -84 }),
+    };
+    (scene as any).scene = {
+      get: jest.fn().mockReturnValue({
+        containsScreenPoint: jest.fn().mockReturnValue(true),
+      }),
+    };
+    const pointer = {
+      x: 1800,
+      y: 760,
+      button: 0,
+      rightButtonDown: () => false,
+    };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handlePointerDown(pointer);
+
+    expect(onPointerDown).not.toHaveBeenCalled();
+    expect((scene as any).inputManager.toWorldPoint).not.toHaveBeenCalled();
+  });
+
+  it('routes inspector intents only to the active authoritative Place tool', () => {
+    const scene = new WorldScene();
+    const tool = {
+      confirm: jest.fn(),
+      backstep: jest.fn(),
+      cancel: jest.fn(),
+    };
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = tool;
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).constructionIntentHandler({ action: 'confirm' });
+    (scene as any).constructionIntentHandler({ action: 'backstep' });
+    (scene as any).constructionIntentHandler({ action: 'cancel' });
+
+    expect(tool.confirm).toHaveBeenCalledTimes(1);
+    expect(tool.backstep).toHaveBeenCalledTimes(1);
+    expect(tool.cancel).toHaveBeenCalledTimes(1);
+
+    (scene as any).activeTool = 'select';
+    (scene as any).constructionIntentHandler({ action: 'confirm' });
+    expect(tool.confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes authoritative cash after command push, undo, and redo changes', () => {
+    const scene = new WorldScene();
+    WorldManager.createNew('HUD authority', 'quote-seed');
+    (scene as any).commandStack = {};
+    (scene as any).selectionManager = { selectedUUIDs: [] };
+    const emit = jest.spyOn(EventBus, 'emit');
+    (scene as any).bindCommandStackReporting();
+
+    for (const cash of [997_200, 1_000_000, 997_200]) {
+      WorldManager.world!.company.cash = cash;
+      (scene as any).commandStack.onChange(true, true);
+      expect(emit).toHaveBeenCalledWith('ui:company-state', {
+        cash,
+        saveState: 'unsaved',
+      });
+    }
+
+    emit.mockRestore();
+    WorldManager.reset();
+  });
+
   it('forwards the canceling pointer to pointer-aware construction tools', () => {
     const scene = new WorldScene();
     const onPointerCancel = jest.fn();
@@ -221,9 +310,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 
-  it('rejects editor delete events and the direct scene deletion path', () => {
+  it('rejects stale deletion intent with zero command or selection mutation', () => {
     const scene = new WorldScene();
     const push = jest.fn();
+    WorldManager.createNew('Delete authority', 'quote-seed');
     (scene as any).commandStack = { push };
     (scene as any).selectionManager = {
       selectedUUIDs: ['paid-track'],
@@ -231,11 +321,129 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     GameStateManager.enterCreate('test-world');
 
-    (scene as any).editorDeleteHandler({ uuids: ['paid-track'] });
-    (scene as any).deleteSelectedTracks(['paid-track']);
+    (scene as any).editorDeleteHandler({
+      uuids: ['paid-track'],
+      expectedRefund: 50,
+      expectedRevision: WorldManager.world!.revision + 1,
+    });
 
     expect(push).not.toHaveBeenCalled();
     expect((scene as any).selectionManager.clearSelection).not.toHaveBeenCalled();
+    WorldManager.reset();
+  });
+
+  it('pushes an exactly revalidated deletion through CommandStack and clears selection', () => {
+    const scene = new WorldScene();
+    const world = WorldManager.createNew('Delete authority', 'quote-seed');
+    world.tracks.push({
+      uuid: 'paid-track',
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 101,
+    });
+    const push = jest.fn().mockReturnValue(true);
+    const clearSelection = jest.fn();
+    (scene as any).commandStack = { push };
+    (scene as any).trackManager = {
+      captureTopology: jest.fn().mockReturnValue({
+        connections: [],
+        junctions: [],
+      }),
+      getJunction: jest.fn(),
+    };
+    (scene as any).selectionManager = {
+      selectedUUIDs: ['paid-track'],
+      clearSelection,
+    };
+    GameStateManager.enterCreate(world.id);
+
+    (scene as any).editorDeleteHandler({
+      uuids: ['paid-track'],
+      expectedRefund: 50,
+      expectedRevision: world.revision,
+    });
+
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({
+      description: 'Delete track(s)',
+    }));
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+    WorldManager.reset();
+  });
+
+  it('publishes the persisted refund and a specific station dependency reason', () => {
+    const scene = new WorldScene();
+    const world = WorldManager.createNew('Delete review', 'quote-seed');
+    world.tracks.push({
+      uuid: 'paid-track',
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 101,
+    });
+    world.stations.push({
+      id: 'station-1',
+      name: 'Station',
+      trackUUID: 'paid-track',
+      trackT: 0.5,
+      passengerSpawnRate: 1,
+    });
+    (scene as any).selectionManager = {
+      selectedUUIDs: ['paid-track'],
+      clearSelection: jest.fn(),
+    };
+    (scene as any).commandStack = { push: jest.fn() };
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate(world.id);
+
+    (scene as any).publishDeletionReview(['paid-track']);
+    expect(emit).toHaveBeenCalledWith('ui:deletion-review', {
+      uuids: ['paid-track'],
+      expectedRefund: 50,
+      expectedRevision: world.revision,
+      available: false,
+      blockingReason: expect.stringContaining('Remove stations'),
+    });
+
+    (scene as any).editorDeleteHandler({
+      uuids: ['paid-track'],
+      expectedRefund: 50,
+      expectedRevision: world.revision,
+    });
+    expect((scene as any).commandStack.push).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: expect.stringContaining('Remove stations'),
+      type: 'warning',
+    });
+
+    emit.mockRestore();
+    WorldManager.reset();
   });
 
   it('refuses generator run events even in create mode', () => {
@@ -265,6 +473,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toolbar-save-state',
       { state: 'unsaved' },
+    );
+    expect(emitSpy).toHaveBeenCalledWith(
+      'ui:company-state',
+      { cash: expect.any(Number), saveState: 'unsaved' },
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toast',

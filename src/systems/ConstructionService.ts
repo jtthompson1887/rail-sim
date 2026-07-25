@@ -99,6 +99,8 @@ export interface ConstructionPreview {
   readonly predictedConnections: ReadonlyArray<PredictedEndpointConnectionDef>;
   readonly topologyCost: number;
   readonly totalCost: number;
+  readonly cashBefore: number;
+  readonly cashAfter: number;
   readonly affordable: boolean;
   readonly message: string;
 }
@@ -286,6 +288,8 @@ export class ConstructionService {
       predictedConnections,
       topologyCost,
       totalCost,
+      cashBefore: world.company.cash,
+      cashAfter: world.company.cash - totalCost,
       affordable,
       message,
     });

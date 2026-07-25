@@ -17,7 +17,12 @@ export interface ConstructionPreviewModel {
   readonly phase: ConstructionToolPhase;
   readonly proposal: ConstructionProposal;
   readonly predictedConnections: ReadonlyArray<PredictedEndpointConnectionDef>;
+  readonly engineeringSubtotal: number;
+  readonly topologyCost: number;
   readonly totalCost: number;
+  readonly cashBefore: number;
+  readonly cashAfter: number;
+  readonly structureLengths: Readonly<Record<StructureType, number>>;
   readonly affordable: boolean;
   readonly canConfirm: boolean;
   readonly stale: boolean;

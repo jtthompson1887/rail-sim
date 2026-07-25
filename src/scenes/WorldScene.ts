@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import TrackManager from '../managers/TrackManager';
+import type { TrackTopologySnapshot } from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
 import { GameStateManager } from '../managers/GameStateManager';
@@ -34,6 +35,32 @@ import type { IEditorTool } from '../systems/tools/IEditorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
 import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
+import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
+import { demolitionRefund } from '../systems/ConstructionEconomy';
+import type {
+  DeletionReviewDTO,
+  DeleteTracksIntent,
+} from '../ui/PropertiesPanel';
+import { clonePlainData } from '../utils/PlainData';
+import type { WorldData } from '../config/WorldData';
+import type {
+  ConstructionPreviewModel,
+  ConstructionToolPhase,
+} from '../ui/ConstructionPreviewOverlay';
+
+interface ConstructionE2ESnapshot {
+  readonly phase: ConstructionToolPhase;
+  readonly preview: ConstructionPreviewModel | null;
+  readonly camera: Readonly<{
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    width: number;
+    height: number;
+  }>;
+  readonly world: WorldData | null;
+  readonly topology: TrackTopologySnapshot;
+}
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -42,11 +69,38 @@ declare global {
     __railSimWorldDerailCount: number;
     __railSimTrainManager: TrainManager | undefined;
     __railSimTrackManager: TrackManager | undefined;
+    __railSimConstructionSnapshot:
+      (() => ConstructionE2ESnapshot) | undefined;
   }
 }
 
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
+
+function deletionBlockingReason(
+  world: WorldData,
+  uuids: ReadonlyArray<string>,
+): string {
+  const selected = new Set(uuids);
+  const stationIds = new Set(
+    world.stations
+      .filter((station) => selected.has(station.trackUUID))
+      .map((station) => station.id),
+  );
+  if (world.scenarios.some((scenario) => (
+    scenario.targetStationId !== undefined
+    && stationIds.has(scenario.targetStationId)
+  ))) {
+    return 'Deletion blocked · A scenario depends on a station here';
+  }
+  if (stationIds.size > 0) {
+    return 'Deletion blocked · Remove stations from these tracks first';
+  }
+  if (world.trains.some((train) => selected.has(train.trackUUID))) {
+    return 'Deletion blocked · Move trains off these tracks first';
+  }
+  return '';
+}
 
 /**
  * WorldScene – the persistent main scene for the sandbox world.
@@ -141,10 +195,69 @@ export default class WorldScene extends Phaser.Scene {
     }
   };
 
-  private readonly editorDeleteHandler = ({ uuids }: { uuids: string[] }) => {
+  private readonly editorDeleteHandler = (intent: DeleteTracksIntent) => {
     if (GameStateManager.worldMode !== 'create') return;
-    void uuids;
-    this.reportEconomyLock();
+    const world = WorldManager.world;
+    const selected = this.selectionManager.selectedUUIDs;
+    const exactSelection = selected.length === intent.uuids.length
+      && selected.every((uuid, index) => uuid === intent.uuids[index]);
+    const refund = intent.uuids.reduce((sum, uuid) => {
+      const track = world?.tracks.find((candidate) => candidate.uuid === uuid);
+      return track ? sum + demolitionRefund(track.paidBuildCost) : Number.NaN;
+    }, 0);
+    if (!world
+      || intent.expectedRevision !== world.revision
+      || !exactSelection
+      || !Number.isSafeInteger(refund)
+      || refund !== intent.expectedRefund) {
+      EventBus.emit('ui:toast', {
+        message: 'Deletion changed — review the refund again.',
+        type: 'warning',
+      });
+      this.publishDeletionReview(selected);
+      return;
+    }
+    const blockingReason = deletionBlockingReason(world, intent.uuids);
+    if (blockingReason) {
+      EventBus.emit('ui:toast', {
+        message: blockingReason.replace(' · ', ': '),
+        type: 'warning',
+      });
+      this.publishDeletionReview(selected);
+      return;
+    }
+    const command = new DeleteTracksCommand(
+      this.trackManager,
+      this,
+      intent.uuids,
+      new ConstructionEconomy(world.company),
+    );
+    if (!this.commandStack.push(command)) {
+      EventBus.emit('ui:toast', {
+        message: 'Deletion could not be completed because the railway changed.',
+        type: 'warning',
+      });
+      this.publishDeletionReview(selected);
+      return;
+    }
+    this.selectionManager.clearSelection();
+  };
+
+  private readonly constructionIntentHandler = ({
+    action,
+  }: {
+    action: 'confirm' | 'backstep' | 'cancel';
+  }) => {
+    if (GameStateManager.worldMode !== 'create'
+      || this.activeTool !== 'place-track') return;
+    const tool = this.activeEditorTool as PlaceTrackTool | null;
+    if (action === 'confirm') tool?.confirm();
+    else if (action === 'backstep') tool?.backstep();
+    else tool?.cancel();
+  };
+
+  private readonly selectionChangedHandler = ({ uuids }: { uuids: string[] }) => {
+    this.publishDeletionReview(uuids);
   };
 
   private readonly vehicleTypeChangedHandler = ({ type }: { type: import('../config/VehicleTypes').VehicleType }) => {
@@ -200,10 +313,7 @@ export default class WorldScene extends Phaser.Scene {
     // ── Editor systems ─────────────────────────────────────────────────────
     this.snapSystem     = new SnapSystem(this.trackManager);
     this.commandStack   = new CommandStack(GameConfig.WORLD.MAX_UNDO_STEPS);
-    this.commandStack.onChange = (canUndo, canRedo) => {
-      EventBus.emit('ui:toolbar-undo-state', { canUndo, canRedo });
-      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    };
+    this.bindCommandStackReporting();
     this.selectionManager = new SelectionManager(this, this.trackManager, this.snapSystem);
 
     // ── Tool registry ──────────────────────────────────────────────────────
@@ -231,7 +341,13 @@ export default class WorldScene extends Phaser.Scene {
     ));
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
-    this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
+    this.scene.launch(EDITOR_UI_SCENE_KEY, {
+      trackManager: this.trackManager,
+      selectionManager: this.selectionManager,
+      visible: GameStateManager.worldMode === 'create',
+      companyCash: world?.company.cash ?? 0,
+      saveState: 'saved',
+    });
 
     this.minimapRenderer = new MinimapRenderer(this, this.trackManager, this.selectionManager);
 
@@ -252,11 +368,30 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('editor:mode-toggle', this.modeToggleHandler);
     EventBus.on('generator:run',      this.generatorRunHandler);
     EventBus.on('editor:delete-tracks', this.editorDeleteHandler);
+    EventBus.on('construction:intent', this.constructionIntentHandler);
+    EventBus.on('selection:changed', this.selectionChangedHandler);
     EventBus.on('vehicle:type-changed', this.vehicleTypeChangedHandler);
 
     // Expose managers for E2E tests after everything is constructed
     window.__railSimTrainManager = this.trainManager;
     window.__railSimTrackManager = this.trackManager;
+    window.__railSimConstructionSnapshot = () => {
+      const placeTrack = this.toolRegistry.get('place-track') as PlaceTrackTool | undefined;
+      const camera = this.cameras.main;
+      return clonePlainData({
+        phase: placeTrack?.phase ?? 'idle',
+        preview: placeTrack?.previewModel ?? null,
+        camera: {
+          scrollX: camera.scrollX,
+          scrollY: camera.scrollY,
+          zoom: camera.zoom,
+          width: camera.width,
+          height: camera.height,
+        },
+        world: WorldManager.world,
+        topology: this.trackManager.captureTopology(),
+      });
+    };
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',        this.modeChangedHandler);
@@ -267,6 +402,8 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:mode-toggle',  this.modeToggleHandler);
       EventBus.off('generator:run',       this.generatorRunHandler);
       EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
+      EventBus.off('construction:intent', this.constructionIntentHandler);
+      EventBus.off('selection:changed', this.selectionChangedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
@@ -275,6 +412,7 @@ export default class WorldScene extends Phaser.Scene {
       this.sceneryManager.destroyAll();
       window.__railSimTrainManager = undefined;
       window.__railSimTrackManager = undefined;
+      window.__railSimConstructionSnapshot = undefined;
     });
 
     // Input routing
@@ -432,9 +570,11 @@ export default class WorldScene extends Phaser.Scene {
   private syncTrainsSaveAndReport(): void {
     if (this.syncTrainsAndSave()) {
       EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
+      this.publishCompanyState('saved');
       return;
     }
     EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    this.publishCompanyState('unsaved');
     EventBus.emit('ui:toast', {
       message: 'Could not save the world.',
       type: 'error',
@@ -458,9 +598,57 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Return true if the pointer's screen position overlaps any editor UI panel. */
   private isPointerOverUI(pointer: Phaser.Input.Pointer): boolean {
+    const editorUI = this.scene?.get?.(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
+    if (editorUI?.containsScreenPoint(pointer.x, pointer.y)) return true;
     const { width, height } = this.scale;
     const toolbarWidth = scalePx(72, width, height, isMobileWidth(width) ? 44 : 56);
     return pointer.x <= toolbarWidth + TOOLBAR_PADDING;
+  }
+
+  private bindCommandStackReporting(): void {
+    this.commandStack.onChange = (canUndo, canRedo) => {
+      EventBus.emit('ui:toolbar-undo-state', { canUndo, canRedo });
+      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+      this.publishCompanyState('unsaved');
+      this.publishDeletionReview(this.selectionManager.selectedUUIDs);
+    };
+  }
+
+  private publishDeletionReview(uuids: ReadonlyArray<string>): void {
+    const world = WorldManager.world;
+    const tracks = world
+      ? uuids.map((uuid) => world.tracks.find((track) => track.uuid === uuid))
+      : [];
+    const complete = !!world
+      && tracks.length === uuids.length
+      && tracks.every((track) => track !== undefined);
+    const blockingReason = world && complete
+      ? deletionBlockingReason(world, uuids)
+      : uuids.length > 0
+        ? 'Deletion changed · Review the selection again'
+        : '';
+    const review: DeletionReviewDTO = Object.freeze({
+      uuids: Object.freeze([...uuids]),
+      expectedRefund: complete
+        ? tracks.reduce(
+          (sum, track) => sum + demolitionRefund(track!.paidBuildCost),
+          0,
+        )
+        : 0,
+      expectedRevision: world?.revision ?? -1,
+      available: complete && uuids.length > 0 && blockingReason === '',
+      blockingReason,
+    });
+    EventBus.emit('ui:deletion-review', review);
+  }
+
+  private publishCompanyState(
+    saveState: 'saved' | 'unsaved' | 'saving',
+  ): void {
+    EventBus.emit('ui:company-state', {
+      cash: WorldManager.world?.company.cash ?? 0,
+      saveState,
+    });
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
@@ -504,6 +692,12 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    const target = event.target;
+    if (target instanceof HTMLElement && (
+      target.isContentEditable
+      || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].indexOf(target.tagName) !== -1
+      || target.closest('[data-testid="construction-inspector"]') !== null
+    )) return;
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
       if (event.ctrlKey) {

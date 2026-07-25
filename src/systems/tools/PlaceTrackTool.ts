@@ -264,20 +264,32 @@ export class PlaceTrackTool implements IEditorTool {
       this.resetToIdle();
       return;
     }
+    const canonicalEndpoint = liveTrack
+      ? this.snapConstructionPoint(geometry.p3.x, geometry.p3.y)
+      : null;
+    if (liveTrack && (
+      canonicalEndpoint?.type !== 'endpoint'
+      || canonicalEndpoint.trackUUID !== quote.newTrackUUID
+      || canonicalEndpoint.endpoint !== 'end'
+      || canonicalEndpoint.open !== true
+    )) {
+      this.resetToIdle();
+      return;
+    }
     const curveTangent = liveTrack?.getCurvePath().getTangent(1);
     const outward = curveTangent
       ? { x: curveTangent.x, y: curveTangent.y }
       : outwardFromGeometry(geometry);
-    this.start = {
-      x: geometry.p3.x,
-      y: geometry.p3.y,
-      snapped: true,
-      type: 'endpoint',
-      trackUUID: quote.newTrackUUID,
-      endpoint: 'end',
-      outward,
-      open: true,
-    };
+    this.start = canonicalEndpoint ?? {
+        x: geometry.p3.x,
+        y: geometry.p3.y,
+        snapped: true,
+        type: 'endpoint',
+        trackUUID: quote.newTrackUUID,
+        endpoint: 'end',
+        outward,
+        open: true,
+      };
     this.pendingUUID = crypto.randomUUID();
     this.currentPreview = null;
     this.currentModel = null;
@@ -327,7 +339,12 @@ export class PlaceTrackTool implements IEditorTool {
       phase: this.currentPhase,
       proposal: preview.proposal,
       predictedConnections: preview.predictedConnections,
+      engineeringSubtotal: preview.proposal.costs.total,
+      topologyCost: preview.topologyCost,
       totalCost: preview.totalCost,
+      cashBefore: preview.cashBefore,
+      cashAfter: preview.cashAfter,
+      structureLengths: Object.freeze({ ...preview.proposal.structureLengths }),
       affordable,
       canConfirm,
       stale,
@@ -336,10 +353,9 @@ export class PlaceTrackTool implements IEditorTool {
     });
     this.overlay.render(this.currentModel);
     this.dispatchPreview();
-    this.dispatchHint(
-      engineeringReady ? 'ok' : 'error',
-      message,
-    );
+    // Task 7's construction inspector is the single visible owner of this
+    // decision/remedy. Clear the legacy canvas hint to avoid duplicate advice.
+    this.dispatchHint('ok', '');
   }
 
   private setPhase(phase: ConstructionToolPhase): void {

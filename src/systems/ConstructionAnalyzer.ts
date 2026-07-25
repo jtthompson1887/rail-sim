@@ -46,7 +46,9 @@ export interface ConstructionProposal {
   minimumRadius: number;
   maximumGradePercent: number;
   maximumGradeT: number;
+  maximumGradeDistance: number;
   structures: StructureInterval[];
+  structureLengths: Record<StructureType, number>;
   costs: ConstructionCostBreakdown;
   valid: boolean;
   reasonCode: ConstructionReasonCode;
@@ -74,6 +76,24 @@ const ZERO_COSTS: ConstructionCostBreakdown = {
   tunnel: 0,
   total: 0,
 };
+
+function emptyStructureLengths(): Record<StructureType, number> {
+  return {
+    surface: 0,
+    cut: 0,
+    fill: 0,
+    bridge: 0,
+    tunnel: 0,
+  };
+}
+
+function structureLengthsFor(
+  segments: AnalysedSegment[],
+): Record<StructureType, number> {
+  const lengths = emptyStructureLengths();
+  for (const segment of segments) lengths[segment.type] += segment.length;
+  return lengths;
+}
 
 const CURVATURE_EPSILON = 1e-10;
 const LENGTH_EPSILON = 1e-6;
@@ -106,7 +126,9 @@ function invalidProposal(
     minimumRadius,
     maximumGradePercent: 0,
     maximumGradeT: 0,
+    maximumGradeDistance: 0,
     structures: [],
+    structureLengths: emptyStructureLengths(),
     costs: ZERO_COSTS,
     valid: false,
     reasonCode,
@@ -456,6 +478,9 @@ export class ConstructionAnalyzer {
     const alignment = deriveVerticalAlignment(terrainSamples);
     const classified = classifyStructures(terrainSamples, alignment);
     const costs = calculateCosts(totalLength, classified.segments);
+    const maximumGradeDistance = terrainSamples.find(
+      ({ t }) => t === alignment.maximumGradeT,
+    )?.distance ?? 0;
     const valid = alignment.maximumGradePercent
       <= ConstructionConfig.MAX_GRADE_PERCENT + 1e-9;
     const reasonCode: ConstructionReasonCode = valid ? 'ok' : 'grade';
@@ -467,7 +492,9 @@ export class ConstructionAnalyzer {
       minimumRadius,
       maximumGradePercent: alignment.maximumGradePercent,
       maximumGradeT: alignment.maximumGradeT,
+      maximumGradeDistance,
       structures: classified.structures,
+      structureLengths: structureLengthsFor(classified.segments),
       costs,
       valid,
       reasonCode,

@@ -1,5 +1,9 @@
 type EventCallback<T = unknown> = (data: T) => void;
 import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
+import type {
+  DeletionReviewDTO,
+  DeleteTracksIntent,
+} from '../ui/PropertiesPanel';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -47,10 +51,16 @@ interface EventMap {
   'ui:toolbar-save-state': { state: 'saved' | 'unsaved' | 'saving' };
   'ui:toolbar-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
-  'editor:delete-tracks': { uuids: string[] };
+  'editor:delete-tracks': DeleteTracksIntent;
+  'ui:deletion-review': DeletionReviewDTO;
   /** Emitted by editor tools during track placement / reshaping to show live validation feedback. */
   'ui:validation-hint': { state: 'ok' | 'warning' | 'error'; message: string };
   'construction:preview': ConstructionPreviewEvent;
+  'construction:intent': { action: 'confirm' | 'backstep' | 'cancel' };
+  'ui:company-state': {
+    cash: number;
+    saveState: 'saved' | 'unsaved' | 'saving';
+  };
 }
 
 class EventBusClass {

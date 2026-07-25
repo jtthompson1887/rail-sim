@@ -8,16 +8,18 @@ describe('PropertiesPanel', () => {
   let scene: any;
   let trackManager: any;
   let selectionManager: any;
+  let onDelete: jest.Mock;
 
   beforeEach(() => {
     scene = makeScene();
     trackManager = { getTrack: jest.fn() };
     selectionManager = { selectedUUIDs: [] };
+    onDelete = jest.fn();
     panel = new PropertiesPanel(
       scene,
       trackManager as any,
       selectionManager as any,
-      jest.fn(),
+      onDelete,
     );
   });
 
@@ -94,7 +96,7 @@ describe('PropertiesPanel', () => {
     emitSpy.mockRestore();
   });
 
-  it('shows analysed structures without a manual tunnel mutation', () => {
+  it('shows analysed structures and exact refund without tunnel or reshape mutation', () => {
     trackManager.getTrack.mockReturnValue({
       getUUID: () => 'track-1',
       getControlPoints: () => ({
@@ -116,15 +118,158 @@ describe('PropertiesPanel', () => {
     selectionManager.selectedUUIDs = ['track-1'];
 
     EventBus.emit('selection:changed', { uuids: ['track-1'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['track-1'],
+      expectedRefund: 617,
+      expectedRevision: 4,
+      available: true,
+      blockingReason: '',
+    });
 
-    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(true);
-    expect((panel as any).tunnelBtn.disableInteractive).toHaveBeenCalled();
-    expect((panel as any).tunnelBtnText.setText).toHaveBeenCalledWith(
-      expect.stringContaining('analysis'),
-    );
-    expect((panel as any).deleteBtn.disableInteractive).toHaveBeenCalled();
+    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).tunnelBtnText.setVisible).toHaveBeenLastCalledWith(false);
     expect((panel as any).deleteBtnText.setText).toHaveBeenCalledWith(
-      expect.stringContaining('Deletion'),
+      expect.stringContaining('Refund £617'),
     );
+    expect(scene.add.text).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      expect.stringContaining('cost-delta quote required'),
+      expect.any(Object),
+    );
+  });
+
+  it('confirms the exact sum of per-track floored refunds in two inline steps', () => {
+    const tracks: Record<string, any> = {
+      a: {
+        getUUID: () => 'a',
+        getCurvePath: () => ({ getLength: () => 100 }),
+        paidBuildCost: 101,
+      },
+      b: {
+        getUUID: () => 'b',
+        getCurvePath: () => ({ getLength: () => 100 }),
+        paidBuildCost: 103,
+      },
+    };
+    trackManager.getTrack.mockImplementation((uuid: string) => tracks[uuid]);
+    selectionManager.selectedUUIDs = ['a', 'b'];
+    EventBus.emit('selection:changed', { uuids: ['a', 'b'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a', 'b'],
+      expectedRefund: 101,
+      expectedRevision: 7,
+      available: true,
+      blockingReason: '',
+    });
+    const pointerDown = (panel as any).deleteBtn.on.mock.calls.find(
+      ([event]: [string]) => event === 'pointerdown',
+    )[1];
+
+    expect((panel as any).deleteBtnText.setText).toHaveBeenLastCalledWith(
+      expect.stringContaining('Refund £101'),
+    );
+    pointerDown();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect((panel as any).deleteBtnText.setText).toHaveBeenLastCalledWith(
+      expect.stringContaining('Confirm'),
+    );
+
+    pointerDown();
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({
+      uuids: ['a', 'b'],
+      expectedRefund: 101,
+      expectedRevision: 7,
+    }));
+  });
+
+  it('disarms deletion confirmation when selection, tool, or play state changes', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 101,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedRevision: 9,
+      available: true,
+      blockingReason: '',
+    });
+    const pointerDown = (panel as any).deleteBtn.on.mock.calls.find(
+      ([event]: [string]) => event === 'pointerdown',
+    )[1];
+    pointerDown();
+    expect((panel as any).deleteArmed).toBe(true);
+
+    EventBus.emit('tool:changed', { tool: 'select' });
+    expect((panel as any).deleteArmed).toBe(false);
+    pointerDown();
+    panel.setVisible(false);
+    expect((panel as any).deleteArmed).toBe(false);
+  });
+
+  it('echoes an unavailable authoritative deletion review and cannot arm it', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 999_999,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 0,
+      expectedRevision: 12,
+      available: false,
+      blockingReason: 'Deletion blocked · Move trains off these tracks first',
+    });
+    const pointerDown = (panel as any).deleteBtn.on.mock.calls.find(
+      ([event]: [string]) => event === 'pointerdown',
+    )[1];
+
+    expect((panel as any).deleteBtnText.setText).toHaveBeenLastCalledWith(
+      expect.stringContaining('Move trains'),
+    );
+    pointerDown();
+    expect((panel as any).deleteArmed).toBe(false);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it('hides selection properties while the Place tool owns the right edge', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 100,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+
+    EventBus.emit('tool:changed', { tool: 'place-track' });
+
+    expect((panel as any).isVisible).toBe(false);
   });
 });

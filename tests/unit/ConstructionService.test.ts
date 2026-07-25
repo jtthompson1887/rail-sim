@@ -94,6 +94,23 @@ describe('ConstructionService', () => {
     expect(result!.proposal.valid).toBe(false);
     expect(result!.quote).toBeNull();
     expect(result!.proposal.remedy).not.toBe('');
+    expect(result!.cashBefore).toBe(1_000_000);
+    expect(result!.cashAfter).toBe(result!.cashBefore - result!.totalCost);
+  });
+
+  it('captures exact cash before and after for an unaffordable quote-null preview', () => {
+    WorldManager.world!.company.cash = 100;
+    const result = service.createPreview(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'unaffordable-preview',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('unaffordable');
+    expect(result!.quote).toBeNull();
+    expect(result!.cashBefore).toBe(100);
+    expect(result!.cashAfter).toBe(100 - result!.totalCost);
   });
 
   it('respects an explicit free/grid anchor when endpoint snapping is disabled', () => {

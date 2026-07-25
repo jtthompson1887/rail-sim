@@ -3,6 +3,7 @@ import { EditorToolbar } from '../ui/EditorToolbar';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { PropertiesPanel } from '../ui/PropertiesPanel';
 import type { GeneratorParams } from '../ui/PropertiesPanel';
+import type { DeleteTracksIntent } from '../ui/PropertiesPanel';
 import { ContextMenu } from '../ui/ContextMenu';
 import type { MenuItem } from '../ui/ContextMenu';
 import { ValidationHint } from '../ui/ValidationHint';
@@ -10,6 +11,8 @@ import { EventBus } from '../services/EventBus';
 import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
 import type { VehicleType } from '../config/VehicleTypes';
+import { ConstructionInspector } from '../ui/ConstructionInspector';
+import { CompanyHud } from '../ui/CompanyHud';
 
 /**
  * EditorUIScene
@@ -34,6 +37,11 @@ export default class EditorUIScene extends Phaser.Scene {
   private propertiesPanel!: PropertiesPanel;
   private contextMenu!: ContextMenu;
   private validationHint!: ValidationHint;
+  private constructionInspector!: ConstructionInspector;
+  private companyHud!: CompanyHud;
+  private initialVisible = true;
+  private initialCash = 0;
+  private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -52,6 +60,13 @@ export default class EditorUIScene extends Phaser.Scene {
   private readonly visibleHandler = ({ visible }: { visible: boolean }) => {
     this.toolbar.setVisible(visible);
     this.propertiesPanel.setVisible(visible);
+    this.constructionInspector.setVisible(visible);
+    this.companyHud.setVisible(visible);
+    this.validationHint.setVisible(visible);
+    if (!visible) {
+      this.constructionInspector.clear();
+      this.validationHint.clear();
+    }
   };
 
   private readonly selectToolHandler = ({ tool }: { tool: string }) => {
@@ -62,9 +77,18 @@ export default class EditorUIScene extends Phaser.Scene {
     super({ key: 'EditorUIScene' });
   }
 
-  init(data: { trackManager: TrackManager; selectionManager: SelectionManager }): void {
+  init(data: {
+    trackManager: TrackManager;
+    selectionManager: SelectionManager;
+    visible?: boolean;
+    companyCash?: number;
+    saveState?: 'saved' | 'unsaved' | 'saving';
+  }): void {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
+    this.initialVisible = data.visible ?? true;
+    this.initialCash = data.companyCash ?? 0;
+    this.initialSaveState = data.saveState ?? 'saved';
   }
 
   create(): void {
@@ -73,10 +97,17 @@ export default class EditorUIScene extends Phaser.Scene {
       this,
       this.trackManager,
       this.selectionManager,
-      (uuids) => EventBus.emit('editor:delete-tracks', { uuids }),
+      (intent: DeleteTracksIntent) => EventBus.emit('editor:delete-tracks', intent),
     );
     this.contextMenu = new ContextMenu(this);
     this.validationHint = new ValidationHint(this);
+    this.constructionInspector = new ConstructionInspector();
+    this.companyHud = new CompanyHud();
+    this.companyHud.setState({
+      cash: this.initialCash,
+      saveState: this.initialSaveState,
+    });
+    this.visibleHandler({ visible: this.initialVisible });
 
     // Subscribe to WorldScene → EditorUIScene events
     EventBus.on('ui:toolbar-undo-state', this.undoStateHandler);
@@ -93,6 +124,8 @@ export default class EditorUIScene extends Phaser.Scene {
       this.propertiesPanel.destroy();
       this.contextMenu.destroy();
       this.validationHint.destroy();
+      this.constructionInspector.destroy();
+      this.companyHud.destroy();
     });
   }
 
@@ -113,5 +146,17 @@ export default class EditorUIScene extends Phaser.Scene {
   /** Returns the currently selected vehicle type from the properties panel. */
   getVehicleType(): VehicleType {
     return this.propertiesPanel.getVehicleType();
+  }
+
+  /** Shared screen-space input gate for every visible editor overlay. */
+  containsScreenPoint(x: number, y: number): boolean {
+    const toolbar = this.toolbar.screenBounds;
+    return (
+      x >= toolbar.left && x <= toolbar.right
+      && y >= toolbar.top && y <= toolbar.bottom
+    )
+      || this.propertiesPanel.containsScreenPoint(x, y)
+      || this.constructionInspector.containsScreenPoint(x, y)
+      || this.companyHud.containsScreenPoint(x, y);
   }
 }
