@@ -5,6 +5,7 @@ import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
 import { GameConfig } from '../config/GameConfig';
 import type { JunctionDef, TrackDef } from '../config/WorldData';
+import { TrackSerializer } from '../utils/TrackSerializer';
 import type { TerrainValidator } from './TerrainValidator';
 
 /**
@@ -231,8 +232,8 @@ export class JunctionCreatorSystem {
     };
     WorldManager.addJunctionDef(junctionDef);
 
-    const leftDef: TrackDef = this.trackToDef(leftTrack);
-    const rightDef: TrackDef = this.trackToDef(rightTrack);
+    const leftDef: TrackDef = TrackSerializer.toTrackDef(leftTrack);
+    const rightDef: TrackDef = TrackSerializer.toTrackDef(rightTrack);
     WorldManager.addTrackDef(leftDef);
     WorldManager.addTrackDef(rightDef);
 
@@ -315,20 +316,4 @@ export class JunctionCreatorSystem {
     return this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y) as Phaser.Math.Vector2;
   }
 
-  private trackToDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
-    return {
-      uuid: track.getUUID(),
-      p0: { x: p0.x, y: p0.y },
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      p3: { x: p3.x, y: p3.y },
-      isTunnel: track.isTunnel || undefined,
-      elevation: track.elevation || undefined,
-    };
-  }
 }

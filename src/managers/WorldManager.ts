@@ -44,6 +44,8 @@ class WorldManagerClass {
     if (world) {
       this._world = world;
       SaveService.setLastPlayedWorldId(id);
+    } else {
+      this._world = null;
     }
     return world;
   }

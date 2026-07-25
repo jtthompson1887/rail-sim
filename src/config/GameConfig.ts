@@ -33,6 +33,10 @@ export const GameConfig = {
     ALIGNMENT_ANGLE_DEG: 5,
     /** Snap radius (px) used when detecting nearby endpoints for connection checks. */
     SNAP_RADIUS_PX: 60,
+    /** Minimum automatic Bézier handle length in world-units (px). */
+    MIN_CONTROL_DISTANCE_PX: 50,
+    /** Maximum automatic Bézier handle length in world-units (px). */
+    MAX_CONTROL_DISTANCE_PX: 400,
   },
   JUNCTION: { LENGTH: 400, LEFT_ANGLE_DEG: -15, RIGHT_ANGLE_DEG: 15 },
   FORCE: { GUIDE_CONSTANT: 0.002 },

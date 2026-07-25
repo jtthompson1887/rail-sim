@@ -193,6 +193,7 @@ describe('TrackCompleterSystem construction behavior', () => {
 
   it('applies tunnel/elevation metadata and serializes optional fields on valid commit', () => {
     const pending = makeTrack(scene, 0, 0, 300, 100);
+    const controls = pending.getControlPoints();
     (system as any).pendingTracks = [pending];
     (system as any).isAwaitingConfirm = true;
     terrainValidator.canPlaceTrack.mockReturnValue({
@@ -205,6 +206,12 @@ describe('TrackCompleterSystem construction behavior', () => {
 
     system.confirm();
 
+    expect(terrainValidator.canPlaceTrack).toHaveBeenCalledWith(
+      controls.p0,
+      controls.p1,
+      controls.p2,
+      controls.p3,
+    );
     expect(pending.isTunnel).toBe(true);
     expect(pending.elevation).toBe(91);
     expect(addWorld).toHaveBeenCalledWith(expect.objectContaining({

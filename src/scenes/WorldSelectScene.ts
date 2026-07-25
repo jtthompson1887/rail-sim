@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { SaveService } from '../services/SaveService';
 import { WorldManager } from '../managers/WorldManager';
-import type { WorldData, BiomeType } from '../config/WorldData';
+import type { WorldData, BiomeType, IncompatibleWorldResult } from '../config/WorldData';
 
 /** Icon and label shown per biome in the picker. */
 const BIOME_OPTIONS: Array<{ biome: BiomeType; label: string; color: number }> = [
@@ -56,7 +56,7 @@ export default class WorldSelectScene extends Phaser.Scene {
 
   private renderWorldList(): void {
     const { width } = this.scale;
-    const worlds = SaveService.listWorlds();
+    const worlds = SaveService.listWorldResults();
 
     if (worlds.length === 0) {
       this.add.text(width / 2, 300, 'No worlds yet — create your first!', {
@@ -71,8 +71,12 @@ export default class WorldSelectScene extends Phaser.Scene {
     const btnW = width * 0.72;
     let y = 200;
 
-    for (const world of worlds) {
-      this.renderWorldRow(world, width / 2, y, btnW, rowH);
+    for (const result of worlds) {
+      if ('world' in result) {
+        this.renderWorldRow(result.world, width / 2, y, btnW, rowH);
+      } else {
+        this.renderIncompatibleWorldRow(result, width / 2, y, btnW, rowH);
+      }
       y += rowH + 16;
     }
   }
@@ -86,7 +90,7 @@ export default class WorldSelectScene extends Phaser.Scene {
       .on('pointerdown', () => this.loadWorld(world));
 
     const updatedDate = new Date(world.metadata.updatedAt).toLocaleDateString();
-    const biomeLabel  = world.biome ? `[${world.biome}]` : '';
+    const biomeLabel = `[${world.generationConfig.biome}]`;
     this.add.text(cx - w / 2 + 24, cy - 28, `${world.name} ${biomeLabel}`, {
       fontFamily: 'Verdana',
       fontSize: '30px',
@@ -113,8 +117,40 @@ export default class WorldSelectScene extends Phaser.Scene {
   }
 
   private loadWorld(world: WorldData): void {
-    WorldManager.load(world.id);
-    this.scene.start('WorldScene', { worldId: world.id, mode: 'create' });
+    if (WorldManager.load(world.id)) {
+      this.scene.start('WorldScene', { worldId: world.id, mode: 'create' });
+    }
+  }
+
+  private renderIncompatibleWorldRow(
+    result: IncompatibleWorldResult,
+    cx: number,
+    cy: number,
+    w: number,
+    h: number,
+  ): void {
+    this.add.rectangle(cx, cy, w, h, 0x402020, 0.95)
+      .setStrokeStyle(2, 0xff7777, 0.7);
+    this.add.text(cx - w / 2 + 24, cy - 28, result.name, {
+      fontFamily: 'Verdana',
+      fontSize: '30px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+    }).setOrigin(0, 0.5);
+    this.add.text(cx - w / 2 + 24, cy + 16, `${result.message} ${result.action}`, {
+      fontFamily: 'Verdana',
+      fontSize: '18px',
+      color: '#ffb0b0',
+    }).setOrigin(0, 0.5);
+
+    if (result.id) {
+      const del = this.add.text(cx + w / 2 - 24, cy, 'ðŸ—‘', {
+        fontFamily: 'Verdana',
+        fontSize: '32px',
+      }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this.deleteWorld(result.id!));
+      del.setPadding(8);
+    }
   }
 
   private deleteWorld(worldId: string): void {

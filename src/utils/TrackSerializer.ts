@@ -8,13 +8,10 @@ import type { TrackDef } from '../config/WorldData';
 export class TrackSerializer {
   /** Convert a live RailTrack to a serialisable TrackDef. */
   static toTrackDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
+    const { p0, p1, p2, p3 } = track.getControlPoints();
     return {
       uuid: track.getUUID(),
+      geometryVersion: 1,
       p0: { x: p0.x, y: p0.y },
       p1: { x: p1.x, y: p1.y },
       p2: { x: p2.x, y: p2.y },

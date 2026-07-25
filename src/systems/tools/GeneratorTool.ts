@@ -109,7 +109,11 @@ export class GeneratorTool implements IEditorTool {
       minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
       maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
     };
-    const generator = new TrackGenerator(this.scene, this.trackManager, WorldManager.world?.seed);
+    const generator = new TrackGenerator(
+      this.scene,
+      this.trackManager,
+      WorldManager.world?.generationConfig.seed,
+    );
 
     // Check if near an existing endpoint — use SnapSystem for consistency
     const snapped = this.snapSystem.snapPoint(wx, wy);

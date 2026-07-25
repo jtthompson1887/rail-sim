@@ -42,7 +42,7 @@ export class RailTrackRenderer {
     }
   }
 
-  private createSegment(texture: string, i: number, iterations: number, curve: Phaser.Curves.Path): void {
+  private createSegment(texture: string, i: number, iterations: number, curve: Phaser.Curves.CubicBezier): void {
     const t = i / iterations;
     const point = curve.getPoint(t);
     const nextPoint = curve.getPoint((i + 1) / iterations);

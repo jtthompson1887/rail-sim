@@ -3,6 +3,28 @@
  */
 import { SaveService, SaveData } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
+import type { WorldData } from '../../src/config/WorldData';
+
+function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
+  return {
+    schemaVersion: 1,
+    id,
+    name,
+    generationConfig: {
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    },
+    tracks: [],
+    junctions: [],
+    stations: [],
+    trains: [],
+    scenarios: [],
+    scenery: [],
+    metadata: { createdAt: timestamp, updatedAt: timestamp },
+  };
+}
 
 describe('SaveService', () => {
   beforeEach(() => {
@@ -145,7 +167,7 @@ describe('SaveService', () => {
 
   describe('saveWorld() / loadWorld()', () => {
     it('saves and loads a world by id', () => {
-      const world = { id: 'w1', name: 'Test', seed: '123', terrainSeed: '123', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
+      const world = makeWorld('w1', 'Test', '123', 1000);
       SaveService.saveWorld(world);
       const loaded = SaveService.loadWorld('w1');
       expect(loaded).not.toBeNull();
@@ -157,7 +179,7 @@ describe('SaveService', () => {
     });
 
     it('updates updatedAt on save', () => {
-      const world = { id: 'w-ts', name: 'TS', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const world = makeWorld('w-ts', 'TS', '0', 1);
       SaveService.saveWorld(world);
       const loaded = SaveService.loadWorld('w-ts')!;
       expect(loaded.metadata.updatedAt).toBeGreaterThanOrEqual(1);
@@ -170,16 +192,16 @@ describe('SaveService', () => {
     });
 
     it('returns all saved worlds', () => {
-      const w1 = { id: 'wl1', name: 'A', seed: '1', terrainSeed: '1', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
-      const w2 = { id: 'wl2', name: 'B', seed: '2', terrainSeed: '2', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 2000, updatedAt: 2000 } };
+      const w1 = makeWorld('wl1', 'A', '1', 1000);
+      const w2 = makeWorld('wl2', 'B', '2', 2000);
       SaveService.saveWorld(w1);
       SaveService.saveWorld(w2);
       expect(SaveService.listWorlds()).toHaveLength(2);
     });
 
     it('sorts worlds newest first (by updatedAt)', () => {
-      const older = { id: 'older-w', name: 'Old', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 100, updatedAt: 100 } };
-      const newer = { id: 'newer-w', name: 'New', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 999, updatedAt: 999 } };
+      const older = makeWorld('older-w', 'Old', '0', 100);
+      const newer = makeWorld('newer-w', 'New', '0', 999);
       // Manually set updatedAt after saving so the sort ordering is predictable
       SaveService.saveWorld(older);
       const raw1 = JSON.parse(localStorage.getItem('rail-sim-worlds') || '{}');
@@ -196,7 +218,7 @@ describe('SaveService', () => {
 
   describe('deleteWorld()', () => {
     it('removes a world by id', () => {
-      const w = { id: 'del-w', name: 'Del', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('del-w', 'Del', '0', 1);
       SaveService.saveWorld(w);
       SaveService.deleteWorld('del-w');
       expect(SaveService.loadWorld('del-w')).toBeNull();
@@ -209,7 +231,7 @@ describe('SaveService', () => {
 
   describe('exportWorld() / importWorld()', () => {
     it('round-trips a world through JSON', () => {
-      const w = { id: 'exp', name: 'Export Me', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('exp', 'Export Me', '0', 1);
       const json = SaveService.exportWorld(w);
       const imported = SaveService.importWorld(json);
       expect(imported).not.toBeNull();
@@ -221,7 +243,7 @@ describe('SaveService', () => {
     });
 
     it('importWorld persists the world', () => {
-      const w = { id: 'imp', name: 'Imported', seed: '1', terrainSeed: '1', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('imp', 'Imported', '1', 1);
       const json = SaveService.exportWorld(w);
       SaveService.importWorld(json);
       expect(SaveService.loadWorld('imp')).not.toBeNull();

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-type Path = Phaser.Curves.Path;
+type CubicBezier = Phaser.Curves.CubicBezier;
 import { GameConfig } from '../config/GameConfig';
 import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
@@ -29,7 +29,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private p0!: Phaser.Math.Vector2;
   private p1!: Phaser.Math.Vector2;
   private p2!: Phaser.Math.Vector2;
-  private curve!: Path;
+  private curve!: CubicBezier;
   private uuid: string;
   private renderer: RailTrackRenderer;
   /** Port-based connection model. */
@@ -56,15 +56,19 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   }
 
   updateTrackVectors(p0: Phaser.Math.Vector2, p1: Phaser.Math.Vector2, p2: Phaser.Math.Vector2, p3: Phaser.Math.Vector2): void {
-    this.curve = new Phaser.Curves.Path(p0.x, p0.y).splineTo([p1, p2, p3]);
-    this.p0 = p0;
-    this.p1 = p1;
-    this.p2 = p2;
+    const copiedP0 = new Phaser.Math.Vector2(p0.x, p0.y);
+    const copiedP1 = new Phaser.Math.Vector2(p1.x, p1.y);
+    const copiedP2 = new Phaser.Math.Vector2(p2.x, p2.y);
+    const copiedP3 = new Phaser.Math.Vector2(p3.x, p3.y);
+    this.curve = new Phaser.Curves.CubicBezier(copiedP0, copiedP1, copiedP2, copiedP3);
+    this.p0 = copiedP0;
+    this.p1 = copiedP1;
+    this.p2 = copiedP2;
     this.totalDistance = this.curve.getLength();
     this.iterations = Math.max(1, Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale)));
     // Update port positions
     this._startPort.position = { x: p0.x, y: p0.y };
-    this._endPort.position = { x: p3.x, y: p3.y };
+    this._endPort.position = { x: copiedP3.x, y: copiedP3.y };
     this.renderer.rebuild();
   }
 
@@ -122,7 +126,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     return (lo + hi) / 2;
   }
 
-  getCurvePath(): Path {
+  getCurvePath(): CubicBezier {
     return this.curve;
   }
 

@@ -136,6 +136,7 @@ describe('Context menu factories', () => {
   it('toggles a single track surface type in both the live and persisted world', () => {
     WorldManager.createNew('Context fixture', 'context-seed');
     WorldManager.addTrackDef({
+      geometryVersion: 1,
       uuid: 'track-1',
       p0: { x: 0, y: 0 },
       p1: { x: 1, y: 0 },

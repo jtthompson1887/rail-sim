@@ -6,6 +6,7 @@ import { scalePx, responsiveFontSize } from '../utils/responsive';
 import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
 import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
+import { TrackSerializer } from '../utils/TrackSerializer';
 
 /** Generator configuration exposed to the caller via getGeneratorParams(). */
 export interface GeneratorParams {
@@ -536,15 +537,7 @@ export class PropertiesPanel {
         track.isTunnel = !track.isTunnel;
         const cps = track.getControlPoints();
         track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
-        WorldManager.updateTrackDef({
-          uuid: track.getUUID(),
-          p0: { x: cps.p0.x, y: cps.p0.y },
-          p1: { x: cps.p1.x, y: cps.p1.y },
-          p2: { x: cps.p2.x, y: cps.p2.y },
-          p3: { x: cps.p3.x, y: cps.p3.y },
-          isTunnel: track.isTunnel,
-          elevation: track.elevation,
-        });
+        WorldManager.updateTrackDef(TrackSerializer.toTrackDef(track));
       }
     }
     EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });

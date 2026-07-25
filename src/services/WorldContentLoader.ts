@@ -47,7 +47,7 @@ export class WorldContentLoader {
   private restoreVehicle(def: TrainDef): void {
     const track = this.trackManager.getTrack(def.trackUUID);
     if (!track) return;
-    const vehicleType = def.type ?? 'locomotive';
+    const vehicleType = def.type;
     const vehicle = vehicleType === 'passenger-carriage'
       ? this.trainManager.createCarriage(def.id)
       : this.trainManager.createInitialTrain(def.id);
@@ -88,7 +88,11 @@ export class WorldContentLoader {
   }
 
   private generateStarterTrack(): void {
-    const generator = new TrackGenerator(this.scene, this.trackManager, WorldManager.world?.seed);
+    const generator = new TrackGenerator(
+      this.scene,
+      this.trackManager,
+      WorldManager.world?.generationConfig.seed,
+    );
     const tracks = generator.generateTracks({
       startPoint: new Phaser.Math.Vector2(0, 500),
       startAngle: Phaser.Math.DegToRad(90),

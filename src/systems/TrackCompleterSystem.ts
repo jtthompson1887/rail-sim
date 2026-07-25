@@ -4,7 +4,7 @@ import TrackManager from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
 import { GameConfig } from '../config/GameConfig';
-import type { TrackDef } from '../config/WorldData';
+import { TrackSerializer } from '../utils/TrackSerializer';
 import type { TerrainValidator } from './TerrainValidator';
 
 interface Endpoint {
@@ -270,9 +270,8 @@ export class TrackCompleterSystem {
     for (const track of this.pendingTracks) {
       // Terrain validation gate
       if (this.terrainValidator) {
-        const p0 = new Phaser.Math.Vector2(track.getCurvePath().getStartPoint());
-        const p3 = new Phaser.Math.Vector2(track.getCurvePath().getEndPoint());
-        const result = this.terrainValidator.canPlaceTrack(p0, p3);
+        const { p0, p1, p2, p3 } = track.getControlPoints();
+        const result = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3);
         if (!result.valid) {
           EventBus.emit('ui:toast', { message: result.reason, type: 'error' });
           this.clearPending();
@@ -285,7 +284,7 @@ export class TrackCompleterSystem {
       }
 
       this.trackManager.addTrack(track);
-      const def = this.trackToDef(track);
+      const def = TrackSerializer.toTrackDef(track);
       WorldManager.addTrackDef(def);
       uuids.push(track.getUUID());
     }
@@ -389,20 +388,4 @@ export class TrackCompleterSystem {
     return this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y) as Phaser.Math.Vector2;
   }
 
-  private trackToDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
-    return {
-      uuid: track.getUUID(),
-      p0: { x: p0.x, y: p0.y },
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      p3: { x: p3.x, y: p3.y },
-      isTunnel: track.isTunnel || undefined,
-      elevation: track.elevation || undefined,
-    };
-  }
 }

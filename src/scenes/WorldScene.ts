@@ -36,6 +36,7 @@ import { SelectTool } from '../systems/tools/SelectTool';
 import { JunctionTool } from '../systems/tools/JunctionTool';
 import { CompleterTool } from '../systems/tools/CompleterTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
+import { createTrackGeometry } from '../systems/TrackGeometry';
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -87,6 +88,7 @@ export default class WorldScene extends Phaser.Scene {
   private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
   private activeTool: CreateTool = 'none';
+  private worldLoadFailed = false;
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -159,8 +161,10 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   init(data: { worldId?: string; mode?: 'create' | 'play' }): void {
-    if (data.worldId) {
-      WorldManager.load(data.worldId);
+    this.worldLoadFailed = false;
+    if (data.worldId && !WorldManager.load(data.worldId)) {
+      this.worldLoadFailed = true;
+      return;
     }
     const startMode = data.mode ?? 'create';
     if (startMode === 'create') {
@@ -171,14 +175,18 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   create(): void {
+    if (this.worldLoadFailed) {
+      this.scene.start('WorldSelectScene');
+      return;
+    }
     // Expose scene identity and E2E accessors
     window.__railSimScene = 'WorldScene';
     window.__railSimWorldDerailCount = 0;
 
     // ── Terrain system ──────────────────────────────────────────────────────
     const world = WorldManager.world;
-    const terrainSeed = world?.terrainSeed ?? (world?.seed ?? 'default');
-    const biome = world?.biome ?? 'temperate';
+    const terrainSeed = world?.generationConfig.seed ?? 'default';
+    const biome = world?.generationConfig.biome ?? 'temperate';
 
     this.terrainGenerator    = new TerrainGenerator(terrainSeed);
     this.terrainValidator    = new TerrainValidator(this.terrainGenerator);
@@ -504,14 +512,16 @@ export default class WorldScene extends Phaser.Scene {
     this.reshapeValidationOverlay.lineStyle(4, overlayColour, 0.7);
     this.reshapeValidationOverlay.beginPath();
     this.reshapeValidationOverlay.moveTo(newCps.p0.x, newCps.p0.y);
-    // Approximate curve with linear samples
     const STEPS = 20;
-    for (let i = 1; i <= STEPS; i++) {
-      const t = i / STEPS;
-      const it = 1 - t;
-      const bx = it*it*it*newCps.p0.x + 3*it*it*t*newCps.p1.x + 3*it*t*t*newCps.p2.x + t*t*t*newCps.p3.x;
-      const by = it*it*it*newCps.p0.y + 3*it*it*t*newCps.p1.y + 3*it*t*t*newCps.p2.y + t*t*t*newCps.p3.y;
-      this.reshapeValidationOverlay.lineTo(bx, by);
+    const geometry = createTrackGeometry({
+      geometryVersion: 1,
+      p0: newCps.p0,
+      p1: newCps.p1,
+      p2: newCps.p2,
+      p3: newCps.p3,
+    });
+    for (const { point } of geometry.sample(STEPS).slice(1)) {
+      this.reshapeValidationOverlay.lineTo(point.x, point.y);
     }
     this.reshapeValidationOverlay.strokePath();
 

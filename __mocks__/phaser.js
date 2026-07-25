@@ -75,6 +75,40 @@ class CurvePath {
   getEndPoint() { return new Vector2(this._end.x, this._end.y); }
 }
 
+class CubicBezier {
+  constructor(p0, p1, p2, p3) {
+    this.p0 = new Vector2(p0);
+    this.p1 = new Vector2(p1);
+    this.p2 = new Vector2(p2);
+    this.p3 = new Vector2(p3);
+  }
+  getPoint(t) {
+    const inverse = 1 - t;
+    return new Vector2(
+      inverse ** 3 * this.p0.x + 3 * inverse ** 2 * t * this.p1.x + 3 * inverse * t ** 2 * this.p2.x + t ** 3 * this.p3.x,
+      inverse ** 3 * this.p0.y + 3 * inverse ** 2 * t * this.p1.y + 3 * inverse * t ** 2 * this.p2.y + t ** 3 * this.p3.y,
+    );
+  }
+  getTangent(t) {
+    const delta = 0.0001;
+    const before = this.getPoint(Math.max(0, t - delta));
+    const after = this.getPoint(Math.min(1, t + delta));
+    return after.subtract(before).normalize();
+  }
+  getLength() {
+    let length = 0;
+    let previous = this.getPoint(0);
+    for (let index = 1; index <= 100; index++) {
+      const current = this.getPoint(index / 100);
+      length += current.distance(previous);
+      previous = current;
+    }
+    return length;
+  }
+  getStartPoint() { return new Vector2(this.p0); }
+  getEndPoint() { return new Vector2(this.p3); }
+}
+
 // ---------------------------------------------------------------------------
 // Matter body stub
 // ---------------------------------------------------------------------------
@@ -516,6 +550,7 @@ const Phaser = {
   },
   Curves: {
     Path: CurvePath,
+    CubicBezier,
   },
   Geom: {
     Rectangle,
@@ -597,6 +632,7 @@ module.exports.default = Phaser;
 module.exports.makeScene = makeScene;
 module.exports.makeMatterBody = makeMatterBody;
 module.exports.CurvePath = CurvePath;
+module.exports.CubicBezier = CubicBezier;
 module.exports.Vector2 = Vector2;
 module.exports.MatterImage = MatterImage;
 module.exports.Container = Container;

@@ -198,8 +198,8 @@ describe('REGRESSION: recovered derailed train should not be flung off the track
   function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 500, y2 = 0): RailTrack {
     const Phaser = require('phaser');
     const p0 = new Phaser.Math.Vector2(x1, y1);
-    const p1 = new Phaser.Math.Vector2(x1 + (x2 - x1) / 3, y1 + 30);
-    const p2 = new Phaser.Math.Vector2(x1 + 2 * (x2 - x1) / 3, y1 - 30);
+    const p1 = new Phaser.Math.Vector2(x1 + (x2 - x1) / 3, y1 + (y2 - y1) / 3 + 30);
+    const p2 = new Phaser.Math.Vector2(x1 + 2 * (x2 - x1) / 3, y1 + 2 * (y2 - y1) / 3 - 30);
     const p3 = new Phaser.Math.Vector2(x2, y2);
     return new RailTrack(scene, p0, p1, p2, p3);
   }

@@ -202,11 +202,11 @@ describe('ReshapeTrackCommand', () => {
     const uuid = track.getUUID();
 
     const before = {
-      uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
+      geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
       p2: { x: 67, y: 0 }, p3: { x: 100, y: 0 },
     };
     const after = {
-      uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
+      geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
       p2: { x: 67, y: 50 }, p3: { x: 100, y: 0 },
     };
 
@@ -220,11 +220,11 @@ describe('ReshapeTrackCommand', () => {
     const uuid = track.getUUID();
 
     const before = {
-      uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
+      geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
       p2: { x: 67, y: 0 }, p3: { x: 100, y: 0 },
     };
     const after = {
-      uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
+      geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
       p2: { x: 67, y: 50 }, p3: { x: 100, y: 0 },
     };
 
@@ -234,7 +234,7 @@ describe('ReshapeTrackCommand', () => {
   });
 
   it('is a no-op when track UUID is not found', () => {
-    const before = { uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } };
+    const before = { geometryVersion: 1 as const, uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } };
     const after  = { ...before };
     const cmd = new ReshapeTrackCommand(trackManager, 'x', before, after);
     expect(() => cmd.execute()).not.toThrow();

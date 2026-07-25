@@ -40,7 +40,21 @@ describe('WorldManager', () => {
 
     it('accepts a custom seed', () => {
       const w = WorldManager.createNew('Seeded', 'my-seed-123');
-      expect(w.seed).toBe('my-seed-123');
+      expect(w.generationConfig.seed).toBe('my-seed-123');
+    });
+
+    it('creates schema 1 with one authoritative generation configuration', () => {
+      const w = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
+      expect(w.schemaVersion).toBe(1);
+      expect(w.generationConfig).toEqual({
+        generationConfigVersion: 1,
+        seed: 'seed-v1',
+        biome: 'alpine',
+        constructionDifficultyId: 'standard',
+      });
+      expect(w).not.toHaveProperty('seed');
+      expect(w).not.toHaveProperty('terrainSeed');
+      expect(w).not.toHaveProperty('biome');
     });
   });
 
@@ -73,6 +87,18 @@ describe('WorldManager', () => {
       expect(WorldManager.load('no-such-id')).toBeNull();
     });
 
+    it('clears a stale active world when the requested save is incompatible', () => {
+      const incompatible = { ...createEmptyWorld('Old'), schemaVersion: 2 };
+      localStorage.setItem(
+        'rail-sim-worlds',
+        JSON.stringify({ [incompatible.id]: incompatible }),
+      );
+      WorldManager.createNew('Stale');
+
+      expect(WorldManager.load(incompatible.id)).toBeNull();
+      expect(WorldManager.world).toBeNull();
+    });
+
     it('sets currentWorldId after loading', () => {
       const w = WorldManager.createNew('W2');
       WorldManager.save();
@@ -85,19 +111,19 @@ describe('WorldManager', () => {
   describe('addTrackDef() / removeTrackDef()', () => {
     it('adds a track definition', () => {
       WorldManager.createNew('T');
-      WorldManager.addTrackDef({ uuid: 'abc', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'abc', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
       expect(WorldManager.world!.tracks).toHaveLength(1);
     });
 
     it('removes a track definition by uuid', () => {
       WorldManager.createNew('T');
-      WorldManager.addTrackDef({ uuid: 'rm-me', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'rm-me', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
       WorldManager.removeTrackDef('rm-me');
       expect(WorldManager.world!.tracks).toHaveLength(0);
     });
 
     it('does nothing when no world is loaded', () => {
-      expect(() => WorldManager.addTrackDef({ uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } })).not.toThrow();
+      expect(() => WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } })).not.toThrow();
     });
   });
 
@@ -148,30 +174,30 @@ describe('WorldManager', () => {
   describe('addTrainDef() / removeTrainDef() / updateTrainDef()', () => {
     it('adds a train definition', () => {
       WorldManager.createNew('Tr');
-      WorldManager.addTrainDef({ id: 'train-1', trackUUID: 'abc', trackT: 0, passengers: 0 });
+      WorldManager.addTrainDef({ id: 'train-1', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
       expect(WorldManager.world!.trains).toHaveLength(1);
     });
 
     it('removes a train definition', () => {
       WorldManager.createNew('Tr');
-      WorldManager.addTrainDef({ id: 'rm-train', trackUUID: 'abc', trackT: 0, passengers: 0 });
+      WorldManager.addTrainDef({ id: 'rm-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
       WorldManager.removeTrainDef('rm-train');
       expect(WorldManager.world!.trains).toHaveLength(0);
     });
 
     it('updates a train definition', () => {
       WorldManager.createNew('Tr');
-      WorldManager.addTrainDef({ id: 'upd-train', trackUUID: 'abc', trackT: 0, passengers: 0 });
+      WorldManager.addTrainDef({ id: 'upd-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
       WorldManager.updateTrainDef({ id: 'upd-train', passengers: 42 });
       expect(WorldManager.world!.trains[0].passengers).toBe(42);
     });
 
     it('replaces all train definitions via setTrainDefs', () => {
       WorldManager.createNew('Tr');
-      WorldManager.addTrainDef({ id: 'old', trackUUID: 'abc', trackT: 0, passengers: 0 });
+      WorldManager.addTrainDef({ id: 'old', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
       WorldManager.setTrainDefs([
-        { id: 'new1', trackUUID: 'x', trackT: 0.5, passengers: 5 },
-        { id: 'new2', trackUUID: 'y', trackT: 0.8, passengers: 3 },
+        { id: 'new1', trackUUID: 'x', trackT: 0.5, passengers: 5, type: 'locomotive' },
+        { id: 'new2', trackUUID: 'y', trackT: 0.8, passengers: 3, type: 'locomotive' },
       ]);
       expect(WorldManager.world!.trains).toHaveLength(2);
       expect(WorldManager.world!.trains[0].id).toBe('new1');
@@ -180,14 +206,14 @@ describe('WorldManager', () => {
 
     it('setTrainDefs does nothing when no world is loaded', () => {
       WorldManager.reset();
-      expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0 }])).not.toThrow();
+      expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' }])).not.toThrow();
     });
   });
 
   describe('snapshot() / restore()', () => {
     it('captures a deep copy of current state', () => {
       WorldManager.createNew('Snap');
-      WorldManager.addTrackDef({ uuid: 'snap-track', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'snap-track', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
       const snap = WorldManager.snapshot();
       expect(snap).not.toBeNull();
       expect(snap!.tracks).toHaveLength(1);
@@ -200,7 +226,7 @@ describe('WorldManager', () => {
     it('restores a snapshot, overwriting current state', () => {
       WorldManager.createNew('Restore');
       const snap = WorldManager.snapshot()!;
-      WorldManager.addTrackDef({ uuid: 'extra', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'extra', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } });
       expect(WorldManager.world!.tracks).toHaveLength(1);
       WorldManager.restore(snap);
       expect(WorldManager.world!.tracks).toHaveLength(0);
@@ -209,7 +235,7 @@ describe('WorldManager', () => {
     it('is a deep copy (mutation does not affect snapshot)', () => {
       WorldManager.createNew('Deep');
       const snap = WorldManager.snapshot()!;
-      WorldManager.addTrackDef({ uuid: 'new', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'new', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } });
       expect(snap.tracks).toHaveLength(0);
     });
   });
@@ -217,14 +243,14 @@ describe('WorldManager', () => {
   describe('updateTrackDef()', () => {
     it('updates matching track in-place', () => {
       WorldManager.createNew('U');
-      WorldManager.addTrackDef({ uuid: 'upd', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
-      WorldManager.updateTrackDef({ uuid: 'upd', p0: { x: 99, y: 99 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
+      WorldManager.addTrackDef({ geometryVersion: 1, uuid: 'upd', p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
+      WorldManager.updateTrackDef({ geometryVersion: 1, uuid: 'upd', p0: { x: 99, y: 99 }, p1: { x: 1, y: 0 }, p2: { x: 2, y: 0 }, p3: { x: 3, y: 0 } });
       expect(WorldManager.world!.tracks[0].p0.x).toBe(99);
     });
 
     it('does nothing for unknown uuid', () => {
       WorldManager.createNew('U');
-      expect(() => WorldManager.updateTrackDef({ uuid: 'ghost', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } })).not.toThrow();
+      expect(() => WorldManager.updateTrackDef({ geometryVersion: 1, uuid: 'ghost', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } })).not.toThrow();
     });
   });
 });

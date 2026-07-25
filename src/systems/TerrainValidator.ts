@@ -3,6 +3,7 @@ import type { TerrainGenerator } from './TerrainGenerator';
 import { GameConfig } from '../config/GameConfig';
 import type TrackManager from '../managers/TrackManager';
 import type RailTrack from '../entities/RailTrack';
+import { createTrackGeometry } from './TrackGeometry';
 
 /** Machine-readable classification of why a track is invalid (or 'ok' when valid). */
 export type ValidationReasonCode = 'ok' | 'slope' | 'cliff' | 'curvature' | 'misaligned';
@@ -104,7 +105,17 @@ export class TerrainValidator {
     sampleCount: number,
     trackManager: TrackManager | null,
   ): TrackValidationResult {
-    const gradientResult = this.exceedsMaxGradient(p0, p3, sampleCount);
+    const geometry = createTrackGeometry({
+      geometryVersion: 1,
+      p0,
+      p1,
+      p2,
+      p3,
+    });
+    const sampledCurve = geometry.sample(sampleCount).map(
+      ({ point }) => new Phaser.Math.Vector2(point.x, point.y),
+    );
+    const gradientResult = this.gradientForPoints(sampledCurve);
     if (gradientResult.exceeds) {
       return {
         valid: false,
@@ -115,7 +126,7 @@ export class TerrainValidator {
       };
     }
 
-    const cliffResult = this.intersectsCliff(p0, p3, sampleCount);
+    const cliffResult = this.cliffForPoints(sampledCurve);
     if (cliffResult.intersects) {
       return {
         valid: false,
@@ -150,7 +161,7 @@ export class TerrainValidator {
       }
     }
 
-    const tunnelResult = this.requiresTunnel(p0, p3, sampleCount);
+    const tunnelResult = this.tunnelForPoints(p0, p3, sampledCurve);
 
     return {
       valid: true,
@@ -173,7 +184,12 @@ export class TerrainValidator {
     p3: Phaser.Math.Vector2,
     sampleCount: number = 20,
   ): { exceeds: boolean; maxGradient: number; averageElevation: number } {
-    const pts = this.sampleSegment(p0, p3, sampleCount);
+    return this.gradientForPoints(this.sampleSegment(p0, p3, sampleCount));
+  }
+
+  private gradientForPoints(
+    pts: Phaser.Math.Vector2[],
+  ): { exceeds: boolean; maxGradient: number; averageElevation: number } {
     let maxGradient = 0;
     let elevTotal   = 0;
 
@@ -210,8 +226,10 @@ export class TerrainValidator {
     p3: Phaser.Math.Vector2,
     sampleCount: number = 20,
   ): { intersects: boolean } {
-    const pts = this.sampleSegment(p0, p3, sampleCount);
+    return this.cliffForPoints(this.sampleSegment(p0, p3, sampleCount));
+  }
 
+  private cliffForPoints(pts: Phaser.Math.Vector2[]): { intersects: boolean } {
     for (const pt of pts) {
       const band  = this.terrain.getBandAt(pt.x, pt.y);
       const slope = this.terrain.slopeAt(pt.x, pt.y);
@@ -233,10 +251,17 @@ export class TerrainValidator {
     p3: Phaser.Math.Vector2,
     sampleCount: number = 20,
   ): { needed: boolean } {
+    return this.tunnelForPoints(p0, p3, this.sampleSegment(p0, p3, sampleCount));
+  }
+
+  private tunnelForPoints(
+    p0: Phaser.Math.Vector2,
+    p3: Phaser.Math.Vector2,
+    pts: Phaser.Math.Vector2[],
+  ): { needed: boolean } {
     const h0   = this.terrain.getHeightAt(p0.x, p0.y);
     const h3   = this.terrain.getHeightAt(p3.x, p3.y);
     const base = Math.max(h0, h3);
-    const pts  = this.sampleSegment(p0, p3, sampleCount);
 
     for (const pt of pts) {
       if (this.terrain.getHeightAt(pt.x, pt.y) > base + TC.MIN_TUNNEL_CLEARANCE) {
@@ -438,15 +463,16 @@ export class TerrainValidator {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  /** Linearly sample `count` points along the segment from p0 to p3. */
+  /** Linearly sample a straight two-point proposal. */
   sampleSegment(
     p0: Phaser.Math.Vector2,
     p3: Phaser.Math.Vector2,
     count: number,
   ): Phaser.Math.Vector2[] {
+    const sampleCount = Math.max(1, Math.floor(count));
     const pts: Phaser.Math.Vector2[] = [];
-    for (let i = 0; i <= count; i++) {
-      const t = i / count;
+    for (let i = 0; i <= sampleCount; i++) {
+      const t = i / sampleCount;
       pts.push(new Phaser.Math.Vector2(
         p0.x + (p3.x - p0.x) * t,
         p0.y + (p3.y - p0.y) * t,

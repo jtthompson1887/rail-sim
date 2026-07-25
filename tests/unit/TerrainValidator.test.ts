@@ -8,6 +8,7 @@ const Phaser = require('phaser');
 import { TerrainValidator } from '../../src/systems/TerrainValidator';
 import TrackManager from '../../src/managers/TrackManager';
 import RailTrack from '../../src/entities/RailTrack';
+import { createTrackGeometry } from '../../src/systems/TrackGeometry';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -172,6 +173,33 @@ describe('TerrainValidator.canPlaceTrack() — 2-point form', () => {
 // ── canPlaceTrack — 4-point form ─────────────────────────────────────────────
 
 describe('TerrainValidator.canPlaceTrack() — 4-point form', () => {
+  it('samples terrain along the canonical cubic rather than the endpoint chord', () => {
+    const sampledBandPoints: Array<{ x: number; y: number }> = [];
+    const terrain = {
+      getHeightAt: () => 0,
+      getBandAt: (x: number, y: number) => {
+        sampledBandPoints.push({ x, y });
+        return 'LOWLAND';
+      },
+      slopeAt: () => 0,
+    };
+    const validator = new TerrainValidator(terrain as any);
+    const points = [v(0, 0), v(0, 300), v(300, 300), v(300, 0)] as const;
+
+    validator.canPlaceTrack(points[0], points[1], points[2], points[3], 4, null);
+
+    expect(sampledBandPoints).toEqual(
+      createTrackGeometry({
+        geometryVersion: 1,
+        p0: points[0],
+        p1: points[1],
+        p2: points[2],
+        p3: points[3],
+      }).sample(4).map(({ point }) => point),
+    );
+    expect(sampledBandPoints[2].y).toBeGreaterThan(0);
+  });
+
   it('Given a straight track (4-point form), When validating, Then it passes', () => {
     const validator = new TerrainValidator(makeFlatTerrain() as any);
     const result = validator.canPlaceTrack(v(0, 0), v(100, 0), v(200, 0), v(300, 0), 20, null);
