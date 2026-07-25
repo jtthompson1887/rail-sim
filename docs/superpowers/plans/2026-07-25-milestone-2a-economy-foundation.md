@@ -81,7 +81,7 @@ use the event bus for authoritative mutations.
   `getFacilityDefinition(id)` returning immutable definitions or `undefined`.
 - Consumed by every later task in this plan.
 
-- [ ] **Step 1: Write failing catalogue tests**
+- [x] **Step 1: Write failing catalogue tests**
 
 Cover the exact initial IDs and reject duplicates, unknown recipe products,
 unknown facility recipes, duplicate inventory slots, non-positive or unsafe
@@ -104,7 +104,7 @@ expect(validateEconomyContent(
 )).toEqual({ valid: true });
 ```
 
-- [ ] **Step 2: Run the focused test and verify the red state**
+- [x] **Step 2: Run the focused test and verify the red state**
 
 ```powershell
 npx jest tests/unit/ProductCatalog.test.ts --runInBand --coverage=false
@@ -112,7 +112,7 @@ npx jest tests/unit/ProductCatalog.test.ts --runInBand --coverage=false
 
 Expected: fail because the economy modules do not exist.
 
-- [ ] **Step 3: Add the serialisable domain types**
+- [x] **Step 3: Add the serialisable domain types**
 
 Define these exact foundations in `EconomyData.ts`:
 
@@ -172,7 +172,7 @@ export interface FacilityDefinition {
 }
 ```
 
-- [ ] **Step 4: Add exactly the approved construction-chain content**
+- [x] **Step 4: Add exactly the approved construction-chain content**
 
 Use these products and recipes:
 
@@ -225,7 +225,7 @@ Create facility definitions for `managed-forest`, `sawmill`, `quarry`,
 `town-construction-market`. Give each referenced product one slot, with positive
 capacity/target values. Only the port and town use non-`none` boundaries.
 
-- [ ] **Step 5: Implement catalogue validation and immutable lookup**
+- [x] **Step 5: Implement catalogue validation and immutable lookup**
 
 Validation returns:
 
@@ -238,7 +238,7 @@ export type ContentValidationResult =
 Clone and freeze the exported content at module creation. Lookups must not
 return mutable shared arrays.
 
-- [ ] **Step 6: Run focused and configuration tests**
+- [x] **Step 6: Run focused and configuration tests**
 
 ```powershell
 npx jest tests/unit/ProductCatalog.test.ts tests/unit/ConfigAndLevelData.test.ts --runInBand --coverage=false
@@ -246,7 +246,7 @@ npx jest tests/unit/ProductCatalog.test.ts tests/unit/ConfigAndLevelData.test.ts
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add src/economy tests/unit/ProductCatalog.test.ts
