@@ -17,6 +17,7 @@ import {
   sampleConstructionCurve,
   type ConstructionCurveSample,
 } from './ConstructionCurveSampler';
+import { realPolynomialRootsInUnitInterval } from './PolynomialRoots';
 import {
   deriveVerticalAlignment,
   type TerrainProfileSample,
@@ -219,6 +220,70 @@ function hasStationaryPoint(def: TrackGeometryDef): boolean {
   });
 }
 
+function addPolynomials(
+  left: readonly number[],
+  right: readonly number[],
+): number[] {
+  const length = Math.max(left.length, right.length);
+  return Array.from(
+    { length },
+    (_, index) => (left[index] ?? 0) + (right[index] ?? 0),
+  );
+}
+
+function multiplyPolynomials(
+  left: readonly number[],
+  right: readonly number[],
+): number[] {
+  const result = Array(left.length + right.length - 1).fill(0);
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex++) {
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex++) {
+      result[leftIndex + rightIndex] += left[leftIndex] * right[rightIndex];
+    }
+  }
+  return result;
+}
+
+function scalePolynomial(coefficients: readonly number[], scale: number): number[] {
+  return coefficients.map((coefficient) => coefficient * scale);
+}
+
+function derivativeCoefficients(coefficients: readonly number[]): number[] {
+  return coefficients.slice(1).map(
+    (coefficient, index) => coefficient * (index + 1),
+  );
+}
+
+function curvatureExtremaTs(def: TrackGeometryDef): number[] {
+  const x = derivativePolynomial(def.p0.x, def.p1.x, def.p2.x, def.p3.x);
+  const y = derivativePolynomial(def.p0.y, def.p1.y, def.p2.y, def.p3.y);
+  const vx = [x.c, x.b, x.a];
+  const vy = [y.c, y.b, y.a];
+  const ax = derivativeCoefficients(vx);
+  const ay = derivativeCoefficients(vy);
+  const signedCurvatureNumerator = addPolynomials(
+    multiplyPolynomials(vx, ay),
+    scalePolynomial(multiplyPolynomials(vy, ax), -1),
+  );
+  const numeratorDerivative = derivativeCoefficients(signedCurvatureNumerator);
+  const speedSquared = addPolynomials(
+    multiplyPolynomials(vx, vx),
+    multiplyPolynomials(vy, vy),
+  );
+  const velocityDotAcceleration = addPolynomials(
+    multiplyPolynomials(vx, ax),
+    multiplyPolynomials(vy, ay),
+  );
+  const extremaPolynomial = addPolynomials(
+    multiplyPolynomials(numeratorDerivative, speedSquared),
+    scalePolynomial(
+      multiplyPolynomials(signedCurvatureNumerator, velocityDotAcceleration),
+      -3,
+    ),
+  );
+  return realPolynomialRootsInUnitInterval(extremaPolynomial);
+}
+
 export function minimumRadiusForGeometry(
   def: TrackGeometryDef,
   sampledPoints: readonly ConstructionCurveSample[],
@@ -242,7 +307,11 @@ export function minimumRadiusForGeometry(
   }
 
   let minimumRadius = Infinity;
-  for (const { t } of sampledPoints) {
+  const candidateTs = [
+    ...sampledPoints.map(({ t }) => t),
+    ...curvatureExtremaTs(def),
+  ];
+  for (const t of candidateTs) {
     const { dx, dy, ddx, ddy } = derivatives(def, t);
     const denominator = Math.pow(dx * dx + dy * dy, 1.5);
     if (denominator < CURVATURE_EPSILON) continue;

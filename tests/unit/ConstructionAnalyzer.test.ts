@@ -116,6 +116,21 @@ describe('ConstructionAnalyzer', () => {
     );
   });
 
+  it('rejects a hidden interior curvature maximum between survey positions', () => {
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 165.23726480927027, y: -89.7898434199951 },
+      p2: { x: 13.082751519786054, y: -4.3917624180665475 },
+      p3: { x: 204.62412743046525, y: -109.82728414994573 },
+    }, () => 0);
+
+    expect(proposal.valid).toBe(false);
+    expect(proposal.reasonCode).toBe('curvature');
+    expect(proposal.minimumRadius).toBeCloseTo(137.6667, 3);
+    expect(proposal.minimumRadius).toBeLessThan(ConstructionConfig.MINIMUM_RADIUS);
+  });
+
   it('rejects a collinear cubic that reverses through a zero-speed cusp', () => {
     const proposal = analyse({
       geometryVersion: 1,
@@ -292,7 +307,7 @@ describe('ConstructionAnalyzer', () => {
     expect(getHeightAt.mock.calls.length).toBe(96);
   });
 
-  it('uses one frozen curve profile for terrain, length, grade, curvature, structures, and costs', () => {
+  it('uses one frozen curve profile for terrain, length, grade, structures, and costs', () => {
     const terrainReads: Array<{ x: number; y: number }> = [];
     const geometry: TrackGeometryDef = {
       geometryVersion: 1,
@@ -331,33 +346,7 @@ describe('ConstructionAnalyzer', () => {
         + detailed.proposal.costs.tunnel,
     );
 
-    const sampledMinimumRadius = detailed.curveSamples.reduce((minimum, { t }) => {
-      const inverse = 1 - t;
-      const dx = 3 * (
-        inverse ** 2 * (geometry.p1.x - geometry.p0.x)
-        + 2 * inverse * t * (geometry.p2.x - geometry.p1.x)
-        + t ** 2 * (geometry.p3.x - geometry.p2.x)
-      );
-      const dy = 3 * (
-        inverse ** 2 * (geometry.p1.y - geometry.p0.y)
-        + 2 * inverse * t * (geometry.p2.y - geometry.p1.y)
-        + t ** 2 * (geometry.p3.y - geometry.p2.y)
-      );
-      const ddx = 6 * (
-        inverse * (geometry.p2.x - 2 * geometry.p1.x + geometry.p0.x)
-        + t * (geometry.p3.x - 2 * geometry.p2.x + geometry.p1.x)
-      );
-      const ddy = 6 * (
-        inverse * (geometry.p2.y - 2 * geometry.p1.y + geometry.p0.y)
-        + t * (geometry.p3.y - 2 * geometry.p2.y + geometry.p1.y)
-      );
-      const denominator = Math.pow(dx * dx + dy * dy, 1.5);
-      const curvature = denominator < 1e-10
-        ? 0
-        : Math.abs(dx * ddy - dy * ddx) / denominator;
-      return curvature > 1e-10 ? Math.min(minimum, 1 / curvature) : minimum;
-    }, Infinity);
-    expect(detailed.proposal.minimumRadius).toBeCloseTo(sampledMinimumRadius, 10);
+    expect(detailed.proposal.minimumRadius).toBeCloseTo(1301.6826923076922, 10);
     expect(analyzer.analyze(geometry)).toEqual(detailed.proposal);
   });
 
