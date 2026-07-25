@@ -2,6 +2,7 @@ import { GameConfig } from './GameConfig';
 
 export const MAX_OPPORTUNITY_ATTEMPTS = 12;
 export const MAX_SITE_CANDIDATES_PER_ATTEMPT = 256;
+export const OPPORTUNITY_CAMERA_PADDING = 160;
 
 export const WorldGenerationConfig = {
   SITE_GRID_SIZE: 16,
@@ -13,6 +14,10 @@ export const WorldGenerationConfig = {
   MIN_SITE_ELEVATION_DIFFERENCE: 8,
   MAX_PAIR_EVALUATIONS_PER_ATTEMPT: 24,
   DETOUR_OFFSETS: [640, 896, 1_152, 1_408] as readonly number[],
+  CAMERA_VIEWPORT_WIDTH: GameConfig.RESOLUTION.WIDTH,
+  CAMERA_VIEWPORT_HEIGHT: GameConfig.RESOLUTION.HEIGHT,
+  CAMERA_MIN_ZOOM: GameConfig.CAMERA.MIN_ZOOM,
+  CAMERA_MAX_ZOOM: 0.8,
   WORLD_HALF_WIDTH: GameConfig.TERRAIN.WORLD_WIDTH / 2,
   WORLD_HALF_HEIGHT: GameConfig.TERRAIN.WORLD_HEIGHT / 2,
 } as const;

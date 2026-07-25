@@ -13,12 +13,37 @@ import {
   WorldOpportunityGenerator,
   type OpportunityGenerationResult,
 } from '../../src/systems/WorldOpportunityGenerator';
+import { GameConfig } from '../../src/config/GameConfig';
+import type { StarterOpportunityDef } from '../../src/config/WorldData';
+import { OPPORTUNITY_CAMERA_PADDING } from '../../src/config/WorldGeneration';
 
 const fixtureTerrain = {
   getHeightAt(x: number, y: number): number {
     return 120 + x * 0.008 + Math.sin(x / 420) * 32 + Math.cos(y / 510) * 24;
   },
 };
+
+function expectSurveyFitsRecommendedCamera(
+  opportunity: StarterOpportunityDef,
+): void {
+  const { x, y, zoom } = opportunity.recommendedCamera;
+  const halfWidth = GameConfig.RESOLUTION.WIDTH / (2 * zoom);
+  const halfHeight = GameConfig.RESOLUTION.HEIGHT / (2 * zoom);
+  for (const corridor of opportunity.corridors) {
+    for (const waypoint of corridor.waypoints) {
+      expect(Math.abs(waypoint.x - x) + OPPORTUNITY_CAMERA_PADDING)
+        .toBeLessThanOrEqual(halfWidth);
+      expect(Math.abs(waypoint.y - y) + OPPORTUNITY_CAMERA_PADDING)
+        .toBeLessThanOrEqual(halfHeight);
+    }
+  }
+  for (const site of opportunity.sites) {
+    expect(Math.abs(site.x - x) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
+      .toBeLessThanOrEqual(halfWidth);
+    expect(Math.abs(site.y - y) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
+      .toBeLessThanOrEqual(halfHeight);
+  }
+}
 
 function successfulResult(
   seed = 'fixture-seed',
@@ -153,6 +178,100 @@ describe('generated blank-world start', () => {
     expect(WorldManager.world).toBeNull();
   });
 
+  it('preserves the exact active world when replacement generation exhausts', () => {
+    const prior = WorldManager.tryCreateNew(
+      'Prior',
+      'prior-seed',
+      'temperate',
+      successfulPort(),
+    );
+    expect(prior.ok).toBe(true);
+    if (!prior.ok) return;
+    prior.world.company.cash = 765_432;
+    const failingGenerator: OpportunityGeneratorPort = {
+      generate: jest.fn().mockReturnValue({
+        ok: false,
+        error: {
+          code: 'opportunity-exhausted',
+          seed: 'replacement-failed',
+          attemptsEvaluated: 12,
+          maxSiteCandidatesEvaluated: 256,
+        },
+      }),
+    };
+
+    const result = WorldManager.tryCreateNew(
+      'Replacement',
+      'replacement-failed',
+      'temperate',
+      failingGenerator,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(WorldManager.world).toBe(prior.world);
+    expect(WorldManager.world?.company.cash).toBe(765_432);
+    expect(SaveService.listWorlds().map((world) => world.id))
+      .toEqual([prior.world.id]);
+  });
+
+  it('preserves the exact active world when replacement persistence fails', () => {
+    const prior = WorldManager.tryCreateNew(
+      'Prior',
+      'prior-save-seed',
+      'temperate',
+      successfulPort(),
+    );
+    expect(prior.ok).toBe(true);
+    if (!prior.ok) return;
+    prior.world.company.cash = 654_321;
+    jest.spyOn(SaveService, 'saveWorld').mockReturnValue(false);
+
+    const result = WorldManager.tryCreateNew(
+      'Unsaved replacement',
+      'replacement-save-failed',
+      'temperate',
+      successfulPort(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'world-save-failed',
+        seed: 'replacement-save-failed',
+      },
+    });
+    expect(WorldManager.world).toBe(prior.world);
+    expect(WorldManager.world?.company.cash).toBe(654_321);
+    expect(SaveService.listWorlds().map((world) => world.id))
+      .toEqual([prior.world.id]);
+  });
+
+  it('replaces an active world only after successful persistence', () => {
+    const prior = WorldManager.tryCreateNew(
+      'Prior',
+      'prior-success-seed',
+      'temperate',
+      successfulPort(),
+    );
+    expect(prior.ok).toBe(true);
+    if (!prior.ok) return;
+
+    const replacement = WorldManager.tryCreateNew(
+      'Replacement',
+      'replacement-success-seed',
+      'alpine',
+      successfulPort(),
+    );
+
+    expect(replacement.ok).toBe(true);
+    if (!replacement.ok) return;
+    expect(WorldManager.world).toBe(replacement.world);
+    expect(WorldManager.world).not.toBe(prior.world);
+    expect(SaveService.loadWorld(replacement.world.id)).toEqual(
+      replacement.world,
+    );
+  });
+
   it.each(['real-terrain-alpha', 'real-terrain-beta'])(
     'finds an affordable opportunity for fixed real terrain seed %s',
     (seed) => {
@@ -167,6 +286,7 @@ describe('generated blank-world start', () => {
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
+      expectSurveyFitsRecommendedCamera(result.opportunity);
       expect(Math.min(...result.opportunity.corridors.map(
         (corridor) => corridor.estimatedCost,
       ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);

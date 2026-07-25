@@ -2,6 +2,7 @@ import { STANDARD_STARTING_CASH } from '../config/ConstructionConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
+  OPPORTUNITY_CAMERA_PADDING,
   WorldGenerationConfig,
 } from '../config/WorldGeneration';
 import type {
@@ -288,11 +289,28 @@ export class WorldOpportunityGenerator {
       const surveyPoints = [start, waypoint, end];
       const xs = surveyPoints.map((point) => point.x);
       const ys = surveyPoints.map((point) => point.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      const span = Math.max(maxX - minX, maxY - minY);
+      const minX = Math.min(
+        ...xs,
+        ...sites.map((site) => site.x - site.footprintRadius),
+      );
+      const maxX = Math.max(
+        ...xs,
+        ...sites.map((site) => site.x + site.footprintRadius),
+      );
+      const minY = Math.min(
+        ...ys,
+        ...sites.map((site) => site.y - site.footprintRadius),
+      );
+      const maxY = Math.max(
+        ...ys,
+        ...sites.map((site) => site.y + site.footprintRadius),
+      );
+      const paddedWidth = maxX - minX + OPPORTUNITY_CAMERA_PADDING * 2;
+      const paddedHeight = maxY - minY + OPPORTUNITY_CAMERA_PADDING * 2;
+      const widthZoom = WorldGenerationConfig.CAMERA_VIEWPORT_WIDTH
+        / Math.max(1, paddedWidth);
+      const heightZoom = WorldGenerationConfig.CAMERA_VIEWPORT_HEIGHT
+        / Math.max(1, paddedHeight);
       const opportunity: StarterOpportunityDef = {
         opportunityVersion: 1,
         resolvedAttempt: attempt,
@@ -301,7 +319,14 @@ export class WorldOpportunityGenerator {
         recommendedCamera: {
           x: (minX + maxX) / 2,
           y: (minY + maxY) / 2,
-          zoom: Math.max(0.25, Math.min(0.8, 1_400 / Math.max(1, span))),
+          zoom: Math.max(
+            WorldGenerationConfig.CAMERA_MIN_ZOOM,
+            Math.min(
+              WorldGenerationConfig.CAMERA_MAX_ZOOM,
+              widthZoom,
+              heightZoom,
+            ),
+          ),
         },
       };
       if (this.validator.validate(

@@ -68,7 +68,6 @@ class WorldManagerClass {
     biome: BiomeType = 'temperate',
     opportunityGenerator?: OpportunityGeneratorPort,
   ): GeneratedWorldCreationResult {
-    this._world = null;
     const generationConfig: WorldGenerationConfigDef = {
       generationConfigVersion: 1,
       seed,

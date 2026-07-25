@@ -1,12 +1,15 @@
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
+  OPPORTUNITY_CAMERA_PADDING,
 } from '../../src/config/WorldGeneration';
 import {
   WorldOpportunityGenerator,
 } from '../../src/systems/WorldOpportunityGenerator';
 import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import type { StarterOpportunityDef } from '../../src/config/WorldData';
+import { GameConfig } from '../../src/config/GameConfig';
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -23,6 +26,28 @@ const variedTerrain = {
       + Math.cos(y / 510) * 24;
   },
 };
+
+function expectSurveyFitsRecommendedCamera(
+  opportunity: StarterOpportunityDef,
+): void {
+  const { x, y, zoom } = opportunity.recommendedCamera;
+  const halfWidth = GameConfig.RESOLUTION.WIDTH / (2 * zoom);
+  const halfHeight = GameConfig.RESOLUTION.HEIGHT / (2 * zoom);
+  for (const corridor of opportunity.corridors) {
+    for (const waypoint of corridor.waypoints) {
+      expect(Math.abs(waypoint.x - x) + OPPORTUNITY_CAMERA_PADDING)
+        .toBeLessThanOrEqual(halfWidth);
+      expect(Math.abs(waypoint.y - y) + OPPORTUNITY_CAMERA_PADDING)
+        .toBeLessThanOrEqual(halfHeight);
+    }
+  }
+  for (const site of opportunity.sites) {
+    expect(Math.abs(site.x - x) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
+      .toBeLessThanOrEqual(halfWidth);
+    expect(Math.abs(site.y - y) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
+      .toBeLessThanOrEqual(halfHeight);
+  }
+}
 
 describe('WorldOpportunityGenerator', () => {
   it('replays identical sites, corridors, witnesses, attempt, and camera for one seed', () => {
@@ -135,7 +160,7 @@ describe('WorldOpportunityGenerator', () => {
     expect(dot).toBeGreaterThan(0);
   });
 
-  it('centres the recommendation on the complete survey envelope', () => {
+  it('centres the recommendation on the complete opportunity envelope', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -143,13 +168,37 @@ describe('WorldOpportunityGenerator', () => {
       (all, corridor) => all.concat(corridor.waypoints),
       [] as Array<{ x: number; y: number }>,
     );
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
+    const xs = points.map((point) => point.x).concat(
+      result.opportunity.sites.reduce(
+        (values, site) => values.concat(
+          site.x - site.footprintRadius,
+          site.x + site.footprintRadius,
+        ),
+        [] as number[],
+      ),
+    );
+    const ys = points.map((point) => point.y).concat(
+      result.opportunity.sites.reduce(
+        (values, site) => values.concat(
+          site.y - site.footprintRadius,
+          site.y + site.footprintRadius,
+        ),
+        [] as number[],
+      ),
+    );
 
     expect(result.opportunity.recommendedCamera.x)
       .toBe((Math.min(...xs) + Math.max(...xs)) / 2);
     expect(result.opportunity.recommendedCamera.y)
       .toBe((Math.min(...ys) + Math.max(...ys)) / 2);
+  });
+
+  it('fits every survey waypoint and site footprint inside the 1920x1080 viewport', () => {
+    const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expectSurveyFitsRecommendedCamera(result.opportunity);
   });
 
   it('returns an explicit bounded error after exhausting flat terrain', () => {
