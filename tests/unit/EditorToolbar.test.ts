@@ -1,4 +1,5 @@
 import { EditorToolbar } from '../../src/ui/EditorToolbar';
+import { EventBus } from '../../src/services/EventBus';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -26,4 +27,23 @@ describe('EditorToolbar lifecycle', () => {
     }
     expect(scene.add.container).not.toHaveBeenCalled();
   });
+
+  it.each(['generator', 'completer', 'junction'] as const)(
+    'refuses disabled %s selection with the engineering-lock reason',
+    (tool) => {
+      const scene = makeScene();
+      const toolbar = new EditorToolbar(scene);
+      const emitSpy = jest.spyOn(EventBus, 'emit');
+
+      toolbar.selectTool(tool);
+
+      expect(toolbar.currentTool).toBe('none');
+      expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
+        message: expect.stringContaining('engineering analysis'),
+        type: 'info',
+      });
+      emitSpy.mockRestore();
+      toolbar.destroy();
+    },
+  );
 });

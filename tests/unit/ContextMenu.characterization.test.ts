@@ -133,7 +133,7 @@ describe('ContextMenu interaction and cleanup', () => {
 describe('Context menu factories', () => {
   afterEach(() => WorldManager.reset());
 
-  it('toggles a single track surface type in both the live and persisted world', () => {
+  it('disables manual structure mutation while retaining deletion', () => {
     WorldManager.createNew('Context fixture', 'context-seed');
     WorldManager.addTrackDef({
       geometryVersion: 1,
@@ -142,6 +142,18 @@ describe('Context menu factories', () => {
       p1: { x: 1, y: 0 },
       p2: { x: 2, y: 0 },
       p3: { x: 3, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 30,
     });
     const track = {
       isTunnel: false,
@@ -152,15 +164,15 @@ describe('Context menu factories', () => {
 
     const items = buildTrackContextItems(trackManager as any, ['track-1'], onDelete);
     expect(items.map((item) => item.label)).toEqual([
-      '🚇 Set as Tunnel',
+      'Structures locked to engineering analysis',
       '🗑 Delete (1)',
     ]);
 
     items[0].action();
-    expect(track.isTunnel).toBe(true);
-    expect(WorldManager.world!.tracks[0].isTunnel).toBe(true);
+    expect(track.isTunnel).toBe(false);
+    expect((WorldManager.world!.tracks[0] as any).isTunnel).toBeUndefined();
     expect(buildTrackContextItems(trackManager as any, ['track-1'], onDelete)[0].label)
-      .toBe('☀ Set as Surface');
+      .toBe('Structures locked to engineering analysis');
 
     items[1].action();
     expect(onDelete).toHaveBeenCalledWith(['track-1']);
@@ -178,12 +190,11 @@ describe('Context menu factories', () => {
     expect(trackManager.getTrack).not.toHaveBeenCalled();
   });
 
-  it('captures the requested world position for generate-here actions', () => {
+  it('offers no empty-space generation action while engineering routing is disabled', () => {
     const generate = jest.fn();
     const [item] = buildEmptyContextItems(321, 654, generate);
 
-    item.action();
-
-    expect(generate).toHaveBeenCalledWith(321, 654);
+    expect(item).toBeUndefined();
+    expect(generate).not.toHaveBeenCalled();
   });
 });

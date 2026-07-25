@@ -7,17 +7,53 @@ import { SnapSystem } from '../SnapSystem';
 import { TerrainValidator } from '../TerrainValidator';
 import { TrackSerializer } from '../../utils/TrackSerializer';
 import { EventBus } from '../../services/EventBus';
+import {
+  deriveAutomaticCubic,
+  type TrackGeometryDef,
+} from '../TrackGeometry';
+import type { ConstructionProposal } from '../ConstructionAnalyzer';
 
-function validationHintState(validation: { valid: boolean; requiresTunnel: boolean }): 'ok' | 'warning' | 'error' {
-  if (!validation.valid) return 'error';
-  return validation.requiresTunnel ? 'warning' : 'ok';
+function hasMajorStructure(proposal: ConstructionProposal): boolean {
+  return proposal.structures.some(
+    (interval) => interval.type === 'bridge' || interval.type === 'tunnel',
+  );
+}
+
+function validationHintState(
+  proposal: ConstructionProposal,
+): 'ok' | 'warning' | 'error' {
+  if (!proposal.valid) return 'error';
+  return hasMajorStructure(proposal) ? 'warning' : 'ok';
+}
+
+function proposalMessage(proposal: ConstructionProposal): string {
+  if (!proposal.valid) return proposal.remedy;
+  if (proposal.structures.some((interval) => interval.type === 'tunnel')) {
+    return 'Tunnel engineering included.';
+  }
+  if (proposal.structures.some((interval) => interval.type === 'bridge')) {
+    return 'Bridge engineering included.';
+  }
+  return '';
+}
+
+function vectors(def: TrackGeometryDef): {
+  p0: Phaser.Math.Vector2;
+  p1: Phaser.Math.Vector2;
+  p2: Phaser.Math.Vector2;
+  p3: Phaser.Math.Vector2;
+} {
+  return {
+    p0: new Phaser.Math.Vector2(def.p0.x, def.p0.y),
+    p1: new Phaser.Math.Vector2(def.p1.x, def.p1.y),
+    p2: new Phaser.Math.Vector2(def.p2.x, def.p2.y),
+    p3: new Phaser.Math.Vector2(def.p3.x, def.p3.y),
+  };
 }
 
 /**
- * PlaceTrackTool – two-click placement of straight cubic Bézier tracks.
- *
- * First click sets anchor (snapped to nearby endpoint via SnapSystem).
- * Second click commits the track and chains the anchor to the new endpoint.
+ * Two-click pre-Task-6 placement path. Every committed track is built from
+ * the exact ConstructionProposal returned by TerrainValidator.
  */
 export class PlaceTrackTool implements IEditorTool {
   private scene: Phaser.Scene;
@@ -40,9 +76,7 @@ export class PlaceTrackTool implements IEditorTool {
     this.ghostGraphics = scene.add.graphics().setDepth(598);
   }
 
-  activate(): void {
-    // No-op — state reset happens in deactivate
-  }
+  activate(): void {}
 
   deactivate(): void {
     this.cancel();
@@ -55,110 +89,110 @@ export class PlaceTrackTool implements IEditorTool {
   }
 
   wantsPointerButton(button: number): boolean {
-    return button === 0; // Only left button
+    return button === 0;
   }
 
   onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
     if (!this.placeAnchor) {
-      // First click — snap to a nearby endpoint
       const snapped = this.snapSystem.snapPoint(worldX, worldY);
       this.placeAnchor = new Phaser.Math.Vector2(snapped.x, snapped.y);
-      this.ghostGraphics.clear();
-      this.ghostGraphics.fillStyle(0x4ad5ff, 0.9);
-      this.ghostGraphics.fillCircle(snapped.x, snapped.y, 6);
-    } else {
-      // Second click — commit the track
-      const p0 = this.placeAnchor;
-      const p3 = new Phaser.Math.Vector2(worldX, worldY);
-      const p1 = new Phaser.Math.Vector2(
-        p0.x + (p3.x - p0.x) / 3,
-        p0.y + (p3.y - p0.y) / 3,
-      );
-      const p2 = new Phaser.Math.Vector2(
-        p0.x + (p3.x - p0.x) * 2 / 3,
-        p0.y + (p3.y - p0.y) * 2 / 3,
-      );
-
-      const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
-      if (!validation.valid) {
-        EventBus.emit('ui:toast', { message: `Cannot place track: ${validation.reason}`, type: 'error' });
-        EventBus.emit('ui:validation-hint', { state: 'error', message: validation.reason });
-      } else {
-        const snap = this.terrainValidator.snapToFlushConnection(p0, p1, p2, p3, this.trackManager);
-
-        if (snap.neighbourAdjustment) {
-          const { track: nTrack, p0: nP0, p1: nP1, p2: nP2, p3: nP3 } = snap.neighbourAdjustment;
-          // Validate the adjusted neighbour still satisfies all constraints.
-          const nCheck = this.terrainValidator.canPlaceTrack(nP0, nP1, nP2, nP3, 20, null);
-          if (nCheck.valid) {
-            nTrack.updateTrackVectors(nP0, nP1, nP2, nP3);
-            WorldManager.updateTrackDef(TrackSerializer.toTrackDef(nTrack));
-          }
-        }
-
-        const track = new RailTrack(this.scene, snap.p0, snap.p1, snap.p2, snap.p3);
-        track.isTunnel = validation.requiresTunnel;
-        track.elevation = validation.averageElevation;
-        // Rebuild after tunnel/elevation flags are set so renderer tint/alpha is correct.
-        track.updateTrackVectors(snap.p0, snap.p1, snap.p2, snap.p3);
-        this.trackManager.addTrack(track);
-        WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
-        EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-        EventBus.emit('ui:validation-hint', { state: validationHintState(validation), message: validation.reason });
-        EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
-      }
-
-      // Chain — anchor moves to the new endpoint
-      this.placeAnchor = new Phaser.Math.Vector2(worldX, worldY);
-      this.ghostGraphics.clear();
-      this.ghostGraphics.fillStyle(0x4ad5ff, 0.9);
-      this.ghostGraphics.fillCircle(worldX, worldY, 6);
+      this.drawAnchor(snapped.x, snapped.y, 0x4ad5ff);
+      return;
     }
+
+    const proposal = this.analyse(worldX, worldY);
+    if (!proposal.valid) {
+      EventBus.emit('ui:toast', {
+        message: `Cannot place track: ${proposal.remedy}`,
+        type: 'error',
+      });
+      EventBus.emit('ui:validation-hint', {
+        state: 'error',
+        message: proposal.remedy,
+      });
+    } else {
+      const controls = vectors(proposal.geometry);
+      const track = new RailTrack(
+        this.scene,
+        controls.p0,
+        controls.p1,
+        controls.p2,
+        controls.p3,
+      );
+      track.setConstructionData(
+        proposal.verticalProfile,
+        proposal.structures,
+        proposal.costs.total,
+      );
+      this.trackManager.addTrack(track);
+      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
+      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+      EventBus.emit('ui:validation-hint', {
+        state: validationHintState(proposal),
+        message: proposalMessage(proposal),
+      });
+      EventBus.emit('ui:toast', { message: 'Track placed', type: 'success' });
+    }
+
+    this.placeAnchor = new Phaser.Math.Vector2(worldX, worldY);
+    this.drawAnchor(worldX, worldY, 0x4ad5ff);
   }
 
   onPointerMove(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
     if (!this.placeAnchor) return;
-
-    const p0 = this.placeAnchor;
-    const p3 = new Phaser.Math.Vector2(worldX, worldY);
-    const dx = p3.x - p0.x;
-    const dy = p3.y - p0.y;
-    const p1 = new Phaser.Math.Vector2(p0.x + dx / 3, p0.y + dy / 3);
-    const p2 = new Phaser.Math.Vector2(p0.x + dx * 2 / 3, p0.y + dy * 2 / 3);
-
-    const validation = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3, 20, this.trackManager);
-    const colour = validation.valid
-      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
+    const proposal = this.analyse(worldX, worldY);
+    const colour = proposal.valid
+      ? (hasMajorStructure(proposal) ? 0xffcc00 : 0x00ff88)
       : 0xff4444;
 
     this.ghostGraphics.clear();
-    // Anchor dot
     this.ghostGraphics.fillStyle(colour, 0.9);
     this.ghostGraphics.fillCircle(this.placeAnchor.x, this.placeAnchor.y, 6);
-    // Ghost line
     this.ghostGraphics.lineStyle(2, colour, 0.6);
     this.ghostGraphics.beginPath();
     this.ghostGraphics.moveTo(this.placeAnchor.x, this.placeAnchor.y);
     this.ghostGraphics.lineTo(worldX, worldY);
     this.ghostGraphics.strokePath();
-    // Cursor dot
     this.ghostGraphics.fillStyle(colour, 0.7);
     this.ghostGraphics.fillCircle(worldX, worldY, 4);
 
-    EventBus.emit('ui:validation-hint', { state: validationHintState(validation), message: validation.reason });
+    EventBus.emit('ui:validation-hint', {
+      state: validationHintState(proposal),
+      message: proposalMessage(proposal),
+    });
   }
 
-  onPointerUp(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {
-    // No-op for place-track
+  private analyse(worldX: number, worldY: number): ConstructionProposal {
+    const geometry = deriveAutomaticCubic({
+      start: this.placeAnchor!,
+      end: { x: worldX, y: worldY },
+    });
+    const controls = vectors(geometry);
+    return this.terrainValidator.canPlaceTrack(
+      controls.p0,
+      controls.p1,
+      controls.p2,
+      controls.p3,
+      20,
+      this.trackManager,
+    );
   }
 
-  onKeyDown(_event: KeyboardEvent): void {
-    // No-op for place-track
+  private drawAnchor(x: number, y: number, colour: number): void {
+    this.ghostGraphics.clear();
+    this.ghostGraphics.fillStyle(colour, 0.9);
+    this.ghostGraphics.fillCircle(x, y, 6);
   }
 
-  update(_delta: number): void {
-    // No-op
-  }
+  onPointerUp(
+    _worldX: number,
+    _worldY: number,
+    _pointer: Phaser.Input.Pointer,
+  ): void {}
+
+  onKeyDown(_event: KeyboardEvent): void {}
+
+  update(_delta: number): void {}
 
   destroy(): void {
     this.ghostGraphics.destroy();

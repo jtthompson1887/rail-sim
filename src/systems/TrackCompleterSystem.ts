@@ -273,14 +273,17 @@ export class TrackCompleterSystem {
         const { p0, p1, p2, p3 } = track.getControlPoints();
         const result = this.terrainValidator.canPlaceTrack(p0, p1, p2, p3);
         if (!result.valid) {
-          EventBus.emit('ui:toast', { message: result.reason, type: 'error' });
+          EventBus.emit('ui:toast', { message: result.remedy, type: 'error' });
           this.clearPending();
           this.isAwaitingConfirm = false;
           this.ghostGraphics.clear();
           return;
         }
-        track.isTunnel   = result.requiresTunnel;
-        track.elevation  = result.averageElevation;
+        track.setConstructionData(
+          result.verticalProfile,
+          result.structures,
+          result.costs.total,
+        );
       }
 
       this.trackManager.addTrack(track);

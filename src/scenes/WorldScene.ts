@@ -6,16 +6,12 @@ import { GameStateManager } from '../managers/GameStateManager';
 import { SceneryManager } from '../managers/SceneryManager';
 import { CameraController } from '../systems/CameraController';
 import { InputManager } from '../systems/InputManager';
-import { JunctionCreatorSystem } from '../systems/JunctionCreatorSystem';
-import { TrackCompleterSystem } from '../systems/TrackCompleterSystem';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
 import { SnapSystem } from '../systems/SnapSystem';
 import { CommandStack } from '../systems/CommandStack';
 import { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
-import { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
-import { TrackSerializer } from '../utils/TrackSerializer';
 import { TrainSerializer } from '../utils/TrainSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
@@ -23,20 +19,19 @@ import { WorldContentLoader } from '../services/WorldContentLoader';
 import { AudioManager } from '../managers/AudioManager';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
-import type { CreateTool } from '../ui/EditorToolbar';
+import {
+  CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  disabledConstructionToolReason,
+  type CreateTool,
+} from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
-import type { TrackDef } from '../config/WorldData';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
 import type { IEditorTool } from '../systems/tools/IEditorTool';
 import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
 import { EraserTool } from '../systems/tools/EraserTool';
-import { GeneratorTool } from '../systems/tools/GeneratorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
-import { JunctionTool } from '../systems/tools/JunctionTool';
-import { CompleterTool } from '../systems/tools/CompleterTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
-import { createTrackGeometry } from '../systems/TrackGeometry';
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -51,12 +46,6 @@ declare global {
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
 
-/** Map a TrackValidationResult to the EventBus hint state string. */
-function validationHintState(validation: { valid: boolean; requiresTunnel: boolean }): 'ok' | 'warning' | 'error' {
-  if (!validation.valid) return 'error';
-  return validation.requiresTunnel ? 'warning' : 'ok';
-}
-
 /**
  * WorldScene – the persistent main scene for the sandbox world.
  *
@@ -70,8 +59,6 @@ export default class WorldScene extends Phaser.Scene {
   private cameraController!: CameraController;
   private inputManager!: InputManager;
   private audioManager!: AudioManager;
-  private junctionCreator!: JunctionCreatorSystem;
-  private trackCompleter!: TrackCompleterSystem;
   private terrainGenerator!: TerrainGenerator;
   private terrainChunkManager!: TerrainChunkManager;
   private terrainValidator!: TerrainValidator;
@@ -82,8 +69,6 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
-  /** Per-track validation overlay drawn during handle-drag reshape. */
-  private reshapeValidationOverlay!: Phaser.GameObjects.Graphics;
   private contentLoader!: WorldContentLoader;
   private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
@@ -94,10 +79,6 @@ export default class WorldScene extends Phaser.Scene {
   private toolRegistry!: Map<CreateTool, IEditorTool>;
   private activeEditorTool: IEditorTool | null = null;
 
-  // ── Drag-reshape state ─────────────────────────────────────────────────────
-  private reshapingTrackUUID: string | null = null;
-  private reshapeBeforeDef: TrackDef | null = null;
-
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
@@ -105,6 +86,15 @@ export default class WorldScene extends Phaser.Scene {
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
     if (GameStateManager.worldMode !== 'create') return;
+    const disabledReason = disabledConstructionToolReason(tool);
+    if (disabledReason) {
+      this.activeEditorTool?.cancel();
+      this.activeEditorTool?.deactivate();
+      this.activeTool = 'none';
+      this.activeEditorTool = null;
+      EventBus.emit('ui:toast', { message: disabledReason, type: 'info' });
+      return;
+    }
     // Cancel and deactivate previous tool
     this.activeEditorTool?.cancel();
     this.activeEditorTool?.deactivate();
@@ -125,11 +115,12 @@ export default class WorldScene extends Phaser.Scene {
   private readonly redoHandler = () => {
     if (GameStateManager.worldMode === 'create') this.commandStack.redo();
   };
-  /** Triggered by the 'Generate' button in PropertiesPanel when generator tool is active. */
   private readonly generatorRunHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
-    const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
-    generatorTool?.runFromAnchor();
+    EventBus.emit('ui:toast', {
+      message: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+      type: 'info',
+    });
   };
   private readonly saveHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
@@ -193,15 +184,12 @@ export default class WorldScene extends Phaser.Scene {
     this.terrainChunkManager = new TerrainChunkManager(this, this.terrainGenerator, biome);
     this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
     this.terrainOverlay      = this.add.graphics().setDepth(-50).setScrollFactor(0);
-    this.reshapeValidationOverlay = this.add.graphics().setDepth(595);
 
     this.trackManager    = new TrackManager(this);
     this.cameraController = new CameraController(this);
     this.trainManager    = new TrainManager(this, this.trackManager, this.cameraController);
     this.inputManager    = new InputManager(this, this.cameraController);
     this.audioManager    = new AudioManager(this);
-    this.junctionCreator = new JunctionCreatorSystem(this, this.trackManager, this.terrainValidator);
-    this.trackCompleter  = new TrackCompleterSystem(this, this.trackManager, this.terrainValidator);
 
     // ── Editor systems ─────────────────────────────────────────────────────
     this.snapSystem     = new SnapSystem(this.trackManager);
@@ -216,10 +204,7 @@ export default class WorldScene extends Phaser.Scene {
     this.toolRegistry = new Map<CreateTool, IEditorTool>();
     this.toolRegistry.set('place-track', new PlaceTrackTool(this, this.trackManager, this.snapSystem, this.terrainValidator));
     this.toolRegistry.set('eraser', new EraserTool(this, this.trackManager, this.commandStack, this.selectionManager));
-    this.toolRegistry.set('generator', new GeneratorTool(this, this.trackManager, this.snapSystem, this.terrainValidator));
     this.toolRegistry.set('select', new SelectTool(this.selectionManager));
-    this.toolRegistry.set('junction', new JunctionTool(this.junctionCreator));
-    this.toolRegistry.set('completer', new CompleterTool(this.trackCompleter));
     this.toolRegistry.set('place-vehicle', new PlaceVehicleTool(this, this.trackManager, this.trainManager));
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
@@ -263,7 +248,6 @@ export default class WorldScene extends Phaser.Scene {
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
-      this.reshapeValidationOverlay.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
       window.__railSimTrainManager = undefined;
@@ -276,14 +260,6 @@ export default class WorldScene extends Phaser.Scene {
     this.input.on('pointerup',   this.handlePointerUp,   this);
     this.input.keyboard.on('keydown', (event: KeyboardEvent) => {
       this.handleKeyDown(event);
-    });
-
-    // Drag events for control-point reshape handles
-    this.input.on('drag', (_ptr: Phaser.Input.Pointer, go: any, dragX: number, dragY: number) => {
-      this.handleHandleDrag(go, dragX, dragY);
-    });
-    this.input.on('dragend', (_ptr: Phaser.Input.Pointer, go: any) => {
-      this.handleHandleDragEnd(go);
     });
 
     // ESC → pause in play mode
@@ -442,8 +418,7 @@ export default class WorldScene extends Phaser.Scene {
       // Keyboard tool shortcuts (only when no modifier)
       if (!event.ctrlKey && !event.altKey) {
         const shortcuts: Record<string, CreateTool> = {
-          KeyV: 'select', KeyH: 'pan', KeyD: 'completer',
-          KeyJ: 'junction', KeyG: 'generator', KeyE: 'eraser', KeyT: 'terrain-view',
+          KeyV: 'select', KeyH: 'pan', KeyE: 'eraser', KeyT: 'terrain-view',
           KeyP: 'place-track',
           KeyN: 'place-vehicle',
         };
@@ -469,97 +444,6 @@ export default class WorldScene extends Phaser.Scene {
     }
   }
 
-  // ── Reshape drag handles ───────────────────────────────────────────────────
-
-  private handleHandleDrag(go: any, dragX: number, dragY: number): void {
-    const trackUUID: string | undefined = go._trackUUID;
-    const cpType: string | undefined = go._cpType;
-    if (!trackUUID || !cpType) return;
-
-    const track = this.trackManager.getTrack(trackUUID);
-    if (!track) return;
-
-    // Snapshot before-state on first drag event
-    if (this.reshapingTrackUUID !== trackUUID) {
-      this.reshapingTrackUUID = trackUUID;
-      const def = WorldManager.world?.tracks.find((t) => t.uuid === trackUUID);
-      this.reshapeBeforeDef = def ? { ...def } : null;
-    }
-
-    const snapped = this.snapSystem.snapPoint(dragX, dragY, [trackUUID]);
-    const nx = snapped.x;
-    const ny = snapped.y;
-
-    const cps = track.getControlPoints();
-    const newCps = { ...cps };
-    (newCps as any)[cpType] = new Phaser.Math.Vector2(nx, ny);
-
-    track.updateTrackVectors(newCps.p0, newCps.p1, newCps.p2, newCps.p3);
-
-    // Move the handle game object to follow
-    go.setPosition(nx, ny);
-
-    // Live validation overlay
-    const validation = this.terrainValidator.canPlaceTrack(
-      newCps.p0, newCps.p1, newCps.p2, newCps.p3,
-      20,
-      this.trackManager,
-    );
-    const overlayColour = validation.valid
-      ? (validation.requiresTunnel ? 0xffcc00 : 0x00ff88)
-      : 0xff4444;
-    this.reshapeValidationOverlay.clear();
-    this.reshapeValidationOverlay.lineStyle(4, overlayColour, 0.7);
-    this.reshapeValidationOverlay.beginPath();
-    this.reshapeValidationOverlay.moveTo(newCps.p0.x, newCps.p0.y);
-    const STEPS = 20;
-    const geometry = createTrackGeometry({
-      geometryVersion: 1,
-      p0: newCps.p0,
-      p1: newCps.p1,
-      p2: newCps.p2,
-      p3: newCps.p3,
-    });
-    for (const { point } of geometry.sample(STEPS).slice(1)) {
-      this.reshapeValidationOverlay.lineTo(point.x, point.y);
-    }
-    this.reshapeValidationOverlay.strokePath();
-
-    const hintState = validationHintState(validation);
-    EventBus.emit('ui:validation-hint', { state: hintState, message: validation.reason });
-  }
-
-  private handleHandleDragEnd(go: any): void {
-    const trackUUID: string | undefined = go._trackUUID;
-    if (!trackUUID || !this.reshapeBeforeDef) {
-      this.reshapingTrackUUID = null;
-      this.reshapeBeforeDef = null;
-      this.reshapeValidationOverlay.clear();
-      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
-      return;
-    }
-
-    const track = this.trackManager.getTrack(trackUUID);
-    if (!track) {
-      this.reshapeValidationOverlay.clear();
-      EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
-      return;
-    }
-
-    const afterDef: TrackDef = TrackSerializer.toTrackDef(track);
-
-    const beforeDef = this.reshapeBeforeDef;
-    const cmd = new ReshapeTrackCommand(this.trackManager, trackUUID, beforeDef, afterDef);
-    // The drag already applied the change — record without re-executing
-    this.commandStack.record(cmd);
-    WorldManager.updateTrackDef(afterDef);
-
-    this.reshapingTrackUUID = null;
-    this.reshapeBeforeDef = null;
-    this.reshapeValidationOverlay.clear();
-    EventBus.emit('ui:validation-hint', { state: 'ok', message: '' });
-  }
-
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   private deleteSelectedTracks(uuids: string[]): void {
@@ -581,11 +465,7 @@ export default class WorldScene extends Phaser.Scene {
     if (uuids.length > 0) {
       items = buildTrackContextItems(this.trackManager, uuids, (ids) => this.deleteSelectedTracks(ids));
     } else {
-      items = buildEmptyContextItems(pointer.x, pointer.y, (sx, sy) => {
-        const world = this.cameras.main.getWorldPoint(sx, sy);
-        const generatorTool = this.toolRegistry.get('generator') as GeneratorTool | undefined;
-        generatorTool?.runGeneratorAt(world.x, world.y);
-      });
+      items = buildEmptyContextItems(pointer.x, pointer.y, () => {});
     }
     if (items.length > 0) {
       const editorUI = this.scene.get(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;

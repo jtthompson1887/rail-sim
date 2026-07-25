@@ -128,9 +128,31 @@ describe('JunctionCreatorSystem', () => {
       const terrainValidator = {
         canPlaceTrack: jest.fn().mockReturnValue({
           valid: true,
-          reason: '',
-          requiresTunnel: false,
-          averageElevation: 0,
+          geometry: {
+            geometryVersion: 1,
+            p0: { x: 0, y: 0 },
+            p1: { x: 1, y: 0 },
+            p2: { x: 2, y: 0 },
+            p3: { x: 3, y: 0 },
+          },
+          verticalProfile: {
+            profileVersion: 1,
+            knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+          },
+          structures: [{
+            type: 'surface',
+            startT: 0,
+            endT: 1,
+            startElevation: 0,
+            endElevation: 0,
+          }],
+          costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 0, total: 100 },
+          length: 10,
+          minimumRadius: Number.POSITIVE_INFINITY,
+          maximumGradePercent: 0,
+          maximumGradeT: 0,
+          remedy: '',
+          reasonCode: 'ok',
         }),
       };
       system.destroy();

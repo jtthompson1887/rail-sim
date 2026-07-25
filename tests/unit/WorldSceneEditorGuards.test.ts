@@ -1,30 +1,52 @@
 import WorldScene from '../../src/scenes/WorldScene';
 import { GameStateManager } from '../../src/managers/GameStateManager';
+import { EventBus } from '../../src/services/EventBus';
 
-describe('WorldScene editor event guards', () => {
+describe('WorldScene disabled construction bypass guards', () => {
   afterEach(() => {
     GameStateManager.enterCreate('test-world');
   });
 
-  it('ignores stale generator and delete events outside create mode', () => {
+  it.each(['generator', 'completer', 'junction'] as const)(
+    'ignores programmatic %s tool activation',
+    (tool) => {
+      const scene = new WorldScene();
+      const activate = jest.fn();
+      (scene as any).toolRegistry = new Map([[tool, { activate }]]);
+      (scene as any).cameraController = { setInputLockOwner: jest.fn() };
+      GameStateManager.enterCreate('test-world');
+
+      (scene as any).toolChangedHandler({ tool });
+
+      expect(activate).not.toHaveBeenCalled();
+      expect((scene as any).activeEditorTool).toBeNull();
+    },
+  );
+
+  it.each(['KeyG', 'KeyD', 'KeyJ'])(
+    'does not emit a toolbar-selection event for disabled shortcut %s',
+    (code) => {
+      const scene = new WorldScene();
+      const emitSpy = jest.spyOn(EventBus, 'emit');
+      GameStateManager.enterCreate('test-world');
+
+      (scene as any).handleKeyDown({ code, ctrlKey: false, altKey: false });
+
+      expect(emitSpy.mock.calls.some(
+        ([event]) => event === 'ui:toolbar-select-tool',
+      )).toBe(false);
+      emitSpy.mockRestore();
+    },
+  );
+
+  it('refuses generator run events even in create mode', () => {
     const scene = new WorldScene();
     const runFromAnchor = jest.fn();
-    const deleteSelectedTracks = jest.fn();
     (scene as any).toolRegistry = new Map([['generator', { runFromAnchor }]]);
-    (scene as any).deleteSelectedTracks = deleteSelectedTracks;
+    GameStateManager.enterCreate('test-world');
 
-    GameStateManager.enterPlay('test-world');
     (scene as any).generatorRunHandler();
-    (scene as any).editorDeleteHandler({ uuids: ['track-1'] });
 
     expect(runFromAnchor).not.toHaveBeenCalled();
-    expect(deleteSelectedTracks).not.toHaveBeenCalled();
-
-    GameStateManager.returnToCreate();
-    (scene as any).generatorRunHandler();
-    (scene as any).editorDeleteHandler({ uuids: ['track-1'] });
-
-    expect(runFromAnchor).toHaveBeenCalledTimes(1);
-    expect(deleteSelectedTracks).toHaveBeenCalledWith(['track-1']);
   });
 });

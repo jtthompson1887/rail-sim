@@ -4,10 +4,6 @@ import { Station } from '../entities/Station';
 import type TrackManager from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
-import TrackGenerator from '../systems/TrackGenerator';
-import { TrackSerializer } from '../utils/TrackSerializer';
-import { TrainSerializer } from '../utils/TrainSerializer';
-import { GameConfig } from '../config/GameConfig';
 import type { TrackDef, WorldStationDef, TrainDef } from '../config/WorldData';
 
 /**
@@ -28,13 +24,10 @@ export class WorldContentLoader {
     this.trainManager = trainManager;
   }
 
-  /** Load all world content (tracks, stations, trains) or generate starter content. */
+  /** Load all persisted world content without synthesising construction data. */
   load(): void {
     const world = WorldManager.world;
-    if (!world || world.tracks.length === 0) {
-      this.generateStarterTrack();
-      return;
-    }
+    if (!world) return;
 
     for (const def of world.tracks)   { this.restoreTrack(def); }
     for (const def of world.stations) { this.restoreStation(def); }
@@ -67,10 +60,11 @@ export class WorldContentLoader {
     const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
     const track = new RailTrack(this.scene, p0, p1, p2, p3);
     track.setUUID(def.uuid);
-    if (def.isTunnel)  track.isTunnel  = def.isTunnel;
-    if (def.elevation) track.elevation = def.elevation;
-    // Rebuild after loading tunnel/elevation flags so renderer tint/alpha is correct.
-    track.updateTrackVectors(p0, p1, p2, p3);
+    track.setConstructionData(
+      def.verticalProfile,
+      def.structures,
+      def.paidBuildCost,
+    );
     this.trackManager.addTrack(track);
   }
 
@@ -87,38 +81,4 @@ export class WorldContentLoader {
     this.stations.push(new Station(this.scene, stationDef, track));
   }
 
-  private generateStarterTrack(): void {
-    const generator = new TrackGenerator(
-      this.scene,
-      this.trackManager,
-      WorldManager.world?.generationConfig.seed,
-    );
-    const tracks = generator.generateTracks({
-      startPoint: new Phaser.Math.Vector2(0, 500),
-      startAngle: Phaser.Math.DegToRad(90),
-      sections: GameConfig.GENERATION.MAIN.SECTIONS,
-      minLength: GameConfig.GENERATION.MAIN.MIN_LENGTH,
-      maxLength: GameConfig.GENERATION.MAIN.MAX_LENGTH,
-      curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-      minCurveAngle: GameConfig.GENERATION.MAIN.MIN_ANGLE,
-      maxCurveAngle: GameConfig.GENERATION.MAIN.MAX_ANGLE,
-      smoothness: GameConfig.GENERATION.MAIN.SMOOTHNESS,
-    });
-
-    for (const track of tracks) {
-      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
-    }
-
-    const firstTrack = tracks[0];
-    const startPt = firstTrack.getCurvePath().getPoint(0);
-    const train = this.trainManager.createInitialTrain();
-    train.getMatterBody().setPosition(startPt.x, startPt.y);
-    train.currentTrack = firstTrack;
-    train.getMatterBody().setAngle(firstTrack.getTrackAngle(train.getMatterBody()));
-
-    const trainDef = TrainSerializer.toTrainDef(train);
-    if (trainDef) {
-      WorldManager.addTrainDef(trainDef);
-    }
-  }
 }

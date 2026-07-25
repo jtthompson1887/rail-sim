@@ -7,7 +7,7 @@ import type { WorldData } from '../../src/config/WorldData';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     name,
     generationConfig: {

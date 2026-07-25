@@ -54,7 +54,7 @@ export class RailTrackRenderer {
     img.setDepth(0);
     img.rotation = angle;
 
-    if (this.track.isTunnel) {
+    if (this.track.structureTypeAt(t) === 'tunnel') {
       img.setAlpha(0.45);
       img.setTint(0x334455);
     }

@@ -9,6 +9,12 @@ export class TrackSerializer {
   /** Convert a live RailTrack to a serialisable TrackDef. */
   static toTrackDef(track: RailTrack): TrackDef {
     const { p0, p1, p2, p3 } = track.getControlPoints();
+    const verticalProfile = track.verticalProfile;
+    const structures = track.structures;
+    const paidBuildCost = track.paidBuildCost;
+    if (!verticalProfile || !structures || paidBuildCost === null) {
+      throw new Error('Track is missing construction engineering data.');
+    }
     return {
       uuid: track.getUUID(),
       geometryVersion: 1,
@@ -16,8 +22,12 @@ export class TrackSerializer {
       p1: { x: p1.x, y: p1.y },
       p2: { x: p2.x, y: p2.y },
       p3: { x: p3.x, y: p3.y },
-      isTunnel: track.isTunnel || undefined,
-      elevation: track.elevation || undefined,
+      verticalProfile: {
+        profileVersion: 1,
+        knots: verticalProfile.knots.map((knot) => ({ ...knot })),
+      },
+      structures: structures.map((interval) => ({ ...interval })),
+      paidBuildCost,
     };
   }
 }

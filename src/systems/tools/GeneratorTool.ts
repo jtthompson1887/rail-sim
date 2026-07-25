@@ -172,14 +172,17 @@ export class GeneratorTool implements IEditorTool {
       // Use the 4-point form with full curvature validation
       const result = this.terrainValidator.canPlaceTrack(cps.p0, cps.p1, cps.p2, cps.p3, 20, null);
       if (result.valid) {
-        track.isTunnel = result.requiresTunnel;
-        track.elevation = result.averageElevation;
+        track.setConstructionData(
+          result.verticalProfile,
+          result.structures,
+          result.costs.total,
+        );
         track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
         validTracks.push(track);
       } else {
         invalidTracks.push({
           track,
-          reason: result.reason,
+          reason: result.remedy,
           reasonCode: result.reasonCode,
         });
       }
@@ -212,8 +215,8 @@ export class GeneratorTool implements IEditorTool {
       const reasonSummary = Array.from(reasonCounts.entries())
         .map(([code, count]) => {
           const labels: Record<string, string> = {
-            slope: 'too steep',
-            cliff: 'crosses cliffs',
+            grade: 'too steep',
+            clearance: 'clearance blocked',
             curvature: 'too tight',
             misaligned: 'misaligned',
           };

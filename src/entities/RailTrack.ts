@@ -5,6 +5,11 @@ import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
 import { RailTrackRenderer } from './RailTrackRenderer';
 import { createPort, type TrackPort } from './TrackPort';
+import type {
+  StructureInterval,
+  StructureType,
+  VerticalProfileDef,
+} from '../config/WorldData';
 
 /**
  * Minimal interface for objects whose position can be projected onto a track.
@@ -35,10 +40,9 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   /** Port-based connection model. */
   private _startPort!: TrackPort;
   private _endPort!: TrackPort;
-  /** When true the track runs through a tunnel and renders with a darker tint. */
-  isTunnel: boolean = false;
-  /** Average terrain elevation at the time of placement. */
-  elevation: number = 0;
+  private _verticalProfile: VerticalProfileDef | null = null;
+  private _structures: StructureInterval[] | null = null;
+  private _paidBuildCost: number | null = null;
   protected trackConnections: {
     next?: TrackNode;
     previous?: TrackNode;
@@ -164,6 +168,46 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   /** Override the auto-generated UUID (used when restoring from saved state). */
   setUUID(uuid: string): void {
     this.uuid = uuid;
+  }
+
+  setConstructionData(
+    verticalProfile: VerticalProfileDef,
+    structures: StructureInterval[],
+    paidBuildCost: number,
+  ): void {
+    this._verticalProfile = {
+      profileVersion: 1,
+      knots: verticalProfile.knots.map((knot) => ({ ...knot })),
+    };
+    this._structures = structures.map((interval) => ({ ...interval }));
+    this._paidBuildCost = paidBuildCost;
+    this.renderer.rebuild();
+  }
+
+  get verticalProfile(): VerticalProfileDef | null {
+    if (!this._verticalProfile) return null;
+    return {
+      profileVersion: 1,
+      knots: this._verticalProfile.knots.map((knot) => ({ ...knot })),
+    };
+  }
+
+  get structures(): StructureInterval[] | null {
+    return this._structures?.map((interval) => ({ ...interval })) ?? null;
+  }
+
+  get paidBuildCost(): number | null {
+    return this._paidBuildCost;
+  }
+
+  structureTypeAt(rawT: number): StructureType {
+    if (!this._structures) return 'surface';
+    const t = Math.max(0, Math.min(1, rawT));
+    const match = this._structures.find((interval, index) => (
+      t >= interval.startT
+      && (t < interval.endT || index === this._structures!.length - 1)
+    ));
+    return match?.type ?? 'surface';
   }
 
   hasNext(): boolean {

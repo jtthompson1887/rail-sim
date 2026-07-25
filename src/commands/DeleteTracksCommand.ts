@@ -42,10 +42,11 @@ export class DeleteTracksCommand implements Command {
       const p3 = new Phaser.Math.Vector2(def.p3.x, def.p3.y);
       const track = new RailTrack(this.scene, p0, p1, p2, p3);
       track.setUUID(def.uuid);
-      if (def.isTunnel) track.isTunnel = def.isTunnel;
-      if (def.elevation) track.elevation = def.elevation;
-      // Rebuild after restoring tunnel/elevation flags so renderer tint/alpha is correct.
-      track.updateTrackVectors(p0, p1, p2, p3);
+      track.setConstructionData(
+        def.verticalProfile,
+        def.structures,
+        def.paidBuildCost,
+      );
       this.trackManager.addTrack(track);
       WorldManager.addTrackDef(def);
     }

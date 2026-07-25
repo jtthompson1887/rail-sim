@@ -15,6 +15,19 @@ export type CreateTool =
   | 'place-vehicle'
   | 'none';
 
+export const CONSTRUCTION_ANALYSIS_LOCK_REASON =
+  'Unavailable until this tool routes through construction engineering analysis.';
+
+const DISABLED_CONSTRUCTION_TOOLS: Partial<Record<CreateTool, string>> = {
+  completer: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  junction: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  generator: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+};
+
+export function disabledConstructionToolReason(tool: CreateTool): string | null {
+  return DISABLED_CONSTRUCTION_TOOLS[tool] ?? null;
+}
+
 /** Keyboard shortcut badge labels for each tool. */
 const SHORTCUTS: Partial<Record<CreateTool, string>> = {
   select: 'V',
@@ -304,6 +317,11 @@ export class EditorToolbar {
   // ── Public API ───────────────────────────────────────────────────────────
 
   selectTool(tool: CreateTool): void {
+    const disabledReason = disabledConstructionToolReason(tool);
+    if (disabledReason) {
+      EventBus.emit('ui:toast', { message: disabledReason, type: 'info' });
+      return;
+    }
     if (this.activeTool === tool) return;
     this.activeTool = tool;
     for (const ref of this.toolButtons) {

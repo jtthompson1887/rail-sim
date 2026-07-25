@@ -71,7 +71,7 @@ describe('SelectionManager editor interaction lifecycle', () => {
   const first = trackFixture('track-a', { x: 10, y: 10 }, { x: 0, y: 0 }, { x: 20, y: 20 });
   const second = trackFixture('track-b', { x: 25, y: 10 }, { x: 20, y: 0 }, { x: 30, y: 20 });
 
-  it('rebuilds draggable handles and emits each observable selection transition', () => {
+  it('emits selection transitions without creating reshape handles', () => {
     const { manager, scene } = selectionHarness([first, second]);
     const transitions: string[][] = [];
     const listener = ({ uuids }: { uuids: string[] }) => transitions.push(uuids);
@@ -79,16 +79,12 @@ describe('SelectionManager editor interaction lifecycle', () => {
 
     manager.select('track-a');
     expect(manager.selectedUUIDs).toEqual(['track-a']);
-    expect(manager.getHandles().map((handle) => handle.type)).toEqual(['p0', 'p1', 'p2', 'p3']);
-    expect(scene.input.setDraggable).toHaveBeenCalledTimes(4);
+    expect(manager.getHandles()).toEqual([]);
+    expect(scene.input.setDraggable).not.toHaveBeenCalled();
 
-    const firstHandles = manager.getHandles().map((handle) => handle.rect as any);
     manager.addToSelection('track-b');
     expect(manager.selectedUUIDs).toEqual(['track-a', 'track-b']);
-    expect(manager.getHandles()).toHaveLength(8);
-    for (const oldHandle of firstHandles) {
-      expect(oldHandle.destroy).toHaveBeenCalledTimes(1);
-    }
+    expect(manager.getHandles()).toEqual([]);
 
     manager.addToSelection('track-a');
     expect(manager.selectedUUIDs).toEqual(['track-b']);
@@ -162,7 +158,7 @@ describe('SelectionManager editor interaction lifecycle', () => {
     manager.destroy();
   });
 
-  it('draws hover and selected-track geometry, then destroys all owned graphics and handles', () => {
+  it('draws hover and selected outlines without reshape affordances', () => {
     const { manager, trackManager, highlights, rubberBand } = selectionHarness([first]);
     trackManager.getClosestTrack.mockReturnValue(first);
 
@@ -172,17 +168,13 @@ describe('SelectionManager editor interaction lifecycle', () => {
     expect(highlights.strokePath).toHaveBeenCalledTimes(1);
 
     manager.select('track-a');
-    const handles = manager.getHandles().map((handle) => handle.rect as any);
     manager.update(16);
     expect(highlights.lineStyle).toHaveBeenCalledWith(4, 0xffffff, 0.9);
-    expect(highlights.fillRect).toHaveBeenCalledTimes(4);
+    expect(highlights.fillRect).not.toHaveBeenCalled();
 
     manager.destroy();
     expect(highlights.destroy).toHaveBeenCalledTimes(1);
     expect(rubberBand.destroy).toHaveBeenCalledTimes(1);
-    for (const handle of handles) {
-      expect(handle.destroy).toHaveBeenCalledTimes(1);
-    }
     expect(manager.getHandles()).toEqual([]);
   });
 });

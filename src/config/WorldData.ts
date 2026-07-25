@@ -1,6 +1,24 @@
 import type { VehicleType } from './VehicleTypes';
 import type { TrackGeometryDef } from '../systems/TrackGeometry';
 
+export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
+
+export interface VerticalProfileDef {
+  profileVersion: 1;
+  knots: Array<{
+    t: number;
+    elevation: number;
+  }>;
+}
+
+export interface StructureInterval {
+  type: StructureType;
+  startT: number;
+  endT: number;
+  startElevation: number;
+  endElevation: number;
+}
+
 /** Serialised control point (Bézier p0–p3) */
 export interface Vec2Def {
   x: number;
@@ -10,10 +28,9 @@ export interface Vec2Def {
 /** A serialised RailTrack (cubic Bézier). */
 export interface TrackDef extends TrackGeometryDef {
   uuid: string;
-  /** True when the track segment runs through a tunnel. */
-  isTunnel?: boolean;
-  /** Average terrain elevation at the time the track was placed (world-units). */
-  elevation?: number;
+  verticalProfile: VerticalProfileDef;
+  structures: StructureInterval[];
+  paidBuildCost: number;
 }
 
 /** A serialised Junction referencing three track UUIDs. */
@@ -88,7 +105,7 @@ export interface WorldGenerationConfigDef {
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
@@ -110,7 +127,7 @@ export function createEmptyWorld(name: string, seed?: string, biome: BiomeType =
   const now = Date.now();
   const resolvedSeed = seed ?? now.toString();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
@@ -163,6 +180,56 @@ function isVec2(value: unknown): value is Vec2Def {
   return isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.y);
 }
 
+function isVerticalProfile(value: unknown): value is VerticalProfileDef {
+  if (!isRecord(value)
+    || value.profileVersion !== 1
+    || !Array.isArray(value.knots)
+    || value.knots.length < 2) {
+    return false;
+  }
+  for (let index = 0; index < value.knots.length; index++) {
+    const knot = value.knots[index];
+    const previous = index > 0 ? value.knots[index - 1] : null;
+    if (!isRecord(knot)
+      || !isFiniteNumber(knot.t)
+      || !isFiniteNumber(knot.elevation)
+      || knot.t < 0
+      || knot.t > 1
+      || (isRecord(previous) && isFiniteNumber(previous.t) && knot.t <= previous.t)) {
+      return false;
+    }
+  }
+  const first = value.knots[0];
+  const last = value.knots[value.knots.length - 1];
+  return isRecord(first) && first.t === 0 && isRecord(last) && last.t === 1;
+}
+
+function isStructureInterval(value: unknown): value is StructureInterval {
+  if (!isRecord(value)) return false;
+  const types: StructureType[] = ['surface', 'cut', 'fill', 'bridge', 'tunnel'];
+  return types.indexOf(value.type as StructureType) !== -1
+    && isFiniteNumber(value.startT)
+    && isFiniteNumber(value.endT)
+    && value.startT >= 0
+    && value.endT <= 1
+    && value.startT < value.endT
+    && isFiniteNumber(value.startElevation)
+    && isFiniteNumber(value.endElevation);
+}
+
+function isStructureSequence(value: unknown): value is StructureInterval[] {
+  if (!Array.isArray(value)
+    || value.length === 0
+    || !value.every(isStructureInterval)) {
+    return false;
+  }
+  if (value[0].startT !== 0 || value[value.length - 1].endT !== 1) return false;
+  for (let index = 1; index < value.length; index++) {
+    if (value[index - 1].endT !== value[index].startT) return false;
+  }
+  return true;
+}
+
 function isTrack(value: unknown): value is TrackDef {
   if (!isRecord(value)) return false;
   return value.geometryVersion === 1
@@ -171,8 +238,12 @@ function isTrack(value: unknown): value is TrackDef {
     && isVec2(value.p1)
     && isVec2(value.p2)
     && isVec2(value.p3)
-    && (value.isTunnel === undefined || typeof value.isTunnel === 'boolean')
-    && (value.elevation === undefined || isFiniteNumber(value.elevation));
+    && isVerticalProfile(value.verticalProfile)
+    && isStructureSequence(value.structures)
+    && isFiniteNumber(value.paidBuildCost)
+    && value.paidBuildCost >= 0
+    && !('isTunnel' in value)
+    && !('elevation' in value);
 }
 
 function isJunction(value: unknown): value is JunctionDef {
@@ -250,7 +321,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 1) {
+  if (raw.schemaVersion !== 2) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -282,7 +353,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 1.');
+    return incompatible(raw, 'data does not match schema version 2.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

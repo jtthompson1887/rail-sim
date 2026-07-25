@@ -6,11 +6,13 @@ const { makeScene } = require('../../__mocks__/phaser');
 describe('PropertiesPanel', () => {
   let panel: PropertiesPanel;
   let scene: any;
+  let trackManager: any;
+  let selectionManager: any;
 
   beforeEach(() => {
     scene = makeScene();
-    const trackManager = { getTrack: jest.fn() };
-    const selectionManager = { selectedUUIDs: [] };
+    trackManager = { getTrack: jest.fn() };
+    selectionManager = { selectedUUIDs: [] };
     panel = new PropertiesPanel(
       scene,
       trackManager as any,
@@ -47,7 +49,6 @@ describe('PropertiesPanel', () => {
   });
 
   it.each([
-    ['generator', 'paramObjects'],
     ['place-vehicle', 'vehicleTypeObjects'],
   ])('hides and disables %s controls in play, then restores them in create', (tool, objectsKey) => {
     EventBus.emit('tool:changed', { tool: tool as any });
@@ -73,5 +74,53 @@ describe('PropertiesPanel', () => {
     expect(afterCreate.length).toBeGreaterThan(0);
     expect(container.setVisible).toHaveBeenLastCalledWith(true);
     expect((panel as any).deleteBtn.setVisible).toHaveBeenLastCalledWith(false);
+  });
+
+  it('shows generator as disabled without interactive parameters or a run event', () => {
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+
+    EventBus.emit('tool:changed', { tool: 'generator' });
+
+    expect((panel as any).paramObjects.every(
+      (object: any) => object.setInteractive.mock.calls.length === 0,
+    )).toBe(true);
+    expect(scene.add.text).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      expect.stringContaining('engineering analysis'),
+      expect.any(Object),
+    );
+    expect(emitSpy.mock.calls.some(([event]) => event === 'generator:run')).toBe(false);
+    emitSpy.mockRestore();
+  });
+
+  it('shows analysed structures without a manual tunnel mutation', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'track-1',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 100, y: 0 },
+        p2: { x: 200, y: 0 },
+        p3: { x: 300, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 300 }),
+      structures: [{
+        type: 'tunnel',
+        startT: 0,
+        endT: 1,
+        startElevation: 10,
+        endElevation: 10,
+      }],
+      paidBuildCost: 1234,
+    });
+    selectionManager.selectedUUIDs = ['track-1'];
+
+    EventBus.emit('selection:changed', { uuids: ['track-1'] });
+
+    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(true);
+    expect((panel as any).tunnelBtn.disableInteractive).toHaveBeenCalled();
+    expect((panel as any).tunnelBtnText.setText).toHaveBeenCalledWith(
+      expect.stringContaining('analysis'),
+    );
   });
 });

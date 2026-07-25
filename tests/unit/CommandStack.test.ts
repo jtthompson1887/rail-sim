@@ -7,6 +7,7 @@ import type { Command } from '../../src/systems/CommandStack';
 import TrackManager from '../../src/managers/TrackManager';
 import RailTrack from '../../src/entities/RailTrack';
 import { WorldManager } from '../../src/managers/WorldManager';
+import type { TrackDef } from '../../src/config/WorldData';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -16,7 +17,42 @@ function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 100, y2 = 0): RailTrack {
   const p1 = new Phaser.Math.Vector2(x1 + (x2 - x1) / 3, y1);
   const p2 = new Phaser.Math.Vector2(x1 + 2 * (x2 - x1) / 3, y1);
   const p3 = new Phaser.Math.Vector2(x2, y2);
-  return new RailTrack(scene, p0, p1, p2, p3);
+  const track = new RailTrack(scene, p0, p1, p2, p3);
+  track.setConstructionData(
+    {
+      profileVersion: 1,
+      knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+    },
+    [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 0,
+      endElevation: 0,
+    }],
+    0,
+  );
+  return track;
+}
+
+function withConstruction(
+  geometry: Pick<TrackDef, 'geometryVersion' | 'uuid' | 'p0' | 'p1' | 'p2' | 'p3'>,
+): TrackDef {
+  return {
+    ...geometry,
+    verticalProfile: {
+      profileVersion: 1,
+      knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+    },
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 0,
+      endElevation: 0,
+    }],
+    paidBuildCost: 0,
+  };
 }
 
 function makeCommand(label = 'cmd'): Command & { execCount: number; undoCount: number } {
@@ -201,14 +237,14 @@ describe('ReshapeTrackCommand', () => {
     trackManager.addTrack(track);
     const uuid = track.getUUID();
 
-    const before = {
+    const before = withConstruction({
       geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
       p2: { x: 67, y: 0 }, p3: { x: 100, y: 0 },
-    };
-    const after = {
+    });
+    const after = withConstruction({
       geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
       p2: { x: 67, y: 50 }, p3: { x: 100, y: 0 },
-    };
+    });
 
     const cmd = new ReshapeTrackCommand(trackManager, uuid, before, after);
     expect(() => cmd.execute()).not.toThrow();
@@ -219,14 +255,14 @@ describe('ReshapeTrackCommand', () => {
     trackManager.addTrack(track);
     const uuid = track.getUUID();
 
-    const before = {
+    const before = withConstruction({
       geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 0 },
       p2: { x: 67, y: 0 }, p3: { x: 100, y: 0 },
-    };
-    const after = {
+    });
+    const after = withConstruction({
       geometryVersion: 1 as const, uuid, p0: { x: 0, y: 0 }, p1: { x: 33, y: 50 },
       p2: { x: 67, y: 50 }, p3: { x: 100, y: 0 },
-    };
+    });
 
     const cmd = new ReshapeTrackCommand(trackManager, uuid, before, after);
     cmd.execute();
@@ -234,7 +270,7 @@ describe('ReshapeTrackCommand', () => {
   });
 
   it('is a no-op when track UUID is not found', () => {
-    const before = { geometryVersion: 1 as const, uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } };
+    const before = withConstruction({ geometryVersion: 1 as const, uuid: 'x', p0: { x: 0, y: 0 }, p1: { x: 0, y: 0 }, p2: { x: 0, y: 0 }, p3: { x: 0, y: 0 } });
     const after  = { ...before };
     const cmd = new ReshapeTrackCommand(trackManager, 'x', before, after);
     expect(() => cmd.execute()).not.toThrow();

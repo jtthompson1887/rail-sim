@@ -21,10 +21,31 @@ function makeTrack(scene: any, x0: number, y0: number, x3: number, y3: number): 
 function validResult(overrides: Record<string, unknown> = {}) {
   return {
     valid: true,
-    requiresTunnel: false,
-    averageElevation: 10,
-    reason: '',
-    reasonCode: '',
+    geometry: {
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 1, y: 0 },
+      p2: { x: 2, y: 0 },
+      p3: { x: 3, y: 0 },
+    },
+    verticalProfile: {
+      profileVersion: 1,
+      knots: [{ t: 0, elevation: 10 }, { t: 1, elevation: 10 }],
+    },
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 10,
+      endElevation: 10,
+    }],
+    costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 0, total: 100 },
+    length: 10,
+    minimumRadius: Number.POSITIVE_INFINITY,
+    maximumGradePercent: 0,
+    maximumGradeT: 0,
+    remedy: '',
+    reasonCode: 'ok',
     ...overrides,
   };
 }
@@ -142,17 +163,27 @@ describe('GeneratorTool construction behavior', () => {
     generateSpy.mockReturnValue([valid, slopeInvalid, secondSlopeInvalid, cliffInvalid]);
     terrainValidator.canPlaceTrack
       .mockReturnValueOnce(validResult({
-        requiresTunnel: true,
-        averageElevation: 77,
+        verticalProfile: {
+          profileVersion: 1,
+          knots: [{ t: 0, elevation: 77 }, { t: 1, elevation: 77 }],
+        },
+        structures: [{
+          type: 'tunnel',
+          startT: 0,
+          endT: 1,
+          startElevation: 77,
+          endElevation: 77,
+        }],
+        costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 500, total: 600 },
       }))
       .mockReturnValueOnce({
-        valid: false, reason: 'too steep', reasonCode: 'slope',
+        ...validResult(), valid: false, remedy: 'too steep', reasonCode: 'grade',
       })
       .mockReturnValueOnce({
-        valid: false, reason: 'too steep', reasonCode: 'slope',
+        ...validResult(), valid: false, remedy: 'too steep', reasonCode: 'grade',
       })
       .mockReturnValueOnce({
-        valid: false, reason: 'crosses cliff', reasonCode: 'cliff',
+        ...validResult(), valid: false, remedy: 'clearance blocked', reasonCode: 'clearance',
       });
     const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
     const updateValid = jest.spyOn(valid, 'updateTrackVectors');
@@ -160,25 +191,26 @@ describe('GeneratorTool construction behavior', () => {
     tool.runGeneratorAt(0, 0);
 
     expect(updateValid).toHaveBeenCalled();
-    expect(valid.isTunnel).toBe(true);
-    expect(valid.elevation).toBe(77);
+    expect(valid.structureTypeAt(0.5)).toBe('tunnel');
+    expect(valid.verticalProfile?.knots[0].elevation).toBe(77);
+    expect(valid.paidBuildCost).toBe(600);
     expect(addWorld).toHaveBeenCalledTimes(1);
     expect(addWorld).toHaveBeenCalledWith(expect.objectContaining({
       uuid: valid.getUUID(),
-      isTunnel: true,
-      elevation: 77,
+      paidBuildCost: 600,
+      structures: [expect.objectContaining({ type: 'tunnel' })],
     }));
     expect(trackManager.removeTrack).toHaveBeenCalledTimes(3);
     expect(trackManager.removeTrack).toHaveBeenCalledWith(slopeInvalid.getUUID());
     expect(trackManager.removeTrack).toHaveBeenCalledWith(cliffInvalid.getUUID());
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:validation-hint',
-      { state: 'warning', message: '3 section(s) failed: slope, cliff' },
+      { state: 'warning', message: '3 section(s) failed: grade, clearance' },
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toast',
       {
-        message: 'Generated 1 tracks (3 blocked: 2 too steep, 1 crosses cliffs)',
+        message: 'Generated 1 tracks (3 blocked: 2 too steep, 1 clearance blocked)',
         type: 'warning',
       },
     );

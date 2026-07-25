@@ -29,6 +29,38 @@ function endpoint(track: RailTrack, isStart: boolean) {
   return { track, isStart, point, tangent };
 }
 
+function proposal(overrides: Record<string, unknown> = {}) {
+  return {
+    valid: true,
+    geometry: {
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 1, y: 0 },
+      p2: { x: 2, y: 0 },
+      p3: { x: 3, y: 0 },
+    },
+    verticalProfile: {
+      profileVersion: 1,
+      knots: [{ t: 0, elevation: 20 }, { t: 1, elevation: 20 }],
+    },
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 20,
+      endElevation: 20,
+    }],
+    costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 0, total: 100 },
+    length: 10,
+    minimumRadius: Number.POSITIVE_INFINITY,
+    maximumGradePercent: 0,
+    maximumGradeT: 0,
+    remedy: '',
+    reasonCode: 'ok',
+    ...overrides,
+  };
+}
+
 function makeGraphicsFake(scene: any) {
   const graphics = new Phaser.GameObjects.Graphics(scene) as any;
   for (const method of [
@@ -52,6 +84,10 @@ describe('TrackCompleterSystem construction behavior', () => {
 
   beforeEach(() => {
     scene = makeScene();
+    const image = scene.add.image();
+    image.setAlpha = jest.fn().mockReturnValue(image);
+    image.setTint = jest.fn().mockReturnValue(image);
+    scene.add.image = jest.fn().mockReturnValue(image);
     scene.add.graphics = jest.fn().mockImplementation(() => makeGraphicsFake(scene));
     trackManager = {
       tracks: [],
@@ -113,12 +149,7 @@ describe('TrackCompleterSystem construction behavior', () => {
     const fromTrack = makeTrack(scene, -100, 0, 0, 0);
     const toTrack = makeTrack(scene, 120, 0, 220, 0);
     trackManager.tracks = [];
-    terrainValidator.canPlaceTrack.mockReturnValue({
-      valid: true,
-      requiresTunnel: false,
-      averageElevation: 20,
-      reason: '',
-    });
+    terrainValidator.canPlaceTrack.mockReturnValue(proposal());
     const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
 
     (system as any).runCompletion(endpoint(fromTrack, false), endpoint(toTrack, true));
@@ -171,12 +202,11 @@ describe('TrackCompleterSystem construction behavior', () => {
     const destroySecond = jest.spyOn(second, 'destroy');
     (system as any).pendingTracks = [first, second];
     (system as any).isAwaitingConfirm = true;
-    terrainValidator.canPlaceTrack.mockReturnValue({
+    terrainValidator.canPlaceTrack.mockReturnValue(proposal({
       valid: false,
-      requiresTunnel: false,
-      averageElevation: 0,
-      reason: 'terrain blocked',
-    });
+      remedy: 'terrain blocked',
+      reasonCode: 'clearance',
+    }));
 
     system.confirm();
 
@@ -191,17 +221,25 @@ describe('TrackCompleterSystem construction behavior', () => {
     );
   });
 
-  it('applies tunnel/elevation metadata and serializes optional fields on valid commit', () => {
+  it('applies analysed construction data and serializes required fields on valid commit', () => {
     const pending = makeTrack(scene, 0, 0, 300, 100);
     const controls = pending.getControlPoints();
     (system as any).pendingTracks = [pending];
     (system as any).isAwaitingConfirm = true;
-    terrainValidator.canPlaceTrack.mockReturnValue({
-      valid: true,
-      requiresTunnel: true,
-      averageElevation: 91,
-      reason: 'tunnel required',
-    });
+    terrainValidator.canPlaceTrack.mockReturnValue(proposal({
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 91 }, { t: 1, elevation: 91 }],
+      },
+      structures: [{
+        type: 'tunnel',
+        startT: 0,
+        endT: 1,
+        startElevation: 91,
+        endElevation: 91,
+      }],
+      costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 900, total: 1000 },
+    }));
     const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
 
     system.confirm();
@@ -212,12 +250,13 @@ describe('TrackCompleterSystem construction behavior', () => {
       controls.p2,
       controls.p3,
     );
-    expect(pending.isTunnel).toBe(true);
-    expect(pending.elevation).toBe(91);
+    expect(pending.structureTypeAt(0.5)).toBe('tunnel');
+    expect(pending.verticalProfile?.knots[0].elevation).toBe(91);
+    expect(pending.paidBuildCost).toBe(1000);
     expect(addWorld).toHaveBeenCalledWith(expect.objectContaining({
       uuid: pending.getUUID(),
-      isTunnel: true,
-      elevation: 91,
+      paidBuildCost: 1000,
+      structures: [expect.objectContaining({ type: 'tunnel' })],
     }));
   });
 

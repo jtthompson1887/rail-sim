@@ -1,6 +1,9 @@
 import { WorldContentLoader } from '../../src/services/WorldContentLoader';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { TrackSerializer } from '../../src/utils/TrackSerializer';
+import RailTrack from '../../src/entities/RailTrack';
+import Phaser from 'phaser';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -9,17 +12,33 @@ describe('WorldContentLoader exact track restoration', () => {
     WorldManager.reset();
   });
 
-  it('restores and reserializes every cubic knot without drift', () => {
-    const original = {
+  it('preserves proposal engineering through live, definition, reload, live, and definition', () => {
+    const geometry = {
       geometryVersion: 1 as const,
-      uuid: 'exact-track',
-      p0: { x: 2.125, y: -8.25 },
-      p1: { x: 143.75, y: 312.5 },
-      p2: { x: 389.875, y: -177.125 },
-      p3: { x: 600.25, y: 44.5 },
-      isTunnel: true,
-      elevation: 73.5,
+      p0: { x: 0, y: 0 },
+      p1: { x: 200, y: 0 },
+      p2: { x: 400, y: 0 },
+      p3: { x: 600, y: 0 },
     };
+    const proposal = new ConstructionAnalyzer({
+      getHeightAt: (x: number) => (x >= 192 && x <= 448 ? -180 : 0),
+    }).analyze(geometry);
+    expect(proposal.valid).toBe(true);
+    const scene = makeScene();
+    const sourceTrack = new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(geometry.p0.x, geometry.p0.y),
+      new Phaser.Math.Vector2(geometry.p1.x, geometry.p1.y),
+      new Phaser.Math.Vector2(geometry.p2.x, geometry.p2.y),
+      new Phaser.Math.Vector2(geometry.p3.x, geometry.p3.y),
+    );
+    sourceTrack.setUUID('exact-track');
+    sourceTrack.setConstructionData(
+      proposal.verticalProfile,
+      proposal.structures,
+      proposal.costs.total,
+    );
+    const original = TrackSerializer.toTrackDef(sourceTrack);
     const world = WorldManager.createNew('Exact restore');
     world.tracks = [original];
     const restoredTracks: any[] = [];
@@ -31,7 +50,6 @@ describe('WorldContentLoader exact track restoration', () => {
       createInitialTrain: jest.fn(),
       createCarriage: jest.fn(),
     };
-    const scene = makeScene();
     const image = scene.add.image();
     image.setAlpha = jest.fn().mockReturnValue(image);
     image.setTint = jest.fn().mockReturnValue(image);
@@ -50,5 +68,62 @@ describe('WorldContentLoader exact track restoration', () => {
       serialized = TrackSerializer.toTrackDef(restoredTracks[0]);
       expect(serialized).toEqual(original);
     }
+  });
+
+  it('restores a zero paid build cost exactly', () => {
+    const world = WorldManager.createNew('Zero cost restore');
+    world.tracks = [{
+      geometryVersion: 1,
+      uuid: 'zero-cost',
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 0,
+    }];
+    const restoredTracks: any[] = [];
+    const scene = makeScene();
+    const loader = new WorldContentLoader(
+      scene,
+      {
+        addTrack: jest.fn((track) => restoredTracks.push(track)),
+        getTrack: jest.fn(),
+      } as any,
+      { createInitialTrain: jest.fn(), createCarriage: jest.fn() } as any,
+    );
+
+    loader.load();
+
+    expect(TrackSerializer.toTrackDef(restoredTracks[0]).paidBuildCost).toBe(0);
+  });
+
+  it('does not generate starter content for an empty schema-2 world', () => {
+    WorldManager.createNew('Empty world');
+    const trackManager = { addTrack: jest.fn(), getTrack: jest.fn() };
+    const trainManager = {
+      createInitialTrain: jest.fn(),
+      createCarriage: jest.fn(),
+    };
+    const loader = new WorldContentLoader(
+      makeScene(),
+      trackManager as any,
+      trainManager as any,
+    );
+
+    loader.load();
+
+    expect(trackManager.addTrack).not.toHaveBeenCalled();
+    expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
   });
 });

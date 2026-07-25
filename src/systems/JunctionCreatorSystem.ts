@@ -148,6 +148,14 @@ export class JunctionCreatorSystem {
    * Returns the Junction uuid on success, null if angle tolerance is violated.
    */
   private createJunctionAtSplit(track: RailTrack, t: number): string | null {
+    if (!this.terrainValidator) {
+      EventBus.emit('ui:toast', {
+        message: 'Junction creation requires construction engineering analysis.',
+        type: 'info',
+      });
+      return null;
+    }
+
     // Clamp t away from the very ends so the split produces usable segments
     t = Phaser.Math.Clamp(t, 0.15, 0.85);
 
@@ -197,37 +205,41 @@ export class JunctionCreatorSystem {
     this.trackManager.addTrack(rightTrack);
 
     // Terrain validation for branch tracks
-    if (this.terrainValidator) {
-      const leftControls = leftTrack.getControlPoints();
-      const rightControls = rightTrack.getControlPoints();
-      const leftResult = this.terrainValidator.canPlaceTrack(
-        leftControls.p0,
-        leftControls.p1,
-        leftControls.p2,
-        leftControls.p3,
-      );
-      const rightResult = this.terrainValidator.canPlaceTrack(
-        rightControls.p0,
-        rightControls.p1,
-        rightControls.p2,
-        rightControls.p3,
-      );
+    const leftControls = leftTrack.getControlPoints();
+    const rightControls = rightTrack.getControlPoints();
+    const leftResult = this.terrainValidator.canPlaceTrack(
+      leftControls.p0,
+      leftControls.p1,
+      leftControls.p2,
+      leftControls.p3,
+    );
+    const rightResult = this.terrainValidator.canPlaceTrack(
+      rightControls.p0,
+      rightControls.p1,
+      rightControls.p2,
+      rightControls.p3,
+    );
 
-      if (!leftResult.valid || !rightResult.valid) {
-        const reason = !leftResult.valid ? leftResult.reason : rightResult.reason;
-        EventBus.emit('ui:toast', { message: `Junction blocked: ${reason}`, type: 'error' });
-        this.trackManager.removeTrack(leftTrack.getUUID());
-        this.trackManager.removeTrack(rightTrack.getUUID());
-        leftTrack.destroy();
-        rightTrack.destroy();
-        return null;
-      }
-
-      leftTrack.isTunnel   = leftResult.requiresTunnel;
-      rightTrack.isTunnel  = rightResult.requiresTunnel;
-      leftTrack.elevation  = leftResult.averageElevation;
-      rightTrack.elevation = rightResult.averageElevation;
+    if (!leftResult.valid || !rightResult.valid) {
+      const reason = !leftResult.valid ? leftResult.remedy : rightResult.remedy;
+      EventBus.emit('ui:toast', { message: `Junction blocked: ${reason}`, type: 'error' });
+      this.trackManager.removeTrack(leftTrack.getUUID());
+      this.trackManager.removeTrack(rightTrack.getUUID());
+      leftTrack.destroy();
+      rightTrack.destroy();
+      return null;
     }
+
+    leftTrack.setConstructionData(
+      leftResult.verticalProfile,
+      leftResult.structures,
+      leftResult.costs.total,
+    );
+    rightTrack.setConstructionData(
+      rightResult.verticalProfile,
+      rightResult.structures,
+      rightResult.costs.total,
+    );
 
     const junction = this.trackManager.createJunctionFromBranches(track.getUUID(), t, leftTrack, rightTrack);
     if (!junction) return null;

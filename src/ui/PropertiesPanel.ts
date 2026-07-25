@@ -1,12 +1,11 @@
 import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
-import { WorldManager } from '../managers/WorldManager';
 import { scalePx, responsiveFontSize } from '../utils/responsive';
 import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
 import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
-import { TrackSerializer } from '../utils/TrackSerializer';
+import { CONSTRUCTION_ANALYSIS_LOCK_REASON } from './EditorToolbar';
 
 /** Generator configuration exposed to the caller via getGeneratorParams(). */
 export interface GeneratorParams {
@@ -189,7 +188,10 @@ export class PropertiesPanel {
       .setInteractive({ useHandCursor: true })
       .on('pointerover', () => this.tunnelBtn.setFillStyle(0x1e4a7c, 1))
       .on('pointerout',  () => this.tunnelBtn.setFillStyle(0x1a3a5c, 0.9))
-      .on('pointerdown', () => this.onToggleTunnel());
+      .on('pointerdown', () => EventBus.emit('ui:toast', {
+        message: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+        type: 'info',
+      }));
 
     this.tunnelBtnText = this.scene.add.text(px - pw / 2, height - (btnH * 2 + 20), '🚇 Toggle Tunnel', {
       fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
@@ -221,97 +223,27 @@ export class PropertiesPanel {
 
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
-    const pw = this.panelWidth;
     const fs = responsiveFontSize(11, width, height, 9, 11);
     const fsSm = responsiveFontSize(10, width, height, 8, 10);
-    const btnH = scalePx(22, width, height, 20);
 
-    // Title
-    const title = this.scene.add.text(px, 14, '⚙ GENERATOR', {
-      fontFamily: 'Verdana', fontSize: fs, color: '#4ad5ff',
+    const title = this.scene.add.text(px, 14, 'GENERATOR DISABLED', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
     this.lines.push(title);
-
-    const hint = this.scene.add.text(px, 30, 'Click near endpoint\nor anywhere to place', {
-      fontFamily: 'Verdana', fontSize: fsSm, color: '#6a8aa0', align: 'center',
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+    const hint = this.scene.add.text(
+      px,
+      38,
+      CONSTRUCTION_ANALYSIS_LOCK_REASON,
+      {
+        fontFamily: 'Verdana',
+        fontSize: fsSm,
+        color: '#6a8aa0',
+        align: 'center',
+        wordWrap: { width: this.panelWidth - 20 },
+      },
+    ).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
     this.lines.push(hint);
-
-    let rowY = 62;
-    const paramDefs: Array<{
-      label: string;
-      key: keyof GeneratorParams;
-      step: number;
-      min: number;
-      max: number;
-      format?: (v: number) => string;
-    }> = [
-      { label: 'Sections',    key: 'sections',         step: 1,    min: 1,  max: 20  },
-      { label: 'Min length',  key: 'minLength',        step: 50,   min: 50, max: 2000 },
-      { label: 'Max length',  key: 'maxLength',        step: 100,  min: 100, max: 4000 },
-      { label: 'Curve %',     key: 'curveProbability', step: 0.1,  min: 0,  max: 1, format: (v) => `${Math.round(v * 100)}%` },
-      { label: 'Min angle°',  key: 'minCurveAngle',    step: 5,    min: 5,  max: 60 },
-      { label: 'Max angle°',  key: 'maxCurveAngle',    step: 5,    min: 10, max: 90 },
-    ];
-
-    for (const def of paramDefs) {
-      const labelTxt = this.scene.add.text(px - pw / 2 + 8, rowY, def.label, {
-        fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
-      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(600);
-      this.lines.push(labelTxt);
-
-      const valueTxt = this.scene.add.text(px + pw / 2 - 8, rowY, this.formatParam(def.key, def.format), {
-        fontFamily: 'Verdana', fontSize: fsSm, color: '#d0e8ff',
-      }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(600);
-      this.lines.push(valueTxt);
-
-      // Minus button
-      const minusBtn = this.scene.add.rectangle(px - 20, rowY + 18, 28, 22, 0x1a3a5c, 0.9)
-        .setStrokeStyle(1, 0x2a8cff, 0.3)
-        .setScrollFactor(0).setDepth(599)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => {
-          this.adjustParam(def.key, -def.step, def.min, def.max);
-          valueTxt.setText(this.formatParam(def.key, def.format));
-        });
-      this.paramObjects.push(minusBtn);
-      const minusText = this.scene.add.text(px - 20, rowY + 18, '-', {
-        fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
-      this.paramObjects.push(minusText);
-
-      // Plus button
-      const plusBtn = this.scene.add.rectangle(px + 20, rowY + 18, 28, 22, 0x1a3a5c, 0.9)
-        .setStrokeStyle(1, 0x2a8cff, 0.3)
-        .setScrollFactor(0).setDepth(599)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => {
-          this.adjustParam(def.key, def.step, def.min, def.max);
-          valueTxt.setText(this.formatParam(def.key, def.format));
-        });
-      this.paramObjects.push(plusBtn);
-      const plusText = this.scene.add.text(px + 20, rowY + 18, '+', {
-        fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
-      this.paramObjects.push(plusText);
-
-      rowY += 44;
-    }
-
-    // Run button
-    const runBtn = this.scene.add.rectangle(px, rowY + 10, pw - 16, btnH, 0x1a6e3c, 0.9)
-      .setStrokeStyle(1, 0x4ade80, 0.6)
-      .setScrollFactor(0).setDepth(599)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => runBtn.setFillStyle(0x22a05a, 0.95))
-      .on('pointerout', () => runBtn.setFillStyle(0x1a6e3c, 0.9))
-      .on('pointerdown', () => EventBus.emit('generator:run', {}));
-    this.paramObjects.push(runBtn);
-    const runText = this.scene.add.text(px, rowY + 10, '▶ Generate', {
-      fontFamily: 'Verdana', fontSize: fs, color: '#4ade80',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
-    this.paramObjects.push(runText);
-    this.container.add([...this.lines, ...this.paramObjects]);
+    this.container.add(this.lines);
   }
 
   private formatParam(key: keyof GeneratorParams, format?: (v: number) => string): string {
@@ -423,11 +355,14 @@ export class PropertiesPanel {
       }
       const { p0, p3 } = track.getControlPoints();
       const length = track.getCurvePath().getLength();
+      const structureSummary = Array.from(
+        new Set((track.structures ?? []).map((interval) => interval.type)),
+      ).join(', ') || 'unavailable';
       const lines = [
         `UUID: ${track.getUUID().slice(0, 8)}…`,
         `Length: ${Math.round(length)}`,
-        `Elevation: ${track.elevation?.toFixed(1) ?? '—'}`,
-        `Tunnel: ${track.isTunnel ? 'Yes' : 'No'}`,
+        `Structures: ${structureSummary}`,
+        `Paid build: ${track.paidBuildCost ?? 'unavailable'}`,
         `p0: (${Math.round(p0.x)}, ${Math.round(p0.y)})`,
         `p3: (${Math.round(p3.x)}, ${Math.round(p3.y)})`,
       ];
@@ -441,6 +376,8 @@ export class PropertiesPanel {
       }
       this.tunnelBtn.setVisible(true);
       this.tunnelBtnText.setVisible(true);
+      this.tunnelBtn.disableInteractive();
+      this.tunnelBtnText.setText('Structures set by analysis');
     } else {
       let totalLength = 0;
       for (const uuid of uuids) {
@@ -455,10 +392,9 @@ export class PropertiesPanel {
         fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
       this.lines.push(lenTxt);
-      this.tunnelBtn.setVisible(true);
-      this.tunnelBtnText.setVisible(true);
+      this.tunnelBtn.setVisible(false);
+      this.tunnelBtnText.setVisible(false);
     }
-    this.tunnelBtn.setInteractive({ useHandCursor: true });
     this.container.add(this.lines);
   }
 
@@ -519,8 +455,8 @@ export class PropertiesPanel {
       ...this.vehicleTypeObjects,
     ];
     for (const object of objects) {
-      if (enabled) object.setInteractive();
-      else object.disableInteractive();
+      if (!enabled || object === this.tunnelBtn) object.disableInteractive();
+      else object.setInteractive();
     }
   }
 
@@ -528,20 +464,6 @@ export class PropertiesPanel {
     if (this.onDeleteCallback) {
       this.onDeleteCallback(this.selectionManager.selectedUUIDs);
     }
-  }
-
-  private onToggleTunnel(): void {
-    for (const uuid of this.selectionManager.selectedUUIDs) {
-      const track = this.trackManager.getTrack(uuid);
-      if (track) {
-        track.isTunnel = !track.isTunnel;
-        const cps = track.getControlPoints();
-        track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
-        WorldManager.updateTrackDef(TrackSerializer.toTrackDef(track));
-      }
-    }
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    this.refresh(this.selectionManager.selectedUUIDs);
   }
 
   destroy(): void {

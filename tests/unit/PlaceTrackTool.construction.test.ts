@@ -1,33 +1,57 @@
-import Phaser from 'phaser';
 import { PlaceTrackTool } from '../../src/systems/tools/PlaceTrackTool';
 import { EventBus } from '../../src/services/EventBus';
 import { WorldManager } from '../../src/managers/WorldManager';
-import RailTrack from '../../src/entities/RailTrack';
+import type { ConstructionProposal } from '../../src/systems/ConstructionAnalyzer';
+import type { TrackGeometryDef } from '../../src/systems/TrackGeometry';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
-function validResult(overrides: Record<string, unknown> = {}) {
+function geometry(x0 = 0, y0 = 0, x3 = 300, y3 = 0): TrackGeometryDef {
   return {
+    geometryVersion: 1,
+    p0: { x: x0, y: y0 },
+    p1: { x: x0 + (x3 - x0) / 3, y: y0 + (y3 - y0) / 3 },
+    p2: { x: x0 + (x3 - x0) * 2 / 3, y: y0 + (y3 - y0) * 2 / 3 },
+    p3: { x: x3, y: y3 },
+  };
+}
+
+function proposal(
+  proposalGeometry: TrackGeometryDef,
+  overrides: Partial<ConstructionProposal> = {},
+): ConstructionProposal {
+  return {
+    geometry: proposalGeometry,
+    verticalProfile: {
+      profileVersion: 1,
+      knots: [{ t: 0, elevation: 12 }, { t: 1, elevation: 12 }],
+    },
+    length: 300,
+    minimumRadius: Infinity,
+    maximumGradePercent: 0,
+    maximumGradeT: 0,
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 12,
+      endElevation: 12,
+    }],
+    costs: {
+      track: 3000,
+      earthworks: 0,
+      bridge: 0,
+      tunnel: 0,
+      total: 3000,
+    },
     valid: true,
-    requiresTunnel: false,
-    averageElevation: 12,
-    reason: '',
-    reasonCode: '',
+    reasonCode: 'ok',
+    remedy: '',
     ...overrides,
   };
 }
 
-function makeTrack(scene: any, x0: number, y0: number, x3: number, y3: number): RailTrack {
-  return new RailTrack(
-    scene,
-    new Phaser.Math.Vector2(x0, y0),
-    new Phaser.Math.Vector2(x0 + (x3 - x0) / 3, y0 + (y3 - y0) / 3),
-    new Phaser.Math.Vector2(x0 + (x3 - x0) * 2 / 3, y0 + (y3 - y0) * 2 / 3),
-    new Phaser.Math.Vector2(x3, y3),
-  );
-}
-
-describe('PlaceTrackTool construction behavior', () => {
+describe('PlaceTrackTool construction proposal persistence', () => {
   let scene: any;
   let graphics: any;
   let trackManager: any;
@@ -50,10 +74,7 @@ describe('PlaceTrackTool construction behavior', () => {
     }
     trackManager = { addTrack: jest.fn() };
     snapSystem = { snapPoint: jest.fn((x, y) => ({ x, y })) };
-    terrainValidator = {
-      canPlaceTrack: jest.fn(),
-      snapToFlushConnection: jest.fn(),
-    };
+    terrainValidator = { canPlaceTrack: jest.fn() };
     WorldManager.createNew('PlaceTrackTool construction');
     emitSpy = jest.spyOn(EventBus, 'emit');
     tool = new PlaceTrackTool(scene, trackManager, snapSystem, terrainValidator);
@@ -64,150 +85,110 @@ describe('PlaceTrackTool construction behavior', () => {
     WorldManager.reset();
   });
 
-  it('anchors at the snapped first click and previews valid, tunnel, and invalid routes', () => {
+  it('previews surface, engineered structure, and invalid proposals', () => {
     snapSystem.snapPoint.mockReturnValue({ x: 40, y: 60 });
     tool.onPointerDown(43, 64, {} as any);
-
-    expect(snapSystem.snapPoint).toHaveBeenCalledWith(43, 64);
     expect(graphics.fillCircle).toHaveBeenCalledWith(40, 60, 6);
 
     terrainValidator.canPlaceTrack
-      .mockReturnValueOnce(validResult())
-      .mockReturnValueOnce(validResult({ requiresTunnel: true, reason: 'tunnel required' }))
-      .mockReturnValueOnce({
+      .mockReturnValueOnce(proposal(geometry(40, 60, 340, 60)))
+      .mockReturnValueOnce(proposal(geometry(40, 60, 340, 160), {
+        structures: [{
+          type: 'tunnel',
+          startT: 0,
+          endT: 1,
+          startElevation: 12,
+          endElevation: 12,
+        }],
+      }))
+      .mockReturnValueOnce(proposal(geometry(40, 60, 340, 260), {
         valid: false,
-        requiresTunnel: false,
-        averageElevation: 0,
-        reason: 'too steep',
-        reasonCode: 'slope',
-      });
+        reasonCode: 'grade',
+        remedy: 'Choose endpoints with less elevation difference.',
+      }));
 
     tool.onPointerMove(340, 60, {} as any);
     expect(graphics.lineStyle).toHaveBeenLastCalledWith(2, 0x00ff88, 0.6);
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:validation-hint',
-      { state: 'ok', message: '' },
-    );
-
     tool.onPointerMove(340, 160, {} as any);
     expect(graphics.lineStyle).toHaveBeenLastCalledWith(2, 0xffcc00, 0.6);
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:validation-hint',
-      { state: 'warning', message: 'tunnel required' },
-    );
-
     tool.onPointerMove(340, 260, {} as any);
     expect(graphics.lineStyle).toHaveBeenLastCalledWith(2, 0xff4444, 0.6);
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:validation-hint',
-      { state: 'error', message: 'too steep' },
-    );
+    expect(emitSpy).toHaveBeenCalledWith('ui:validation-hint', {
+      state: 'error',
+      message: 'Choose endpoints with less elevation difference.',
+    });
   });
 
-  it('rejects invalid placement without mutation and chains from the rejected endpoint', () => {
-    terrainValidator.canPlaceTrack.mockReturnValue({
+  it('rejects invalid placement without mutating the world', () => {
+    terrainValidator.canPlaceTrack.mockReturnValue(proposal(geometry(), {
       valid: false,
-      requiresTunnel: false,
-      averageElevation: 0,
-      reason: 'crosses cliff',
-      reasonCode: 'cliff',
-    });
+      reasonCode: 'out-of-bounds',
+      remedy: 'Keep the entire route inside the terrain boundary.',
+    }));
 
     tool.onPointerDown(0, 0, {} as any);
-    tool.onPointerDown(300, 100, {} as any);
+    tool.onPointerDown(300, 0, {} as any);
 
     expect(trackManager.addTrack).not.toHaveBeenCalled();
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toast',
-      { message: 'Cannot place track: crosses cliff', type: 'error' },
-    );
-
-    terrainValidator.canPlaceTrack.mockClear();
-    tool.onPointerMove(600, 100, {} as any);
-    const [p0] = terrainValidator.canPlaceTrack.mock.calls[0];
-    expect({ x: p0.x, y: p0.y }).toEqual({ x: 300, y: 100 });
-  });
-
-  it('commits a validated tunnel and persists a valid flush neighbour adjustment', () => {
-    const neighbour = makeTrack(scene, -100, 0, 0, 0);
-    const updateNeighbour = jest.spyOn(neighbour, 'updateTrackVectors');
-    const adjustment = {
-      track: neighbour,
-      p0: new Phaser.Math.Vector2(-100, 0),
-      p1: new Phaser.Math.Vector2(-60, 4),
-      p2: new Phaser.Math.Vector2(-30, 2),
-      p3: new Phaser.Math.Vector2(0, 0),
-    };
-    terrainValidator.canPlaceTrack
-      .mockReturnValueOnce(validResult({
-        requiresTunnel: true,
-        averageElevation: 88,
-        reason: 'tunnel required',
-      }))
-      .mockReturnValueOnce(validResult());
-    terrainValidator.snapToFlushConnection.mockReturnValue({
-      p0: new Phaser.Math.Vector2(0, 0),
-      p1: new Phaser.Math.Vector2(100, 0),
-      p2: new Phaser.Math.Vector2(200, 0),
-      p3: new Phaser.Math.Vector2(300, 0),
-      neighbourAdjustment: adjustment,
+    expect(WorldManager.world!.tracks).toEqual([]);
+    expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
+      message: 'Cannot place track: Keep the entire route inside the terrain boundary.',
+      type: 'error',
     });
-    const updateWorld = jest.spyOn(WorldManager, 'updateTrackDef');
-    const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
-
-    tool.onPointerDown(0, 0, {} as any);
-    tool.onPointerDown(300, 0, {} as any);
-
-    expect(updateNeighbour).toHaveBeenCalledWith(
-      adjustment.p0, adjustment.p1, adjustment.p2, adjustment.p3,
-    );
-    expect(updateWorld).toHaveBeenCalledWith(expect.objectContaining({ uuid: neighbour.getUUID() }));
-    expect(trackManager.addTrack).toHaveBeenCalledTimes(1);
-    const committedTrack = trackManager.addTrack.mock.calls[0][0];
-    expect(committedTrack.isTunnel).toBe(true);
-    expect(committedTrack.elevation).toBe(88);
-    expect(addWorld).toHaveBeenCalledWith(expect.objectContaining({
-      uuid: committedTrack.getUUID(),
-      isTunnel: true,
-      elevation: 88,
-    }));
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:validation-hint',
-      { state: 'warning', message: 'tunnel required' },
-    );
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toolbar-save-state',
-      { state: 'unsaved' },
-    );
   });
 
-  it('leaves a neighbour untouched when its flush adjustment fails validation', () => {
-    const neighbour = { updateTrackVectors: jest.fn() };
-    terrainValidator.canPlaceTrack
-      .mockReturnValueOnce(validResult())
-      .mockReturnValueOnce({ valid: false, reason: 'adjustment invalid' });
-    terrainValidator.snapToFlushConnection.mockReturnValue({
-      p0: new Phaser.Math.Vector2(0, 0),
-      p1: new Phaser.Math.Vector2(100, 0),
-      p2: new Phaser.Math.Vector2(200, 0),
-      p3: new Phaser.Math.Vector2(300, 0),
-      neighbourAdjustment: {
-        track: neighbour,
-        p0: new Phaser.Math.Vector2(-100, 0),
-        p1: new Phaser.Math.Vector2(-60, 0),
-        p2: new Phaser.Math.Vector2(-30, 0),
-        p3: new Phaser.Math.Vector2(0, 0),
+  it('persists exact proposal profile, structures, and subtotal without neighbour reshape', () => {
+    const build = proposal(geometry(), {
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [
+          { t: 0, elevation: 5 },
+          { t: 0.5, elevation: 8 },
+          { t: 1, elevation: 5 },
+        ],
+      },
+      structures: [
+        {
+          type: 'surface',
+          startT: 0,
+          endT: 0.5,
+          startElevation: 5,
+          endElevation: 8,
+        },
+        {
+          type: 'bridge',
+          startT: 0.5,
+          endT: 1,
+          startElevation: 8,
+          endElevation: 5,
+        },
+      ],
+      costs: {
+        track: 3000,
+        earthworks: 0,
+        bridge: 1321,
+        tunnel: 0,
+        total: 4321,
       },
     });
+    terrainValidator.canPlaceTrack.mockReturnValue(build);
 
     tool.onPointerDown(0, 0, {} as any);
     tool.onPointerDown(300, 0, {} as any);
 
-    expect(neighbour.updateTrackVectors).not.toHaveBeenCalled();
     expect(trackManager.addTrack).toHaveBeenCalledTimes(1);
+    expect(WorldManager.world!.tracks).toEqual([
+      expect.objectContaining({
+        geometryVersion: 1,
+        verticalProfile: build.verticalProfile,
+        structures: build.structures,
+        paidBuildCost: 4321,
+      }),
+    ]);
+    expect(terrainValidator).not.toHaveProperty('snapToFlushConnection');
   });
 
-  it('cancels/deactivates cleanly and advertises only the left pointer button', () => {
+  it('cancels cleanly and advertises only the left pointer button', () => {
     tool.onPointerDown(10, 20, {} as any);
     tool.deactivate();
     terrainValidator.canPlaceTrack.mockClear();
@@ -216,11 +197,6 @@ describe('PlaceTrackTool construction behavior', () => {
     expect(terrainValidator.canPlaceTrack).not.toHaveBeenCalled();
     expect(tool.wantsPointerButton(0)).toBe(true);
     expect(tool.wantsPointerButton(1)).toBe(false);
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:validation-hint',
-      { state: 'ok', message: '' },
-    );
-
     tool.destroy();
     expect(graphics.destroy).toHaveBeenCalled();
   });

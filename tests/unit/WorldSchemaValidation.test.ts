@@ -19,7 +19,7 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('accepts schema 1 without converting or copying it', () => {
+  it('accepts schema 2 without converting or copying it', () => {
     const world = currentWorld();
     const result = validateWorldData(world);
     expect(result).toEqual({ compatible: true, world });
@@ -28,7 +28,8 @@ describe('world schema validation', () => {
 
   it.each([
     ['missing', undefined],
-    ['unsupported', 2],
+    ['legacy', 1],
+    ['unsupported', 3],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -50,9 +51,56 @@ describe('world schema validation', () => {
       p1: { x: 100, y: 0 },
       p2: { x: 200, y: 0 },
       p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 100,
     });
     const result = validateWorldData(raw);
     expect(result).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
+  it.each([
+    ['verticalProfile'],
+    ['structures'],
+    ['paidBuildCost'],
+  ])('rejects a schema-2 track missing required %s', (field) => {
+    const raw = currentWorld() as any;
+    const track: any = {
+      geometryVersion: 1,
+      uuid: 'track-1',
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 100,
+    };
+    delete track[field];
+    raw.tracks.push(track);
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
       compatible: false,
       action: 'Start a new world.',
     }));
