@@ -288,6 +288,57 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(harness.overlay.clear).toHaveBeenCalled();
   });
 
+  it('enters immutable invalid review for a same-position release and ignores later hover', () => {
+    const harness = makeHarness({ analyzed: preview(false) });
+    const active = { ...pointer(), id: 7 };
+
+    harness.tool.onPointerDown(0, 0, active);
+    harness.tool.onPointerMove(0, 0, active);
+    harness.tool.onPointerUp(0, 0, active);
+    const reviewed = harness.tool.previewModel;
+    harness.tool.onPointerMove(200, 0, { ...pointer(), id: 8 });
+
+    expect(harness.tool.phase).toBe('review');
+    expect(reviewed).toEqual(expect.objectContaining({
+      canConfirm: false,
+      message: expect.any(String),
+    }));
+    expect(harness.tool.previewModel).toBe(reviewed);
+    expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases an unavailable gesture to idle instead of remaining dragging', () => {
+    const harness = makeHarness();
+    harness.constructionService.createPreview.mockReturnValue(null);
+    const active = { ...pointer(), id: 11 };
+
+    harness.tool.onPointerDown(0, 0, active);
+    harness.tool.onPointerMove(300, 0, active);
+    harness.tool.onPointerUp(300, 0, active);
+    harness.tool.onPointerMove(400, 0, { ...pointer(), id: 12 });
+
+    expect(harness.tool.phase).toBe('idle');
+    expect(harness.tool.previewModel).toBeNull();
+    expect(harness.overlay.clear).toHaveBeenCalled();
+    expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores another pointer cancel and cancels only the active gesture pointer', () => {
+    const harness = makeHarness();
+    const pointerA = { ...pointer(), id: 21 };
+    const pointerB = { ...pointer(), id: 22 };
+    harness.tool.onPointerDown(0, 0, pointerA);
+
+    harness.tool.onPointerCancel(pointerB);
+    expect(harness.tool.phase).toBe('dragging');
+    harness.tool.onPointerMove(300, 0, pointerA);
+    expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(1);
+
+    harness.tool.onPointerCancel(pointerA);
+    expect(harness.tool.phase).toBe('idle');
+    expect(harness.overlay.clear).toHaveBeenCalled();
+  });
+
   it('commits the displayed canonical geometry and supports undo/redo without direct mutation', () => {
     const scene = makeScene();
     const world = WorldManager.createNew('Live placement', 'live-placement');

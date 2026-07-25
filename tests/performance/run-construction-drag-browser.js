@@ -1,4 +1,5 @@
 const os = require('os');
+const http = require('http');
 const path = require('path');
 const webpack = require('webpack');
 const { chromium } = require('playwright');
@@ -29,6 +30,7 @@ function buildHarness() {
           },
         }],
       },
+      externals: { phaser: 'Phaser' },
       devtool: false,
     }, (error, stats) => {
       if (error) return reject(error);
@@ -40,10 +42,37 @@ function buildHarness() {
   });
 }
 
+function startHarnessServer() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end('<!doctype html><html><body><div id="game"></div></body></html>');
+    });
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      resolve({
+        server,
+        url: `http://127.0.0.1:${address.port}/`,
+      });
+    });
+  });
+}
+
+async function drivePointerMoves(page) {
+  for (let index = 0; index < 500; index++) {
+    await page.mouse.move(
+      250 + index * 2.8,
+      540 + Math.sin(index / 11) * 140,
+    );
+  }
+}
+
 (async () => {
   process.stdout.write('[construction-drag-browser] boundary=build-start\n');
   await buildHarness();
   process.stdout.write('[construction-drag-browser] boundary=build-complete\n');
+  const harnessServer = await startHarnessServer();
   const browser = await chromium.launch({ headless: true });
   try {
     process.stdout.write('[construction-drag-browser] boundary=browser-launched\n');
@@ -54,20 +83,25 @@ function buildHarness() {
     page.on('pageerror', (error) => {
       process.stdout.write(`[construction-drag-browser] page-error=${error.message}\n`);
     });
-    await page.setContent('<!doctype html><html><body></body></html>');
-    await page.evaluate(() => {
-      if (!crypto.randomUUID) {
-        let sequence = 0;
-        crypto.randomUUID = () => (
-          `00000000-0000-4000-8000-${String(sequence++).padStart(12, '0')}`
-        );
-      }
-    });
+    await page.goto(harnessServer.url);
     process.stdout.write('[construction-drag-browser] boundary=page-ready\n');
+    await page.addScriptTag({
+      path: require.resolve('phaser/dist/phaser.js'),
+    });
+    process.stdout.write('[construction-drag-browser] boundary=phaser-ready\n');
     await page.addScriptTag({ path: path.join(outputPath, bundleName) });
     process.stdout.write('[construction-drag-browser] boundary=script-ready\n');
+    await page.evaluate(() => window.__prepareConstructionDragBenchmark());
+    await page.mouse.move(100, 540);
+    await page.mouse.down();
+    await drivePointerMoves(page);
     process.stdout.write('[construction-drag-browser] boundary=benchmark-start\n');
-    const result = await page.evaluate(() => window.__runConstructionDragBenchmark());
+    await page.evaluate(() => window.__beginConstructionDragMeasurement());
+    await drivePointerMoves(page);
+    const result = await page.evaluate(
+      () => window.__finishConstructionDragBenchmark(),
+    );
+    await page.mouse.up();
     process.stdout.write('[construction-drag-browser] boundary=benchmark-complete\n');
     const record = {
       ...result,
@@ -82,6 +116,7 @@ function buildHarness() {
     }
   } finally {
     await browser.close();
+    await new Promise((resolve) => harnessServer.server.close(resolve));
   }
 })().catch((error) => {
   console.error(error);

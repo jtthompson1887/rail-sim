@@ -110,6 +110,155 @@ describe('ConstructionService', () => {
     expect(result!.predictedConnections).toEqual([]);
   });
 
+  it('rejects adversarial outward vectors on free and grid anchors', () => {
+    const result = service.createPreview(
+      {
+        x: 0,
+        y: 0,
+        snapped: false,
+        type: 'none',
+        outward: { x: 0, y: 1 },
+      } as any,
+      {
+        x: 300,
+        y: 0,
+        snapped: true,
+        type: 'grid',
+        outward: { x: 0, y: -1 },
+      } as any,
+      'adversarial-free',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('accepts an endpoint only when all supplied metadata exactly matches authority', () => {
+    addTrack(manager, scene);
+    const accepted = service.createPreview(
+      {
+        x: 0,
+        y: 0,
+        snapped: true,
+        type: 'endpoint',
+        trackUUID: 'neighbour',
+        endpoint: 'end',
+        outward: { x: 1, y: 0 },
+        open: true,
+      } as any,
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'exact-endpoint',
+    );
+
+    expect(accepted).not.toBeNull();
+    expect(accepted!.proposal.geometry.p1).toEqual({ x: 100, y: 0 });
+    expect(accepted!.predictedConnections).toEqual([
+      expect.objectContaining({
+        existingTrackUUID: 'neighbour',
+        existingEndpoint: 'end',
+      }),
+    ]);
+
+    for (const [newTrackUUID, override] of [
+      ['offset-point', { x: Number.EPSILON }],
+      ['forged-tangent', { outward: { x: 0, y: 1 } }],
+      ['stale-open', { open: false }],
+    ] as const) {
+      const rejected = service.createPreview(
+        {
+          x: 0,
+          y: 0,
+          snapped: true,
+          type: 'endpoint',
+          trackUUID: 'neighbour',
+          endpoint: 'end',
+          outward: { x: 1, y: 0 },
+          open: true,
+          ...override,
+        } as any,
+        { x: 300, y: 0, snapped: false, type: 'none' },
+        newTrackUUID,
+      );
+      expect(rejected).not.toBeNull();
+      expect(rejected!.status).toBe('endpoint-unavailable');
+      expect(rejected!.quote).toBeNull();
+      expect(rejected!.predictedConnections).toEqual([]);
+    }
+  });
+
+  it('rejects malformed endpoint input at the runtime boundary', () => {
+    addTrack(manager, scene);
+    const result = service.createPreview(
+      {
+        x: 0,
+        y: 0,
+        snapped: true,
+        type: 'endpoint',
+        trackUUID: 'neighbour',
+        endpoint: 'end',
+      } as any,
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'missing-endpoint-metadata',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('rejects endpoint metadata attached to none or grid anchors', () => {
+    addTrack(manager, scene);
+    for (const type of ['none', 'grid'] as const) {
+      const result = service.createPreview(
+        {
+          x: 0,
+          y: 0,
+          snapped: type === 'grid',
+          type,
+          trackUUID: 'neighbour',
+          endpoint: 'end',
+          outward: { x: 1, y: 0 },
+          open: true,
+        } as any,
+        { x: 300, y: 0, snapped: false, type: 'none' },
+        `metadata-${type}`,
+      );
+      expect(result).toBeNull();
+    }
+  });
+
+  it('rejects midpoint preview anchors at runtime without creating a quote', () => {
+    const result = service.createPreview(
+      { x: 0, y: 0, snapped: true, type: 'midpoint' } as any,
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'midpoint-anchor',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('returns a deterministic frozen invalid preview for the same snapped port', () => {
+    addTrack(manager, scene);
+    const anchor = {
+      x: 0,
+      y: 0,
+      snapped: true as const,
+      type: 'endpoint' as const,
+      trackUUID: 'neighbour',
+      endpoint: 'end' as const,
+      outward: { x: 1, y: 0 },
+      open: true,
+    };
+    const first = service.createPreview(anchor, anchor, 'same-port-a');
+    const second = service.createPreview(anchor, anchor, 'same-port-b');
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(first!.proposal.valid).toBe(false);
+    expect(first!.quote).toBeNull();
+    expect(first!.proposal.remedy).not.toBe('');
+    expect(first!.proposal.geometry).toEqual(second!.proposal.geometry);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first!.proposal.geometry)).toBe(true);
+  });
+
   it('preserves Infinity in a straight proposal without JSON coercion', () => {
     const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'straight');
     expect(quote).not.toBeNull();

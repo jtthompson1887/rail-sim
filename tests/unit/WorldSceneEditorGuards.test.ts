@@ -207,15 +207,18 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(onPointerDown).toHaveBeenCalledTimes(1);
   });
 
-  it('cancels pending construction on a pointer-cancel lifecycle event', () => {
+  it('forwards the canceling pointer to pointer-aware construction tools', () => {
     const scene = new WorldScene();
+    const onPointerCancel = jest.fn();
     const cancel = jest.fn();
-    (scene as any).activeEditorTool = { cancel };
+    (scene as any).activeEditorTool = { cancel, onPointerCancel };
     GameStateManager.enterCreate('test-world');
+    const pointer = { id: 9 };
 
-    (scene as any).handlePointerCancel();
+    (scene as any).handlePointerCancel(pointer);
 
-    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(onPointerCancel).toHaveBeenCalledWith(pointer);
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it('rejects editor delete events and the direct scene deletion path', () => {

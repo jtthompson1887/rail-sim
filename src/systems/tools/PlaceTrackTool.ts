@@ -6,6 +6,7 @@ import { EventBus } from '../../services/EventBus';
 import type { CommandStack } from '../CommandStack';
 import type { ConstructionEconomy } from '../ConstructionEconomy';
 import type {
+  ConstructionInputAnchor,
   ConstructionPreview,
   ConstructionService,
 } from '../ConstructionService';
@@ -143,11 +144,15 @@ export class PlaceTrackTool implements IEditorTool {
     if (this.cache?.key === key) {
       preview = this.cache.preview;
     } else {
-      preview = this.constructionService.createPreview(
-        this.start,
-        end,
-        this.pendingUUID,
-      );
+      const startInput = this.serviceAnchor(this.start);
+      const endInput = this.serviceAnchor(end);
+      preview = startInput && endInput
+        ? this.constructionService.createPreview(
+          startInput,
+          endInput,
+          this.pendingUUID,
+        )
+        : null;
       if (preview) this.cache = { key, preview };
     }
     if (!preview) {
@@ -175,10 +180,18 @@ export class PlaceTrackTool implements IEditorTool {
     if (this.currentPhase !== 'dragging' && this.currentPhase !== 'chained') return;
     if (this.activePointerId !== null && pointer.id !== this.activePointerId) return;
     this.onPointerMove(worldX, worldY, pointer);
-    if (!this.currentPreview) return;
     this.activePointerId = null;
+    if (!this.currentPreview) {
+      this.resetToIdle();
+      return;
+    }
     this.setPhase('review');
     this.publishModel(false);
+  }
+
+  onPointerCancel(pointer: Phaser.Input.Pointer): void {
+    if (this.activePointerId === null || pointer.id !== this.activePointerId) return;
+    this.resetToIdle();
   }
 
   onKeyDown(event: KeyboardEvent): void {
@@ -377,6 +390,37 @@ export class PlaceTrackTool implements IEditorTool {
       world?.revision ?? 'none',
       world?.company.cash ?? 'none',
     ].join('|');
+  }
+
+  private serviceAnchor(anchor: SnapResult): ConstructionInputAnchor | null {
+    if (anchor.type === 'midpoint') return null;
+    if (anchor.type === 'endpoint') {
+      if (!anchor.trackUUID || !anchor.endpoint
+        || !anchor.outward || typeof anchor.open !== 'boolean') return null;
+      return {
+        x: anchor.x,
+        y: anchor.y,
+        snapped: true,
+        type: 'endpoint',
+        trackUUID: anchor.trackUUID,
+        endpoint: anchor.endpoint,
+        outward: { ...anchor.outward },
+        open: anchor.open,
+      };
+    }
+    return anchor.type === 'grid'
+      ? {
+        x: anchor.x,
+        y: anchor.y,
+        snapped: true,
+        type: 'grid',
+      }
+      : {
+        x: anchor.x,
+        y: anchor.y,
+        snapped: false,
+        type: 'none',
+      };
   }
 
   private dispatchPreview(): void {

@@ -56,14 +56,35 @@ export interface ConstructionPreviewAnchor {
   readonly endpoint: ResolvedTrackEndpoint | null;
 }
 
-export interface ConstructionInputAnchor extends Vec2Def {
-  readonly snapped?: boolean;
-  readonly type?: 'none' | 'grid' | 'endpoint' | 'midpoint';
-  readonly trackUUID?: string;
-  readonly endpoint?: 'start' | 'end';
-  readonly outward?: Readonly<Vec2Def>;
-  readonly open?: boolean;
+export interface LegacyConstructionInputAnchor extends Vec2Def {
+  readonly snapped?: undefined;
+  readonly type?: undefined;
 }
+
+export interface FreeConstructionInputAnchor extends Vec2Def {
+  readonly snapped: false;
+  readonly type: 'none';
+}
+
+export interface GridConstructionInputAnchor extends Vec2Def {
+  readonly snapped: true;
+  readonly type: 'grid';
+}
+
+export interface EndpointConstructionInputAnchor extends Vec2Def {
+  readonly snapped: true;
+  readonly type: 'endpoint';
+  readonly trackUUID: string;
+  readonly endpoint: 'start' | 'end';
+  readonly outward: Readonly<Vec2Def>;
+  readonly open: boolean;
+}
+
+export type ConstructionInputAnchor =
+  | LegacyConstructionInputAnchor
+  | FreeConstructionInputAnchor
+  | GridConstructionInputAnchor
+  | EndpointConstructionInputAnchor;
 
 /**
  * One immutable analysis result for one semantic pointer position. A valid,
@@ -142,15 +163,17 @@ export class ConstructionService {
     const world = WorldManager.world;
     if (!world || !WorldManager.canAdvanceRevision()
       || !newTrackUUID || this.trackManager.getTrack(newTrackUUID)
-      || world.tracks.some((track) => track.uuid === newTrackUUID)) return null;
+      || world.tracks.some((track) => track.uuid === newTrackUUID)
+      || !this.isSupportedAnchor(start)
+      || !this.isSupportedAnchor(end)) return null;
 
     const startSnap = this.resolveInputEndpoint(start);
     const endSnap = this.resolveInputEndpoint(end);
     const startEndpointStale = start.type === 'endpoint' && !startSnap;
     const endEndpointStale = end.type === 'endpoint' && !endSnap;
-    if (startSnap && endSnap
+    const sameResolvedEndpoint = !!(startSnap && endSnap
       && startSnap.trackUUID === endSnap.trackUUID
-      && startSnap.endpoint === endSnap.endpoint) return null;
+      && startSnap.endpoint === endSnap.endpoint);
 
     const snappedStart = startSnap
       ? startSnap
@@ -163,10 +186,10 @@ export class ConstructionService {
       end: { x: snappedEnd.x, y: snappedEnd.y },
       startOutward: startSnap
         ? { ...startSnap.outward }
-        : start.outward ? { ...start.outward } : undefined,
+        : undefined,
       endOutward: endSnap
         ? { ...endSnap.outward }
-        : end.outward ? { ...end.outward } : undefined,
+        : undefined,
     });
     const analyzed = this.safeAnalyze(geometry);
     if (!analyzed) return null;
@@ -182,7 +205,7 @@ export class ConstructionService {
         point: { ...geometry.p0 },
       });
     }
-    if (endSnap) {
+    if (endSnap && !sameResolvedEndpoint) {
       predictedConnections.push({
         kind: 'endpoint-connection',
         existingTrackUUID: endSnap.trackUUID,
@@ -348,12 +371,50 @@ export class ConstructionService {
       this.trackManager,
       anchor.x,
       anchor.y,
-      anchor.type === 'endpoint' ? 1e-6 : GameConfig.TRACK.SNAP_RADIUS_PX,
+      anchor.type === 'endpoint' ? 0 : GameConfig.TRACK.SNAP_RADIUS_PX,
     );
     if (!resolved || anchor.type !== 'endpoint') return resolved;
-    return resolved.trackUUID === anchor.trackUUID
-      && resolved.endpoint === anchor.endpoint
+    const endpointAnchor = anchor as EndpointConstructionInputAnchor;
+    return exact(resolved, {
+      x: endpointAnchor.x,
+      y: endpointAnchor.y,
+      trackUUID: endpointAnchor.trackUUID,
+      endpoint: endpointAnchor.endpoint,
+      outward: endpointAnchor.outward,
+      open: endpointAnchor.open,
+    })
       ? resolved
       : null;
+  }
+
+  private isSupportedAnchor(anchor: ConstructionInputAnchor): boolean {
+    if (!anchor || typeof anchor !== 'object'
+      || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) return false;
+    const runtime = anchor as unknown as Record<string, unknown>;
+    const hasEndpointMetadata = [
+      'trackUUID',
+      'endpoint',
+      'outward',
+      'open',
+    ].some((key) => key in runtime);
+    if (anchor.type === undefined) {
+      return anchor.snapped === undefined && !hasEndpointMetadata;
+    }
+    if (anchor.type === 'none') {
+      return anchor.snapped === false && !hasEndpointMetadata;
+    }
+    if (anchor.type === 'grid') {
+      return anchor.snapped === true && !hasEndpointMetadata;
+    }
+    return anchor.type === 'endpoint'
+      && anchor.snapped === true
+      && typeof runtime.trackUUID === 'string'
+      && runtime.trackUUID.length > 0
+      && (runtime.endpoint === 'start' || runtime.endpoint === 'end')
+      && !!runtime.outward
+      && typeof runtime.outward === 'object'
+      && Number.isFinite((runtime.outward as Vec2Def).x)
+      && Number.isFinite((runtime.outward as Vec2Def).y)
+      && typeof runtime.open === 'boolean';
   }
 }

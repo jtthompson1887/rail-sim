@@ -494,9 +494,13 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.onPointerUp(world.x, world.y, pointer);
   }
 
-  private handlePointerCancel(): void {
+  private handlePointerCancel(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
-    this.activeEditorTool?.cancel();
+    if (this.activeEditorTool?.onPointerCancel) {
+      this.activeEditorTool.onPointerCancel(pointer);
+    } else {
+      this.activeEditorTool?.cancel();
+    }
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
