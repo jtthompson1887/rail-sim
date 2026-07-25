@@ -24,6 +24,12 @@ describe('WorldScene disabled construction bypass guards', () => {
     },
   );
 
+  it('does not expose the unquoted reshape command from the editor command boundary', () => {
+    const commands = require('../../src/systems/CommandStack');
+
+    expect(commands.ReshapeTrackCommand).toBeUndefined();
+  });
+
   it.each(['eraser'] as const)(
     'ignores programmatic economy-bypassing %s activation',
     (tool) => {
@@ -452,9 +458,15 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).toolRegistry = new Map([['generator', { runFromAnchor }]]);
     GameStateManager.enterCreate('test-world');
 
+    const emitSpy = jest.spyOn(EventBus, 'emit');
     (scene as any).generatorRunHandler();
 
     expect(runFromAnchor).not.toHaveBeenCalled();
+    expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
+      message: 'Generate unavailable — multi-track construction needs one atomic quote.',
+      type: 'info',
+    });
+    emitSpy.mockRestore();
   });
 
   it('keeps the toolbar unsaved and reports an error when persistence fails', () => {

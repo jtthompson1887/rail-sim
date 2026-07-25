@@ -23,8 +23,8 @@ import { AudioManager } from '../managers/AudioManager';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { buildTrackContextItems, buildEmptyContextItems } from '../ui/ContextMenu';
 import {
-  CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  CONSTRUCTION_ECONOMY_LOCK_REASON,
+  ERASER_LOCK_REASON,
+  GENERATOR_LOCK_REASON,
   disabledConstructionToolReason,
   type CreateTool,
 } from '../ui/EditorToolbar';
@@ -178,7 +178,7 @@ export default class WorldScene extends Phaser.Scene {
   private readonly generatorRunHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
     EventBus.emit('ui:toast', {
-      message: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+      message: GENERATOR_LOCK_REASON,
       type: 'info',
     });
   };
@@ -759,7 +759,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private reportEconomyLock(): void {
     EventBus.emit('ui:toast', {
-      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+      message: ERASER_LOCK_REASON,
       type: 'info',
     });
   }

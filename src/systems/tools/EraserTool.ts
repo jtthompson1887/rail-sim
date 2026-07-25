@@ -4,11 +4,11 @@ import type TrackManager from '../../managers/TrackManager';
 import type { CommandStack } from '../CommandStack';
 import type { SelectionManager } from '../SelectionManager';
 import { EventBus } from '../../services/EventBus';
-import { CONSTRUCTION_ECONOMY_LOCK_REASON } from '../../ui/EditorToolbar';
+import { ERASER_LOCK_REASON } from '../../ui/EditorToolbar';
 
 /**
- * Compatibility shell retained until deletion can refund paid construction
- * value through an economy-aware command.
+ * Compatibility shell retained because deletion requires the inspector's
+ * selection-bound refund review before its economy-aware command.
  */
 export class EraserTool implements IEditorTool {
   constructor(
@@ -37,7 +37,7 @@ export class EraserTool implements IEditorTool {
 
   private reportLocked(): void {
     EventBus.emit('ui:toast', {
-      message: CONSTRUCTION_ECONOMY_LOCK_REASON,
+      message: ERASER_LOCK_REASON,
       type: 'info',
     });
   }

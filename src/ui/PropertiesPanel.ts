@@ -2,11 +2,11 @@ import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
 import { scalePx, responsiveFontSize } from '../utils/responsive';
-import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
 import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
 import {
-  CONSTRUCTION_ANALYSIS_LOCK_REASON,
+  GENERATOR_LOCK_REASON,
+  RESHAPE_LOCK_REASON,
 } from './EditorToolbar';
 
 export interface DeleteTracksIntent {
@@ -23,26 +23,16 @@ export interface DeletionReviewDTO {
   readonly blockingReason: string;
 }
 
-/** Generator configuration exposed to the caller via getGeneratorParams(). */
-export interface GeneratorParams {
-  sections: number;
-  minLength: number;
-  maxLength: number;
-  curveProbability: number; // 0–1
-  minCurveAngle: number;
-  maxCurveAngle: number;
-}
-
 /**
  * PropertiesPanel
  *
  * A right-side inspector panel that updates whenever the editor selection
  * changes or the active tool changes.  Shows properties for:
  *   – No selection / no special tool: empty (panel hidden)
- *   – Generator tool active: editable generation parameters
+ *   – Generator tool active: concise unavailable explanation
  *   – place-vehicle tool active: vehicle type selector
- *   – Single track selected: UUID, length, elevation, tunnel flag, delete button
- *   – Multiple tracks selected: count, total length, batch delete, batch tunnel
+ *   – Single track selected: UUID, length, analysed structures, delete button
+ *   – Multiple tracks selected: count, total length, batch delete
  *
  * The panel slides in/out with a tween when the selection changes.
  */
@@ -55,27 +45,13 @@ export class PropertiesPanel {
   private panel!: Phaser.GameObjects.Rectangle;
   private border!: Phaser.GameObjects.Rectangle;
   private lines: Phaser.GameObjects.Text[] = [];
-  /** Interactive game objects created for the generator-params UI (buttons+labels). */
-  private paramObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text)[] = [];
   private deleteBtn!: Phaser.GameObjects.Rectangle;
   private deleteBtnText!: Phaser.GameObjects.Text;
-  private tunnelBtn!: Phaser.GameObjects.Rectangle;
-  private tunnelBtnText!: Phaser.GameObjects.Text;
 
   readonly panelWidth: number;
   private isVisible: boolean = false;
   private editorEnabled: boolean = true;
   private currentActiveTool: string = 'none';
-
-  /** Mutable generator parameters; edited via the panel UI. */
-  private generatorParams: GeneratorParams = {
-    sections:         GameConfig.GENERATION.MAIN.SECTIONS,
-    minLength:        GameConfig.GENERATION.MAIN.MIN_LENGTH,
-    maxLength:        GameConfig.GENERATION.MAIN.MAX_LENGTH,
-    curveProbability: GameConfig.GENERATION.MAIN.CURVE_PROB,
-    minCurveAngle:    GameConfig.GENERATION.MAIN.MIN_ANGLE,
-    maxCurveAngle:    GameConfig.GENERATION.MAIN.MAX_ANGLE,
-  };
 
   /** Currently selected vehicle type for the place-vehicle tool. */
   private activeVehicleType: VehicleType = 'locomotive';
@@ -100,7 +76,7 @@ export class PropertiesPanel {
     this.currentActiveTool = data.tool;
     if (!this.editorEnabled) return;
     if (data.tool === 'generator') {
-      this.showGeneratorParams();
+      this.showGeneratorUnavailable();
     } else if (data.tool === 'place-vehicle') {
       this.showVehicleParams();
     } else if (data.tool === 'place-track') {
@@ -148,11 +124,6 @@ export class PropertiesPanel {
     });
   }
 
-  /** Return a copy of the current generator parameters set via the panel UI. */
-  getGeneratorParams(): GeneratorParams {
-    return { ...this.generatorParams };
-  }
-
   /** Return the currently selected vehicle type. */
   getVehicleType(): VehicleType {
     return this.activeVehicleType;
@@ -176,7 +147,7 @@ export class PropertiesPanel {
     }
 
     if (this.currentActiveTool === 'generator') {
-      this.showGeneratorParams();
+      this.showGeneratorUnavailable();
     } else if (this.currentActiveTool === 'place-vehicle') {
       this.showVehicleParams();
     } else if (this.currentActiveTool === 'place-track') {
@@ -195,7 +166,6 @@ export class PropertiesPanel {
     const btnH = scalePx(28, width, height, 24);
     const btnW = pw - 16;
     const fs = responsiveFontSize(11, width, height, 9, 11);
-    const fsSm = responsiveFontSize(10, width, height, 8, 10);
 
     this.container = this.scene.add.container(0, 0).setDepth(598).setScrollFactor(0);
 
@@ -227,48 +197,24 @@ export class PropertiesPanel {
       fontFamily: 'Verdana', fontSize: fs, color: '#ff8080',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
 
-    // Tunnel toggle button
-    this.tunnelBtn = this.scene.add.rectangle(
-      px - pw / 2, height - (btnH * 2 + 20),
-      btnW, btnH,
-      0x1a3a5c, 0.9,
-    ).setScrollFactor(0).setDepth(599)
-      .setStrokeStyle(1, 0x2a8cff, 0.4)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => this.tunnelBtn.setFillStyle(0x1e4a7c, 1))
-      .on('pointerout',  () => this.tunnelBtn.setFillStyle(0x1a3a5c, 0.9))
-      .on('pointerdown', () => EventBus.emit('ui:toast', {
-        message: CONSTRUCTION_ANALYSIS_LOCK_REASON,
-        type: 'info',
-      }));
-
-    this.tunnelBtnText = this.scene.add.text(px - pw / 2, height - (btnH * 2 + 20), '🚇 Toggle Tunnel', {
-      fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
-
     this.container.add([
       this.panel,
       this.border,
       this.deleteBtn,
       this.deleteBtnText,
-      this.tunnelBtn,
-      this.tunnelBtnText,
     ]);
     this.setPanelOffscreen();
     this.refresh([]);
   }
 
-  // ── Generator params UI ────────────────────────────────────────────────────
+  // ── Disabled generator explanation ─────────────────────────────────────────
 
-  private showGeneratorParams(): void {
+  private showGeneratorUnavailable(): void {
     this.clearLines();
-    this.clearParamObjects();
     this.clearVehicleObjects();
     this.slideIn();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
-    this.tunnelBtn.setVisible(false);
-    this.tunnelBtnText.setVisible(false);
 
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
@@ -282,7 +228,7 @@ export class PropertiesPanel {
     const hint = this.scene.add.text(
       px,
       38,
-      CONSTRUCTION_ANALYSIS_LOCK_REASON,
+      GENERATOR_LOCK_REASON,
       {
         fontFamily: 'Verdana',
         fontSize: fsSm,
@@ -295,32 +241,14 @@ export class PropertiesPanel {
     this.container.add(this.lines);
   }
 
-  private formatParam(key: keyof GeneratorParams, format?: (v: number) => string): string {
-    const val = this.generatorParams[key];
-    return format ? format(val as number) : String(val);
-  }
-
-  private adjustParam(key: keyof GeneratorParams, delta: number, min: number, max: number): void {
-    const current = this.generatorParams[key];
-    let next = (typeof current === 'number' ? current : 0) + delta;
-    // Round to avoid float drift
-    const decimals = Math.max(0, -Math.floor(Math.log10(Math.abs(delta))));
-    next = Number(next.toFixed(decimals));
-    next = Math.max(min, Math.min(max, next));
-    (this.generatorParams as any)[key] = next;
-  }
-
   // ── Vehicle params UI ──────────────────────────────────────────────────────
 
   private showVehicleParams(): void {
     this.clearLines();
-    this.clearParamObjects();
     this.clearVehicleObjects();
     this.slideIn();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
-    this.tunnelBtn.setVisible(false);
-    this.tunnelBtnText.setVisible(false);
 
     const px = this.getOnscreenX();
     const { width, height } = this.scene.scale;
@@ -376,12 +304,9 @@ export class PropertiesPanel {
   private refresh(uuids: string[]): void {
     this.disarmDelete();
     this.clearLines();
-    this.clearParamObjects();
     this.clearVehicleObjects();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
-    this.tunnelBtn.setVisible(false);
-    this.tunnelBtnText.setVisible(false);
 
     const count = uuids.length;
     if (count === 0) {
@@ -426,7 +351,7 @@ export class PropertiesPanel {
         `Length: ${Math.round(length)}`,
         `Structures: ${structureSummary}`,
         `Paid build: ${track.paidBuildCost ?? 'unavailable'}`,
-        'Reshape unavailable — cost-delta quote required',
+        RESHAPE_LOCK_REASON,
         `p0: (${Math.round(p0.x)}, ${Math.round(p0.y)})`,
         `p3: (${Math.round(p3.x)}, ${Math.round(p3.y)})`,
       ];
@@ -438,8 +363,6 @@ export class PropertiesPanel {
         this.lines.push(txt);
         y += 18;
       }
-      this.tunnelBtn.setVisible(false);
-      this.tunnelBtnText.setVisible(false);
     } else {
       let totalLength = 0;
       for (const uuid of uuids) {
@@ -454,8 +377,6 @@ export class PropertiesPanel {
         fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
       this.lines.push(lenTxt);
-      this.tunnelBtn.setVisible(false);
-      this.tunnelBtnText.setVisible(false);
     }
     this.container.add(this.lines);
   }
@@ -499,11 +420,6 @@ export class PropertiesPanel {
     this.lines = [];
   }
 
-  private clearParamObjects(): void {
-    for (const obj of this.paramObjects) obj.destroy();
-    this.paramObjects = [];
-  }
-
   private clearVehicleObjects(): void {
     for (const obj of this.vehicleTypeObjects) obj.destroy();
     this.vehicleTypeObjects = [];
@@ -512,13 +428,10 @@ export class PropertiesPanel {
   private setInteractionsEnabled(enabled: boolean): void {
     const objects = [
       this.deleteBtn,
-      this.tunnelBtn,
-      ...this.paramObjects,
       ...this.vehicleTypeObjects,
     ];
     for (const object of objects) {
       if (!enabled
-        || object === this.tunnelBtn
         || (object === this.deleteBtn
           && this.reviewFor(this.selectionManager.selectedUUIDs)?.available !== true)) {
         object.disableInteractive();
@@ -577,14 +490,11 @@ export class PropertiesPanel {
     EventBus.off('tool:changed', this.toolChangedHandler);
     EventBus.off('ui:deletion-review', this.deletionReviewHandler);
     this.clearLines();
-    this.clearParamObjects();
     this.clearVehicleObjects();
     this.panel.destroy();
     this.border.destroy();
     this.deleteBtn.destroy();
     this.deleteBtnText.destroy();
-    this.tunnelBtn.destroy();
-    this.tunnelBtnText.destroy();
     this.container.destroy();
   }
 }

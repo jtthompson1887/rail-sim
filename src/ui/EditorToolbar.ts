@@ -19,12 +19,22 @@ export const CONSTRUCTION_ANALYSIS_LOCK_REASON =
   'Unavailable until this tool routes through construction engineering analysis.';
 export const CONSTRUCTION_ECONOMY_LOCK_REASON =
   'Unavailable until this action uses an economy-aware construction command.';
+export const GENERATOR_LOCK_REASON =
+  'Generate unavailable — multi-track construction needs one atomic quote.';
+export const COMPLETER_LOCK_REASON =
+  'Connect unavailable — route completion needs one atomic quote.';
+export const JUNCTION_LOCK_REASON =
+  'Junction unavailable — track splitting needs one atomic quote.';
+export const ERASER_LOCK_REASON =
+  'Erase unavailable — select tracks to review the exact refund.';
+export const RESHAPE_LOCK_REASON =
+  'Reshape unavailable — exact cost-delta quote required.';
 
 const DISABLED_CONSTRUCTION_TOOLS: Partial<Record<CreateTool, string>> = {
-  completer: CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  junction: CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  generator: CONSTRUCTION_ANALYSIS_LOCK_REASON,
-  eraser: CONSTRUCTION_ECONOMY_LOCK_REASON,
+  completer: COMPLETER_LOCK_REASON,
+  junction: JUNCTION_LOCK_REASON,
+  generator: GENERATOR_LOCK_REASON,
+  eraser: ERASER_LOCK_REASON,
 };
 
 export function disabledConstructionToolReason(tool: CreateTool): string | null {

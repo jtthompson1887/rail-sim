@@ -28,9 +28,14 @@ describe('EditorToolbar lifecycle', () => {
     expect(scene.add.container).not.toHaveBeenCalled();
   });
 
-  it.each(['generator', 'completer', 'junction', 'eraser'] as const)(
-    'refuses disabled %s selection with the engineering-lock reason',
-    (tool) => {
+  it.each([
+    ['generator', 'Generate unavailable — multi-track construction needs one atomic quote.'],
+    ['completer', 'Connect unavailable — route completion needs one atomic quote.'],
+    ['junction', 'Junction unavailable — track splitting needs one atomic quote.'],
+    ['eraser', 'Erase unavailable — select tracks to review the exact refund.'],
+  ] as const)(
+    'refuses disabled %s selection with its truthful next-step reason',
+    (tool, message) => {
       const scene = makeScene();
       const toolbar = new EditorToolbar(scene);
       const emitSpy = jest.spyOn(EventBus, 'emit');
@@ -39,7 +44,7 @@ describe('EditorToolbar lifecycle', () => {
 
       expect(toolbar.currentTool).toBe('none');
       expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
-        message: expect.stringMatching(/engineering analysis|economy-aware/),
+        message,
         type: 'info',
       });
       emitSpy.mockRestore();

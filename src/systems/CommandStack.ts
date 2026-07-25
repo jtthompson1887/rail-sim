@@ -150,4 +150,3 @@ export class CommandStack {
 // Re-export concrete commands for backward compatibility
 export { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
 export { PlaceTrackCommand } from '../commands/PlaceTrackCommand';
-export { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';

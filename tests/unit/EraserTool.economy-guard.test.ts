@@ -26,7 +26,7 @@ describe('EraserTool economy guard', () => {
     expect(commandStack.push).not.toHaveBeenCalled();
     expect(selectionManager.clearSelection).not.toHaveBeenCalled();
     expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
-      message: expect.stringContaining('economy-aware'),
+      message: 'Erase unavailable — select tracks to review the exact refund.',
       type: 'info',
     });
     emitSpy.mockRestore();

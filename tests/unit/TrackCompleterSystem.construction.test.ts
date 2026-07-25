@@ -1,82 +1,11 @@
-import Phaser from 'phaser';
-import RailTrack from '../../src/entities/RailTrack';
 import { TrackCompleterSystem } from '../../src/systems/TrackCompleterSystem';
 import { EventBus } from '../../src/services/EventBus';
 import { WorldManager } from '../../src/managers/WorldManager';
-import { GameConfig } from '../../src/config/GameConfig';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
-function makeTrack(scene: any, x0: number, y0: number, x3: number, y3: number): RailTrack {
-  return new RailTrack(
-    scene,
-    new Phaser.Math.Vector2(x0, y0),
-    new Phaser.Math.Vector2(x0 + (x3 - x0) / 3, y0 + (y3 - y0) / 3),
-    new Phaser.Math.Vector2(x0 + (x3 - x0) * 2 / 3, y0 + (y3 - y0) * 2 / 3),
-    new Phaser.Math.Vector2(x3, y3),
-  );
-}
-
-function endpoint(track: RailTrack, isStart: boolean) {
-  const curve = track.getCurvePath();
-  const point = new Phaser.Math.Vector2(
-    isStart ? curve.getStartPoint() : curve.getEndPoint(),
-  );
-  const tangent = new Phaser.Math.Vector2(
-    curve.getTangent(isStart ? 0 : 1),
-  );
-  if (isStart) tangent.scale(-1);
-  return { track, isStart, point, tangent };
-}
-
-function proposal(overrides: Record<string, unknown> = {}) {
-  return {
-    valid: true,
-    geometry: {
-      geometryVersion: 1,
-      p0: { x: 0, y: 0 },
-      p1: { x: 1, y: 0 },
-      p2: { x: 2, y: 0 },
-      p3: { x: 3, y: 0 },
-    },
-    verticalProfile: {
-      profileVersion: 1,
-      knots: [{ t: 0, elevation: 20 }, { t: 1, elevation: 20 }],
-    },
-    structures: [{
-      type: 'surface',
-      startT: 0,
-      endT: 1,
-      startElevation: 20,
-      endElevation: 20,
-    }],
-    costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 0, total: 100 },
-    length: 10,
-    minimumRadius: Number.POSITIVE_INFINITY,
-    maximumGradePercent: 0,
-    maximumGradeT: 0,
-    remedy: '',
-    reasonCode: 'ok',
-    ...overrides,
-  };
-}
-
-function makeGraphicsFake(scene: any) {
-  const graphics = new Phaser.GameObjects.Graphics(scene) as any;
-  for (const method of [
-    'clear', 'fillStyle', 'fillCircle', 'lineStyle', 'beginPath',
-    'moveTo', 'lineTo', 'strokePath', 'destroy',
-  ]) {
-    graphics[method] = jest.fn().mockReturnValue(graphics);
-  }
-  return graphics;
-}
-
-describe('TrackCompleterSystem construction behavior', () => {
+describe('TrackCompleterSystem construction authority', () => {
   let scene: any;
-  let ghostGraphics: any;
-  let endpointGraphics: any;
-  let endpointDots: any;
   let trackManager: any;
   let terrainValidator: any;
   let system: TrackCompleterSystem;
@@ -84,22 +13,16 @@ describe('TrackCompleterSystem construction behavior', () => {
 
   beforeEach(() => {
     scene = makeScene();
-    const image = scene.add.image();
-    image.setAlpha = jest.fn().mockReturnValue(image);
-    image.setTint = jest.fn().mockReturnValue(image);
-    scene.add.image = jest.fn().mockReturnValue(image);
-    scene.add.graphics = jest.fn().mockImplementation(() => makeGraphicsFake(scene));
     trackManager = {
       tracks: [],
-      addTrack: jest.fn((track) => trackManager.tracks.push(track)),
+      addTrack: jest.fn(),
+      removeTrack: jest.fn(),
+      updateTrackVectors: jest.fn(),
     };
     terrainValidator = { canPlaceTrack: jest.fn() };
-    WorldManager.createNew('Completer construction', 'real-terrain-alpha');
+    WorldManager.createNew('Completer lock', 'completer-lock-seed');
     emitSpy = jest.spyOn(EventBus, 'emit');
     system = new TrackCompleterSystem(scene, trackManager, terrainValidator);
-    ghostGraphics = (system as any).ghostGraphics;
-    endpointGraphics = (system as any).endpointGraphics;
-    endpointDots = (system as any).endpointDots;
   });
 
   afterEach(() => {
@@ -107,201 +30,34 @@ describe('TrackCompleterSystem construction behavior', () => {
     WorldManager.reset();
   });
 
-  it('renders only open endpoints while active and clears endpoint visuals when disabled', () => {
-    const open = makeTrack(scene, 0, 0, 200, 0);
-    const connected = makeTrack(scene, 400, 0, 600, 0);
-    connected.setPrevious(open);
-    connected.setNext(open);
-    trackManager.tracks = [open, connected];
-
-    system.update(100);
-    expect(endpointDots.fillCircle).not.toHaveBeenCalled();
+  it('keeps activation, pointer, keyboard, and confirm paths mutation-free', () => {
+    const before = JSON.stringify(WorldManager.world);
 
     system.setActive(true);
-    system.update(300);
-    expect(endpointDots.fillCircle).toHaveBeenCalledTimes(2);
-    expect(endpointDots.fillCircle).toHaveBeenCalledWith(0, 0, 12);
-    expect(endpointDots.fillCircle).toHaveBeenCalledWith(200, 0, 12);
-
-    const dotClearsBeforeDisable = endpointDots.clear.mock.calls.length;
-    const lineClearsBeforeDisable = endpointGraphics.clear.mock.calls.length;
-    system.setActive(false);
-    expect(endpointDots.clear.mock.calls.length).toBeGreaterThan(dotClearsBeforeDisable);
-    expect(endpointGraphics.clear.mock.calls.length).toBeGreaterThan(lineClearsBeforeDisable);
-  });
-
-  it('selects an endpoint, rejects the other endpoint of the same track, and supports Escape cleanup', () => {
-    const track = makeTrack(scene, 0, 0, 300, 0);
-    trackManager.tracks = [track];
-
     system.onPointerDown({ leftButtonDown: () => true, x: 0, y: 0 } as any);
-    system.onPointerDown({ leftButtonDown: () => true, x: 300, y: 0 } as any);
-
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toast',
-      { message: 'Select a different track endpoint.', type: 'info' },
-    );
-    system.onKeyDown({ code: 'Escape' } as KeyboardEvent);
-    expect((system as any).firstEndpoint).toBeNull();
-  });
-
-  it('finds a route, builds a preview, and commits it on Enter', () => {
-    const fromTrack = makeTrack(scene, -100, 0, 0, 0);
-    const toTrack = makeTrack(scene, 120, 0, 220, 0);
-    trackManager.tracks = [];
-    terrainValidator.canPlaceTrack.mockReturnValue(proposal());
-    const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
-
-    (system as any).runCompletion(endpoint(fromTrack, false), endpoint(toTrack, true));
-
-    expect((system as any).isAwaitingConfirm).toBe(true);
-    expect((system as any).pendingTracks.length).toBeGreaterThan(0);
-    expect(ghostGraphics.strokePath).toHaveBeenCalled();
-
     system.onKeyDown({ code: 'Enter' } as KeyboardEvent);
-
-    expect((system as any).isAwaitingConfirm).toBe(false);
-    expect(trackManager.addTrack).toHaveBeenCalled();
-    expect(addWorld).toHaveBeenCalled();
-    expect(emitSpy).toHaveBeenCalledWith(
-      'completer:success',
-      { trackUUIDs: expect.any(Array) },
-    );
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toast',
-      { message: 'Track connection committed.', type: 'success' },
-    );
-  });
-
-  it('reports budget exhaustion without creating a preview', () => {
-    const fromTrack = makeTrack(scene, 0, 0, 100, 0);
-    const toTrack = makeTrack(scene, 1000, 0, 1100, 0);
-    const originalBudget = GameConfig.TOOLS.COMPLETER_SEARCH_BUDGET;
-    (GameConfig.TOOLS as any).COMPLETER_SEARCH_BUDGET = 0;
-    try {
-      (system as any).runCompletion(endpoint(fromTrack, false), endpoint(toTrack, true));
-    } finally {
-      (GameConfig.TOOLS as any).COMPLETER_SEARCH_BUDGET = originalBudget;
-    }
-
-    expect((system as any).isAwaitingConfirm).toBe(false);
-    expect(emitSpy).toHaveBeenCalledWith('completer:failed', { reason: 'budget' });
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toast',
-      {
-        message: 'No valid route found — try adjusting the endpoints.',
-        type: 'error',
-      },
-    );
-  });
-
-  it('rejects the entire pending preview when terrain validation fails', () => {
-    const first = makeTrack(scene, 0, 0, 100, 0);
-    const second = makeTrack(scene, 100, 0, 200, 0);
-    const destroyFirst = jest.spyOn(first, 'destroy');
-    const destroySecond = jest.spyOn(second, 'destroy');
-    (system as any).pendingTracks = [first, second];
-    (system as any).isAwaitingConfirm = true;
-    terrainValidator.canPlaceTrack.mockReturnValue(proposal({
-      valid: false,
-      remedy: 'terrain blocked',
-      reasonCode: 'clearance',
-    }));
-
+    system.onKeyDown({ code: 'Space' } as KeyboardEvent);
     system.confirm();
+    system.update(16);
 
+    expect(emitSpy).toHaveBeenCalledWith('ui:toast', {
+      message: 'Connect unavailable — route completion needs one atomic quote.',
+      type: 'info',
+    });
+    expect(terrainValidator.canPlaceTrack).not.toHaveBeenCalled();
     expect(trackManager.addTrack).not.toHaveBeenCalled();
-    expect(destroyFirst).toHaveBeenCalled();
-    expect(destroySecond).toHaveBeenCalled();
-    expect((system as any).pendingTracks).toEqual([]);
-    expect((system as any).isAwaitingConfirm).toBe(false);
-    expect(emitSpy).toHaveBeenCalledWith(
-      'ui:toast',
-      { message: 'terrain blocked', type: 'error' },
-    );
+    expect(trackManager.removeTrack).not.toHaveBeenCalled();
+    expect(trackManager.updateTrackVectors).not.toHaveBeenCalled();
+    expect(JSON.stringify(WorldManager.world)).toBe(before);
+    expect((system as any).pendingTracks).toBeUndefined();
   });
 
-  it('applies analysed construction data and serializes required fields on valid commit', () => {
-    const pending = makeTrack(scene, 0, 0, 300, 100);
-    const controls = pending.getControlPoints();
-    (system as any).pendingTracks = [pending];
-    (system as any).isAwaitingConfirm = true;
-    terrainValidator.canPlaceTrack.mockReturnValue(proposal({
-      verticalProfile: {
-        profileVersion: 1,
-        knots: [{ t: 0, elevation: 91 }, { t: 1, elevation: 91 }],
-      },
-      structures: [{
-        type: 'tunnel',
-        startT: 0,
-        endT: 1,
-        startElevation: 91,
-        endElevation: 91,
-      }],
-      costs: { track: 100, earthworks: 0, bridge: 0, tunnel: 900, total: 1000 },
-    }));
-    const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
-
-    system.confirm();
-
-    expect(terrainValidator.canPlaceTrack).toHaveBeenCalledWith(
-      controls.p0,
-      controls.p1,
-      controls.p2,
-      controls.p3,
-    );
-    expect(pending.structureTypeAt(0.5)).toBe('tunnel');
-    expect(pending.verticalProfile?.knots[0].elevation).toBe(91);
-    expect(pending.paidBuildCost).toBe(1000);
-    expect(addWorld).toHaveBeenCalledWith(expect.objectContaining({
-      uuid: pending.getUUID(),
-      paidBuildCost: 1000,
-      structures: [expect.objectContaining({ type: 'tunnel' })],
-    }));
-  });
-
-  it('groups long paths into multiple track segments and detects proximity collisions', () => {
-    const path = Array.from({ length: 18 }, (_, index) => ({
-      point: new Phaser.Math.Vector2(index * 20, index * 5),
-      angle: Math.atan2(5, 20),
-    }));
-    const built = (system as any).buildTracksFromPath(path) as RailTrack[];
-    expect(built).toHaveLength(3);
-    expect((system as any).buildTracksFromPath([])).toEqual([]);
-
-    const blocker = makeTrack(scene, 0, 0, 100, 0);
-    trackManager.tracks = [blocker];
-    expect((system as any).collidesWithExistingTracks(
-      new Phaser.Math.Vector2(50, 5), 30,
-    )).toBe(true);
-    expect((system as any).collidesWithExistingTracks(
-      new Phaser.Math.Vector2(50, 200), 30,
-    )).toBe(false);
-
-    for (const track of built) track.destroy();
-  });
-
-  it('cancel destroys pending tracks and destroy releases all owned graphics', () => {
-    const pending = makeTrack(scene, 0, 0, 100, 0);
-    const destroyPending = jest.spyOn(pending, 'destroy');
-    (system as any).pendingTracks = [pending];
-    (system as any).isAwaitingConfirm = true;
-
-    system.cancel();
-    expect(destroyPending).toHaveBeenCalled();
-    expect((system as any).pendingTracks).toEqual([]);
-    expect((system as any).isAwaitingConfirm).toBe(false);
-
-    const ownedGraphics = [
-      ghostGraphics,
-      endpointGraphics,
-      endpointDots,
-    ];
-    expect(new Set(ownedGraphics).size).toBe(3);
-
-    system.destroy();
-    for (const ownedGraphic of ownedGraphics) {
-      expect(ownedGraphic.destroy).toHaveBeenCalledTimes(1);
-    }
+  it('cancel, deactivate, and destroy are idempotent lifecycle no-ops', () => {
+    expect(() => {
+      system.cancel();
+      system.setActive(false);
+      system.destroy();
+      system.destroy();
+    }).not.toThrow();
   });
 });

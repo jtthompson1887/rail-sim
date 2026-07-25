@@ -2,7 +2,8 @@
  * Tests for CommandStack (incremental undo/redo) and concrete commands.
  */
 
-import { CommandStack, DeleteTracksCommand, ReshapeTrackCommand } from '../../src/systems/CommandStack';
+import { CommandStack, DeleteTracksCommand } from '../../src/systems/CommandStack';
+import { ReshapeTrackCommand } from '../../src/commands/ReshapeTrackCommand';
 import type { Command } from '../../src/systems/CommandStack';
 import TrackManager from '../../src/managers/TrackManager';
 import RailTrack from '../../src/entities/RailTrack';

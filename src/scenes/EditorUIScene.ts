@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import { EditorToolbar } from '../ui/EditorToolbar';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { PropertiesPanel } from '../ui/PropertiesPanel';
-import type { GeneratorParams } from '../ui/PropertiesPanel';
 import type { DeleteTracksIntent } from '../ui/PropertiesPanel';
 import { ContextMenu } from '../ui/ContextMenu';
 import type { MenuItem } from '../ui/ContextMenu';
@@ -136,11 +135,6 @@ export default class EditorUIScene extends Phaser.Scene {
    */
   showContextMenu(screenX: number, screenY: number, items: MenuItem[]): void {
     this.contextMenu.show(screenX, screenY, items);
-  }
-
-  /** Returns the current generator parameters from the properties panel. */
-  getGeneratorParams(): GeneratorParams {
-    return this.propertiesPanel.getGeneratorParams();
   }
 
   /** Returns the currently selected vehicle type from the properties panel. */

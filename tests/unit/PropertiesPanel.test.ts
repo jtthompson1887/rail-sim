@@ -46,8 +46,11 @@ describe('PropertiesPanel', () => {
   it('keeps selection-only actions hidden for an empty selection', () => {
     expect((panel as any).deleteBtn.setVisible).toHaveBeenLastCalledWith(false);
     expect((panel as any).deleteBtnText.setVisible).toHaveBeenLastCalledWith(false);
-    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(false);
-    expect((panel as any).tunnelBtnText.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).tunnelBtn).toBeUndefined();
+    expect((panel as any).tunnelBtnText).toBeUndefined();
+    expect(scene.add.text.mock.calls.some(
+      ([, , text]: [number, number, string]) => text.includes('Toggle Tunnel'),
+    )).toBe(false);
   });
 
   it.each([
@@ -83,13 +86,11 @@ describe('PropertiesPanel', () => {
 
     EventBus.emit('tool:changed', { tool: 'generator' });
 
-    expect((panel as any).paramObjects.every(
-      (object: any) => object.setInteractive.mock.calls.length === 0,
-    )).toBe(true);
+    expect((panel as any).paramObjects).toBeUndefined();
     expect(scene.add.text).toHaveBeenCalledWith(
       expect.any(Number),
       expect.any(Number),
-      expect.stringContaining('engineering analysis'),
+      'Generate unavailable — multi-track construction needs one atomic quote.',
       expect.any(Object),
     );
     expect(emitSpy.mock.calls.some(([event]) => event === 'generator:run')).toBe(false);
@@ -126,8 +127,8 @@ describe('PropertiesPanel', () => {
       blockingReason: '',
     });
 
-    expect((panel as any).tunnelBtn.setVisible).toHaveBeenLastCalledWith(false);
-    expect((panel as any).tunnelBtnText.setVisible).toHaveBeenLastCalledWith(false);
+    expect((panel as any).tunnelBtn).toBeUndefined();
+    expect((panel as any).tunnelBtnText).toBeUndefined();
     expect((panel as any).deleteBtnText.setText).toHaveBeenCalledWith(
       expect.stringContaining('Refund £617'),
     );
