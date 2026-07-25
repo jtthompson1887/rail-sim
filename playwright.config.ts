@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 60_000,
   retries: 1,
+  workers: 1,
   use: {
     baseURL: 'http://localhost:8080',
     // Allow WebGL / Canvas; SW renderer keeps CI happy without a GPU
