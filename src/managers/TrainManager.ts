@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import Train from '../entities/Train';
+import Carriage from '../entities/Carriage';
 import type TrackManager from './TrackManager';
 import { CameraController } from '../systems/CameraController';
 import { GameStateManager } from './GameStateManager';
 import { EventBus } from '../services/EventBus';
 import TrackFlowSolver from '../systems/TrackFlowSolver';
 import { GameConfig } from '../config/GameConfig';
+import type { ITrackFollower } from '../config/VehicleTypes';
 
 interface Bounds {
   min: { x: number; y: number };
@@ -19,10 +21,11 @@ export class TrainManager {
   trains: Train[] = [];
   private trackManager: TrackManager;
   private cameraController: CameraController;
-  private trackSolvers: Map<Train, TrackFlowSolver> = new Map();
+  carriages: Carriage[] = [];
+  private trackSolvers: Map<ITrackFollower, TrackFlowSolver> = new Map();
 
-  /** Map from Matter body game objects back to their owning Train. */
-  static readonly bodyToTrain: WeakMap<Phaser.GameObjects.GameObject, Train> = new WeakMap();
+  /** Map from Matter body game objects back to their owning vehicle (Train or Carriage). */
+  static readonly bodyToTrain: WeakMap<Phaser.GameObjects.GameObject, ITrackFollower> = new WeakMap();
 
   constructor(scene: Phaser.Scene, trackManager: TrackManager, cameraController: CameraController) {
     this.scene = scene;
@@ -38,6 +41,15 @@ export class TrainManager {
     TrainManager.bodyToTrain.set(train.getMatterBody(), train);
     GameStateManager.setActiveTrains(this.trains.length);
     return train;
+  }
+
+  createCarriage(id?: string): Carriage {
+    const carriage = new Carriage(this.scene, 0, 500, id);
+    carriage.getMatterBody().angle = 90;
+    this.carriages.push(carriage);
+    this.trackSolvers.set(carriage, new TrackFlowSolver(this.trackManager, carriage));
+    TrainManager.bodyToTrain.set(carriage.getMatterBody(), carriage);
+    return carriage;
   }
 
   handleTrainClick(train: Train, pointer: Phaser.Input.Pointer): void {
@@ -79,26 +91,27 @@ export class TrainManager {
     return this._selectedTrain;
   }
 
-  tryRecoverDerailedTrain(train: Train): boolean {
-    if (!train.derailed) return false;
-    const trainBody = train.getMatterBody();
+  tryRecoverDerailedTrain(follower: ITrackFollower): boolean {
+    if (!follower.derailed) return false;
+    const trainBody = follower.getMatterBody();
     const closestTrack = this.trackManager.getClosestTrack(
       { x: trainBody.x, y: trainBody.y },
       Math.max(GameConfig.TRACK.MAX_CLOSE_DISTANCE, 120),
-      train.currentTrack ?? undefined,
+      follower.currentTrack ?? undefined,
     );
     if (!closestTrack) {
       return false;
     }
 
     const snappedPoint = closestTrack.getTrackPoint(trainBody);
+    const snappedAngle = closestTrack.getTrackAngle(trainBody);
     trainBody.setPosition(snappedPoint.x, snappedPoint.y);
-    trainBody.setAngle(closestTrack.getTrackAngle(trainBody));
-    train.currentTrack = closestTrack;
-    train.recover();
-    train.pidControllerFront.reset();
-    train.pidControllerRear.reset();
-    train.enginePower = 0;
+    trainBody.setAngle(snappedAngle);
+    follower.currentTrack = closestTrack;
+    follower.recover();
+    follower.pidControllerFront.reset();
+    follower.pidControllerRear.reset();
+    follower.enginePower = 0;
     return true;
   }
 
@@ -137,6 +150,11 @@ export class TrainManager {
     for (const train of this.trains) {
       train.update(time, delta);
       const solver = this.trackSolvers.get(train);
+      solver?.applyTrackFlowForces();
+    }
+    for (const carriage of this.carriages) {
+      carriage.update(time, delta);
+      const solver = this.trackSolvers.get(carriage);
       solver?.applyTrackFlowForces();
     }
     GameStateManager.setActiveTrains(this.trains.length);

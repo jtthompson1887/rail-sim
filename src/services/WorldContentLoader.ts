@@ -8,7 +8,7 @@ import TrackGenerator from '../systems/TrackGenerator';
 import { TrackSerializer } from '../utils/TrackSerializer';
 import { TrainSerializer } from '../utils/TrainSerializer';
 import { GameConfig } from '../config/GameConfig';
-import type { TrackDef, WorldStationDef } from '../config/WorldData';
+import type { TrackDef, WorldStationDef, TrainDef } from '../config/WorldData';
 
 /**
  * WorldContentLoader – responsible for loading/restoring world content
@@ -40,16 +40,23 @@ export class WorldContentLoader {
     for (const def of world.stations) { this.restoreStation(def); }
 
     for (const def of world.trains) {
-      const track = this.trackManager.getTrack(def.trackUUID);
-      if (!track) continue;
-      const train = this.trainManager.createInitialTrain(def.id);
-      const pt = track.getCurvePath().getPoint(def.trackT);
-      train.getMatterBody().setPosition(pt.x, pt.y);
-      train.currentTrack = track;
-      train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
-      if (def.passengers > 0) {
-        train.boardPassengers(def.passengers);
-      }
+      this.restoreVehicle(def);
+    }
+  }
+
+  private restoreVehicle(def: TrainDef): void {
+    const track = this.trackManager.getTrack(def.trackUUID);
+    if (!track) return;
+    const vehicleType = def.type ?? 'locomotive';
+    const vehicle = vehicleType === 'passenger-carriage'
+      ? this.trainManager.createCarriage(def.id)
+      : this.trainManager.createInitialTrain(def.id);
+    const pt = track.getCurvePath().getPoint(def.trackT);
+    vehicle.getMatterBody().setPosition(pt.x, pt.y);
+    vehicle.currentTrack = track;
+    vehicle.getMatterBody().setAngle(track.getTrackAngle(vehicle.getMatterBody()));
+    if (def.passengers > 0) {
+      vehicle.boardPassengers(def.passengers);
     }
   }
 

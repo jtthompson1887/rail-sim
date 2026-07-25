@@ -12,6 +12,8 @@ declare global {
   interface Window {
     __railSimScene: string;
     __railSimMenuDerailCount: number;
+    __railSimMenuTrains: Train[] | undefined;
+    __railSimMenuTracks: RailTrack[] | undefined;
   }
 }
 
@@ -19,6 +21,8 @@ export default class MenuScene extends Phaser.Scene {
   private railTracks: RailTrack[] = [];
   private trains: Train[] = [];
   private trainStartTracks: RailTrack[] = [];
+  /** Engine power per train, stored so recovery can restore it correctly. */
+  private trainEnginePowers: number[] = [];
   private camControl?: CameraController;
   private previewSolvers: TrackFlowSolver[] = [];
 
@@ -30,6 +34,11 @@ export default class MenuScene extends Phaser.Scene {
     // Expose scene identity and derail counter for E2E tests
     window.__railSimScene = 'MenuScene';
     window.__railSimMenuDerailCount = 0;
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.__railSimMenuTrains = undefined;
+      window.__railSimMenuTracks = undefined;
+    });
 
     const { width, height } = this.scale;
     const bg = new Background(this, 20, 20);
@@ -78,6 +87,7 @@ export default class MenuScene extends Phaser.Scene {
     train1.getMatterBody().setDepth(50);
     this.trains.push(train1);
     this.trainStartTracks.push(firstTrack);
+    this.trainEnginePowers.push(38);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train1));
 
     // Train 2 – starts at the opposite side of the circle
@@ -94,7 +104,11 @@ export default class MenuScene extends Phaser.Scene {
     train2.getMatterBody().setDepth(50);
     this.trains.push(train2);
     this.trainStartTracks.push(secondTrack);
+    this.trainEnginePowers.push(42);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train2));
+
+    window.__railSimMenuTrains = this.trains;
+    window.__railSimMenuTracks = this.railTracks;
 
     // Right-side menu panel
     const panelWidth = width * 0.42;
@@ -216,14 +230,30 @@ export default class MenuScene extends Phaser.Scene {
   /**
    * Reset a derailed menu train to its designated start position on the
    * circular track so it can continue driving itself.
+   *
+   * Order matters: snap position/angle onto the track FIRST, then call
+   * recover() — which calls matterScaling() internally and replaces the
+   * Matter body.  If recover() runs first the new body is created at the
+   * old (derailed) position and the subsequent setPosition call goes to the
+   * stale body reference.
    */
   private recoverTrain(train: Train, index: number): void {
     const track = this.trainStartTracks[index];
-    train.recover();
     const point = track.getCurvePath().getPoint(0);
+    // Snap to track before recover() so matterScaling creates the body in place.
     train.getMatterBody().setPosition(point.x, point.y);
     train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
     train.currentTrack = track;
+    train.recover();
+    // Re-snap after recover() to correct any drift introduced by matterScaling.
+    train.getMatterBody().setPosition(point.x, point.y);
+    train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
+    train.getMatterBody().setVelocity(0, 0);
+    train.getMatterBody().setAngularVelocity(0);
+    // Restore engine power and clear PID state so the solver can guide cleanly.
+    train.enginePower = this.trainEnginePowers[index];
+    train.pidControllerFront.reset();
+    train.pidControllerRear.reset();
   }
 
   private continueGame(): void {

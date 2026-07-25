@@ -9,6 +9,7 @@ import { ValidationHint } from '../ui/ValidationHint';
 import { EventBus } from '../services/EventBus';
 import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
+import type { VehicleType } from '../config/VehicleTypes';
 
 /**
  * EditorUIScene
@@ -106,5 +107,10 @@ export default class EditorUIScene extends Phaser.Scene {
   /** Returns the current generator parameters from the properties panel. */
   getGeneratorParams(): GeneratorParams {
     return this.propertiesPanel.getGeneratorParams();
+  }
+
+  /** Returns the currently selected vehicle type from the properties panel. */
+  getVehicleType(): VehicleType {
+    return this.propertiesPanel.getVehicleType();
   }
 }

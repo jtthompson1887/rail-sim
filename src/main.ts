@@ -14,6 +14,13 @@ import SettingsScene from './scenes/SettingsScene';
 import WorldSelectScene from './scenes/WorldSelectScene';
 import WorldScene from './scenes/WorldScene';
 
+/** Expose game instance for Playwright / E2E tests. */
+declare global {
+  interface Window {
+    __railSimGame: Phaser.Game;
+  }
+}
+
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   scale: {
@@ -46,4 +53,4 @@ const config: Phaser.Types.Core.GameConfig = {
   ],
 };
 
-new Phaser.Game(config);
+window.__railSimGame = new Phaser.Game(config);

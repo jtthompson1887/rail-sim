@@ -35,6 +35,17 @@ import { GeneratorTool } from '../systems/tools/GeneratorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { JunctionTool } from '../systems/tools/JunctionTool';
 import { CompleterTool } from '../systems/tools/CompleterTool';
+import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
+
+/** Window augmentation for Playwright / E2E test hooks. */
+declare global {
+  interface Window {
+    __railSimScene: string;
+    __railSimWorldDerailCount: number;
+    __railSimTrainManager: TrainManager | undefined;
+    __railSimTrackManager: TrackManager | undefined;
+  }
+}
 
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
@@ -126,6 +137,11 @@ export default class WorldScene extends Phaser.Scene {
     this.deleteSelectedTracks(uuids);
   };
 
+  private readonly vehicleTypeChangedHandler = ({ type }: { type: import('../config/VehicleTypes').VehicleType }) => {
+    const placeVehicleTool = this.toolRegistry.get('place-vehicle') as PlaceVehicleTool | undefined;
+    placeVehicleTool?.setVehicleType(type);
+  };
+
   constructor() {
     super({ key: 'WorldScene' });
   }
@@ -143,6 +159,10 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Expose scene identity and E2E accessors
+    window.__railSimScene = 'WorldScene';
+    window.__railSimWorldDerailCount = 0;
+
     // ── Terrain system ──────────────────────────────────────────────────────
     const world = WorldManager.world;
     const terrainSeed = world?.terrainSeed ?? (world?.seed ?? 'default');
@@ -180,6 +200,7 @@ export default class WorldScene extends Phaser.Scene {
     this.toolRegistry.set('select', new SelectTool(this.selectionManager));
     this.toolRegistry.set('junction', new JunctionTool(this.junctionCreator));
     this.toolRegistry.set('completer', new CompleterTool(this.trackCompleter));
+    this.toolRegistry.set('place-vehicle', new PlaceVehicleTool(this, this.trackManager, this.trainManager));
 
     // ── UI (owned by EditorUIScene to be unaffected by WorldScene camera zoom) ──
     this.scene.launch(EDITOR_UI_SCENE_KEY, { trackManager: this.trackManager, selectionManager: this.selectionManager });
@@ -203,6 +224,11 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('editor:mode-toggle', this.modeToggleHandler);
     EventBus.on('generator:run',      this.generatorRunHandler);
     EventBus.on('editor:delete-tracks', this.editorDeleteHandler);
+    EventBus.on('vehicle:type-changed', this.vehicleTypeChangedHandler);
+
+    // Expose managers for E2E tests after everything is constructed
+    window.__railSimTrainManager = this.trainManager;
+    window.__railSimTrackManager = this.trackManager;
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',        this.modeChangedHandler);
@@ -213,12 +239,15 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:mode-toggle',  this.modeToggleHandler);
       EventBus.off('generator:run',       this.generatorRunHandler);
       EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
+      EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
       this.reshapeValidationOverlay.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
+      window.__railSimTrainManager = undefined;
+      window.__railSimTrackManager = undefined;
     });
 
     // Input routing
@@ -266,8 +295,8 @@ export default class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
     const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
-    this.terrainChunkManager.update(camCX, camCY);
-    this.sceneryManager.update(camCX, camCY);
+    this.terrainChunkManager.update(camCX, camCY, cam.zoom);
+    this.sceneryManager.update(camCX, camCY, cam.zoom);
 
     // Terrain overlay when tool is active
     this.updateTerrainOverlay();
@@ -318,7 +347,10 @@ export default class WorldScene extends Phaser.Scene {
     const trainDefs = this.trainManager.trains
       .map((t) => TrainSerializer.toTrainDef(t))
       .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
-    WorldManager.setTrainDefs(trainDefs);
+    const carriageDefs = this.trainManager.carriages
+      .map((c) => TrainSerializer.toTrainDef(c))
+      .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
+    WorldManager.setTrainDefs([...trainDefs, ...carriageDefs]);
     WorldManager.save();
   }
 
@@ -393,6 +425,7 @@ export default class WorldScene extends Phaser.Scene {
           KeyV: 'select', KeyH: 'pan', KeyD: 'completer',
           KeyJ: 'junction', KeyG: 'generator', KeyE: 'eraser', KeyT: 'terrain-view',
           KeyP: 'place-track',
+          KeyN: 'place-vehicle',
         };
         const mapped = shortcuts[event.code];
         if (mapped) { EventBus.emit('ui:toolbar-select-tool', { tool: mapped }); return; }
@@ -550,6 +583,7 @@ export default class WorldScene extends Phaser.Scene {
       eraser:          'not-allowed',
       'terrain-view':  'default',
       'place-track':   'crosshair',
+      'place-vehicle': 'crosshair',
       none:            'default',
     };
     this.cameraController.setCursor(cursors[tool] ?? 'default');

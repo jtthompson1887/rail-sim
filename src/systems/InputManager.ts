@@ -4,6 +4,7 @@ import { TrainManager } from '../managers/TrainManager';
 import { CameraController } from '../systems/CameraController';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
+import type { ITrackFollower } from '../config/VehicleTypes';
 
 export class InputManager {
   private scene: Phaser.Scene;
@@ -39,18 +40,17 @@ export class InputManager {
     for (const train of trainManager.trains) {
       this.scene.input.setDraggable(train.getMatterBody(), true);
     }
+    for (const carriage of trainManager.carriages) {
+      this.scene.input.setDraggable(carriage.getMatterBody(), true);
+    }
 
     this.scene.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: any) => {
       this.clickedGameObject = true;
-      let clickedTrain: Train | null = null;
-      const mappedTrain = TrainManager.bodyToTrain.get(gameObject);
-      if (mappedTrain) {
-        clickedTrain = mappedTrain;
+      const mapped = TrainManager.bodyToTrain.get(gameObject);
+      if (mapped && this.isTrain(mapped)) {
+        trainManager.handleTrainClick(mapped, pointer);
       } else if (trainManager.trains.indexOf(gameObject as Train) !== -1) {
-        clickedTrain = gameObject as Train;
-      }
-      if (clickedTrain) {
-        trainManager.handleTrainClick(clickedTrain, pointer);
+        trainManager.handleTrainClick(gameObject as Train, pointer);
       }
     });
 
@@ -63,8 +63,8 @@ export class InputManager {
 
     // Set input lock to object-drag when dragging starts to suppress camera panning
     this.scene.input.on('dragstart', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
-      const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
-      if (draggedTrain && draggedTrain.derailed) {
+      const dragged = TrainManager.bodyToTrain.get(gameObject);
+      if (dragged && dragged.derailed) {
         this.cameraController.setInputLockOwner('object-drag');
       }
     });
@@ -72,31 +72,36 @@ export class InputManager {
     this.scene.input.on(
       'drag',
       (_pointer: Phaser.Input.Pointer, gameObject: any, dragX: number, dragY: number) => {
-        const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
-        if (!draggedTrain || !draggedTrain.derailed) return;
+        const dragged = TrainManager.bodyToTrain.get(gameObject);
+        if (!dragged || !dragged.derailed) return;
 
         gameObject.setPosition(dragX, dragY);
         gameObject.setVelocity(0, 0);
         gameObject.setAngularVelocity(0);
-        draggedTrain.currentTrack = null;
+        dragged.currentTrack = null;
       },
     );
 
     this.scene.input.on('dragend', (_pointer: Phaser.Input.Pointer, gameObject: any) => {
-      const draggedTrain = TrainManager.bodyToTrain.get(gameObject);
+      const dragged = TrainManager.bodyToTrain.get(gameObject);
       // Release input lock back to camera
       this.cameraController.setInputLockOwner('camera');
-      if (!draggedTrain || !draggedTrain.derailed) return;
+      if (!dragged || !dragged.derailed) return;
       // Sync body position to game object position before recovery
-      const body = draggedTrain.getMatterBody();
+      const body = dragged.getMatterBody();
       body.setPosition(gameObject.x, gameObject.y);
-      const recovered = trainManager.tryRecoverDerailedTrain(draggedTrain);
+      const recovered = trainManager.tryRecoverDerailedTrain(dragged);
+      const label = this.isTrain(dragged) ? 'Train' : 'Carriage';
       if (recovered) {
-        EventBus.emit('ui:toast', { message: 'Train re-railed', type: 'success' });
+        EventBus.emit('ui:toast', { message: `${label} re-railed`, type: 'success' });
       } else {
-        EventBus.emit('ui:toast', { message: 'Drop train closer to a track to re-rail it', type: 'info' });
+        EventBus.emit('ui:toast', { message: `Drop ${label.toLowerCase()} closer to a track to re-rail it`, type: 'info' });
       }
     });
+  }
+
+  private isTrain(follower: ITrackFollower): follower is Train {
+    return follower.vehicleType === 'locomotive';
   }
 
   handleTrainMovement(selectedTrain: Train | null): void {

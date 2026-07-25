@@ -4,6 +4,8 @@ interface EventMap {
   'train:selected': { trainId: string };
   'train:deselected': Record<string, never>;
   'train:derailed': { trainId: string };
+  'carriage:derailed': { carriageId: string };
+  'vehicle:type-changed': { type: 'locomotive' | 'passenger-carriage' };
   'junction:toggled': { junctionId: string; state: 'left' | 'right' };
   'passenger:boarded': { stationId: string; count: number };
   'passenger:delivered': { stationId: string; count: number };
@@ -20,7 +22,7 @@ interface EventMap {
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };
   'mode:changed': { mode: 'create' | 'play' };
-  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'pan' | 'eraser' | 'place-track' | 'none' };
+  'tool:changed': { tool: 'generator' | 'junction' | 'completer' | 'select' | 'terrain-view' | 'pan' | 'eraser' | 'place-track' | 'place-vehicle' | 'none' };
   'track:placed': { trackUUID: string };
   'track:removed': { trackUUID: string };
   'junction:created': { junctionUUID: string };

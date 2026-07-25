@@ -12,6 +12,7 @@ export type CreateTool =
   | 'generator'
   | 'eraser'
   | 'terrain-view'
+  | 'place-vehicle'
   | 'none';
 
 /** Keyboard shortcut badge labels for each tool. */
@@ -24,6 +25,7 @@ const SHORTCUTS: Partial<Record<CreateTool, string>> = {
   generator: 'G',
   eraser: 'E',
   'terrain-view': 'T',
+  'place-vehicle': 'N',
 };
 
 interface ToolEntry {
@@ -48,7 +50,8 @@ const TOOL_GROUPS: ToolEntry[][] = [
     { tool: 'eraser',    icon: '⌫', label: 'Erase',    shortcut: 'E' },
   ],
   [
-    { tool: 'terrain-view', icon: '⛰', label: 'Terrain', shortcut: 'T' },
+    { tool: 'place-vehicle', icon: '🚂', label: 'Vehicle', shortcut: 'N' },
+    { tool: 'terrain-view',  icon: '⛰', label: 'Terrain', shortcut: 'T' },
   ],
 ];
 
@@ -220,165 +223,157 @@ export class EditorToolbar {
 
         const shortcutText = this.scene.add.text(bx + w / 2 - 10, by - btnSize / 2 + 4, entry.shortcut ?? '', {
           fontFamily: 'Verdana', fontSize: shortcutSize, color: '#4a6a8a',
-        }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
+        }).setOrigin(1, 0).setScrollFactor(0).setDepth(601);
         this.allObjects.push(shortcutText);
 
-        this.toolButtons.push({ tool: entry.tool, bg, iconText, labelText, shortcutText, activebar });
-        y += btnSize + 2;
-      }
+        this.toolButtons.push({
+          tool: entry.tool,
+          bg,
+          iconText,
+          labelText,
+          shortcutText,
+          activebar,
+        });
 
-      // Separator between groups (except after last group)
-      if (g < TOOL_GROUPS.length - 1) {
-        this.addDivider(y);
-        y += 8;
+        y += btnSize;
       }
+      y += 8;
+      this.addDivider(y - 4);
+      y += 6;
     }
 
-    // ── Bottom section: Undo / Redo / Save ────────────────────────────────
-    const bottomY = height - 12;
-    const ctrlBtnH = scalePx(34, width, height, 28);
-    const ctrlBtnW = (w - 8) / 2 - 1;
+    // ── Bottom controls ───────────────────────────────────────────────────
+    y += 4;
 
-    this.saveText = this.scene.add.text(w / 2, bottomY - ctrlBtnH * 2 - 8, '● Saved', {
-      fontFamily: 'Verdana', fontSize: labelSize, color: '#4ade80',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
-    this.allObjects.push(this.saveText);
-
-    // Undo
-    this.undoBg = this.scene.add.rectangle(4 + ctrlBtnW / 2, bottomY - ctrlBtnH / 2, ctrlBtnW, ctrlBtnH, 0x2a3a50, 0.8)
-      .setStrokeStyle(1, 0xffffff, 0.15)
+    // Undo button
+    const undoY = y + btnSize / 2;
+    this.undoBg = this.scene.add.rectangle(w / 2, undoY, w - 8, btnSize - 8, 0x1a3a5c, 0.5)
+      .setStrokeStyle(1, 0xffffff, 0.1)
       .setScrollFactor(0).setDepth(600)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => { if (this.undoEnabled) this.undoBg.setFillStyle(0x3a4e6a, 0.9); })
-      .on('pointerout', () => this.undoBg.setFillStyle(this.undoEnabled ? 0x2a3a50 : 0x18242e, 0.8))
+      .on('pointerover', () => { if (this.undoEnabled) this.undoBg.setFillStyle(0x1e4a6e, 0.8); })
+      .on('pointerout', () => this.undoBg.setFillStyle(0x1a3a5c, 0.5))
       .on('pointerdown', () => { if (this.undoEnabled) EventBus.emit('editor:undo', {}); });
     this.allObjects.push(this.undoBg);
 
-    const undoLabel = this.scene.add.text(4 + ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↩', {
+    const undoText = this.scene.add.text(w / 2, undoY, '↩ Undo', {
       fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
-    this.allObjects.push(undoLabel);
+    this.allObjects.push(undoText);
 
-    // Redo
-    this.redoBg = this.scene.add.rectangle(w - 4 - ctrlBtnW / 2, bottomY - ctrlBtnH / 2, ctrlBtnW, ctrlBtnH, 0x2a3a50, 0.8)
-      .setStrokeStyle(1, 0xffffff, 0.15)
+    y += btnSize + 4;
+
+    // Redo button
+    const redoY = y + btnSize / 2;
+    this.redoBg = this.scene.add.rectangle(w / 2, redoY, w - 8, btnSize - 8, 0x1a3a5c, 0.5)
+      .setStrokeStyle(1, 0xffffff, 0.1)
       .setScrollFactor(0).setDepth(600)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => { if (this.redoEnabled) this.redoBg.setFillStyle(0x3a4e6a, 0.9); })
-      .on('pointerout', () => this.redoBg.setFillStyle(this.redoEnabled ? 0x2a3a50 : 0x18242e, 0.8))
+      .on('pointerover', () => { if (this.redoEnabled) this.redoBg.setFillStyle(0x1e4a6e, 0.8); })
+      .on('pointerout', () => this.redoBg.setFillStyle(0x1a3a5c, 0.5))
       .on('pointerdown', () => { if (this.redoEnabled) EventBus.emit('editor:redo', {}); });
     this.allObjects.push(this.redoBg);
 
-    const redoLabel = this.scene.add.text(w - 4 - ctrlBtnW / 2, bottomY - ctrlBtnH / 2, '↪', {
+    const redoText = this.scene.add.text(w / 2, redoY, '↪ Redo', {
       fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
-    this.allObjects.push(redoLabel);
+    this.allObjects.push(redoText);
 
-    this.setUndoEnabled(false);
-    this.setRedoEnabled(false);
+    y += btnSize + 12;
 
-    // Toast text – appears to the right of the toolbar
-    this.toastText = this.scene.add.text(this.panelWidth + 12, height - 60, '', {
-      fontFamily: 'Verdana', fontSize: responsiveFontSize(14, width, height, 12, 14), color: '#ffffff',
-      backgroundColor: '#00000099',
-      padding: { x: 10, y: 6 },
-    }).setOrigin(0, 1).setDepth(700).setScrollFactor(0).setAlpha(0);
-    // Note: toast is NOT added to allObjects – it manages its own visibility via alpha
+    // Save indicator
+    this.saveText = this.scene.add.text(w / 2, y, 'Saved', {
+      fontFamily: 'Verdana', fontSize: labelSize, color: '#4ade80',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(601);
+    this.allObjects.push(this.saveText);
+
+    // Toast text (initially invisible)
+    this.toastText = this.scene.add.text(w / 2, height - 40, '', {
+      fontFamily: 'Verdana', fontSize: labelSize, color: '#ffffff',
+      backgroundColor: '#1a3a5c',
+    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(602).setVisible(false);
+    this.allObjects.push(this.toastText);
   }
 
   private addDivider(y: number): void {
-    const divider = this.scene.add.rectangle(this.panelWidth / 2, y, this.panelWidth - 8, 1, 0xffffff, 0.1)
-      .setScrollFactor(0).setDepth(600);
+    const divider = this.scene.add.rectangle(
+      this.panelWidth / 2, y, this.panelWidth - 8, 1,
+      0xffffff, 0.08,
+    ).setScrollFactor(0).setDepth(600);
     this.allObjects.push(divider);
   }
 
-  // ── Tool selection ─────────────────────────────────────────────────────────
+  // ── Public API ───────────────────────────────────────────────────────────
 
   selectTool(tool: CreateTool): void {
-    const newTool = this.activeTool === tool ? 'none' : tool;
-    this.activeTool = newTool;
-    this.refreshButtonStates();
-    EventBus.emit('tool:changed', { tool: this.activeTool });
-  }
-
-  private refreshButtonStates(): void {
+    if (this.activeTool === tool) return;
+    this.activeTool = tool;
     for (const ref of this.toolButtons) {
-      const active = ref.tool === this.activeTool;
-      if (active) {
-        ref.bg.setFillStyle(0x1a4a8a, 1).setStrokeStyle(1, 0x2a8cff, 0.8);
-        ref.iconText.setColor('#2a8cff');
-        ref.activebar.setAlpha(1);
-      } else {
-        ref.bg.setFillStyle(0x1a3a5c, 0.85).setStrokeStyle(1, 0xffffff, 0.1);
-        ref.iconText.setColor('#d0e8ff');
-        ref.activebar.setAlpha(0);
-      }
+      const isActive = ref.tool === tool;
+      ref.activebar.setAlpha(isActive ? 1 : 0);
+      ref.bg.setFillStyle(isActive ? 0x1e4a7c : 0x1a3a5c, isActive ? 0.95 : 0.85);
     }
+    EventBus.emit('tool:changed', { tool });
   }
-
-  // ── Undo / Redo state ──────────────────────────────────────────────────────
 
   setUndoEnabled(enabled: boolean): void {
     this.undoEnabled = enabled;
-    this.undoBg.setFillStyle(enabled ? 0x2a3a50 : 0x18242e, 0.8);
     this.undoBg.setAlpha(enabled ? 1 : 0.4);
   }
 
   setRedoEnabled(enabled: boolean): void {
     this.redoEnabled = enabled;
-    this.redoBg.setFillStyle(enabled ? 0x2a3a50 : 0x18242e, 0.8);
     this.redoBg.setAlpha(enabled ? 1 : 0.4);
   }
 
-  // ── Save indicator ─────────────────────────────────────────────────────────
-
   setSaveIndicator(state: 'saved' | 'unsaved' | 'saving'): void {
-    const configs = {
-      saved:   { text: '● Saved',   color: '#4ade80' },
-      unsaved: { text: '○ Unsaved', color: '#fbbf24' },
-      saving:  { text: '⟳ Saving…', color: '#60a5fa' },
+    const colors: Record<typeof state, string> = {
+      saved: '#4ade80',
+      unsaved: '#ffaa44',
+      saving: '#4ad5ff',
     };
-    const cfg = configs[state];
-    this.saveText.setText(cfg.text).setColor(cfg.color);
-  }
-
-  // ── Toast ──────────────────────────────────────────────────────────────────
-
-  showToast(message: string, type: 'info' | 'error' | 'success' = 'info'): void {
-    const colors: Record<string, string> = {
-      info: '#d2e6ff',
-      error: '#ff6666',
-      success: '#7dff9b',
+    const labels: Record<typeof state, string> = {
+      saved: 'Saved',
+      unsaved: 'Unsaved',
+      saving: 'Saving…',
     };
-    this.toastText.setText(message).setColor(colors[type] ?? '#ffffff').setAlpha(1);
-    if (this.toastTimer !== null) clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => {
-      this.scene.tweens.add({ targets: this.toastText, alpha: 0, duration: 600 });
-    }, 2500);
+    this.saveText.setColor(colors[state]);
+    this.saveText.setText(labels[state]);
   }
-
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   setVisible(visible: boolean): void {
-    this.background.setVisible(visible);
-    this.border.setVisible(visible);
-    this.container.setVisible(visible);
-    for (const go of this.allObjects) {
-      go.setVisible(visible);
+    for (const obj of this.allObjects) {
+      obj.setVisible(visible);
     }
-    if (!visible) this.toastText.setAlpha(0);
   }
 
   destroy(): void {
     EventBus.off('ui:toast', this.toastHandler);
-    if (this.toastTimer !== null) clearTimeout(this.toastTimer);
-    this.background.destroy();
-    this.border.destroy();
-    this.container.destroy();
-    this.toastText.destroy();
-    for (const go of this.allObjects) {
-      go.destroy();
+    for (const obj of this.allObjects) {
+      obj.destroy();
     }
     this.allObjects = [];
+  }
+
+  // ── Toast ────────────────────────────────────────────────────────────────
+
+  private showToast(message: string, type: 'info' | 'error' | 'success' = 'info'): void {
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+    }
+    const color = type === 'error' ? '#ff8080' : type === 'success' ? '#4ade80' : '#ffffff';
+    this.toastText.setColor(color);
+    this.toastText.setText(message);
+    this.toastText.setVisible(true);
+    this.toastText.setAlpha(1);
+
+    this.toastTimer = setTimeout(() => {
+      this.scene.tweens.add({
+        targets: this.toastText,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => this.toastText.setVisible(false),
+      });
+    }, 2500);
   }
 }

@@ -5,6 +5,7 @@ import { WorldManager } from '../managers/WorldManager';
 import { scalePx, responsiveFontSize } from '../utils/responsive';
 import { GameConfig } from '../config/GameConfig';
 import type { SelectionManager } from '../systems/SelectionManager';
+import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
 
 /** Generator configuration exposed to the caller via getGeneratorParams(). */
 export interface GeneratorParams {
@@ -23,6 +24,7 @@ export interface GeneratorParams {
  * changes or the active tool changes.  Shows properties for:
  *   – No selection / no special tool: empty (panel hidden)
  *   – Generator tool active: editable generation parameters
+ *   – place-vehicle tool active: vehicle type selector
  *   – Single track selected: UUID, length, elevation, tunnel flag, delete button
  *   – Multiple tracks selected: count, total length, batch delete, batch tunnel
  *
@@ -57,10 +59,15 @@ export class PropertiesPanel {
     maxCurveAngle:    GameConfig.GENERATION.MAIN.MAX_ANGLE,
   };
 
+  /** Currently selected vehicle type for the place-vehicle tool. */
+  private activeVehicleType: VehicleType = 'locomotive';
+  /** Buttons created for vehicle-type selection. */
+  private vehicleTypeObjects: (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Text)[] = [];
+
   private onDeleteCallback: ((uuids: string[]) => void) | null = null;
 
   private readonly selectionChangedHandler = (data: { uuids: string[] }) => {
-    if (this.currentActiveTool !== 'generator') {
+    if (this.currentActiveTool !== 'generator' && this.currentActiveTool !== 'place-vehicle') {
       this.refresh(data.uuids);
     }
   };
@@ -69,6 +76,8 @@ export class PropertiesPanel {
     this.currentActiveTool = data.tool;
     if (data.tool === 'generator') {
       this.showGeneratorParams();
+    } else if (data.tool === 'place-vehicle') {
+      this.showVehicleParams();
     } else if (this.selectionManager.selectedUUIDs.length === 0) {
       this.slideOut();
     } else {
@@ -100,6 +109,11 @@ export class PropertiesPanel {
   /** Return a copy of the current generator parameters set via the panel UI. */
   getGeneratorParams(): GeneratorParams {
     return { ...this.generatorParams };
+  }
+
+  /** Return the currently selected vehicle type. */
+  getVehicleType(): VehicleType {
+    return this.activeVehicleType;
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -166,6 +180,7 @@ export class PropertiesPanel {
   private showGeneratorParams(): void {
     this.clearLines();
     this.clearParamObjects();
+    this.clearVehicleObjects();
     this.slideIn();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
@@ -208,254 +223,291 @@ export class PropertiesPanel {
     ];
 
     for (const def of paramDefs) {
-      const labelTxt = this.scene.add.text(px - pw / 2 + 6, rowY, def.label, {
+      const labelTxt = this.scene.add.text(px - pw / 2 + 8, rowY, def.label, {
         fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
       }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(600);
       this.lines.push(labelTxt);
 
-      const valStr = def.format
-        ? def.format(this.generatorParams[def.key] as number)
-        : String(this.generatorParams[def.key]);
-      const valTxt = this.scene.add.text(px, rowY, valStr, {
-        fontFamily: 'Verdana', fontSize: fs, color: '#d0e8ff',
-      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(600);
-      this.lines.push(valTxt);
+      const valueTxt = this.scene.add.text(px + pw / 2 - 8, rowY, this.formatParam(def.key, def.format), {
+        fontFamily: 'Verdana', fontSize: fsSm, color: '#d0e8ff',
+      }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(600);
+      this.lines.push(valueTxt);
 
-      // '−' button
-      const minusBg = this.scene.add.rectangle(px + pw / 2 - 28, rowY, btnH + 2, btnH, 0x1a3a5c, 0.85)
-        .setStrokeStyle(1, 0x2a8cff, 0.4)
-        .setScrollFactor(0).setDepth(600)
+      // Minus button
+      const minusBtn = this.scene.add.rectangle(px - 20, rowY + 18, 28, 22, 0x1a3a5c, 0.9)
+        .setStrokeStyle(1, 0x2a8cff, 0.3)
+        .setScrollFactor(0).setDepth(599)
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
-          const cur = this.generatorParams[def.key] as number;
-          const next = Math.max(def.min, parseFloat((cur - def.step).toFixed(4)));
-          this.setGeneratorParam(def.key, next);
-          const newStr = def.format ? def.format(next) : String(next);
-          valTxt.setText(newStr);
+          this.adjustParam(def.key, -def.step, def.min, def.max);
+          valueTxt.setText(this.formatParam(def.key, def.format));
         });
-      this.paramObjects.push(minusBg);
-
-      const minusLbl = this.scene.add.text(px + pw / 2 - 28, rowY, '−', {
+      this.paramObjects.push(minusBtn);
+      const minusText = this.scene.add.text(px - 20, rowY + 18, '-', {
         fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
-      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
-      this.paramObjects.push(minusLbl);
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
+      this.paramObjects.push(minusText);
 
-      // '+' button
-      const plusBg = this.scene.add.rectangle(px + pw / 2 - 8, rowY, btnH + 2, btnH, 0x1a3a5c, 0.85)
-        .setStrokeStyle(1, 0x2a8cff, 0.4)
-        .setScrollFactor(0).setDepth(600)
+      // Plus button
+      const plusBtn = this.scene.add.rectangle(px + 20, rowY + 18, 28, 22, 0x1a3a5c, 0.9)
+        .setStrokeStyle(1, 0x2a8cff, 0.3)
+        .setScrollFactor(0).setDepth(599)
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
-          const cur = this.generatorParams[def.key] as number;
-          const next = Math.min(def.max, parseFloat((cur + def.step).toFixed(4)));
-          this.setGeneratorParam(def.key, next);
-          const newStr = def.format ? def.format(next) : String(next);
-          valTxt.setText(newStr);
+          this.adjustParam(def.key, def.step, def.min, def.max);
+          valueTxt.setText(this.formatParam(def.key, def.format));
         });
-      this.paramObjects.push(plusBg);
-
-      const plusLbl = this.scene.add.text(px + pw / 2 - 8, rowY, '+', {
+      this.paramObjects.push(plusBtn);
+      const plusText = this.scene.add.text(px + 20, rowY + 18, '+', {
         fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
-      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
-      this.paramObjects.push(plusLbl);
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
+      this.paramObjects.push(plusText);
 
-      rowY += btnH + 6;
+      rowY += 44;
     }
 
-    // 'Generate' action button
-    const genBtnY = rowY + 8;
-    const genBg = this.scene.add.rectangle(px, genBtnY, pw - 16, btnH + 4, 0x1a5a3c, 0.9)
+    // Run button
+    const runBtn = this.scene.add.rectangle(px, rowY + 10, pw - 16, btnH, 0x1a6e3c, 0.9)
       .setStrokeStyle(1, 0x4ade80, 0.6)
-      .setScrollFactor(0).setDepth(600)
+      .setScrollFactor(0).setDepth(599)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => genBg.setFillStyle(0x22804a, 0.95))
-      .on('pointerout',  () => genBg.setFillStyle(0x1a5a3c, 0.9))
+      .on('pointerover', () => runBtn.setFillStyle(0x22a05a, 0.95))
+      .on('pointerout', () => runBtn.setFillStyle(0x1a6e3c, 0.9))
       .on('pointerdown', () => EventBus.emit('generator:run', {}));
-    this.paramObjects.push(genBg);
-
-    const genLbl = this.scene.add.text(px, genBtnY, '⚙ Generate', {
+    this.paramObjects.push(runBtn);
+    const runText = this.scene.add.text(px, rowY + 10, '▶ Generate', {
       fontFamily: 'Verdana', fontSize: fs, color: '#4ade80',
-    }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(601);
-    this.paramObjects.push(genLbl);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
+    this.paramObjects.push(runText);
   }
 
-  /** Type-safe setter for individual generator params. */
-  private setGeneratorParam<K extends keyof GeneratorParams>(key: K, value: GeneratorParams[K]): void {
-    this.generatorParams[key] = value;
+  private formatParam(key: keyof GeneratorParams, format?: (v: number) => string): string {
+    const val = this.generatorParams[key];
+    return format ? format(val as number) : String(val);
   }
 
-  private clearParamObjects(): void {
-    for (const go of this.paramObjects) {
-      go.destroy();
+  private adjustParam(key: keyof GeneratorParams, delta: number, min: number, max: number): void {
+    const current = this.generatorParams[key];
+    let next = (typeof current === 'number' ? current : 0) + delta;
+    // Round to avoid float drift
+    const decimals = Math.max(0, -Math.floor(Math.log10(Math.abs(delta))));
+    next = Number(next.toFixed(decimals));
+    next = Math.max(min, Math.min(max, next));
+    (this.generatorParams as any)[key] = next;
+  }
+
+  // ── Vehicle params UI ──────────────────────────────────────────────────────
+
+  private showVehicleParams(): void {
+    this.clearLines();
+    this.clearParamObjects();
+    this.slideIn();
+    this.deleteBtn.setVisible(false);
+    this.deleteBtnText.setVisible(false);
+    this.tunnelBtn.setVisible(false);
+    this.tunnelBtnText.setVisible(false);
+
+    const px = this.getOnscreenX();
+    const { width, height } = this.scene.scale;
+    const pw = this.panelWidth;
+    const fs = responsiveFontSize(11, width, height, 9, 11);
+    const btnH = scalePx(28, width, height, 24);
+    const btnW = pw - 16;
+
+    // Title
+    const title = this.scene.add.text(px, 14, '🚂 VEHICLE', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#4ad5ff',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+    this.lines.push(title);
+
+    const hint = this.scene.add.text(px, 34, 'Click on a track to place', {
+      fontFamily: 'Verdana', fontSize: fs, color: '#6a8aa0', align: 'center',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+    this.lines.push(hint);
+
+    let rowY = 66;
+    for (const info of VEHICLE_TYPE_REGISTRY) {
+      const isActive = this.activeVehicleType === info.id;
+      const bg = this.scene.add.rectangle(px, rowY, btnW, btnH, isActive ? 0x1e4a7c : 0x1a3a5c, 0.9)
+        .setStrokeStyle(1, isActive ? 0x4ad5ff : 0x2a8cff, isActive ? 0.8 : 0.3)
+        .setScrollFactor(0).setDepth(599)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+          if (this.activeVehicleType !== info.id) bg.setFillStyle(0x1e4a6e, 0.95);
+        })
+        .on('pointerout', () => {
+          if (this.activeVehicleType !== info.id) bg.setFillStyle(0x1a3a5c, 0.9);
+        })
+        .on('pointerdown', () => {
+          this.activeVehicleType = info.id;
+          EventBus.emit('vehicle:type-changed', { type: info.id });
+          // Refresh UI to show active state
+          this.showVehicleParams();
+        });
+      this.vehicleTypeObjects.push(bg);
+
+      const text = this.scene.add.text(px, rowY, info.displayName, {
+        fontFamily: 'Verdana', fontSize: fs, color: isActive ? '#4ad5ff' : '#8ab4d0',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
+      this.vehicleTypeObjects.push(text);
+
+      rowY += btnH + 8;
     }
-    this.paramObjects = [];
   }
 
-  // ── Refresh ────────────────────────────────────────────────────────────────
+  // ── Selection properties UI ────────────────────────────────────────────────
 
   private refresh(uuids: string[]): void {
     this.clearLines();
     this.clearParamObjects();
-    const px = this.getOnscreenX();
-    const { width, height } = this.scene.scale;
-    const fs = responsiveFontSize(11, width, height, 9, 11);
-    const fsSm = responsiveFontSize(10, width, height, 8, 10);
+    this.clearVehicleObjects();
+    this.deleteBtn.setVisible(true);
+    this.deleteBtnText.setVisible(true);
 
-    if (uuids.length === 0) {
+    const count = uuids.length;
+    if (count === 0) {
       this.slideOut();
       return;
     }
 
     this.slideIn();
+    const px = this.getOnscreenX();
+    const { width, height } = this.scene.scale;
+    const fs = responsiveFontSize(11, width, height, 9, 11);
+    const fsSm = responsiveFontSize(10, width, height, 8, 10);
 
-    if (uuids.length === 1) {
+    if (count === 1) {
       const track = this.trackManager.getTrack(uuids[0]);
-      if (track) {
-        const curve = track.getCurvePath();
-        const len = Math.round(curve.getLength());
-        const shortId = track.getUUID().substring(0, 8);
-        this.addLines(px, [
-          { text: 'TRACK', color: '#4ad5ff', size: fsSm },
-          { text: `ID: …${shortId}`, color: '#8ab4d0', size: fsSm },
-          { text: `Length: ${len} u`, color: '#d0e8ff', size: fs },
-          { text: `Elev: ${Math.round(track.elevation)} m`, color: '#d0e8ff', size: fs },
-          { text: track.isTunnel ? '🚇 Tunnel' : '☀ Surface', color: '#aaddff', size: fs },
-        ]);
-        this.tunnelBtnText.setText(track.isTunnel ? '☀ Set Surface' : '🚇 Set Tunnel');
-        this.deleteBtn.setVisible(true);
-        this.deleteBtnText.setVisible(true);
-        this.tunnelBtn.setVisible(true);
-        this.tunnelBtnText.setVisible(true);
+      if (!track) {
+        this.slideOut();
+        return;
       }
+      const { p0, p3 } = track.getControlPoints();
+      const length = track.getCurvePath().getLength();
+      const lines = [
+        `UUID: ${track.getUUID().slice(0, 8)}…`,
+        `Length: ${Math.round(length)}`,
+        `Elevation: ${track.elevation?.toFixed(1) ?? '—'}`,
+        `Tunnel: ${track.isTunnel ? 'Yes' : 'No'}`,
+        `p0: (${Math.round(p0.x)}, ${Math.round(p0.y)})`,
+        `p3: (${Math.round(p3.x)}, ${Math.round(p3.y)})`,
+      ];
+      let y = 14;
+      for (const text of lines) {
+        const txt = this.scene.add.text(px, y, text, {
+          fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+        this.lines.push(txt);
+        y += 18;
+      }
+      this.tunnelBtn.setVisible(true);
+      this.tunnelBtnText.setVisible(true);
     } else {
-      // Multi-select
-      let totalLen = 0;
+      let totalLength = 0;
       for (const uuid of uuids) {
         const track = this.trackManager.getTrack(uuid);
-        if (track) totalLen += track.getCurvePath().getLength();
+        if (track) totalLength += track.getCurvePath().getLength();
       }
-      this.addLines(px, [
-        { text: 'SELECTION', color: '#4ad5ff', size: fsSm },
-        { text: `${uuids.length} tracks`, color: '#d0e8ff', size: fs },
-        { text: `Total: ${Math.round(totalLen)} u`, color: '#d0e8ff', size: fs },
-      ]);
-      this.tunnelBtnText.setText('🚇 Toggle Tunnel');
-      this.deleteBtn.setVisible(true);
-      this.deleteBtnText.setText(`🗑 Delete (${uuids.length})`);
-      this.deleteBtnText.setVisible(true);
+      const txt = this.scene.add.text(px, 14, `${count} tracks selected`, {
+        fontFamily: 'Verdana', fontSize: fs, color: '#8ab4d0',
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+      this.lines.push(txt);
+      const lenTxt = this.scene.add.text(px, 36, `Total length: ${Math.round(totalLength)}`, {
+        fontFamily: 'Verdana', fontSize: fsSm, color: '#8ab4d0',
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
+      this.lines.push(lenTxt);
       this.tunnelBtn.setVisible(true);
       this.tunnelBtnText.setVisible(true);
     }
   }
 
-  private addLines(panelCentreX: number, items: Array<{ text: string; color?: string; size?: string }>): void {
-    const { width, height } = this.scene.scale;
-    const defaultFs = responsiveFontSize(11, width, height, 9, 11);
-    const lineH = scalePx(20, width, height, 16);
-    const startY = 16;
-    items.forEach((item, i) => {
-      const t = this.scene.add.text(panelCentreX, startY + i * lineH, item.text, {
-        fontFamily: 'Verdana',
-        fontSize: item.size ?? defaultFs,
-        color: item.color ?? '#d0e8ff',
-      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
-      this.lines.push(t);
-    });
-  }
-
-  private clearLines(): void {
-    for (const t of this.lines) t.destroy();
-    this.lines = [];
-  }
-
-  // ── Slide animation ────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   private getOnscreenX(): number {
-    return this.scene.scale.width - this.panelWidth / 2;
+    const { width } = this.scene.scale;
+    return width - this.panelWidth / 2;
   }
 
   private setPanelOffscreen(): void {
-    const offX = this.scene.scale.width + this.panelWidth;
-    const pw = this.panelWidth;
-    this.panel.setX(offX);
-    this.border.setX(offX - pw / 2);
-    this.deleteBtn.setX(offX);
-    this.deleteBtnText.setX(offX);
-    this.tunnelBtn.setX(offX);
-    this.tunnelBtnText.setX(offX);
+    const { width, height } = this.scene.scale;
+    this.panel.setPosition(width + this.panelWidth / 2, height / 2);
+    this.border.setPosition(width, height / 2);
   }
 
   private slideIn(): void {
     if (this.isVisible) return;
     this.isVisible = true;
-    const px = this.getOnscreenX();
-    const { width } = this.scene.scale;
+    const { width, height } = this.scene.scale;
+    const targetX = width - this.panelWidth / 2;
     this.scene.tweens.add({
-      targets: [this.panel, this.deleteBtn, this.deleteBtnText, this.tunnelBtn, this.tunnelBtnText],
-      x: px,
-      duration: 180,
-      ease: 'Cubic.Out',
-    });
-    this.scene.tweens.add({
-      targets: this.border,
-      x: width - this.panelWidth,
-      duration: 180,
-      ease: 'Cubic.Out',
+      targets: [this.panel, this.border],
+      x: targetX,
+      duration: 200,
+      ease: 'Power2',
     });
   }
 
   private slideOut(): void {
     if (!this.isVisible) return;
     this.isVisible = false;
-    const offX = this.scene.scale.width + this.panelWidth;
+    const { width, height } = this.scene.scale;
     this.scene.tweens.add({
-      targets: [this.panel, this.deleteBtn, this.deleteBtnText, this.tunnelBtn, this.tunnelBtnText],
-      x: offX,
-      duration: 160,
-      ease: 'Cubic.In',
+      targets: [this.panel, this.border],
+      x: width + this.panelWidth / 2,
+      duration: 200,
+      ease: 'Power2',
     });
-    this.scene.tweens.add({
-      targets: this.border,
-      x: offX - this.panelWidth / 2,
-      duration: 160,
-      ease: 'Cubic.In',
-    });
-    this.deleteBtn.setVisible(false);
-    this.deleteBtnText.setVisible(false);
-    this.tunnelBtn.setVisible(false);
-    this.tunnelBtnText.setVisible(false);
   }
 
-  // ── Actions ────────────────────────────────────────────────────────────────
+  private clearLines(): void {
+    for (const txt of this.lines) txt.destroy();
+    this.lines = [];
+  }
+
+  private clearParamObjects(): void {
+    for (const obj of this.paramObjects) obj.destroy();
+    this.paramObjects = [];
+  }
+
+  private clearVehicleObjects(): void {
+    for (const obj of this.vehicleTypeObjects) obj.destroy();
+    this.vehicleTypeObjects = [];
+  }
 
   private onDelete(): void {
-    const uuids = this.selectionManager.selectedUUIDs;
-    if (this.onDeleteCallback) this.onDeleteCallback(uuids);
+    if (this.onDeleteCallback) {
+      this.onDeleteCallback(this.selectionManager.selectedUUIDs);
+    }
   }
 
   private onToggleTunnel(): void {
-    const uuids = this.selectionManager.selectedUUIDs;
-    for (const uuid of uuids) {
+    for (const uuid of this.selectionManager.selectedUUIDs) {
       const track = this.trackManager.getTrack(uuid);
-      if (!track) continue;
-      track.isTunnel = !track.isTunnel;
-      const def = WorldManager.world?.tracks.find((t) => t.uuid === uuid);
-      if (def) def.isTunnel = track.isTunnel;
-      // Redraw the track to reflect tunnel state change
-      const cp = track.getControlPoints();
-      track.updateTrackVectors(cp.p0, cp.p1, cp.p2, cp.p3);
+      if (track) {
+        track.isTunnel = !track.isTunnel;
+        const cps = track.getControlPoints();
+        track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
+        WorldManager.updateTrackDef({
+          uuid: track.getUUID(),
+          p0: { x: cps.p0.x, y: cps.p0.y },
+          p1: { x: cps.p1.x, y: cps.p1.y },
+          p2: { x: cps.p2.x, y: cps.p2.y },
+          p3: { x: cps.p3.x, y: cps.p3.y },
+          isTunnel: track.isTunnel,
+          elevation: track.elevation,
+        });
+      }
     }
-    // Trigger refresh with current selection
-    this.refresh(uuids);
+    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    this.refresh(this.selectionManager.selectedUUIDs);
   }
-
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   destroy(): void {
     EventBus.off('selection:changed', this.selectionChangedHandler);
     EventBus.off('tool:changed', this.toolChangedHandler);
     this.clearLines();
     this.clearParamObjects();
+    this.clearVehicleObjects();
     this.panel.destroy();
     this.border.destroy();
     this.deleteBtn.destroy();
