@@ -6,6 +6,7 @@ export const MAX_SEGMENT_LENGTH =
   TERRAIN_ANALYSIS_SPACING * (MAX_ANALYSIS_SAMPLES - 1);
 export const STANDARD_STARTING_CASH = 1_000_000;
 export const DEMOLITION_REFUND_RATE = 0.5;
+export const ENDPOINT_CONNECTION_COST = 2_500;
 
 export function startingCashForDifficulty(
   difficultyId: 'standard',

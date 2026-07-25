@@ -74,7 +74,7 @@ describe('generated blank-world start', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists a schema-4 opportunity before installing an otherwise blank world', () => {
+  it('persists a schema-5 opportunity before installing an otherwise blank world', () => {
     const generator = successfulPort();
     const result = WorldManager.tryCreateNew(
       'Generated',
@@ -91,7 +91,8 @@ describe('generated blank-world start', () => {
       biome: 'alpine',
       constructionDifficultyId: 'standard',
     });
-    expect(result.world.schemaVersion).toBe(4);
+    expect(result.world.schemaVersion).toBe(5);
+    expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(
       successfulResult().opportunity,

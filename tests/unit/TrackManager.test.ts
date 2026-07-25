@@ -54,6 +54,17 @@ describe('TrackManager', () => {
       manager.addTrack(t2);
       expect(manager.tracks).toHaveLength(2);
     });
+
+    it('rejects duplicate UUIDs without replacing the owned track', () => {
+      const first = makeTrack(scene);
+      first.setUUID('duplicate');
+      const second = makeTrack(scene, 200, 0, 300, 0);
+      second.setUUID('duplicate');
+      manager.addTrack(first);
+      expect(() => manager.addTrack(second)).toThrow('Duplicate track UUID');
+      expect(manager.getTrack('duplicate')).toBe(first);
+      expect(manager.tracks).toHaveLength(1);
+    });
   });
 
   describe('getTrack()', () => {

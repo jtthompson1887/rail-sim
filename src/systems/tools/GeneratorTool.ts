@@ -177,7 +177,13 @@ export class GeneratorTool implements IEditorTool {
           result.structures,
           result.costs.total,
         );
-        track.updateTrackVectors(cps.p0, cps.p1, cps.p2, cps.p3);
+        this.trackManager.updateTrackVectors(
+          track.getUUID(),
+          cps.p0,
+          cps.p1,
+          cps.p2,
+          cps.p3,
+        );
         validTracks.push(track);
       } else {
         invalidTracks.push({

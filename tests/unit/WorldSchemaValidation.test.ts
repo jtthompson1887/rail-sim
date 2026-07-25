@@ -17,7 +17,7 @@ function currentWorld() {
     'alpine',
     undefined as any,
   ) as any;
-  world.schemaVersion = 4;
+  world.schemaVersion = 5;
   world.starterOpportunity = {
     opportunityVersion: 1,
     resolvedAttempt: 1,
@@ -143,8 +143,9 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('accepts schema 4 without converting or copying it', () => {
+  it('accepts schema 5 without converting or copying it', () => {
     const world = currentWorld();
+    world.revision = 7;
     const result = validateWorldData(world);
     expect(result).toEqual({ compatible: true, world });
     if (result.compatible) expect(result.world).toBe(world);
@@ -155,7 +156,8 @@ describe('world schema validation', () => {
     ['legacy', 1],
     ['engineering-only', 2],
     ['company-only', 3],
-    ['unsupported', 5],
+    ['opportunity-only', 4],
+    ['unsupported', 6],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -203,7 +205,7 @@ describe('world schema validation', () => {
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
     }],
-  ])('rejects schema 4 with %s', (_label, mutate) => {
+  ])('rejects schema 5 with %s', (_label, mutate) => {
     const raw = currentWorld();
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -218,13 +220,26 @@ describe('world schema validation', () => {
     ['negative cash', (world: any) => { world.company.cash = -1; }],
     ['unsafe cash', (world: any) => { world.company.cash = Number.MAX_SAFE_INTEGER + 1; }],
     ['extra company state', (world: any) => { world.company.ledger = []; }],
-  ])('rejects schema 4 with %s', (_label, mutate) => {
+  ])('rejects schema 5 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
       compatible: false,
       action: INCOMPATIBLE_WORLD_ACTION,
     }));
+  });
+
+  it.each([
+    ['missing revision', (world: any) => { delete world.revision; }],
+    ['negative revision', (world: any) => { world.revision = -1; }],
+    ['fractional revision', (world: any) => { world.revision = 1.5; }],
+    ['unsafe revision', (world: any) => {
+      world.revision = Number.MAX_SAFE_INTEGER + 1;
+    }],
+  ])('rejects schema 5 with %s', (_label, mutate) => {
+    const raw = currentWorld() as any;
+    mutate(raw);
+    expect(validateWorldData(raw).compatible).toBe(false);
   });
 
   it.each([
@@ -263,7 +278,7 @@ describe('world schema validation', () => {
     ['verticalProfile'],
     ['structures'],
     ['paidBuildCost'],
-  ])('rejects a schema-4 track missing required %s', (field) => {
+  ])('rejects a schema-5 track missing required %s', (field) => {
     const raw = currentWorld() as any;
     const track: any = {
       geometryVersion: 1,

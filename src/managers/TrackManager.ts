@@ -4,6 +4,7 @@ import RailTrack from '../entities/RailTrack';
 import Junction from '../entities/Junction';
 import type { TrackNode } from '../entities/TrackNode';
 import { GameConfig } from '../config/GameConfig';
+import type { TrackDef } from '../config/WorldData';
 
 /** Chunk coordinate key for the spatial index. */
 type ChunkKey = string;
@@ -91,16 +92,30 @@ export default class TrackManager {
       const startPoint = track.getCurvePath().getStartPoint();
       const endPoint = track.getCurvePath().getEndPoint();
 
-      const prevNode = this.findClosestNode(startPoint, track);
-      if (prevNode) {
-        track.setPrevious(prevNode);
-        prevNode.setNext(track);
+      const previous = this.findEndpointNear(
+        new Phaser.Math.Vector2(startPoint),
+        1e-6,
+        track.getUUID(),
+      );
+      if (previous && !track.getPrevious()
+        && !this.endpointHasConnection(previous.track, previous.isStart)) {
+        track.setPrevious(previous.track);
+        if (previous.isStart) previous.track.setPrevious(track);
+        else previous.track.setNext(track);
       }
 
-      const nextNode = this.findClosestNode(endPoint, track);
-      if (nextNode) {
-        track.setNext(nextNode);
-        nextNode.setPrevious(track);
+      const next = this.findEndpointNear(
+        new Phaser.Math.Vector2(endPoint),
+        1e-6,
+        track.getUUID(),
+      );
+      if (next
+        && !(next.track === previous?.track && next.isStart === previous.isStart)
+        && !track.getNext()
+        && !this.endpointHasConnection(next.track, next.isStart)) {
+        track.setNext(next.track);
+        if (next.isStart) next.track.setPrevious(track);
+        else next.track.setNext(track);
       }
     } else {
       const mainTrack = track.getMainTrack();
@@ -150,6 +165,9 @@ export default class TrackManager {
 
   addTrack(track: RailTrack): string {
     const uuid = track.getUUID();
+    if (this.trackMap.has(uuid)) {
+      throw new Error(`Duplicate track UUID: ${uuid}`);
+    }
     this.trackMap.set(uuid, track);
     this.indexTrack(track);
     this.setupTrackConnections(track);
@@ -158,9 +176,28 @@ export default class TrackManager {
 
   addJunction(junction: Junction): string {
     const uuid = junction.getUUID();
+    if (this.junctionMap.has(uuid)) {
+      throw new Error(`Duplicate junction UUID: ${uuid}`);
+    }
     this.junctionMap.set(uuid, junction);
     this.setupTrackConnections(junction);
     return uuid;
+  }
+
+  getJunction(uuid: string): Junction | undefined {
+    return this.junctionMap.get(uuid);
+  }
+
+  removeJunction(uuid: string): boolean {
+    const junction = this.junctionMap.get(uuid);
+    if (!junction) return false;
+    for (const track of junction.getAllTracks()) {
+      if (track.getNext() === junction) track.setNext(undefined);
+      if (track.getPrevious() === junction) track.setPrevious(undefined);
+    }
+    junction.destroy();
+    this.junctionMap.delete(uuid);
+    return true;
   }
 
   removeTrack(uuid: string): boolean {
@@ -170,13 +207,12 @@ export default class TrackManager {
     // Clear connections from neighbouring tracks before removal
     const prev = track.getPrevious();
     const next = track.getNext();
-    if (prev) {
-      if (prev.getNext?.() === track) prev.setNext?.(undefined);
-      if ((prev as any).getNextTrack?.() === track) (prev as any).setNextTrack?.(undefined);
-    }
-    if (next) {
-      if (next.getPrevious?.() === track) next.setPrevious?.(undefined);
-      if ((next as any).getPreviousTrack?.() === track) (next as any).setPreviousTrack?.(undefined);
+    for (const neighbour of [prev, next]) {
+      if (!neighbour) continue;
+      if (neighbour.getNext?.() === track) neighbour.setNext?.(undefined);
+      if (neighbour.getPrevious?.() === track) neighbour.setPrevious?.(undefined);
+      if ((neighbour as any).getNextTrack?.() === track) (neighbour as any).setNextTrack?.(undefined);
+      if ((neighbour as any).getPreviousTrack?.() === track) (neighbour as any).setPreviousTrack?.(undefined);
     }
 
     this.deindexTrack(track);
@@ -219,11 +255,10 @@ export default class TrackManager {
     const next = track.getNext();
 
     // Clear old connections
-    if (prev) {
-      if (prev.getNext?.() === track) prev.setNext?.(undefined);
-    }
-    if (next) {
-      if (next.getPrevious?.() === track) next.setPrevious?.(undefined);
+    for (const neighbour of [prev, next]) {
+      if (!neighbour) continue;
+      if (neighbour.getNext?.() === track) neighbour.setNext?.(undefined);
+      if (neighbour.getPrevious?.() === track) neighbour.setPrevious?.(undefined);
     }
     track.setPrevious(undefined);
     track.setNext(undefined);
@@ -231,6 +266,23 @@ export default class TrackManager {
     // Re-establish connections
     this.setupTrackConnections(track);
 
+    return true;
+  }
+
+  applyTrackDef(def: TrackDef): boolean {
+    const updated = this.updateTrackVectors(
+      def.uuid,
+      new Phaser.Math.Vector2(def.p0.x, def.p0.y),
+      new Phaser.Math.Vector2(def.p1.x, def.p1.y),
+      new Phaser.Math.Vector2(def.p2.x, def.p2.y),
+      new Phaser.Math.Vector2(def.p3.x, def.p3.y),
+    );
+    if (!updated) return false;
+    this.trackMap.get(def.uuid)!.setConstructionData(
+      JSON.parse(JSON.stringify(def.verticalProfile)),
+      JSON.parse(JSON.stringify(def.structures)),
+      def.paidBuildCost,
+    );
     return true;
   }
 
@@ -426,6 +478,10 @@ export default class TrackManager {
     }
 
     return best;
+  }
+
+  endpointHasConnection(track: RailTrack, isStart: boolean): boolean {
+    return isStart ? track.hasPrevious() : track.hasNext();
   }
 
   updateVisibleTracks(cameraViewBounds: Phaser.Geom.Rectangle): void {

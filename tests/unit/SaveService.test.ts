@@ -8,7 +8,8 @@ import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    revision: 0,
     id,
     name,
     generationConfig: {
@@ -34,7 +35,7 @@ describe('SaveService', () => {
     localStorage.clear();
   });
 
-  it('preserves schema-4 company cash and paid track value exactly', () => {
+  it('preserves schema-5 revision, company cash, and paid track value exactly', () => {
     const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
     world.tracks.push({
       geometryVersion: 1,
@@ -215,6 +216,22 @@ describe('SaveService', () => {
       SaveService.saveWorld(world);
       const loaded = SaveService.loadWorld('w-ts')!;
       expect(loaded.metadata.updatedAt).toBeGreaterThanOrEqual(1);
+    });
+
+    it('leaves both the prior snapshot and active timestamp intact when storage fails', () => {
+      const world = makeWorld('w-atomic', 'Atomic', '0', 123);
+      expect(SaveService.saveWorld(world)).toBe(true);
+      const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+      const previousUpdatedAt = world.metadata.updatedAt;
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(previousUpdatedAt + 10);
+      const write = jest.spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(() => { throw new Error('quota'); });
+
+      expect(SaveService.saveWorld(world)).toBe(false);
+      expect(world.metadata.updatedAt).toBe(previousUpdatedAt);
+      expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+      write.mockRestore();
+      clock.mockRestore();
     });
   });
 

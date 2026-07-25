@@ -11,7 +11,7 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
   private junctionPosition: number;
   private _branchState: 'left' | 'right' = 'right';
   private switched: boolean = false;
-  private readonly uuid: string;
+  private uuid: string;
   private hitArea: Phaser.GameObjects.Arc;
   protected trackConnections: {
     next?: TrackNode;
@@ -96,6 +96,10 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
 
   getUUID(): string {
     return this.uuid;
+  }
+
+  setUUID(uuid: string): void {
+    this.uuid = uuid;
   }
 
   getMainTrack(): RailTrack {

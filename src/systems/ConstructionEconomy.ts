@@ -46,6 +46,10 @@ export class ConstructionEconomy {
    */
   constructor(private readonly company: CompanyConstructionState) {}
 
+  isBoundTo(company: CompanyConstructionState): boolean {
+    return this.company === company;
+  }
+
   canAfford(amount: number): boolean {
     if (!isValidCash(this.company.cash)
       || !Number.isSafeInteger(amount)

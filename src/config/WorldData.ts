@@ -156,7 +156,8 @@ export interface StarterOpportunityDef {
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 4;
+  schemaVersion: 5;
+  revision: number;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
@@ -185,7 +186,8 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    revision: 0,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
@@ -558,7 +560,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 4) {
+  if (raw.schemaVersion !== 5) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -582,6 +584,8 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   const metadata = raw.metadata;
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
+    || !Number.isSafeInteger(raw.revision)
+    || (raw.revision as number) < 0
     || !Array.isArray(raw.tracks) || !raw.tracks.every(isTrack)
     || !Array.isArray(raw.junctions) || !raw.junctions.every(isJunction)
     || !Array.isArray(raw.stations) || !raw.stations.every(isStation)
@@ -596,7 +600,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 4.');
+    return incompatible(raw, 'data does not match schema version 5.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

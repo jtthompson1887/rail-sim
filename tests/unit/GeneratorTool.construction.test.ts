@@ -85,6 +85,7 @@ describe('GeneratorTool construction behavior', () => {
     trackManager = {
       getAllTracks: jest.fn().mockReturnValue([]),
       removeTrack: jest.fn(),
+      updateTrackVectors: jest.fn().mockReturnValue(true),
     };
     snapSystem = { snapPoint: jest.fn((x, y) => ({ x, y })) };
     terrainValidator = { canPlaceTrack: jest.fn().mockReturnValue(validResult()) };
@@ -186,11 +187,15 @@ describe('GeneratorTool construction behavior', () => {
         ...validResult(), valid: false, remedy: 'clearance blocked', reasonCode: 'clearance',
       });
     const addWorld = jest.spyOn(WorldManager, 'addTrackDef');
-    const updateValid = jest.spyOn(valid, 'updateTrackVectors');
-
     tool.runGeneratorAt(0, 0);
 
-    expect(updateValid).toHaveBeenCalled();
+    expect(trackManager.updateTrackVectors).toHaveBeenCalledWith(
+      valid.getUUID(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
     expect(valid.structureTypeAt(0.5)).toBe('tunnel');
     expect(valid.verticalProfile?.knots[0].elevation).toBe(77);
     expect(valid.paidBuildCost).toBe(600);

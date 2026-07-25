@@ -76,9 +76,10 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 4 with deterministic company cash from the authoritative difficulty', () => {
+    it('creates schema 5 at revision zero with deterministic company cash', () => {
       const w = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(4);
+      expect(w.schemaVersion).toBe(5);
+      expect(w.revision).toBe(0);
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
@@ -181,6 +182,17 @@ describe('WorldManager', () => {
     it('does nothing when no world is loaded', () => {
       expect(() => WorldManager.addTrackDef(makeTrackDef('x'))).not.toThrow();
     });
+
+    it('advances once only for an actual mutation and rejects overflow', () => {
+      WorldManager.createNew('Revision', 'real-terrain-alpha');
+      expect(WorldManager.addTrackDef(makeTrackDef('one'))).toBe(true);
+      expect(WorldManager.world!.revision).toBe(1);
+      expect(WorldManager.addTrackDef(makeTrackDef('one'))).toBe(false);
+      expect(WorldManager.world!.revision).toBe(1);
+      WorldManager.world!.revision = Number.MAX_SAFE_INTEGER;
+      expect(WorldManager.addTrackDef(makeTrackDef('two'))).toBe(false);
+      expect(WorldManager.world!.tracks.map((track) => track.uuid)).toEqual(['one']);
+    });
   });
 
   describe('addJunctionDef() / removeJunctionDef()', () => {
@@ -263,6 +275,15 @@ describe('WorldManager', () => {
     it('setTrainDefs does nothing when no world is loaded', () => {
       WorldManager.reset();
       expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' }])).not.toThrow();
+    });
+
+    it('does not advance revision when setTrainDefs receives identical data', () => {
+      WorldManager.createNew('Tr', 'real-terrain-alpha');
+      const defs = [{ id: 'same', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' as const }];
+      expect(WorldManager.setTrainDefs(defs)).toBe(true);
+      const revision = WorldManager.world!.revision;
+      expect(WorldManager.setTrainDefs(defs.map((train) => ({ ...train })))).toBe(false);
+      expect(WorldManager.world!.revision).toBe(revision);
     });
   });
 

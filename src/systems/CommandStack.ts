@@ -10,9 +10,9 @@ export interface Command {
   /** Human-readable label (shown in UI / used for debugging). */
   readonly description: string;
   /** Apply the operation (called once when the command is first committed). */
-  execute(): void;
+  execute(): boolean;
   /** Reverse the operation. */
-  undo(): void;
+  undo(): boolean;
 }
 
 export class CommandStack {
@@ -34,39 +34,43 @@ export class CommandStack {
    * Execute a command and push it onto the undo stack.
    * Clears the redo stack (standard linear undo model).
    */
-  push(command: Command): void {
-    command.execute();
+  push(command: Command): boolean {
+    if (!command.execute()) return false;
     this.undoStack.push(command);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
     this.notify();
+    return true;
   }
 
-  undo(): void {
-    const cmd = this.undoStack.pop();
-    if (!cmd) return;
-    cmd.undo();
+  undo(): boolean {
+    const cmd = this.undoStack[this.undoStack.length - 1];
+    if (!cmd || !cmd.undo()) return false;
+    this.undoStack.pop();
     this.redoStack.push(cmd);
     this.notify();
+    return true;
   }
 
-  redo(): void {
-    const cmd = this.redoStack.pop();
-    if (!cmd) return;
-    cmd.execute();
+  redo(): boolean {
+    const cmd = this.redoStack[this.redoStack.length - 1];
+    if (!cmd || !cmd.execute()) return false;
+    this.redoStack.pop();
     this.undoStack.push(cmd);
     this.notify();
+    return true;
   }
 
   /**
    * Record a command that has already been executed (e.g. by live drag) without
    * calling `execute()` again.  Clears the redo stack.
    */
-  record(command: Command): void {
+  record(command: Command): boolean {
     this.undoStack.push(command);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
     this.notify();
+    return true;
   }
 
   /** Clear both stacks (e.g. when loading a new world). */
@@ -83,4 +87,5 @@ export class CommandStack {
 
 // Re-export concrete commands for backward compatibility
 export { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
+export { PlaceTrackCommand } from '../commands/PlaceTrackCommand';
 export { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';

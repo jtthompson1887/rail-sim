@@ -8,6 +8,7 @@ import TrackManager from '../../src/managers/TrackManager';
 import RailTrack from '../../src/entities/RailTrack';
 import { WorldManager } from '../../src/managers/WorldManager';
 import type { TrackDef } from '../../src/config/WorldData';
+import { TrackSerializer } from '../../src/utils/TrackSerializer';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -60,8 +61,8 @@ function makeCommand(label = 'cmd'): Command & { execCount: number; undoCount: n
     description: label,
     execCount: 0,
     undoCount: 0,
-    execute() { this.execCount++; },
-    undo()    { this.undoCount++; },
+    execute() { this.execCount++; return true; },
+    undo()    { this.undoCount++; return true; },
   };
 }
 
@@ -114,6 +115,22 @@ describe('CommandStack', () => {
       while (stack.canUndo) { stack.undo(); count++; }
       expect(count).toBe(5);
     });
+
+    it('preserves redo and emits no change when execute fails', () => {
+      stack.push(makeCommand());
+      stack.undo();
+      const onChange = jest.fn();
+      stack.onChange = onChange;
+      const failed: Command = {
+        description: 'failed',
+        execute: () => false,
+        undo: () => true,
+      };
+      expect(stack.push(failed)).toBe(false);
+      expect(stack.canUndo).toBe(false);
+      expect(stack.canRedo).toBe(true);
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 
   describe('undo()', () => {
@@ -131,7 +148,22 @@ describe('CommandStack', () => {
     });
 
     it('is a no-op when stack is empty', () => {
-      expect(() => stack.undo()).not.toThrow();
+      expect(stack.undo()).toBe(false);
+    });
+
+    it('keeps a failed undo on the undo stack', () => {
+      const command: Command = {
+        description: 'failed undo',
+        execute: () => true,
+        undo: () => false,
+      };
+      stack.push(command);
+      const onChange = jest.fn();
+      stack.onChange = onChange;
+      expect(stack.undo()).toBe(false);
+      expect(stack.canUndo).toBe(true);
+      expect(stack.canRedo).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
     });
   });
 
@@ -145,7 +177,24 @@ describe('CommandStack', () => {
     });
 
     it('is a no-op when redo stack is empty', () => {
-      expect(() => stack.redo()).not.toThrow();
+      expect(stack.redo()).toBe(false);
+    });
+
+    it('keeps a failed redo on the redo stack', () => {
+      let execution = 0;
+      const command: Command = {
+        description: 'failed redo',
+        execute: () => ++execution === 1,
+        undo: () => true,
+      };
+      stack.push(command);
+      stack.undo();
+      const onChange = jest.fn();
+      stack.onChange = onChange;
+      expect(stack.redo()).toBe(false);
+      expect(stack.canUndo).toBe(false);
+      expect(stack.canRedo).toBe(true);
+      expect(onChange).not.toHaveBeenCalled();
     });
   });
 
@@ -191,6 +240,7 @@ describe('DeleteTracksCommand', () => {
   it('Given a track exists, When execute(), Then track is removed', () => {
     const track = makeTrack(scene);
     trackManager.addTrack(track);
+    WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
     const uuid = track.getUUID();
 
     const cmd = new DeleteTracksCommand(trackManager, scene, [uuid]);
@@ -202,6 +252,7 @@ describe('DeleteTracksCommand', () => {
   it('Given execute was called, When undo(), Then track is restored', () => {
     const track = makeTrack(scene);
     trackManager.addTrack(track);
+    WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
     const uuid = track.getUUID();
 
     const cmd = new DeleteTracksCommand(trackManager, scene, [uuid]);
@@ -214,6 +265,116 @@ describe('DeleteTracksCommand', () => {
   it('ignores unknown UUIDs without throwing', () => {
     const cmd = new DeleteTracksCommand(trackManager, scene, ['nonexistent-uuid']);
     expect(() => cmd.execute()).not.toThrow();
+  });
+
+  it('refunds floor 50% per track exactly once and reverses it on undo', () => {
+    const track = makeTrack(scene);
+    track.setConstructionData(
+      track.verticalProfile!,
+      track.structures!,
+      1_001,
+    );
+    trackManager.addTrack(track);
+    WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+    const beforeCash = WorldManager.world!.company.cash;
+    const cmd = new DeleteTracksCommand(trackManager, scene, [track.getUUID()]);
+
+    expect(cmd.execute()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash + 500);
+    expect(WorldManager.world!.revision).toBe(1);
+    expect(cmd.execute()).toBe(false);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash + 500);
+    expect(cmd.undo()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.revision).toBe(2);
+  });
+
+  it('rejects the whole batch when one track is missing or referenced', () => {
+    const track = makeTrack(scene);
+    trackManager.addTrack(track);
+    WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+    const uuid = track.getUUID();
+    const beforeCash = WorldManager.world!.company.cash;
+    expect(new DeleteTracksCommand(trackManager, scene, [uuid, 'missing']).execute()).toBe(false);
+    expect(trackManager.getTrack(uuid)).toBe(track);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.revision).toBe(0);
+
+    WorldManager.world!.stations.push({
+      id: 'station',
+      name: 'Station',
+      trackUUID: uuid,
+      trackT: 0.5,
+      passengerSpawnRate: 1,
+    });
+    expect(new DeleteTracksCommand(trackManager, scene, [uuid]).execute()).toBe(false);
+    expect(trackManager.getTrack(uuid)).toBe(track);
+  });
+
+  it('sums per-track floored refunds and conserves them through redo', () => {
+    const tracks = [
+      makeTrack(scene, 0, 0, 100, 0),
+      makeTrack(scene, 200, 0, 300, 0),
+    ];
+    for (const track of tracks) {
+      track.setConstructionData(track.verticalProfile!, track.structures!, 1_001);
+      trackManager.addTrack(track);
+      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+    }
+    const beforeCash = WorldManager.world!.company.cash;
+    const cmd = new DeleteTracksCommand(
+      trackManager,
+      scene,
+      tracks.map((track) => track.getUUID()),
+    );
+    expect(cmd.execute()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash + 1_000);
+    expect(cmd.undo()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(cmd.execute()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(beforeCash + 1_000);
+    expect(WorldManager.world!.revision).toBe(3);
+  });
+
+  it('cascades only a directly owned junction and restores its exact identity and state', () => {
+    const main = makeTrack(scene, 0, 0, 100, 0);
+    const left = makeTrack(scene, 100, 0, 200, -100);
+    const right = makeTrack(scene, 100, 0, 200, 100);
+    for (const track of [main, left, right]) {
+      trackManager.addTrack(track);
+      WorldManager.addTrackDef(TrackSerializer.toTrackDef(track), false);
+    }
+    const junction = new (require('../../src/entities/Junction').default)(
+      scene,
+      main,
+      left,
+      right,
+      0.5,
+    );
+    junction.setUUID('owned-junction');
+    junction.branchState = 'left';
+    trackManager.addJunction(junction);
+    WorldManager.addJunctionDef({
+      uuid: 'owned-junction',
+      mainTrackUUID: main.getUUID(),
+      leftTrackUUID: left.getUUID(),
+      rightTrackUUID: right.getUUID(),
+      position: 0.5,
+      branchState: 'right',
+    }, false);
+    const command = new DeleteTracksCommand(trackManager, scene, [left.getUUID()]);
+    expect(command.execute()).toBe(true);
+    expect(trackManager.getTrack(main.getUUID())).toBe(main);
+    expect(trackManager.getTrack(right.getUUID())).toBe(right);
+    expect(trackManager.getJunction('owned-junction')).toBeUndefined();
+    expect(WorldManager.world!.junctions).toEqual([]);
+
+    expect(command.undo()).toBe(true);
+    expect(trackManager.getJunction('owned-junction')!.branchState).toBe('left');
+    expect(WorldManager.world!.junctions).toEqual([expect.objectContaining({
+      uuid: 'owned-junction',
+      branchState: 'right',
+    })]);
   });
 });
 
@@ -247,6 +408,7 @@ describe('ReshapeTrackCommand', () => {
     });
 
     const cmd = new ReshapeTrackCommand(trackManager, uuid, before, after);
+    WorldManager.addTrackDef(before, false);
     expect(() => cmd.execute()).not.toThrow();
   });
 
@@ -265,6 +427,7 @@ describe('ReshapeTrackCommand', () => {
     });
 
     const cmd = new ReshapeTrackCommand(trackManager, uuid, before, after);
+    WorldManager.addTrackDef(before, false);
     cmd.execute();
     expect(() => cmd.undo()).not.toThrow();
   });

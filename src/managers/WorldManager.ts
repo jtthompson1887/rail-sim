@@ -56,6 +56,18 @@ class WorldManagerClass {
     return this._world !== null;
   }
 
+  canAdvanceRevision(): boolean {
+    return this._world !== null
+      && Number.isSafeInteger(this._world.revision)
+      && this._world.revision < Number.MAX_SAFE_INTEGER;
+  }
+
+  advanceRevision(): boolean {
+    if (!this.canAdvanceRevision()) return false;
+    this._world!.revision += 1;
+    return true;
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /**
@@ -134,80 +146,118 @@ class WorldManagerClass {
 
   // ── Track mutations ────────────────────────────────────────────────────────
 
-  addTrackDef(def: TrackDef): void {
-    if (!this._world) return;
+  addTrackDef(def: TrackDef, advanceRevision = true): boolean {
+    if (!this._world
+      || this._world.tracks.some((track) => track.uuid === def.uuid)
+      || (advanceRevision && !this.canAdvanceRevision())) return false;
     this._world.tracks.push(def);
+    if (advanceRevision) this.advanceRevision();
+    return true;
   }
 
-  removeTrackDef(uuid: string): void {
-    if (!this._world) return;
+  removeTrackDef(uuid: string, advanceRevision = true): boolean {
+    if (!this._world
+      || !this._world.tracks.some((track) => track.uuid === uuid)
+      || (advanceRevision && !this.canAdvanceRevision())) return false;
     this._world.tracks = this._world.tracks.filter((t) => t.uuid !== uuid);
+    if (advanceRevision) this.advanceRevision();
+    return true;
   }
 
-  updateTrackDef(updated: TrackDef): void {
-    if (!this._world) return;
+  updateTrackDef(updated: TrackDef, advanceRevision = true): boolean {
+    if (!this._world || (advanceRevision && !this.canAdvanceRevision())) return false;
     const idx = this._world.tracks.findIndex((t) => t.uuid === updated.uuid);
-    if (idx !== -1) this._world.tracks[idx] = updated;
+    if (idx === -1
+      || JSON.stringify(this._world.tracks[idx]) === JSON.stringify(updated)) return false;
+    this._world.tracks[idx] = updated;
+    if (advanceRevision) this.advanceRevision();
+    return true;
   }
 
   // ── Junction mutations ─────────────────────────────────────────────────────
 
-  addJunctionDef(def: JunctionDef): void {
-    if (!this._world) return;
+  addJunctionDef(def: JunctionDef, advanceRevision = true): boolean {
+    if (!this._world
+      || this._world.junctions.some((junction) => junction.uuid === def.uuid)
+      || (advanceRevision && !this.canAdvanceRevision())) return false;
     this._world.junctions.push(def);
+    if (advanceRevision) this.advanceRevision();
+    return true;
   }
 
-  removeJunctionDef(uuid: string): void {
-    if (!this._world) return;
+  removeJunctionDef(uuid: string, advanceRevision = true): boolean {
+    if (!this._world
+      || !this._world.junctions.some((junction) => junction.uuid === uuid)
+      || (advanceRevision && !this.canAdvanceRevision())) return false;
     this._world.junctions = this._world.junctions.filter((j) => j.uuid !== uuid);
+    if (advanceRevision) this.advanceRevision();
+    return true;
   }
 
   // ── Station mutations ──────────────────────────────────────────────────────
 
-  addStationDef(def: WorldStationDef): void {
-    if (!this._world) return;
+  addStationDef(def: WorldStationDef): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || this._world.stations.some((station) => station.id === def.id)) return false;
     this._world.stations.push(def);
+    return this.advanceRevision();
   }
 
-  removeStationDef(id: string): void {
-    if (!this._world) return;
+  removeStationDef(id: string): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || !this._world.stations.some((station) => station.id === id)) return false;
     this._world.stations = this._world.stations.filter((s) => s.id !== id);
+    return this.advanceRevision();
   }
 
   // ── Train mutations ────────────────────────────────────────────────────────
 
-  addTrainDef(def: TrainDef): void {
-    if (!this._world) return;
+  addTrainDef(def: TrainDef): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || this._world.trains.some((train) => train.id === def.id)) return false;
     this._world.trains.push(def);
+    return this.advanceRevision();
   }
 
-  removeTrainDef(id: string): void {
-    if (!this._world) return;
+  removeTrainDef(id: string): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || !this._world.trains.some((train) => train.id === id)) return false;
     this._world.trains = this._world.trains.filter((t) => t.id !== id);
+    return this.advanceRevision();
   }
 
-  updateTrainDef(updated: Partial<TrainDef> & { id: string }): void {
-    if (!this._world) return;
+  updateTrainDef(updated: Partial<TrainDef> & { id: string }): boolean {
+    if (!this._world || !this.canAdvanceRevision()) return false;
     const idx = this._world.trains.findIndex((t) => t.id === updated.id);
-    if (idx !== -1) this._world.trains[idx] = { ...this._world.trains[idx], ...updated };
+    if (idx === -1) return false;
+    const next = { ...this._world.trains[idx], ...updated };
+    if (JSON.stringify(next) === JSON.stringify(this._world.trains[idx])) return false;
+    this._world.trains[idx] = next;
+    return this.advanceRevision();
   }
 
   /** Replace the entire trains array (used to sync live train state before saving). */
-  setTrainDefs(defs: TrainDef[]): void {
-    if (!this._world) return;
+  setTrainDefs(defs: TrainDef[]): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || JSON.stringify(this._world.trains) === JSON.stringify(defs)) return false;
     this._world.trains = defs;
+    return this.advanceRevision();
   }
 
   // ── Scenery mutations ──────────────────────────────────────────────────────
 
-  addSceneryDef(def: SceneryObjectDef): void {
-    if (!this._world) return;
+  addSceneryDef(def: SceneryObjectDef): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || this._world.scenery.some((scenery) => scenery.id === def.id)) return false;
     this._world.scenery.push(def);
+    return this.advanceRevision();
   }
 
-  removeSceneryDef(id: string): void {
-    if (!this._world) return;
+  removeSceneryDef(id: string): boolean {
+    if (!this._world || !this.canAdvanceRevision()
+      || !this._world.scenery.some((scenery) => scenery.id === id)) return false;
     this._world.scenery = this._world.scenery.filter((s) => s.id !== id);
+    return this.advanceRevision();
   }
 
   /** Return all scenery objects whose position falls within the given chunk. */

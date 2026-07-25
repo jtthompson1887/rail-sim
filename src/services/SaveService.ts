@@ -129,9 +129,13 @@ export const SaveService = {
     try {
       if (!validateWorldData(world).compatible) return false;
       const all = this.loadAllWorlds();
-      world.metadata.updatedAt = Date.now();
-      all[world.id] = world;
+      const savedAt = Date.now();
+      const snapshot = JSON.parse(JSON.stringify(world)) as WorldData;
+      snapshot.metadata.updatedAt = savedAt;
+      if (!validateWorldData(snapshot).compatible) return false;
+      all[world.id] = snapshot;
       localStorage.setItem(GameConfig.WORLD.WORLDS_SAVE_KEY, JSON.stringify(all));
+      world.metadata.updatedAt = savedAt;
       return true;
     } catch {
       console.warn('SaveService: failed to save world to localStorage');
