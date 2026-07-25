@@ -211,4 +211,18 @@ describe('InputManager drag recovery regression', () => {
       type: 'success',
     });
   });
+
+  it('refreshes draggable vehicles without duplicating input handlers', () => {
+    const initialHandlerCount = scene.input.on.mock.calls.length;
+    const carriage = trainManager.createCarriage();
+    scene.input.setDraggable.mockClear();
+
+    inputManager.setupClickHandling(trainManager);
+
+    expect(scene.input.setDraggable).toHaveBeenCalledWith(carriage.getMatterBody(), true);
+    expect(scene.input.on).toHaveBeenCalledTimes(initialHandlerCount);
+    for (const callbacks of dragCallbacks.values()) {
+      expect(callbacks).toHaveLength(1);
+    }
+  });
 });

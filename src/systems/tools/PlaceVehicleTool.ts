@@ -55,7 +55,9 @@ export class PlaceVehicleTool implements IEditorTool {
     return button === 0;
   }
 
-  onPointerDown(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
+  onPointerDown(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void {
+    if (!this.wantsPointerButton(pointer.button)) return;
+
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
       EventBus.emit('ui:toast', { message: 'Click on a track to place a vehicle', type: 'error' });

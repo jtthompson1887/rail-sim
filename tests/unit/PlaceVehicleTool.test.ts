@@ -76,6 +76,17 @@ describe('PlaceVehicleTool', () => {
   });
 
   describe('onPointerDown', () => {
+    it('ignores unsupported pointer buttons', () => {
+      const track = makeTrack(scene);
+      trackManager.getClosestTrack.mockReturnValue(track);
+
+      tool.onPointerDown(250, 0, { button: 1 } as any);
+
+      expect(trackManager.getClosestTrack).not.toHaveBeenCalled();
+      expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
+      expect(trainManager.createCarriage).not.toHaveBeenCalled();
+    });
+
     it('emits error toast when no track is nearby', () => {
       const toastCb = jest.fn();
       EventBus.on('ui:toast', toastCb);

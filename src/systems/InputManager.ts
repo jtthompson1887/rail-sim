@@ -34,15 +34,15 @@ export class InputManager {
   }
 
   setupClickHandling(trainManager: TrainManager): void {
-    if (this.clickHandlingSetup) return;
-    this.clickHandlingSetup = true;
-
     for (const train of trainManager.trains) {
       this.scene.input.setDraggable(train.getMatterBody(), true);
     }
     for (const carriage of trainManager.carriages) {
       this.scene.input.setDraggable(carriage.getMatterBody(), true);
     }
+
+    if (this.clickHandlingSetup) return;
+    this.clickHandlingSetup = true;
 
     this.scene.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: any) => {
       this.clickedGameObject = true;

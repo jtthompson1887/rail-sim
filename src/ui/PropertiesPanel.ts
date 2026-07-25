@@ -301,6 +301,7 @@ export class PropertiesPanel {
   private showVehicleParams(): void {
     this.clearLines();
     this.clearParamObjects();
+    this.clearVehicleObjects();
     this.slideIn();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
