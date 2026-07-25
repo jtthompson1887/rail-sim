@@ -84,9 +84,10 @@ function startHarnessServer() {
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const exactObservedWorstCase = measurement.result.ok === true
-      && measurement.result.opportunity.resolvedAttempt === 11
-      && measurement.result.diagnostics.attemptsEvaluated === 11
+    const exactObservedWorstCase = measurement.seed === 'playtest-884'
+      && measurement.result.ok === true
+      && measurement.result.opportunity.resolvedAttempt === 12
+      && measurement.result.diagnostics.attemptsEvaluated === 12
       && measurement.result.diagnostics.maxSiteCandidatesEvaluated === 256;
     if (!exactObservedWorstCase
       || measurement.attemptsCap !== 12

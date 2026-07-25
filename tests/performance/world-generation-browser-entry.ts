@@ -6,8 +6,8 @@ import {
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 
-// Highest observed attempt count in the bounded playtest-000..600 browser audit.
-const AUDITED_WORST_CASE_SEED = 'playtest-150';
+// First configured worst case in the bounded playtest-601..884 browser audit.
+const AUDITED_WORST_CASE_SEED = 'playtest-884';
 const GENERATION_CONFIG = {
   generationConfigVersion: 1 as const,
   seed: AUDITED_WORST_CASE_SEED,
