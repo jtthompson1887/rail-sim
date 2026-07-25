@@ -1,7 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
+import {
+  ENDPOINT_CONNECTION_COST,
+  STANDARD_STARTING_CASH,
+} from '../../src/config/ConstructionConfig';
 import type { WorldGenerationConfigDef } from '../../src/config/WorldData';
 import {
   type OpportunityGeneratorPort,
@@ -97,6 +100,16 @@ describe('generated blank-world start', () => {
     expect(result.world.starterOpportunity).toEqual(
       successfulResult().opportunity,
     );
+    const detour = result.world.starterOpportunity.corridors.find(
+      (corridor) => corridor.dominantTradeoff === 'long-flat',
+    )!;
+    expect(detour.feasibilityWitness.segments.map(
+      (segment) => segment.topologyCost,
+    )).toEqual([0, ENDPOINT_CONNECTION_COST]);
+    expect(detour.estimatedCost).toBe(detour.feasibilityWitness.segments.reduce(
+      (total, segment) => total + segment.costs.total + segment.topologyCost,
+      0,
+    ));
     expect(result.world.tracks).toEqual([]);
     expect(result.world.junctions).toEqual([]);
     expect(result.world.stations).toEqual([]);

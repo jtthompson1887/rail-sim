@@ -568,7 +568,7 @@ export interface OpportunityCorridorDef {
       verticalProfile: VerticalProfileDef;
       structures: StructureInterval[];
       costs: ConstructionCostBreakdown;
-      topologyCost: 0;
+      topologyCost: 0 | typeof ENDPOINT_CONNECTION_COST;
     }>;
     /** Quote-equivalent sum: proposal subtotals plus topology cost. */
     totalCost: number;

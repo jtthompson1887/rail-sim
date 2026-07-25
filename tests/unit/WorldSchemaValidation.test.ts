@@ -67,7 +67,7 @@ function currentWorld() {
       {
         id: 'detour',
         waypoints: [{ x: -500, y: 0 }, { x: 0, y: 500 }, { x: 500, y: 0 }],
-        estimatedCost: 20_000,
+        estimatedCost: 22_500,
         dominantTradeoff: 'long-flat',
         feasibilityWitness: {
           witnessVersion: 1,
@@ -126,10 +126,10 @@ function currentWorld() {
                 tunnel: 0,
                 total: 10_000,
               },
-              topologyCost: 0,
+              topologyCost: 2_500,
             },
           ],
-          totalCost: 20_000,
+          totalCost: 22_500,
         },
       },
     ],
@@ -198,9 +198,17 @@ describe('world schema validation', () => {
     ['estimate mismatch', (world: any) => {
       world.starterOpportunity.corridors[0].estimatedCost += 1;
     }],
-    ['non-zero topology', (world: any) => {
+    ['charged first-leg topology', (world: any) => {
       world.starterOpportunity.corridors[0]
-        .feasibilityWitness.segments[0].topologyCost = 1;
+        .feasibilityWitness.segments[0].topologyCost = 2_500;
+    }],
+    ['missing chained topology', (world: any) => {
+      world.starterOpportunity.corridors[1]
+        .feasibilityWitness.segments[1].topologyCost = 0;
+    }],
+    ['wrong chained topology', (world: any) => {
+      world.starterOpportunity.corridors[1]
+        .feasibilityWitness.segments[1].topologyCost = 2_501;
     }],
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;

@@ -1,6 +1,9 @@
 import type { VehicleType } from './VehicleTypes';
 import type { TrackGeometryDef } from '../systems/TrackGeometry';
-import { startingCashForDifficulty } from './ConstructionConfig';
+import {
+  ENDPOINT_CONNECTION_COST,
+  startingCashForDifficulty,
+} from './ConstructionConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   WorldGenerationConfig,
@@ -140,7 +143,7 @@ export interface OpportunityCorridorDef {
       verticalProfile: VerticalProfileDef;
       structures: StructureInterval[];
       costs: ConstructionCostBreakdown;
-      topologyCost: 0;
+      topologyCost: 0 | typeof ENDPOINT_CONNECTION_COST;
     }>;
     totalCost: number;
   };
@@ -362,7 +365,8 @@ function isOpportunitySegment(value: unknown): boolean {
     && isStructureSequence(value.structures)
     && structureElevationsMatchProfile(value.structures, value.verticalProfile)
     && isConstructionCosts(value.costs)
-    && value.topologyCost === 0;
+    && (value.topologyCost === 0
+      || value.topologyCost === ENDPOINT_CONNECTION_COST);
 }
 
 function isOpportunityCorridor(value: unknown): value is OpportunityCorridorDef {
@@ -392,14 +396,16 @@ function isOpportunityCorridor(value: unknown): value is OpportunityCorridorDef 
   const segments = value.feasibilityWitness.segments as Array<{
     geometry: TrackGeometryDef;
     costs: ConstructionCostBreakdown;
-    topologyCost: 0;
+    topologyCost: 0 | typeof ENDPOINT_CONNECTION_COST;
   }>;
   if (segments.length !== waypoints.length - 1) return false;
   for (let index = 0; index < segments.length; index++) {
     const geometry = segments[index].geometry;
+    const expectedTopologyCost = index === 0 ? 0 : ENDPOINT_CONNECTION_COST;
     const start = waypoints[index];
     const end = waypoints[index + 1];
-    if (geometry.p0.x !== start.x
+    if (segments[index].topologyCost !== expectedTopologyCost
+      || geometry.p0.x !== start.x
       || geometry.p0.y !== start.y
       || geometry.p3.x !== end.x
       || geometry.p3.y !== end.y) {
@@ -420,11 +426,8 @@ function isOpportunityCorridor(value: unknown): value is OpportunityCorridorDef 
       }
     }
   }
-  const total = value.feasibilityWitness.segments.reduce(
-    (sum, segment) => sum + (segment as {
-      costs: ConstructionCostBreakdown;
-      topologyCost: 0;
-    }).costs.total,
+  const total = segments.reduce(
+    (sum, segment) => sum + segment.costs.total + segment.topologyCost,
     0,
   );
   return value.feasibilityWitness.totalCost === total

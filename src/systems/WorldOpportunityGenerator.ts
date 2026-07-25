@@ -1,4 +1,7 @@
-import { STANDARD_STARTING_CASH } from '../config/ConstructionConfig';
+import {
+  ENDPOINT_CONNECTION_COST,
+  STANDARD_STARTING_CASH,
+} from '../config/ConstructionConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
@@ -62,7 +65,10 @@ function siteRelief(
   return Math.max(...samples) - Math.min(...samples);
 }
 
-function witnessSegment(proposal: ConstructionProposal) {
+function witnessSegment(
+  proposal: ConstructionProposal,
+  topologyCost: 0 | typeof ENDPOINT_CONNECTION_COST,
+) {
   return {
     geometry: {
       geometryVersion: 1 as const,
@@ -77,7 +83,7 @@ function witnessSegment(proposal: ConstructionProposal) {
     },
     structures: proposal.structures.map((interval) => ({ ...interval })),
     costs: { ...proposal.costs },
-    topologyCost: 0 as const,
+    topologyCost,
   };
 }
 
@@ -87,7 +93,10 @@ function corridor(
   proposals: ConstructionProposal[],
   dominantTradeoff: OpportunityCorridorDef['dominantTradeoff'],
 ): OpportunityCorridorDef {
-  const segments = proposals.map(witnessSegment);
+  const segments = proposals.map((proposal, index) => witnessSegment(
+    proposal,
+    index === 0 ? 0 : ENDPOINT_CONNECTION_COST,
+  ));
   const totalCost = segments.reduce(
     (sum, segment) => sum + segment.costs.total + segment.topologyCost,
     0,

@@ -6,7 +6,10 @@ import {
 import {
   WorldOpportunityGenerator,
 } from '../../src/systems/WorldOpportunityGenerator';
-import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
+import {
+  ENDPOINT_CONNECTION_COST,
+  STANDARD_STARTING_CASH,
+} from '../../src/config/ConstructionConfig';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
 import { GameConfig } from '../../src/config/GameConfig';
@@ -114,7 +117,7 @@ describe('WorldOpportunityGenerator', () => {
     expect(shortMaximumGrade).toBeGreaterThan(flatMaximumGrade);
   });
 
-  it('keeps estimates quote-equivalent, topology-free, and affordable', () => {
+  it('keeps estimates quote-equivalent, chain-priced, and affordable', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -124,12 +127,16 @@ describe('WorldOpportunityGenerator', () => {
         (sum, segment) => sum + segment.costs.total + segment.topologyCost,
         0,
       );
-      expect(corridor.feasibilityWitness.segments.every(
-        (segment) => segment.topologyCost === 0,
-      )).toBe(true);
       expect(corridor.feasibilityWitness.totalCost).toBe(handTotal);
       expect(corridor.estimatedCost).toBe(handTotal);
     }
+    const [direct, detour] = result.opportunity.corridors;
+    expect(direct.feasibilityWitness.segments.map(
+      (segment) => segment.topologyCost,
+    )).toEqual([0]);
+    expect(detour.feasibilityWitness.segments.map(
+      (segment) => segment.topologyCost,
+    )).toEqual([0, ENDPOINT_CONNECTION_COST]);
     expect(Math.min(...result.opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
     ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);

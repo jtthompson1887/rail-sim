@@ -1,4 +1,7 @@
-import { STANDARD_STARTING_CASH } from '../config/ConstructionConfig';
+import {
+  ENDPOINT_CONNECTION_COST,
+  STANDARD_STARTING_CASH,
+} from '../config/ConstructionConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   WorldGenerationConfig,
@@ -74,7 +77,8 @@ function corridorMetrics(
         return null;
       }
     }
-    if (segment.topologyCost !== 0) return null;
+    const expectedTopologyCost = index === 0 ? 0 : ENDPOINT_CONNECTION_COST;
+    if (segment.topologyCost !== expectedTopologyCost) return null;
     const proposal = analyzer.analyze(segment.geometry);
     if (!proposal.valid
       || JSON.stringify(proposal.verticalProfile) !== JSON.stringify(segment.verticalProfile)

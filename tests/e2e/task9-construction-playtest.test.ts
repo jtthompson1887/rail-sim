@@ -53,6 +53,7 @@ interface ConstructionSnapshot {
             geometry: { p0: Point; p3: Point };
             costs: CostBreakdown;
             structures: Array<{ type: string }>;
+            topologyCost: number;
           }>;
         };
       }>;
@@ -212,6 +213,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
       seed: 'playtest-132',
       attempt: 3,
       direct: {
+        estimatedTotal: 28_002,
         total: 28_002,
         track: 17_716,
         earthworks: 10_286,
@@ -219,6 +221,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
         tunnel: 0,
       },
       detour: {
+        estimatedTotal: 47_651,
         total: 45_151,
         track: 22_380,
         earthworks: 22_771,
@@ -234,6 +237,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
       seed: 'playtest-134',
       attempt: 1,
       direct: {
+        estimatedTotal: 166_478,
         total: 166_478,
         track: 33_401,
         earthworks: 133_077,
@@ -241,6 +245,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
         tunnel: 0,
       },
       detour: {
+        estimatedTotal: 106_416,
         total: 103_916,
         track: 38_186,
         earthworks: 65_730,
@@ -256,6 +261,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
       seed: 'playtest-049',
       attempt: 1,
       direct: {
+        estimatedTotal: 270_704,
         total: 270_704,
         track: 35_222,
         earthworks: 166_296,
@@ -263,6 +269,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
         tunnel: 69_186,
       },
       detour: {
+        estimatedTotal: 192_615,
         total: 190_115,
         track: 37_620,
         earthworks: 129_923,
@@ -285,12 +292,32 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
       expect(generated.world.starterOpportunity.resolvedAttempt).toBe(terrainCase.attempt);
       expect(direct.id).toBe('direct');
       expect(detour.id).toBe('detour');
-      expect(direct.estimatedCost).toBe(terrainCase.direct.total);
-      expect(direct.feasibilityWitness.totalCost).toBe(terrainCase.direct.total);
-      expect(aggregateWitnessCosts(direct)).toEqual(terrainCase.direct);
-      expect(detour.estimatedCost).toBe(terrainCase.detour.total);
-      expect(detour.feasibilityWitness.totalCost).toBe(terrainCase.detour.total);
-      expect(aggregateWitnessCosts(detour)).toEqual(terrainCase.detour);
+      expect(direct.estimatedCost).toBe(terrainCase.direct.estimatedTotal);
+      expect(direct.feasibilityWitness.totalCost)
+        .toBe(terrainCase.direct.estimatedTotal);
+      expect(aggregateWitnessCosts(direct)).toEqual({
+        total: terrainCase.direct.total,
+        track: terrainCase.direct.track,
+        earthworks: terrainCase.direct.earthworks,
+        bridge: terrainCase.direct.bridge,
+        tunnel: terrainCase.direct.tunnel,
+      });
+      expect(direct.feasibilityWitness.segments.map(
+        (segment) => segment.topologyCost,
+      )).toEqual([0]);
+      expect(detour.estimatedCost).toBe(terrainCase.detour.estimatedTotal);
+      expect(detour.feasibilityWitness.totalCost)
+        .toBe(terrainCase.detour.estimatedTotal);
+      expect(aggregateWitnessCosts(detour)).toEqual({
+        total: terrainCase.detour.total,
+        track: terrainCase.detour.track,
+        earthworks: terrainCase.detour.earthworks,
+        bridge: terrainCase.detour.bridge,
+        tunnel: terrainCase.detour.tunnel,
+      });
+      expect(detour.feasibilityWitness.segments.map(
+        (segment) => segment.topologyCost,
+      )).toEqual([0, 2_500]);
 
       const reviewed = await reviewDirectCorridor(page);
       expect(reviewed.phase).toBe('review');
@@ -344,7 +371,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   test('shows natural unaffordability and readable blocking UI on mobile', async ({ page }) => {
     await createFixedSeedWorld(page, 'playtest-513');
     const generated = await snapshot(page);
-    const direct = generated.world.starterOpportunity.corridors[0];
+    const [direct, detour] = generated.world.starterOpportunity.corridors;
 
     expect(generated.world.company.cash).toBe(1_000_000);
     expect(generated.world.starterOpportunity.resolvedAttempt).toBe(5);
@@ -356,6 +383,14 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
       bridge: 194_603,
       tunnel: 0,
     });
+    expect(direct.feasibilityWitness.segments.map(
+      (segment) => segment.topologyCost,
+    )).toEqual([0]);
+    expect(detour.estimatedCost).toBe(518_328);
+    expect(detour.feasibilityWitness.totalCost).toBe(518_328);
+    expect(detour.feasibilityWitness.segments.map(
+      (segment) => segment.topologyCost,
+    )).toEqual([0, 2_500]);
 
     const reviewed = await reviewDirectCorridor(page);
     expect(reviewed.phase).toBe('review');

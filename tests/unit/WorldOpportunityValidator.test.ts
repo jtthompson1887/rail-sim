@@ -32,8 +32,14 @@ describe('WorldOpportunityValidator', () => {
     ['estimate mismatch', (value: StarterOpportunityDef) => {
       value.corridors[0].estimatedCost += 1;
     }],
-    ['non-zero topology', (value: StarterOpportunityDef) => {
-      value.corridors[0].feasibilityWitness.segments[0].topologyCost = 1 as 0;
+    ['charged first-leg topology', (value: StarterOpportunityDef) => {
+      value.corridors[0].feasibilityWitness.segments[0].topologyCost = 2_500 as 0;
+    }],
+    ['missing chained topology', (value: StarterOpportunityDef) => {
+      value.corridors[1].feasibilityWitness.segments[1].topologyCost = 0;
+    }],
+    ['wrong chained topology', (value: StarterOpportunityDef) => {
+      value.corridors[1].feasibilityWitness.segments[1].topologyCost = 2_501 as 0;
     }],
     ['duplicate trade-off', (value: StarterOpportunityDef) => {
       value.corridors[1].dominantTradeoff = value.corridors[0].dominantTradeoff;
