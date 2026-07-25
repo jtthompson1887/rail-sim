@@ -681,21 +681,60 @@ feat: generate feasible blank railway worlds
 **Interfaces:**
 
 ```ts
+export type TrackEndpoint = 'start' | 'end';
+
+export interface PredictedEndpointConnectionDef {
+  kind: 'endpoint-connection';
+  existingTrackUUID: string;
+  existingEndpoint: TrackEndpoint;
+  newEndpoint: TrackEndpoint;
+  point: Vec2Def;
+}
+
 export interface ConstructionQuote {
   quoteId: string;
+  newTrackUUID: string;
   worldRevision: number;
   expectedCash: number;
   proposal: ConstructionProposal;
-  neighbourAdjustment?: TrackAdjustmentDef;
   expectedAffectedTracks: Array<{
     trackUUID: string;
     geometry: TrackGeometryDef;
   }>;
-  predictedJunction?: PredictedJunctionDef;
+  predictedConnections: PredictedEndpointConnectionDef[];
   topologyCost: number;
   totalCost: number;
 }
 ```
+
+**Controller decisions (YAGNI boundary):**
+
+- Task 5 and the primary Task 6 build tool support free endpoints and exact
+  endpoint-to-endpoint connections. Interior track splitting and the legacy
+  three-way `Junction` tool remain disabled until Task 8 can give them a
+  complete engineering, pricing, persistence, and undo model.
+- Each snapped endpoint adds the named integer
+  `ENDPOINT_CONNECTION_COST = 2_500`; a free-to-free segment has zero topology
+  cost. `quote.totalCost` is the engineering subtotal plus the charge for each
+  predicted endpoint connection.
+- Automatic cubic construction already preserves the existing track's outward
+  tangent, so Task 5 does not mutate neighbouring geometry. The
+  `expectedAffectedTracks` snapshots exist to reject a quote if a snapped
+  neighbour changes before confirmation.
+- The command owns `newTrackUUID` from quote creation through redo. Endpoint
+  connections persist through exact shared geometry and are rebuilt by
+  `TrackManager` on reload; Task 5 does not create a `JunctionDef` for an
+  ordinary endpoint connection.
+- Revision advances once for each successful authoritative command, undo, or
+  redo. It never rewinds and does not advance for validation, failed/no-op
+  commands, load, or durable save.
+- Deletion cascades junction topology that directly owns the deleted track.
+  Tracks with station, train, or scenario references are rejected rather than
+  silently deleting gameplay state; later management UI can offer explicit
+  relocation or sale workflows.
+- A failed durable save does not roll back a valid live command. The existing
+  unsaved toolbar state and Save action are the Milestone 1 Retry Save
+  affordance.
 
 - [ ] **Step 1: Write atomicity tests**
 
@@ -706,10 +745,9 @@ Prove:
   `proposal.costs.total`;
 - proposal is revalidated immediately before execution;
 - unaffordable/stale/invalid quotes mutate nothing;
-- track, neighbour adjustment, topology index, persisted definition, and cash
-  commit together;
+- track, endpoint topology, persisted definition, and cash commit together;
 - failure during any stage rolls back all earlier changes;
-- undo restores cash, graph, persisted world, and neighbour geometry exactly;
+- undo restores cash, graph, and persisted world exactly;
 - redo reapplies the same IDs and values without double debit;
 - a nonzero-topology quote stores
   `newTrack.paidBuildCost === quote.totalCost`;
@@ -718,7 +756,7 @@ Prove:
   conserve cash for that same topology-bearing quote;
 - deletion refund follows one configured policy and removes dependent
   references safely;
-- stale world revision, changed cash, or changed neighbour geometry rejects the
+- stale world revision, changed cash, or changed snapped-neighbour geometry rejects the
   quote with zero mutation;
 - injected failure at each prepare/commit stage restores the complete
   before-state;
