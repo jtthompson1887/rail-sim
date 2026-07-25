@@ -274,7 +274,7 @@ git commit -m "feat: add validated freight economy catalogue"
 - Produces:
   `applyFacilityBoundary(facility, definition, productId, requestedUnits, kind): FacilityBoundaryResult`
 
-- [ ] **Step 1: Write failing transfer conservation tests**
+- [x] **Step 1: Write failing transfer conservation tests**
 
 Prove 80 units into a 30-unit free slot moves exactly 30, reserved stock cannot
 move, destination capacity is respected, recent flow counters update by the
@@ -288,7 +288,7 @@ expect(result.source.quantity + result.destination.quantity)
   .toBe(source.quantity + destination.quantity);
 ```
 
-- [ ] **Step 2: Run the inventory test and verify failure**
+- [x] **Step 2: Run the inventory test and verify failure**
 
 ```powershell
 npx jest tests/unit/Inventory.test.ts --runInBand --coverage=false
@@ -296,7 +296,7 @@ npx jest tests/unit/Inventory.test.ts --runInBand --coverage=false
 
 Expected: fail because `Inventory.ts` does not exist.
 
-- [ ] **Step 3: Implement immutable atomic transfer**
+- [x] **Step 3: Implement immutable atomic transfer**
 
 Use this result contract:
 
@@ -320,7 +320,7 @@ Never mutate the inputs. Compute movable units from requested units,
 `source.quantity - source.reservedQuantity`, and
 `destination.capacity - destination.quantity`.
 
-- [ ] **Step 4: Write failing all-or-nothing recipe tests**
+- [x] **Step 4: Write failing all-or-nothing recipe tests**
 
 Prove:
 
@@ -340,7 +340,7 @@ Prove:
 - splitting the same tick count into different call groupings gives identical
   state.
 
-- [ ] **Step 5: Run the recipe test and verify failure**
+- [x] **Step 5: Run the recipe test and verify failure**
 
 ```powershell
 npx jest tests/unit/IndustrySystem.test.ts --runInBand --coverage=false
@@ -348,7 +348,7 @@ npx jest tests/unit/IndustrySystem.test.ts --runInBand --coverage=false
 
 Expected: fail because `IndustrySystem.ts` does not exist.
 
-- [ ] **Step 6: Implement one-active-recipe facility ticks**
+- [x] **Step 6: Implement one-active-recipe facility ticks**
 
 Add the state and result types to `EconomyData.ts`:
 
@@ -379,7 +379,7 @@ commit once. For a `resource-extraction` recipe, tag each positive output delta
 as an explicit `resource-extraction` boundary receipt; a processing recipe has
 no boundary receipt.
 
-- [ ] **Step 7: Implement explicit inventory boundaries**
+- [x] **Step 7: Implement explicit inventory boundaries**
 
 Use:
 
@@ -412,7 +412,7 @@ authorised solely by a validated `resource-extraction` recipe. Require
 conservation-accounting evidence; no other operation may create or destroy
 product.
 
-- [ ] **Step 8: Run the focused economy tests**
+- [x] **Step 8: Run the focused economy tests**
 
 ```powershell
 npx jest tests/unit/ProductCatalog.test.ts tests/unit/Inventory.test.ts tests/unit/IndustrySystem.test.ts --runInBand --coverage=false
@@ -420,7 +420,7 @@ npx jest tests/unit/ProductCatalog.test.ts tests/unit/Inventory.test.ts tests/un
 
 Expected: pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add src/economy tests/unit/Inventory.test.ts tests/unit/IndustrySystem.test.ts

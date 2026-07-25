@@ -51,3 +51,21 @@ export interface FacilityDefinition {
   }>;
   readonly boundary: 'none' | 'port' | 'town-consumer';
 }
+
+export interface FacilityEconomyDef {
+  id: FacilityId;
+  definitionId: FacilityDefinitionId;
+  name: string;
+  x: number;
+  y: number;
+  railAccess: { x: number; y: number; radius: number };
+  inventories: Record<ProductId, InventorySlotDef>;
+  activeRecipeId: RecipeId | null;
+  recipeProgressTicks: number;
+}
+
+export type IndustryBlocker =
+  | 'idle'
+  | 'waiting-input'
+  | 'output-full'
+  | 'working';
