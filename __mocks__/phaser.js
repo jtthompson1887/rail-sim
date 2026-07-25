@@ -123,6 +123,7 @@ class GameObject {
   setDepth(d) { this._depth = d; return this; }
   setOrigin() { return this; }
   setAlpha(a) { this._alpha = a; return this; }
+  setRotation(rotation) { this.rotation = rotation; return this; }
   setScale(x, _y) {
     this.displayWidth = (x || 1) * 100;
     this.displayHeight = (_y !== undefined ? _y : x || 1) * 50;

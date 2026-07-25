@@ -95,7 +95,9 @@ export class GeneratorTool implements IEditorTool {
   onPointerUp(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {}
   onKeyDown(_event: KeyboardEvent): void {}
   update(_delta: number): void {}
-  destroy(): void {}
+  destroy(): void {
+    this.ghostGraphics.destroy();
+  }
 
   runGeneratorAt(wx: number, wy: number): void {
     const editorUI = this.scene.scene.get(this.editorUISceneKey) as EditorUIScene | null;

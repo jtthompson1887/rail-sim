@@ -132,6 +132,7 @@ export class ContextMenu {
   destroy(): void {
     this.close();
     this.scene.input.off('pointerdown', this.closeHandler);
+    this.scene.input.keyboard.off('keydown', this.escHandler);
     this.container.destroy();
   }
 }
