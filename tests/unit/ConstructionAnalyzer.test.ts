@@ -122,6 +122,20 @@ describe('ConstructionAnalyzer', () => {
     expect(proposal.minimumRadius).toBe(0);
   });
 
+  it('detects derivative reversals narrower than one analysis sample bin', () => {
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 6096.168, y: 0 },
+      p2: { x: 96.336, y: 0 },
+      p3: { x: 6000.504, y: 0 },
+    }, () => 0);
+
+    expect(proposal.valid).toBe(false);
+    expect(proposal.reasonCode).toBe('curvature');
+    expect(proposal.minimumRadius).toBe(0);
+  });
+
   it('accepts the exact maximum length and rejects any longer segment', () => {
     const maximum = analyse(straight(MAX_SEGMENT_LENGTH), () => 0);
     const over = analyse(straight(MAX_SEGMENT_LENGTH + 1), () => 0);

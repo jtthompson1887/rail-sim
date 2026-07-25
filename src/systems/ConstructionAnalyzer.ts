@@ -148,7 +148,64 @@ function derivatives(
   };
 }
 
+function derivativePolynomial(
+  p0: number,
+  p1: number,
+  p2: number,
+  p3: number,
+): { a: number; b: number; c: number } {
+  return {
+    a: 3 * (-p0 + 3 * p1 - 3 * p2 + p3),
+    b: 6 * (p0 - 2 * p1 + p2),
+    c: 3 * (p1 - p0),
+  };
+}
+
+function realQuadraticRoots(a: number, b: number, c: number): number[] {
+  const coefficientScale = Math.max(1, Math.abs(a), Math.abs(b), Math.abs(c));
+  const epsilon = coefficientScale * 1e-12;
+  if (Math.abs(a) <= epsilon) {
+    return Math.abs(b) <= epsilon ? [] : [-c / b];
+  }
+
+  const discriminant = b * b - 4 * a * c;
+  const discriminantTolerance = coefficientScale * coefficientScale * 1e-12;
+  if (discriminant < -discriminantTolerance) return [];
+  const root = Math.sqrt(Math.max(0, discriminant));
+  return [
+    (-b - root) / (2 * a),
+    (-b + root) / (2 * a),
+  ];
+}
+
+function hasStationaryPoint(def: TrackGeometryDef): boolean {
+  const x = derivativePolynomial(def.p0.x, def.p1.x, def.p2.x, def.p3.x);
+  const y = derivativePolynomial(def.p0.y, def.p1.y, def.p2.y, def.p3.y);
+  const candidates = [
+    0,
+    1,
+    ...realQuadraticRoots(x.a, x.b, x.c),
+    ...realQuadraticRoots(y.a, y.b, y.c),
+  ];
+  const controlScale = Math.max(
+    1,
+    Math.hypot(def.p1.x - def.p0.x, def.p1.y - def.p0.y),
+    Math.hypot(def.p2.x - def.p1.x, def.p2.y - def.p1.y),
+    Math.hypot(def.p3.x - def.p2.x, def.p3.y - def.p2.y),
+  );
+  const speedTolerance = controlScale * 1e-7;
+
+  return candidates.some((candidate) => {
+    if (candidate < -1e-12 || candidate > 1 + 1e-12) return false;
+    const t = Math.max(0, Math.min(1, candidate));
+    const { dx, dy } = derivatives(def, t);
+    return Math.hypot(dx, dy) <= speedTolerance;
+  });
+}
+
 export function minimumRadiusForGeometry(def: TrackGeometryDef): number {
+  if (hasStationaryPoint(def)) return 0;
+
   const sampledPoints = createTrackGeometry(def).sample(MAX_ANALYSIS_SAMPLES);
   let previousDirection: { x: number; y: number } | null = null;
   for (let index = 1; index < sampledPoints.length; index++) {

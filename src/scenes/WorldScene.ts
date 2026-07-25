@@ -334,7 +334,7 @@ export default class WorldScene extends Phaser.Scene {
     }
     this.cameraController.stopFollow();
     EventBus.emit('ui:toolbar-visible', { visible: true });
-    this.syncTrainsAndSave();
+    this.syncTrainsSaveAndReport();
   }
 
   private syncTrainsAndSave(): boolean {

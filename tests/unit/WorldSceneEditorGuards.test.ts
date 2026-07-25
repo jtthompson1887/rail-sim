@@ -76,4 +76,28 @@ describe('WorldScene disabled construction bypass guards', () => {
     emitSpy.mockRestore();
     saveSpy.mockRestore();
   });
+
+  it('reports save failure when entering create mode', () => {
+    const scene = new WorldScene();
+    (scene as any).trainManager = { trains: [], carriages: [] };
+    (scene as any).cameraController = {
+      stopFollow: jest.fn(),
+    };
+    const saveSpy = jest.spyOn(WorldManager, 'save').mockReturnValue(false);
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+
+    (scene as any).activateCreateMode();
+
+    expect(emitSpy).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'unsaved' },
+    );
+    expect(emitSpy).toHaveBeenCalledWith(
+      'ui:toast',
+      { message: 'Could not save the world.', type: 'error' },
+    );
+
+    emitSpy.mockRestore();
+    saveSpy.mockRestore();
+  });
 });
