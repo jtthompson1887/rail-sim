@@ -1,3 +1,5 @@
+import type { VehicleType } from './VehicleTypes';
+
 /** Serialised control point (Bézier p0–p3) */
 export interface Vec2Def {
   x: number;
@@ -42,6 +44,8 @@ export interface TrainDef {
   trackUUID: string;
   trackT: number;
   passengers: number;
+  /** Vehicle type. Defaults to 'locomotive' for backward compatibility. */
+  type?: VehicleType;
 }
 
 /** A player-authored scenario objective active during play mode. */
@@ -124,6 +128,10 @@ export function createEmptyWorld(name: string, seed?: string, biome: BiomeType =
  * are back-filled with sane defaults. Safe to call on already-current worlds.
  */
 export function migrateWorld(raw: Partial<WorldData>): WorldData {
+  const trains = (raw.trains ?? []).map((t) => ({
+    ...t,
+    type: t.type ?? 'locomotive',
+  }));
   return {
     id: raw.id ?? crypto.randomUUID(),
     name: raw.name ?? 'Unnamed World',
@@ -133,7 +141,7 @@ export function migrateWorld(raw: Partial<WorldData>): WorldData {
     tracks: raw.tracks ?? [],
     junctions: raw.junctions ?? [],
     stations: raw.stations ?? [],
-    trains: raw.trains ?? [],
+    trains,
     scenarios: raw.scenarios ?? [],
     scenery: raw.scenery ?? [],
     metadata: raw.metadata ?? { createdAt: Date.now(), updatedAt: Date.now() },

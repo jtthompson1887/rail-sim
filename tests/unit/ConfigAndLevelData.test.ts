@@ -1,5 +1,6 @@
 import { GameConfig } from '../../src/config/GameConfig';
 import { LEVELS } from '../../src/config/LevelData';
+import { migrateWorld } from '../../src/config/WorldData';
 
 describe('GameConfig', () => {
   it('has valid resolution settings', () => {
@@ -193,5 +194,36 @@ describe('LevelData', () => {
         expect(station.passengerSpawnRate).toBeGreaterThan(0);
       });
     });
+  });
+});
+
+describe('WorldData migration', () => {
+  it('defaults a vehicle without a type to locomotive', () => {
+    const world = migrateWorld({
+      id: 'legacy-world',
+      trains: [{
+        id: 'legacy-train',
+        trackUUID: 'track-1',
+        trackT: 0.5,
+        passengers: 4,
+      }],
+    });
+
+    expect(world.trains[0].type).toBe('locomotive');
+  });
+
+  it('preserves an explicit passenger carriage type', () => {
+    const world = migrateWorld({
+      id: 'current-world',
+      trains: [{
+        id: 'carriage-1',
+        trackUUID: 'track-1',
+        trackT: 0.5,
+        passengers: 8,
+        type: 'passenger-carriage',
+      }],
+    });
+
+    expect(world.trains[0].type).toBe('passenger-carriage');
   });
 });

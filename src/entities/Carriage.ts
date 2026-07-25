@@ -1,29 +1,28 @@
 import Phaser from 'phaser';
 import { PIDController } from '../utils/math';
 import type RailTrack from './RailTrack';
-import { applyForceToGameObject, matterScaling } from '../utils/physics';
+import { matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { IVehicle, VehicleType } from '../config/VehicleTypes';
 
-interface TrainMatterImage extends Phaser.Physics.Matter.Image {
-  parentTrain?: Train;
+interface CarriageMatterImage extends Phaser.Physics.Matter.Image {
+  parentCarriage?: Carriage;
 }
 
-export default class Train extends Phaser.GameObjects.Container implements IVehicle {
-  private _trainBody!: TrainMatterImage;
+export default class Carriage extends Phaser.GameObjects.Container implements IVehicle {
+  private _carriageBody!: CarriageMatterImage;
   private texture: string;
   private readonly _pidControllerFront: PIDController;
   private readonly _pidControllerRear: PIDController;
   private _currentTrack: RailTrack | null = null;
   private _derailed: boolean = false;
-  private _enginePower: number = 0;
-  private _mass: number = GameConfig.TRAIN.DEFAULT_MASS;
+  private _mass: number = GameConfig.TRAIN.DEFAULT_MASS * 0.8;
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
-  readonly vehicleType: VehicleType = 'locomotive';
-  readonly passengerCapacity: number = 20;
+  readonly vehicleType: VehicleType = 'passenger-carriage';
+  readonly passengerCapacity: number = 40;
   public debugGraphics!: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene, x: number, y: number, id?: string) {
@@ -36,20 +35,20 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
     this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);
 
-    this._trainBody = scene.matter.add.image(x, y, this.texture, undefined) as TrainMatterImage;
-    matterScaling(this._trainBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
-    this._trainBody.setMass(this._mass);
-    this._trainBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
-    this._trainBody.setDepth(100);
-    this.add(this._trainBody);
+    this._carriageBody = scene.matter.add.image(x, y, this.texture, undefined) as CarriageMatterImage;
+    matterScaling(this._carriageBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
+    this._carriageBody.setMass(this._mass);
+    this._carriageBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
+    this._carriageBody.setDepth(100);
+    this.add(this._carriageBody);
 
-    const width = this._trainBody.displayWidth;
-    const height = this._trainBody.displayHeight;
+    const width = this._carriageBody.displayWidth;
+    const height = this._carriageBody.displayHeight;
     this.setSize(width, height);
 
     this.setInteractive({ cursor: 'pointer' });
-    this._trainBody.setInteractive({ cursor: 'pointer' });
-    this._trainBody.parentTrain = this;
+    this._carriageBody.setInteractive({ cursor: 'pointer' });
+    this._carriageBody.parentCarriage = this;
 
     this.debugGraphics = this.scene.add.graphics();
     this.debugGraphics.setDepth(1000);
@@ -58,12 +57,7 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   update(time: number, delta: number): void {
     this.pidControllerRear.setCurrentDelta(Math.max(delta, 1));
     this.pidControllerFront.setCurrentDelta(Math.max(delta, 1));
-    if (!this.derailed && this._enginePower !== 0) {
-      const angle = this._trainBody.rotation;
-      const forceMagnitude = this._enginePower;
-      const forceVec = new Phaser.Math.Vector2(Math.cos(angle) * forceMagnitude, Math.sin(angle) * forceMagnitude);
-      applyForceToGameObject(this._trainBody, forceVec);
-    }
+    // Carriages have no self-propulsion; TrackFlowSolver handles alignment
   }
 
   getUUID(): string {
@@ -77,22 +71,22 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   set derailed(value: boolean) {
     if (value && !this._derailed) {
       this.texture = 'train2';
-      this._trainBody.setTexture(this.texture);
-      const angle = this._trainBody.angle;
-      matterScaling(this._trainBody, GameConfig.TRAIN.DERAIL_SCALE, GameConfig.TRAIN.DERAIL_SCALE);
-      this._trainBody.setMass(this._mass);
-      this._trainBody.angle = angle;
-      EventBus.emit('train:derailed', { trainId: this.uuid });
+      this._carriageBody.setTexture(this.texture);
+      const angle = this._carriageBody.angle;
+      matterScaling(this._carriageBody, GameConfig.TRAIN.DERAIL_SCALE, GameConfig.TRAIN.DERAIL_SCALE);
+      this._carriageBody.setMass(this._mass);
+      this._carriageBody.angle = angle;
+      EventBus.emit('carriage:derailed', { carriageId: this.uuid });
     }
     this._derailed = value;
   }
 
   get enginePower(): number {
-    return this._enginePower;
+    return 0;
   }
 
-  set enginePower(value: number) {
-    this._enginePower = value;
+  set enginePower(_value: number) {
+    // Carriages have no engine power
   }
 
   get currentTrack(): RailTrack | null {
@@ -110,14 +104,14 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   set selected(value: boolean) {
     this._selected = value;
     if (value) {
-      this._trainBody.setTint(0x00ff00);
+      this._carriageBody.setTint(0x00ff00);
     } else {
-      this._trainBody.clearTint();
+      this._carriageBody.clearTint();
     }
   }
 
   getMatterBody(): Phaser.Physics.Matter.Image {
-    return this._trainBody;
+    return this._carriageBody;
   }
 
   get pidControllerFront(): PIDController {
@@ -145,23 +139,23 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   }
 
   /**
-   * Reset a derailed train back to its normal running state.
+   * Reset a derailed carriage back to its normal running state.
    * Restores texture, scale, mass, and zeroes velocity so the
-   * TrackFlowSolver can guide the train back onto the track.
+   * TrackFlowSolver can guide the carriage back onto the track.
    */
   recover(): void {
     if (!this._derailed) return;
     this._derailed = false;
     this.texture = 'train1';
-    this._trainBody.setTexture(this.texture);
-    const angle = this._trainBody.angle;
-    matterScaling(this._trainBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
-    this._trainBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
-    this._trainBody.setMass(this._mass);
-    this._trainBody.setAngle(angle);
-    this._trainBody.setVelocity(0, 0);
-    this._trainBody.setAngularVelocity(0);
-    const body = this._trainBody.body as any;
+    this._carriageBody.setTexture(this.texture);
+    const angle = this._carriageBody.angle;
+    matterScaling(this._carriageBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
+    this._carriageBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
+    this._carriageBody.setMass(this._mass);
+    this._carriageBody.setAngle(angle);
+    this._carriageBody.setVelocity(0, 0);
+    this._carriageBody.setAngularVelocity(0);
+    const body = this._carriageBody.body as any;
     if (body?.force) {
       body.force.x = 0;
       body.force.y = 0;
