@@ -70,6 +70,7 @@ interface ConstructionSnapshot {
 declare global {
   interface Window {
     __railSimConstructionSnapshot?: () => ConstructionSnapshot;
+    __railSimRestoreStorageWrite?: () => void;
   }
 }
 
@@ -268,7 +269,7 @@ test.describe('fixed-seed construction decision loop', () => {
     expect(firstBuilt.world.tracks).toHaveLength(1);
     expect(firstBuilt.world.tracks[0].paidBuildCost).toBe(firstReview.preview?.totalCost);
     expect(firstBuilt.world.company.cash).toBe(firstReview.preview?.cashAfter);
-    await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Unsaved');
+    await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Saved');
 
     const chainStart = await toScreen(page, firstBuilt.world.tracks[0].p3, firstBuilt);
     let secondReview: ConstructionSnapshot | null = null;
@@ -329,6 +330,69 @@ test.describe('fixed-seed construction decision loop', () => {
     await expect(page.locator('[data-testid="company-cash"]')).toContainText(
       reloaded.world.company.cash.toLocaleString('en-GB'),
     );
+  });
+
+  test('keeps a failed construction save live and retries the exact change durably', async ({ page }) => {
+    await createFixedSeedWorld(page);
+    const blank = await snapshot(page);
+    const priorPersisted = await page.evaluate(
+      () => localStorage.getItem('rail-sim-worlds'),
+    );
+    const framed = await frameSurfaceDetour(page);
+    await page.keyboard.press('p');
+    const witness =
+      blank.world.starterOpportunity.corridors[1].feasibilityWitness.segments[0];
+    await dragRoute(
+      page,
+      await toScreen(page, witness.geometry.p0, framed),
+      await toScreen(page, witness.geometry.p3, framed),
+    );
+    const review = await snapshot(page);
+    expect(review.phase).toBe('review');
+    expect(review.preview?.canConfirm).toBe(true);
+
+    await page.evaluate(() => {
+      const storagePrototype = Storage.prototype;
+      const originalSetItem = storagePrototype.setItem;
+      let failed = false;
+      storagePrototype.setItem = function setItemWithOneWorldFailure(
+        key: string,
+        value: string,
+      ): void {
+        if (!failed && key === 'rail-sim-worlds') {
+          failed = true;
+          throw new Error('deterministic construction save failure');
+        }
+        originalSetItem.call(this, key, value);
+      };
+      window.__railSimRestoreStorageWrite = () => {
+        storagePrototype.setItem = originalSetItem;
+        window.__railSimRestoreStorageWrite = undefined;
+      };
+    });
+
+    await page.locator('[data-testid="construction-confirm"]').click();
+    const liveAfterFailure = await snapshot(page);
+    expect(liveAfterFailure.world.tracks).toHaveLength(1);
+    expect(liveAfterFailure.world.company.cash).toBe(review.preview?.cashAfter);
+    expect(liveAfterFailure.world.company.cash).toBeLessThan(blank.world.company.cash);
+    expect(await page.evaluate(
+      () => localStorage.getItem('rail-sim-worlds'),
+    )).toBe(priorPersisted);
+    await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Unsaved');
+    const retry = page.locator('[data-testid="editor-retry-save"]');
+    await expect(retry).toBeVisible();
+    await expect(retry).toHaveAccessibleName('Retry Save');
+
+    await page.evaluate(() => window.__railSimRestoreStorageWrite?.());
+    await retry.click();
+    await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Saved');
+    await expect(retry).toBeHidden();
+    const retriedConstruction = persistedConstruction(await snapshot(page));
+
+    await page.reload();
+    await openOnlySavedWorld(page);
+    expect(persistedConstruction(await snapshot(page))).toEqual(retriedConstruction);
   });
 
   test('rejects an unaffordable quote from a reloaded low-cash fixture', async ({ page }) => {

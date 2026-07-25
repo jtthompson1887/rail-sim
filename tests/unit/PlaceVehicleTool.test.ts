@@ -137,6 +137,7 @@ describe('PlaceVehicleTool', () => {
     it('invalidates construction history after a successful out-of-stack world mutation', () => {
       const clear = jest.fn();
       const addTrainDef = jest.spyOn(WorldManager, 'addTrainDef').mockReturnValue(true);
+      const emit = jest.spyOn(EventBus, 'emit');
       const historyAwareTool = new PlaceVehicleTool(
         scene,
         trackManager,
@@ -149,7 +150,12 @@ describe('PlaceVehicleTool', () => {
       historyAwareTool.onPointerDown(250, 0, { button: 0 } as any);
 
       expect(clear).toHaveBeenCalledTimes(1);
+      expect(emit).not.toHaveBeenCalledWith(
+        'ui:toolbar-save-state',
+        { state: 'unsaved' },
+      );
       historyAwareTool.destroy();
+      emit.mockRestore();
       addTrainDef.mockRestore();
     });
   });

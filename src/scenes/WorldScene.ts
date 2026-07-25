@@ -75,6 +75,7 @@ declare global {
 
 const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
+type SaveState = 'saved' | 'unsaved' | 'saving';
 
 function deletionBlockingReason(
   world: WorldData,
@@ -127,6 +128,7 @@ export default class WorldScene extends Phaser.Scene {
   private contentLoader!: WorldContentLoader;
   private minimapRenderer!: MinimapRenderer;
   private autoSaveTimer: number = 0;
+  private lastReportedSaveState: SaveState = 'saved';
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
 
@@ -185,7 +187,7 @@ export default class WorldScene extends Phaser.Scene {
   };
   private readonly saveHandler = () => {
     if (GameStateManager.worldMode !== 'create') return;
-    this.syncTrainsSaveAndReport();
+    this.saveWorldAndReport();
   };
 
   private readonly modeToggleHandler = () => {
@@ -522,7 +524,7 @@ export default class WorldScene extends Phaser.Scene {
       this.autoSaveTimer += delta / 1000;
       if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
         this.autoSaveTimer = 0;
-        this.syncTrainsSaveAndReport();
+        this.runPeriodicSafetySave();
       }
       GameStateManager.tick(delta / 1000);
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
@@ -568,18 +570,39 @@ export default class WorldScene extends Phaser.Scene {
     return WorldManager.save();
   }
 
-  private syncTrainsSaveAndReport(): void {
-    if (this.syncTrainsAndSave()) {
-      EventBus.emit('ui:toolbar-save-state', { state: 'saved' });
-      this.publishCompanyState('saved');
-      return;
+  private saveWorldAndReport(showFailureToast = true): boolean {
+    return this.saveAndReport(() => WorldManager.save(), showFailureToast);
+  }
+
+  private syncTrainsSaveAndReport(showFailureToast = true): boolean {
+    return this.saveAndReport(() => this.syncTrainsAndSave(), showFailureToast);
+  }
+
+  private saveAndReport(
+    persist: () => boolean,
+    showFailureToast: boolean,
+  ): boolean {
+    this.reportSaveState('saving');
+    const saved = persist();
+    this.reportSaveState(saved ? 'saved' : 'unsaved');
+    if (!saved && showFailureToast) {
+      EventBus.emit('ui:toast', {
+        message: 'Could not save the world. Retry Save is available.',
+        type: 'error',
+      });
     }
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    this.publishCompanyState('unsaved');
-    EventBus.emit('ui:toast', {
-      message: 'Could not save the world.',
-      type: 'error',
-    });
+    return saved;
+  }
+
+  private runPeriodicSafetySave(): void {
+    if (this.lastReportedSaveState === 'saved') return;
+    this.syncTrainsSaveAndReport(false);
+  }
+
+  private reportSaveState(state: SaveState): void {
+    this.lastReportedSaveState = state;
+    EventBus.emit('ui:toolbar-save-state', { state });
+    this.publishCompanyState(state);
   }
 
   private activatePlayMode(): void {
@@ -609,8 +632,7 @@ export default class WorldScene extends Phaser.Scene {
   private bindCommandStackReporting(): void {
     this.commandStack.onChange = (canUndo, canRedo) => {
       EventBus.emit('ui:toolbar-undo-state', { canUndo, canRedo });
-      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-      this.publishCompanyState('unsaved');
+      this.saveWorldAndReport();
       this.publishDeletionReview(this.selectionManager.selectedUUIDs);
     };
   }
@@ -644,7 +666,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private publishCompanyState(
-    saveState: 'saved' | 'unsaved' | 'saving',
+    saveState: SaveState,
   ): void {
     EventBus.emit('ui:company-state', {
       cash: WorldManager.world?.company.cash ?? 0,
@@ -713,7 +735,7 @@ export default class WorldScene extends Phaser.Scene {
           return;
         }
         if (event.code === 'KeyS') {
-          this.syncTrainsSaveAndReport();
+          this.saveWorldAndReport();
           return;
         }
       }
@@ -757,7 +779,7 @@ export default class WorldScene extends Phaser.Scene {
       // Delegate to active tool
       this.activeEditorTool?.onKeyDown(event);
 
-      if (event.code === 'Delete') {
+      if (event.code === 'Delete' && !event.repeat) {
         this.requestDeletionReview(this.selectionManager.selectedUUIDs);
       }
     }

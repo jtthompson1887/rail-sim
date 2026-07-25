@@ -90,6 +90,8 @@ interface ButtonRef {
   activebar: Phaser.GameObjects.Rectangle;
 }
 
+type ToolbarSaveState = 'saved' | 'unsaved' | 'saving';
+
 /**
  * EditorToolbar
  *
@@ -130,6 +132,15 @@ export class EditorToolbar {
 
   // Save indicator
   private saveText!: Phaser.GameObjects.Text;
+  private retrySaveButton!: HTMLButtonElement;
+  private saveState: ToolbarSaveState = 'saved';
+  private visible = true;
+  private readonly stopRetryEvent = (event: Event) => event.stopPropagation();
+  private readonly retrySaveHandler = (event: Event) => {
+    event.stopPropagation();
+    if (!this.visible || this.saveState !== 'unsaved') return;
+    EventBus.emit('editor:save', {});
+  };
 
   // Toast
   private toastText!: Phaser.GameObjects.Text;
@@ -157,6 +168,7 @@ export class EditorToolbar {
 
     this.allObjects.push(this.background, this.border);
     this.build();
+    this.buildRetrySaveButton();
 
     EventBus.on('ui:toast', this.toastHandler);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -327,6 +339,43 @@ export class EditorToolbar {
     this.allObjects.push(divider);
   }
 
+  private buildRetrySaveButton(): void {
+    this.retrySaveButton = document.createElement('button');
+    this.retrySaveButton.type = 'button';
+    this.retrySaveButton.dataset.testid = 'editor-retry-save';
+    this.retrySaveButton.textContent = 'Retry Save';
+    this.retrySaveButton.setAttribute('aria-label', 'Retry Save');
+    this.retrySaveButton.style.cssText = [
+      'position:fixed',
+      'z-index:1200',
+      'left:4px',
+      'bottom:12px',
+      `width:${Math.max(48, this.panelWidth - 8)}px`,
+      'min-height:32px',
+      'padding:4px',
+      'border:1px solid #ffaa44',
+      'border-radius:4px',
+      'background:#3a2912',
+      'color:#ffd28a',
+      'font:700 10px Verdana,sans-serif',
+      'cursor:pointer',
+      'pointer-events:auto',
+    ].join(';');
+    for (const eventName of ['pointerdown', 'mousedown', 'touchstart']) {
+      this.retrySaveButton.addEventListener(eventName, this.stopRetryEvent);
+    }
+    this.retrySaveButton.addEventListener('click', this.retrySaveHandler);
+    document.body.append(this.retrySaveButton);
+    this.updateRetrySaveButton();
+  }
+
+  private updateRetrySaveButton(): void {
+    const active = this.visible && this.saveState === 'unsaved';
+    this.retrySaveButton.disabled = !active;
+    this.retrySaveButton.style.display = active ? 'block' : 'none';
+    this.retrySaveButton.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }
+
   // ── Public API ───────────────────────────────────────────────────────────
 
   selectTool(tool: CreateTool): void {
@@ -355,7 +404,7 @@ export class EditorToolbar {
     this.redoBg.setAlpha(enabled ? 1 : 0.4);
   }
 
-  setSaveIndicator(state: 'saved' | 'unsaved' | 'saving'): void {
+  setSaveIndicator(state: ToolbarSaveState): void {
     const colors: Record<typeof state, string> = {
       saved: '#4ade80',
       unsaved: '#ffaa44',
@@ -366,18 +415,27 @@ export class EditorToolbar {
       unsaved: 'Unsaved',
       saving: 'Saving…',
     };
+    this.saveState = state;
     this.saveText.setColor(colors[state]);
     this.saveText.setText(labels[state]);
+    this.updateRetrySaveButton();
   }
 
   setVisible(visible: boolean): void {
+    this.visible = visible;
     for (const obj of this.allObjects) {
       obj.setVisible(visible);
     }
+    this.updateRetrySaveButton();
   }
 
   destroy(): void {
     EventBus.off('ui:toast', this.toastHandler);
+    for (const eventName of ['pointerdown', 'mousedown', 'touchstart']) {
+      this.retrySaveButton.removeEventListener(eventName, this.stopRetryEvent);
+    }
+    this.retrySaveButton.removeEventListener('click', this.retrySaveHandler);
+    this.retrySaveButton.remove();
     for (const obj of this.allObjects) {
       obj.destroy();
     }

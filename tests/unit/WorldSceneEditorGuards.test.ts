@@ -2,9 +2,15 @@ import WorldScene from '../../src/scenes/WorldScene';
 import { GameStateManager } from '../../src/managers/GameStateManager';
 import { EventBus } from '../../src/services/EventBus';
 import { WorldManager } from '../../src/managers/WorldManager';
+import { CommandStack } from '../../src/systems/CommandStack';
+import { SaveService } from '../../src/services/SaveService';
+import { GameConfig } from '../../src/config/GameConfig';
 
 describe('WorldScene disabled construction bypass guards', () => {
   afterEach(() => {
+    jest.restoreAllMocks();
+    WorldManager.reset();
+    localStorage.clear();
     GameStateManager.enterCreate('test-world');
   });
 
@@ -97,7 +103,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     },
   );
 
-  it('routes repeated Delete keys to the exact selected refund review without direct mutation', () => {
+  it('ignores held Delete repeats but preserves two deliberate refund review presses', () => {
     const scene = new WorldScene();
     const push = jest.fn();
     const clearSelection = jest.fn();
@@ -109,8 +115,24 @@ describe('WorldScene disabled construction bypass guards', () => {
     const emitSpy = jest.spyOn(EventBus, 'emit');
     GameStateManager.enterCreate('test-world');
 
-    (scene as any).handleKeyDown({ code: 'Delete', ctrlKey: false, altKey: false });
-    (scene as any).handleKeyDown({ code: 'Delete', ctrlKey: false, altKey: false });
+    (scene as any).handleKeyDown({
+      code: 'Delete',
+      ctrlKey: false,
+      altKey: false,
+      repeat: false,
+    });
+    (scene as any).handleKeyDown({
+      code: 'Delete',
+      ctrlKey: false,
+      altKey: false,
+      repeat: true,
+    });
+    (scene as any).handleKeyDown({
+      code: 'Delete',
+      ctrlKey: false,
+      altKey: false,
+      repeat: false,
+    });
 
     const requests = emitSpy.mock.calls.filter(
       ([event]) => String(event) === 'ui:delete-request',
@@ -297,24 +319,160 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(tool.confirm).toHaveBeenCalledTimes(1);
   });
 
-  it('publishes authoritative cash after command push, undo, and redo changes', () => {
+  it('persists every successful push, undo, and redo without syncing trains', () => {
     const scene = new WorldScene();
     WorldManager.createNew('HUD authority', 'quote-seed');
-    (scene as any).commandStack = {};
+    const commandStack = new CommandStack();
+    const command = {
+      description: 'Persistence fixture',
+      execute: jest.fn().mockReturnValue(true),
+      undo: jest.fn().mockReturnValue(true),
+    };
+    (scene as any).commandStack = commandStack;
     (scene as any).selectionManager = { selectedUUIDs: [] };
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
     (scene as any).bindCommandStackReporting();
 
-    for (const cash of [997_200, 1_000_000, 997_200]) {
-      WorldManager.world!.company.cash = cash;
-      (scene as any).commandStack.onChange(true, true);
-      expect(emit).toHaveBeenCalledWith('ui:company-state', {
-        cash,
-        saveState: 'unsaved',
-      });
-    }
+    expect(commandStack.push(command)).toBe(true);
+    expect(commandStack.undo()).toBe(true);
+    expect(commandStack.redo()).toBe(true);
+
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(setTrainDefs).not.toHaveBeenCalled();
+    expect(emit.mock.calls.filter(
+      ([event]) => event === 'ui:toolbar-save-state',
+    )).toEqual([
+      ['ui:toolbar-save-state', { state: 'saving' }],
+      ['ui:toolbar-save-state', { state: 'saved' }],
+      ['ui:toolbar-save-state', { state: 'saving' }],
+      ['ui:toolbar-save-state', { state: 'saved' }],
+      ['ui:toolbar-save-state', { state: 'saving' }],
+      ['ui:toolbar-save-state', { state: 'saved' }],
+    ]);
+    expect(emit).toHaveBeenCalledWith('ui:company-state', {
+      cash: WorldManager.world!.company.cash,
+      saveState: 'saving',
+    });
+    expect(emit).toHaveBeenCalledWith('ui:company-state', {
+      cash: WorldManager.world!.company.cash,
+      saveState: 'saved',
+    });
 
     emit.mockRestore();
+    setTrainDefs.mockRestore();
+    save.mockRestore();
+    WorldManager.reset();
+  });
+
+  it('preserves the live command result and exact prior snapshot when immediate persistence fails', () => {
+    const scene = new WorldScene();
+    const world = WorldManager.createNew('Failure authority', 'failure-seed');
+    const priorRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+    const priorStored = SaveService.loadWorld(world.id);
+    world.company.cash -= 2_800;
+    world.revision += 1;
+    const liveAfterCommand = JSON.parse(JSON.stringify(world));
+    (scene as any).commandStack = {};
+    (scene as any).selectionManager = { selectedUUIDs: [] };
+    const write = jest.spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => { throw new Error('quota'); });
+    const warning = jest.spyOn(console, 'warn').mockImplementation();
+    const emit = jest.spyOn(EventBus, 'emit');
+    (scene as any).bindCommandStackReporting();
+
+    (scene as any).commandStack.onChange(true, false);
+
+    expect(WorldManager.world).toEqual(liveAfterCommand);
+    expect(WorldManager.world?.revision).toBe(liveAfterCommand.revision);
+    expect(WorldManager.world?.company.cash).toBe(liveAfterCommand.company.cash);
+    expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(priorRaw);
+    expect(SaveService.loadWorld(world.id)).toEqual(priorStored);
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'saving' },
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'unsaved' },
+    );
+    expect(emit).not.toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'saved' },
+    );
+    expect(emit.mock.calls.some(([event]) => event === 'world:saved')).toBe(false);
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Could not save the world. Retry Save is available.',
+      type: 'error',
+    });
+
+    emit.mockRestore();
+    warning.mockRestore();
+    write.mockRestore();
+    WorldManager.reset();
+    localStorage.clear();
+  });
+
+  it('uses pure persistence for Retry Save and Ctrl+S without changing revision or cash', () => {
+    const scene = new WorldScene();
+    const world = WorldManager.createNew('Manual save', 'manual-seed');
+    const revision = world.revision;
+    const cash = world.company.cash;
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate(world.id);
+
+    (scene as any).saveHandler();
+    (scene as any).handleKeyDown({
+      code: 'KeyS',
+      ctrlKey: true,
+      altKey: false,
+      repeat: false,
+    });
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(setTrainDefs).not.toHaveBeenCalled();
+    expect(world.revision).toBe(revision);
+    expect(world.company.cash).toBe(cash);
+    expect(emit.mock.calls.filter(
+      ([event]) => event === 'ui:toolbar-save-state',
+    )).toEqual([
+      ['ui:toolbar-save-state', { state: 'saving' }],
+      ['ui:toolbar-save-state', { state: 'saved' }],
+      ['ui:toolbar-save-state', { state: 'saving' }],
+      ['ui:toolbar-save-state', { state: 'saved' }],
+    ]);
+
+    emit.mockRestore();
+    setTrainDefs.mockRestore();
+    save.mockRestore();
+    WorldManager.reset();
+  });
+
+  it('skips the periodic safety save while already saved but retries when unsaved', () => {
+    const scene = new WorldScene();
+    WorldManager.createNew('Periodic save', 'periodic-seed');
+    (scene as any).trainManager = { trains: [], carriages: [] };
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    (scene as any).lastReportedSaveState = 'saved';
+    (scene as any).runPeriodicSafetySave();
+    expect(save).not.toHaveBeenCalled();
+    expect(setTrainDefs).not.toHaveBeenCalled();
+    expect(emit.mock.calls.some(([event]) => event === 'ui:toast')).toBe(false);
+
+    (scene as any).lastReportedSaveState = 'unsaved';
+    (scene as any).runPeriodicSafetySave();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(setTrainDefs).toHaveBeenCalledWith([]);
+
+    emit.mockRestore();
+    setTrainDefs.mockRestore();
+    save.mockRestore();
     WorldManager.reset();
   });
 
@@ -508,7 +666,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toast',
-      { message: 'Could not save the world.', type: 'error' },
+      {
+        message: 'Could not save the world. Retry Save is available.',
+        type: 'error',
+      },
     );
 
     emitSpy.mockRestore();
@@ -532,7 +693,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toast',
-      { message: 'Could not save the world.', type: 'error' },
+      {
+        message: 'Could not save the world. Retry Save is available.',
+        type: 'error',
+      },
     );
 
     emitSpy.mockRestore();

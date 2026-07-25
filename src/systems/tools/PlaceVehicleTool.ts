@@ -83,17 +83,24 @@ export class PlaceVehicleTool implements IEditorTool {
     vehicle.currentTrack = track;
 
     const def = TrainSerializer.toTrainDef(vehicle);
+    let persistenceDelegated = false;
     if (def && WorldManager.addTrainDef(def)) {
       // Vehicle placement is not yet a command. Explicitly invalidate prior
       // revision-aware history so a later construction push is not stale.
-      this.commandStack?.clear();
+      // WorldScene owns immediate persistence through this stack notification.
+      if (this.commandStack) {
+        persistenceDelegated = true;
+        this.commandStack.clear();
+      }
     }
 
     EventBus.emit('ui:toast', {
       message: `${info?.displayName ?? 'Vehicle'} placed`,
       type: 'success',
     });
-    EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    if (!persistenceDelegated) {
+      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
+    }
   }
 
   onPointerMove(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {

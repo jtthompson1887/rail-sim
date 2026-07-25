@@ -4,6 +4,11 @@ import { EventBus } from '../../src/services/EventBus';
 const { makeScene } = require('../../__mocks__/phaser');
 
 describe('EditorToolbar lifecycle', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
   it('hides, restores, and destroys every owned display object without an unused container', () => {
     const scene = makeScene();
     const toolbar = new EditorToolbar(scene);
@@ -65,5 +70,41 @@ describe('EditorToolbar lifecycle', () => {
     });
     toolbar.destroy();
     emitSpy.mockRestore();
+  });
+
+  it('exposes Retry Save as a native accessible action only while visible and unsaved', () => {
+    const scene = makeScene();
+    const toolbar = new EditorToolbar(scene);
+    const emitSpy = jest.spyOn(EventBus, 'emit');
+    const retry = document.querySelector(
+      '[data-testid="editor-retry-save"]',
+    ) as HTMLButtonElement | null;
+
+    expect(retry?.tagName).toBe('BUTTON');
+    expect(retry?.type).toBe('button');
+    expect(retry?.getAttribute('aria-label')).toBe('Retry Save');
+    expect(retry?.style.display).toBe('none');
+
+    toolbar.setSaveIndicator('unsaved');
+    expect(retry?.textContent).toBe('Retry Save');
+    expect(retry?.style.display).toBe('block');
+    expect(retry?.disabled).toBe(false);
+    retry?.click();
+    expect(emitSpy).toHaveBeenCalledWith('editor:save', {});
+
+    toolbar.setSaveIndicator('saving');
+    expect(retry?.style.display).toBe('none');
+    expect(retry?.disabled).toBe(true);
+
+    toolbar.setSaveIndicator('unsaved');
+    toolbar.setVisible(false);
+    expect(retry?.style.display).toBe('none');
+    toolbar.setVisible(true);
+    expect(retry?.style.display).toBe('block');
+
+    toolbar.setSaveIndicator('saved');
+    expect(retry?.style.display).toBe('none');
+    toolbar.destroy();
+    expect(document.querySelector('[data-testid="editor-retry-save"]')).toBeNull();
   });
 });
