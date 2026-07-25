@@ -168,28 +168,29 @@ async function frameSurfaceDetour(page: Page): Promise<ConstructionSnapshot> {
 
 function extendLiveTangent(
   track: ConstructionSnapshot['world']['tracks'][number],
-  distance: number,
+  forwardDistance: number,
+  normalDistance = 0,
 ): Point {
   const dx = track.p3.x - track.p2.x;
   const dy = track.p3.y - track.p2.y;
   const length = Math.hypot(dx, dy);
+  const tangentX = dx / length;
+  const tangentY = dy / length;
   return {
-    x: track.p3.x + dx / length * distance,
-    y: track.p3.y + dy / length * distance,
+    x: track.p3.x + tangentX * forwardDistance - tangentY * normalDistance,
+    y: track.p3.y + tangentY * forwardDistance + tangentX * normalDistance,
   };
 }
 
 function chainedCandidates(
   track: ConstructionSnapshot['world']['tracks'][number],
-  persistedWitnessEnd: Point,
 ): Point[] {
   return [
-    persistedWitnessEnd,
-    extendLiveTangent(track, 600),
-    { x: track.p3.x + 1_600, y: track.p3.y },
-    { x: track.p3.x + 1_800, y: track.p3.y + 600 },
-    { x: track.p3.x + 1_800, y: track.p3.y + 1_000 },
-  ];
+    [1_200, -900],
+    [1_200, 900],
+  ].map(
+    ([forward, normal]) => extendLiveTangent(track, forward, normal),
+  );
 }
 
 function persistedConstruction(state: ConstructionSnapshot) {
@@ -275,13 +276,7 @@ test.describe('fixed-seed construction decision loop', () => {
 
     const chainStart = await toScreen(page, firstBuilt.world.tracks[0].p3, firstBuilt);
     let secondReview: ConstructionSnapshot | null = null;
-    const persistedWitnessEnd =
-      blank.world.starterOpportunity.corridors[1].feasibilityWitness.segments[1]
-        .geometry.p3;
-    for (const candidate of chainedCandidates(
-      firstBuilt.world.tracks[0],
-      persistedWitnessEnd,
-    )) {
+    for (const candidate of chainedCandidates(firstBuilt.world.tracks[0])) {
       await dragRoute(
         page,
         chainStart,

@@ -9,6 +9,7 @@ import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import { ENDPOINT_CONNECTION_COST } from '../../src/config/ConstructionConfig';
 import { TrackSerializer } from '../../src/utils/TrackSerializer';
+import type { TrackGeometryDef } from '../../src/systems/TrackGeometry';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -29,6 +30,46 @@ function addTrack(manager: TrackManager, scene: Phaser.Scene): RailTrack {
   manager.addTrack(track);
   WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
   return track;
+}
+
+function addGeometryTrack(
+  manager: TrackManager,
+  scene: Phaser.Scene,
+  uuid: string,
+  geometry: TrackGeometryDef,
+  persist = true,
+): RailTrack {
+  const track = new RailTrack(
+    scene,
+    new Phaser.Math.Vector2(geometry.p0.x, geometry.p0.y),
+    new Phaser.Math.Vector2(geometry.p1.x, geometry.p1.y),
+    new Phaser.Math.Vector2(geometry.p2.x, geometry.p2.y),
+    new Phaser.Math.Vector2(geometry.p3.x, geometry.p3.y),
+  );
+  track.setUUID(uuid);
+  track.setConstructionData(
+    { profileVersion: 1, knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }] },
+    [{ type: 'surface', startT: 0, endT: 1, startElevation: 0, endElevation: 0 }],
+    100,
+  );
+  manager.addTrack(track);
+  if (persist) WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
+  return track;
+}
+
+function line(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): TrackGeometryDef {
+  return {
+    geometryVersion: 1,
+    p0: { x: x0, y: y0 },
+    p1: { x: x0 + (x1 - x0) / 3, y: y0 + (y1 - y0) / 3 },
+    p2: { x: x0 + 2 * (x1 - x0) / 3, y: y0 + 2 * (y1 - y0) / 3 },
+    p3: { x: x1, y: y1 },
+  };
 }
 
 describe('ConstructionService', () => {
@@ -68,7 +109,7 @@ describe('ConstructionService', () => {
   it('returns one immutable preview whose valid quote shares the exact proposal', () => {
     const analyzed = jest.spyOn(
       (service as any).analyzer,
-      'analyze',
+      'analyzeDetailed',
     );
     const result = service.createPreview(
       { x: 0, y: 0 },
@@ -81,6 +122,72 @@ describe('ConstructionService', () => {
     expect(result!.quote!.proposal).toBe(result!.proposal);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result!.proposal)).toBe(true);
+  });
+
+  it('returns a clearance-invalid engineering preview without manufacturing a quote', () => {
+    addGeometryTrack(manager, scene, 'crossed', line(-150, 0, 150, 0));
+
+    const result = service.createPreview(
+      { x: 0, y: -150, snapped: false, type: 'none' },
+      { x: 0, y: 150, snapped: false, type: 'none' },
+      'crossing',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('engineering-invalid');
+    expect(result!.proposal.valid).toBe(false);
+    expect(result!.proposal.reasonCode).toBe('clearance');
+    expect(result!.proposal.remedy).toBe(
+      'Move the route away from existing infrastructure.',
+    );
+    expect(result!.quote).toBeNull();
+  });
+
+  it('fails closed when persisted and live track authority diverge', () => {
+    const liveOnly = addGeometryTrack(
+      manager,
+      scene,
+      'live-only',
+      line(1_000, 0, 1_300, 0),
+      false,
+    );
+    expect(service.createPreview(
+      { x: 0, y: 0, snapped: false, type: 'none' },
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'live-divergence',
+    )).toBeNull();
+
+    manager.removeTrack(liveOnly.getUUID());
+    WorldManager.world!.tracks.push({
+      uuid: 'persisted-only',
+      ...line(1_000, 0, 1_300, 0),
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [],
+      paidBuildCost: 100,
+    });
+    expect(service.createPreview(
+      { x: 0, y: 0, snapped: false, type: 'none' },
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'persisted-divergence',
+    )).toBeNull();
+  });
+
+  it('does not treat a free anchor on an endpoint as a legal connection', () => {
+    addTrack(manager, scene);
+
+    const result = service.createPreview(
+      { x: 0, y: 0, snapped: false, type: 'none' },
+      { x: 300, y: 0, snapped: false, type: 'none' },
+      'unnamed-endpoint',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.proposal.reasonCode).toBe('clearance');
+    expect(result!.quote).toBeNull();
+    expect(result!.predictedConnections).toEqual([]);
   });
 
   it('keeps invalid analysis available without manufacturing a quote', () => {
@@ -300,6 +407,76 @@ describe('ConstructionService', () => {
       new Phaser.Math.Vector2(0, 0),
     );
     expect(service.revalidateQuote(quote)).toBe(false);
+  });
+
+  it('rejects a quote when an unrelated live track crosses it after pricing', () => {
+    const quote = service.createPreview(
+      { x: -150, y: 0, snapped: false, type: 'none' },
+      { x: 150, y: 0, snapped: false, type: 'none' },
+      'priced-before-crossing',
+    )!.quote!;
+    addGeometryTrack(
+      manager,
+      scene,
+      'late-crossing',
+      line(0, -150, 0, 150),
+      false,
+    );
+    WorldManager.world!.tracks.push(
+      TrackSerializer.toTrackDef(manager.getTrack('late-crossing')!),
+    );
+
+    expect(service.revalidateQuote(quote)).toBe(false);
+  });
+
+  it('rejects confirm and redo validation after unrelated geometry moves into the route', () => {
+    const distant = addGeometryTrack(
+      manager,
+      scene,
+      'moving-track',
+      line(1_000, -150, 1_000, 150),
+    );
+    const quote = service.createPreview(
+      { x: -150, y: 0, snapped: false, type: 'none' },
+      { x: 150, y: 0, snapped: false, type: 'none' },
+      'geometry-mutation-guard',
+    )!.quote!;
+    manager.updateTrackVectors(
+      distant.getUUID(),
+      new Phaser.Math.Vector2(0, -150),
+      new Phaser.Math.Vector2(0, -50),
+      new Phaser.Math.Vector2(0, 50),
+      new Phaser.Math.Vector2(0, 150),
+    );
+    WorldManager.world!.tracks[0] = TrackSerializer.toTrackDef(distant);
+
+    expect(service.revalidateQuote(quote)).toBe(false);
+    expect(service.revalidateQuoteForRedo(quote, quote.expectedCash)).toBe(false);
+  });
+
+  it('fails closed when any live existing track cannot be profiled', () => {
+    const distant = addGeometryTrack(
+      manager,
+      scene,
+      'distant',
+      line(1_000, 1_000, 1_300, 1_000),
+    );
+    const quote = service.createPreview(
+      { x: -150, y: 0, snapped: false, type: 'none' },
+      { x: 150, y: 0, snapped: false, type: 'none' },
+      'profile-guard',
+    )!.quote!;
+    manager.updateTrackVectors(
+      distant.getUUID(),
+      new Phaser.Math.Vector2(-3_500, 1_000),
+      new Phaser.Math.Vector2(-1_167, 1_000),
+      new Phaser.Math.Vector2(1_167, 1_000),
+      new Phaser.Math.Vector2(3_500, 1_000),
+    );
+    WorldManager.world!.tracks[0] = TrackSerializer.toTrackDef(distant);
+
+    expect(service.revalidateQuote(quote)).toBe(false);
+    expect(service.revalidateQuoteForRedo(quote, quote.expectedCash)).toBe(false);
   });
 
   it('rejects consuming an endpoint that is already connected', () => {

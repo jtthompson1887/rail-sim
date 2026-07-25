@@ -258,6 +258,45 @@ describe('PlaceTrackCommand', () => {
     expect(manager.getTrack('redo-stale')).toBeUndefined();
   });
 
+  it('rejects redo when a new live track crosses the quoted route', () => {
+    const world = WorldManager.world!;
+    const quote = service.createQuote(
+      { x: -150, y: 0 },
+      { x: 150, y: 0 },
+      'redo-clearance',
+    )!;
+    const command = new PlaceTrackCommand(
+      scene,
+      manager,
+      new ConstructionEconomy(world.company),
+      service,
+      quote,
+    );
+    expect(command.execute()).toBe(true);
+    expect(command.undo()).toBe(true);
+
+    const crossing = new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(0, -150),
+      new Phaser.Math.Vector2(0, -50),
+      new Phaser.Math.Vector2(0, 50),
+      new Phaser.Math.Vector2(0, 150),
+    );
+    crossing.setUUID('late-redo-crossing');
+    crossing.setConstructionData(
+      { profileVersion: 1, knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }] },
+      [{ type: 'surface', startT: 0, endT: 1, startElevation: 0, endElevation: 0 }],
+      100,
+    );
+    manager.addTrack(crossing);
+    world.tracks.push(TrackSerializer.toTrackDef(crossing));
+
+    expect(command.execute()).toBe(false);
+    expect(manager.getTrack('redo-clearance')).toBeUndefined();
+    expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['late-redo-crossing']);
+    expect(world.company.cash).toBe(quote.expectedCash);
+  });
+
   it('charges both endpoint connections and reloads the exact graph and engineering data', () => {
     const addNeighbour = (
       uuid: string,

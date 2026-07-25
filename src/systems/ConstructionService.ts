@@ -8,8 +8,14 @@ import { TrackSerializer } from '../utils/TrackSerializer';
 import { clonePlainData, equalPlainData } from '../utils/PlainData';
 import {
   ConstructionAnalyzer,
+  type ConstructionAnalysisDetail,
   type ConstructionProposal,
 } from './ConstructionAnalyzer';
+import { sampleConstructionCurve } from './ConstructionCurveSampler';
+import {
+  hasConstructionClearance,
+  type ClearanceTrack,
+} from './TrackClearance';
 import {
   deriveAutomaticCubic,
   type TrackGeometryDef,
@@ -164,6 +170,7 @@ export class ConstructionService {
   ): ConstructionPreview | null {
     const world = WorldManager.world;
     if (!world || !WorldManager.canAdvanceRevision()
+      || !this.liveTracksMatchWorld(world)
       || !newTrackUUID || this.trackManager.getTrack(newTrackUUID)
       || world.tracks.some((track) => track.uuid === newTrackUUID)
       || !this.isSupportedAnchor(start)
@@ -193,9 +200,6 @@ export class ConstructionService {
         ? { ...endSnap.outward }
         : undefined,
     });
-    const analyzed = this.safeAnalyze(geometry);
-    if (!analyzed) return null;
-    const proposal = clonePlainData(analyzed);
 
     const predictedConnections: PredictedEndpointConnectionDef[] = [];
     if (startSnap) {
@@ -215,6 +219,25 @@ export class ConstructionService {
         newEndpoint: 'end',
         point: { ...geometry.p3 },
       });
+    }
+
+    const analyzed = this.safeAnalyzeDetailed(geometry);
+    if (!analyzed) return null;
+    let proposal = clonePlainData(analyzed.proposal);
+    if (
+      proposal.valid
+      && !this.hasClearance(
+        geometry,
+        analyzed.curveSamples,
+        predictedConnections,
+      )
+    ) {
+      proposal = {
+        ...proposal,
+        valid: false,
+        reasonCode: 'clearance',
+        remedy: 'Move the route away from existing infrastructure.',
+      };
     }
 
     const affectedIds = Array.from(new Set(
@@ -311,6 +334,7 @@ export class ConstructionService {
     const world = WorldManager.world;
     if (!world || this.quoteWorlds.get(quote) !== world
       || !WorldManager.canAdvanceRevision()
+      || !this.liveTracksMatchWorld(world)
       || (requireCapturedRevision && world.revision !== quote.worldRevision)
       || world.company.cash !== expectedCash
       || !quote.quoteId || !quote.newTrackUUID
@@ -355,15 +379,71 @@ export class ConstructionService {
       }
     }
 
-    const analyzed = this.safeAnalyze(quote.proposal.geometry);
-    return analyzed !== null && analyzed.valid && exact(analyzed, quote.proposal);
+    const analyzed = this.safeAnalyzeDetailed(quote.proposal.geometry);
+    return analyzed !== null
+      && analyzed.proposal.valid
+      && exact(analyzed.proposal, quote.proposal)
+      && this.hasClearance(
+        quote.proposal.geometry,
+        analyzed.curveSamples,
+        quote.predictedConnections,
+      );
   }
 
-  private safeAnalyze(geometry: TrackGeometryDef): ConstructionProposal | null {
+  private safeAnalyzeDetailed(
+    geometry: TrackGeometryDef,
+  ): ConstructionAnalysisDetail | null {
     try {
-      return this.analyzer.analyze(geometry);
+      return this.analyzer.analyzeDetailed(geometry);
     } catch {
       return null;
+    }
+  }
+
+  private hasClearance(
+    geometry: TrackGeometryDef,
+    curveSamples: ConstructionAnalysisDetail['curveSamples'],
+    predictedConnections: readonly PredictedEndpointConnectionDef[],
+  ): boolean {
+    const existingTracks: ClearanceTrack[] = [];
+    for (const track of [...this.trackManager.getAllTracks()].sort((left, right) => (
+      left.getUUID() < right.getUUID()
+        ? -1
+        : left.getUUID() > right.getUUID() ? 1 : 0
+    ))) {
+      const existingGeometry = geometryOf(track.getUUID(), this.trackManager);
+      if (!existingGeometry) return false;
+      const existingProfile = sampleConstructionCurve(existingGeometry);
+      if (!existingProfile.ok) return false;
+      existingTracks.push({
+        trackUUID: track.getUUID(),
+        geometry: existingGeometry,
+        curveSamples: existingProfile.samples,
+      });
+    }
+    return hasConstructionClearance(
+      { geometry, curveSamples },
+      existingTracks,
+      predictedConnections,
+    );
+  }
+
+  private liveTracksMatchWorld(world: WorldData): boolean {
+    const liveTracks = [...this.trackManager.getAllTracks()].sort((left, right) => (
+      left.getUUID() < right.getUUID()
+        ? -1
+        : left.getUUID() > right.getUUID() ? 1 : 0
+    ));
+    const persistedTracks = [...world.tracks].sort((left, right) => (
+      left.uuid < right.uuid ? -1 : left.uuid > right.uuid ? 1 : 0
+    ));
+    if (liveTracks.length !== persistedTracks.length) return false;
+    try {
+      return liveTracks.every((track, index) => (
+        equalPlainData(TrackSerializer.toTrackDef(track), persistedTracks[index])
+      ));
+    } catch {
+      return false;
     }
   }
 
