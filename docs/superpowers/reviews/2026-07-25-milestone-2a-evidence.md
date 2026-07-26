@@ -1,16 +1,15 @@
 # Milestone 2A economy-foundation evidence
 
-**Candidate implementation head:** `c51c521`
+**Candidate implementation head:** `4fe2839`
 
-**Independent review:** Pending controller Step 4
+**Independent review:** Approved after one task-review fix and one final-review fix wave
 
-**Reviewed source:** Pending
+**Reviewed source:** `4fe2839`
 
 **Private Sites version and URL:** Pending controller Step 6
 
-This record assembles the Task 9 implementation, automated-gate, and generated
-economy playtest evidence. It deliberately does not claim that independent
-review or publication is complete.
+This record assembles the Task 9 implementation, automated-gate, generated
+economy playtest, and independent-review evidence. Publication remains pending.
 
 ## Full-chain reconciliation
 
@@ -61,12 +60,12 @@ All final commands were run on Windows 11 from `codex/full-game`.
 | Gate | Exact result |
 | --- | --- |
 | `npx jest tests/integration/ConstructionSupplyEconomy.test.ts --runInBand --coverage=false` | 1 suite, 2 tests passed |
-| `npm test -- --runInBand` | 84 suites, 1,258 tests passed; 96.05% statements, 88.60% branches, 90.50% functions, 96.05% lines |
-| Construction preview benchmark inside Jest | 500 proposals; p95 1.011 ms against the 8 ms local target |
-| `npx playwright test --retries=0` | 33 browser tests passed with zero retries in 3.0 minutes |
+| `npm test -- --runInBand` | 84 suites, 1,262 tests passed; 96.05% statements, 88.60% branches, 90.50% functions, 96.05% lines |
+| Construction preview benchmark inside Jest | 500 proposals; p95 0.996 ms against the 8 ms local target |
+| `npx playwright test --retries=0` | 33 browser tests passed with zero retries in 3.1 minutes |
 | `npm run benchmark:construction-drag` | 500 samples; p95 0.4000000059604645 ms against the 16 ms target |
-| `npm run benchmark:world-generation` | Seed `playtest-884`; 74.19999998807907 ms against the 2,000 ms target; opportunity resolved on attempt 12 of 12; 21 economy candidates evaluated; deterministic replay passed |
-| `npm run build` | Production build passed in 8.894 seconds |
+| `npm run benchmark:world-generation` | Seed `playtest-884`; 73.90000000596046 ms against the 2,000 ms target; opportunity resolved on attempt 12 of 12; 21 economy candidates evaluated; deterministic replay passed |
+| `npm run build` | Production build passed in 8.782 seconds |
 | `git diff --check` | Passed with no output |
 | `git status --short` | Clean before evidence drafting |
 | `rg -n "console\.(log\|debug)" src tests` | No matches (`rg` exit 1 is the expected no-match status) |
@@ -167,20 +166,32 @@ explicit sink.
 
 ## Review record
 
-The controller must independently review the exact Milestone 2A range for:
+The Task 9 reviewer found one Important test-quality gap: the browser playtest
+opened the facility inspector but did not assert its inventory and quote
+content. Commit `c51c521` added snapshot-derived quantity/capacity, progress,
+numeric unit-quote, and factor-explanation assertions across all three seeds
+and the mobile case. Scoped re-review marked the finding addressed with no new
+Critical or Important breakage.
 
-- product and inventory conservation;
-- recipe atomicity and explicit boundaries;
-- market bounds and deterministic quotes;
-- ledger/cash equality and P&L classification;
-- schema references and deterministic generation;
-- fixed-tick and pause/persistence behavior;
-- construction regressions and UI input capture.
+The final reviewer examined the exact Milestone 2A range from published
+Milestone 1 commit `52a31ad` through `c51c521`. Product conservation, atomic
+recipes and transfers, explicit boundaries, market bounds, ledger/cash
+equality, P&L classification, deterministic blank-world generation, fixed
+ticks, construction compatibility, and UI input capture were approved except
+for two Important schema gaps:
 
-Review disposition, correction ranges, exact reviewed source SHA, and the
-absence of open Critical or Important findings remain **pending**. This section
-must be replaced with the independent reviewer’s actual findings; it must not
-be inferred from this implementation report.
+- facility instance IDs were unique, but duplicate facility definition IDs
+  could still pass validation;
+- `paidBuildCost` accepted integers outside JavaScript's safe range, while the
+  demolition refund path correctly rejected them.
+
+Commit `4fe2839` enforces unique facility definitions and non-negative safe
+build costs, with regression and boundary tests. The scoped final re-review
+marked both Important findings and the stale evidence attribution addressed,
+with no new Critical or Important breakage.
+
+The exact reviewed source is `4fe2839`. There are no open Critical or Important
+review findings.
 
 ## Publication
 

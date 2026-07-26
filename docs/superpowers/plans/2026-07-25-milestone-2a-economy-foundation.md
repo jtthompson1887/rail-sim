@@ -1207,7 +1207,7 @@ git commit -m "feat: present the generated freight economy"
 - Consumes all prior tasks.
 - Produces the reviewed Milestone 2A Sites build.
 
-- [ ] **Step 1: Prove the complete six-product economy headlessly**
+- [x] **Step 1: Prove the complete six-product economy headlessly**
 
 Drive deterministic ticks and explicit boundary transfers to prove:
 
@@ -1235,7 +1235,7 @@ opening inventory
 Also prove every company cash mutation equals its ledger, and P&L distinguishes
 operating results from construction capital expenditure.
 
-- [ ] **Step 2: Run the complete automated gates**
+- [x] **Step 2: Run the complete automated gates**
 
 ```powershell
 npm test -- --runInBand
@@ -1252,21 +1252,21 @@ Expected: all tests pass without retries; coverage remains at least 85%; both
 performance budgets remain inside target; build succeeds; no diagnostics or
 generated output are staged.
 
-- [ ] **Step 3: Perform a generated-economy playtest**
+- [x] **Step 3: Perform a generated-economy playtest**
 
 Use at least three fixed seeds and verify facility placement, initial route
 affordability, raw production, processor blockers, inventory saturation,
 Build/Operate pause behaviour, save/reload, facility inspection, and mobile
 readability. Tune only evidenced problems.
 
-- [ ] **Step 4: Request independent code review**
+- [x] **Step 4: Request independent code review**
 
 Review the exact Milestone 2A range for product/inventory conservation, recipe
 atomicity, market bounds, ledger/cash equality, schema references, deterministic
 generation, fixed-tick behaviour, construction regressions, and UI input
 capture. Fix all Critical and Important findings and re-review corrections.
 
-- [ ] **Step 5: Commit evidence**
+- [x] **Step 5: Commit evidence**
 
 Record exact test counts, coverage, benchmark values, fixed seeds, manual
 observations, review disposition, and YAGNI deferrals. Do not create an empty
