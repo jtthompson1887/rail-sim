@@ -354,8 +354,7 @@ async function buildWitnessCorridor(
     await expect(
       page.locator('[data-testid="construction-confirm"]'),
     ).toBeEnabled();
-    await page.locator('[data-testid="construction-confirm"]').focus();
-    await page.keyboard.press('Enter');
+    await page.locator('[data-testid="construction-confirm"]').click();
     await expect(
       page.locator('[data-testid="company-save-state"]'),
     ).toHaveText('Saved');
@@ -557,6 +556,12 @@ const movingMidRoute = (state: FirstRouteBrowserSnapshot) => {
   };
 };
 
+const stoppedMidRoute = (state: FirstRouteBrowserSnapshot) => ({
+  ...movingMidRoute(state),
+  speedWorldUnitsPerSecond: 0,
+  throttle: 0 as const,
+});
+
 const persistedPhase = (state: FirstRouteBrowserSnapshot) => ({
   cash: state.world.company.cash,
   ledger: state.world.company.ledger,
@@ -613,7 +618,6 @@ test.describe('collective three-seed first freight route acceptance', () => {
       productId: 'logs',
       units: 60,
     }));
-    await page.waitForTimeout(25_000);
     const sawmill = facility(loaded, 'sawmill');
     const selectedTrainScreen = await toScreen(
       page,
@@ -698,7 +702,7 @@ test.describe('collective three-seed first freight route acceptance', () => {
             await setForward(false);
             if (live.speedWorldUnitsPerSecond > 2) await brakePulse();
           }
-        } else if (live.speedWorldUnitsPerSecond < 14) {
+        } else if (live.speedWorldUnitsPerSecond < 4) {
           await setForward(true);
         } else {
           await setForward(false);
@@ -720,6 +724,11 @@ test.describe('collective three-seed first freight route acceptance', () => {
     const completedAt = await page.evaluate(() => performance.now());
     const elapsedSeconds = (completedAt - purchaseStarted) / 1_000;
     const completed = await snapshot(page);
+    console.info(
+      `[first-route] purchase-to-unload=${elapsedSeconds.toFixed(3)}s`
+      + ` revenue=${train(completed).operations.lastTripRevenue}`
+      + ` running=${train(completed).operations.lastTripRunningCost}`,
+    );
     expect(elapsedSeconds).toBeGreaterThanOrEqual(120);
     expect(elapsedSeconds).toBeLessThanOrEqual(240);
     expect(runtime(completed)).toEqual(expect.objectContaining({
@@ -728,11 +737,6 @@ test.describe('collective three-seed first freight route acceptance', () => {
     }));
     expect(train(completed).operations.lastTripRevenue).toBeGreaterThan(
       train(completed).operations.lastTripRunningCost,
-    );
-    console.info(
-      `[first-route] purchase-to-unload=${elapsedSeconds.toFixed(3)}s`
-      + ` revenue=${train(completed).operations.lastTripRevenue}`
-      + ` running=${train(completed).operations.lastTripRunningCost}`,
     );
     expect(completed.objective.achieved).toBe(true);
     await expect(page.locator('[data-testid="first-route-objective"]')).toContainText(
@@ -764,20 +768,74 @@ test.describe('collective three-seed first freight route acceptance', () => {
     expect(persistedPhase(await snapshot(page))).toEqual(expected);
 
     current = await snapshot(page);
+    await test.step('moving inside Managed Forest access does not load', async () => {
+      await setTrainRuntime(page, trainId, {
+        ...stoppedAt(current, 'managed-forest'),
+        speedWorldUnitsPerSecond: 12,
+        throttle: 1,
+      });
+      const beforeMovingTick = await snapshot(page);
+      const forestAccess = facility(beforeMovingTick, 'managed-forest').railAccess;
+      expect(Math.hypot(
+        runtime(beforeMovingTick).x - forestAccess.x,
+        runtime(beforeMovingTick).y - forestAccess.y,
+      )).toBeLessThanOrEqual(forestAccess.radius);
+      expect(runtime(beforeMovingTick).speedWorldUnitsPerSecond).toBeGreaterThan(2);
+      expect(runtime(beforeMovingTick)).toEqual(expect.objectContaining({
+        throttle: 1,
+        derailed: false,
+      }));
+      expect(train(beforeMovingTick).cargo?.units).toBe(30);
+      expect(facility(beforeMovingTick, 'managed-forest').inventories.logs.quantity)
+        .toBeGreaterThanOrEqual(10);
+
+      await advanceFixedTicks(page, 1);
+      await expect(page.locator('[data-testid="train-transfer-status"]'))
+        .toHaveText('Stop the train to transfer cargo');
+      current = await snapshot(page);
+      expect(train(current).cargo).toEqual(train(beforeMovingTick).cargo);
+      expect(categoryTotal(current, 'delivery-revenue'))
+        .toBe(categoryTotal(beforeMovingTick, 'delivery-revenue'));
+      expect(
+        train(current).operations.currentTripRunningCost
+        - train(beforeMovingTick).operations.currentTripRunningCost,
+      ).toBe(20);
+    });
+
+    await test.step('stopped outside Sawmill access does not transfer', async () => {
+      await setTrainRuntime(page, trainId, stoppedMidRoute(current));
+      const beforeOutsideTick = await snapshot(page);
+      const sawmillAccess = facility(beforeOutsideTick, 'sawmill').railAccess;
+      expect(Math.hypot(
+        runtime(beforeOutsideTick).x - sawmillAccess.x,
+        runtime(beforeOutsideTick).y - sawmillAccess.y,
+      )).toBeGreaterThan(sawmillAccess.radius);
+      expect(runtime(beforeOutsideTick)).toEqual(expect.objectContaining({
+        speedWorldUnitsPerSecond: 0,
+        throttle: 0,
+        derailed: false,
+      }));
+      expect(train(beforeOutsideTick).cargo?.units).toBe(30);
+      expect(
+        facility(beforeOutsideTick, 'sawmill').inventories.logs.capacity
+        - facility(beforeOutsideTick, 'sawmill').inventories.logs.quantity,
+      ).toBeGreaterThanOrEqual(10);
+
+      await advanceFixedTicks(page, 1);
+      await expect(page.locator('[data-testid="train-transfer-status"]'))
+        .toHaveText('Move inside Sawmill rail access');
+      current = await snapshot(page);
+      expect(train(current).cargo).toEqual(train(beforeOutsideTick).cargo);
+      expect(categoryTotal(current, 'delivery-revenue'))
+        .toBe(categoryTotal(beforeOutsideTick, 'delivery-revenue'));
+      expect(train(current).operations.currentTripRevenue)
+        .toBe(train(beforeOutsideTick).operations.currentTripRevenue);
+    });
+
     await setTrainRuntime(page, trainId, stoppedAt(current, 'managed-forest'));
     await advanceFixedTicks(page, 3);
     current = await snapshot(page);
     expect(train(current).cargo?.units).toBe(60);
-
-    await setTrainRuntime(page, trainId, movingMidRoute(current));
-    const beforeMovingTick = await snapshot(page);
-    await advanceFixedTicks(page, 1);
-    current = await snapshot(page);
-    expect(train(current).cargo?.units).toBe(60);
-    expect(
-      train(current).operations.currentTripRunningCost
-      - train(beforeMovingTick).operations.currentTripRunningCost,
-    ).toBe(20);
     expected = persistedPhase(current);
     await reloadOnlySavedWorld(page);
     expect(persistedPhase(await snapshot(page))).toEqual(expected);
@@ -796,10 +854,12 @@ test.describe('collective three-seed first freight route acceptance', () => {
       throttle: 0,
       derailed: false,
     }));
+    expect(facility(firstUnloadBefore, 'sawmill').recipeProgressTicks).toBe(0);
     const expectedFirstRevenue = expectedLogBatchRevenue(firstUnloadBefore);
     await advanceFixedTicks(page, 1);
     current = await snapshot(page);
     expect(train(current).cargo?.units).toBe(50);
+    expect(facility(current, 'sawmill').recipeProgressTicks).toBe(1);
     expect(
       categoryTotal(current, 'delivery-revenue')
       - categoryTotal(firstUnloadBefore, 'delivery-revenue'),
@@ -811,6 +871,9 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await advanceFixedTicks(page, 2);
     current = await snapshot(page);
     expect(train(current).cargo?.units).toBe(30);
+    expect(facility(current, 'sawmill').recipeProgressTicks).toBe(0);
+    expect(facility(current, 'sawmill').inventories.logs.recentOutflow)
+      .toBeGreaterThan(0);
     expected = persistedPhase(current);
     await reloadOnlySavedWorld(page);
     expect(persistedPhase(await snapshot(page))).toEqual(expected);
@@ -836,8 +899,7 @@ test.describe('collective three-seed first freight route acceptance', () => {
     );
     expect(facility(current, 'sawmill').inventories.logs.recentOutflow)
       .toBeGreaterThan(0);
-    expect(facility(current, 'sawmill').recipeProgressTicks)
-      .toBeGreaterThanOrEqual(0);
+    expect(facility(current, 'sawmill').recipeProgressTicks).toBe(0);
     expected = persistedPhase(current);
     await reloadOnlySavedWorld(page);
     expect(persistedPhase(await snapshot(page))).toEqual(expected);
@@ -910,6 +972,19 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await expect(inspector).toHaveAttribute('data-layout', 'mobile');
     await expect(objective).toHaveAttribute('data-layout', 'mobile');
     await expect(company).toHaveAttribute('data-layout', 'mobile');
+    for (const panel of [inspector, objective, company]) {
+      await expect(panel).toBeVisible();
+      const bounds = await panel.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds?.x).toBeGreaterThanOrEqual(0);
+      expect(bounds?.y).toBeGreaterThanOrEqual(0);
+      expect((bounds?.x ?? 0) + (bounds?.width ?? 0))
+        .toBeLessThanOrEqual(MOBILE.width);
+      expect((bounds?.y ?? 0) + (bounds?.height ?? 0))
+        .toBeLessThanOrEqual(MOBILE.height);
+    }
+    const inspectorBounds = await inspector.boundingBox();
+    if (!inspectorBounds) throw new Error('Train inspector has no mobile bounds');
     for (const selector of [
       '[data-throttle="-1"]',
       '[data-throttle="0"]',
@@ -920,8 +995,12 @@ test.describe('collective three-seed first freight route acceptance', () => {
       const bounds = await control.boundingBox();
       expect(bounds).not.toBeNull();
       expect(bounds?.x).toBeGreaterThanOrEqual(0);
+      expect(bounds?.y).toBeGreaterThanOrEqual(inspectorBounds.y);
       expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(
         MOBILE.width,
+      );
+      expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(
+        Math.min(MOBILE.height, inspectorBounds.y + inspectorBounds.height),
       );
       await control.click();
     }

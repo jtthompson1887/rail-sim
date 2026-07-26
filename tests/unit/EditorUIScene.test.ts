@@ -137,6 +137,26 @@ describe('EditorUIScene construction UI boundary', () => {
     expect((scene as any).validationHint.clear).toHaveBeenCalled();
   });
 
+  it('yields the vehicle purchase panel during a construction decision and restores it afterward', () => {
+    const scene = new EditorUIScene();
+    (scene as any).vehiclePurchasePanel = { setVisible: jest.fn() };
+    (scene as any).editorControlsVisible = true;
+
+    (scene as any).constructionPreviewHandler({
+      phase: 'review',
+      preview: {},
+    });
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenLastCalledWith(false);
+
+    (scene as any).constructionPreviewHandler({
+      phase: 'committed',
+      preview: null,
+    });
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenLastCalledWith(true);
+  });
+
   it('hydrates a failed startup save into the HUD and Retry Save action', () => {
     startEditorUI({
       visible: true,

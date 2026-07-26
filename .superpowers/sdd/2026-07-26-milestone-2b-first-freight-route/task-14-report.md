@@ -192,3 +192,118 @@ The required route completed in 135.647 seconds with a £4,800 positive
 last-trip margin. Therefore `GameConfig.TRAIN.ENGINE_POWER`, train mass,
 Matter resistance, the £20 active-tick cost, freight values, six ten-unit
 batches, local quote rules, and stopped-speed boundary remain unchanged.
+
+## Review Round 1
+
+This section supersedes the earlier references to a terminal dwell and
+keyboard activation of overlapped construction controls.
+
+### Browser-first RED/GREEN evidence
+
+The construction loop was first restored to real pointer `.click()` calls
+and given an assertion that the vehicle purchase panel yields while the
+construction inspector is active. The focused no-retry browser run failed
+because the purchase panel remained visible. A focused unit regression also
+failed because `EditorUIScene` had no construction-preview visibility seam.
+
+`EditorUIScene` now listens to the production `construction:preview` event,
+hides the purchase panel only while a live construction decision is active,
+and restores it after cancel or a completed/null preview. The listener is
+removed on scene shutdown and play mode clears stale construction state.
+The construction loop now uses pointer clicks for Back, Cancel, Build, and
+Retry Save; it asserts both review-time yielding and post-commit restoration.
+
+Focused GREEN evidence:
+
+```text
+EditorUIScene.test.ts: 10 passed
+construction-loop "builds..." (no retries): 1 passed (21.3s)
+```
+
+### Independent transfer blockers
+
+The controlled seed now has two separate production economy steps:
+
+1. A partially loaded train is inside Managed Forest access with available
+   source inventory, but is moving above the transfer speed with throttle
+   applied. The production status is `Stop the train to transfer cargo`.
+2. The same partially loaded train is stopped, neutral, non-derailed, and
+   has Sawmill capacity available, but is outside Sawmill access. The
+   production status is `Move inside Sawmill rail access`.
+
+Before/after frozen snapshots prove unchanged cargo and delivery revenue in
+both cases. The moving case separately proves the expected Â£20 running cost,
+so transfer assertions do not confuse legitimate operating expense with a
+cargo mutation.
+
+The Sawmill recipe assertion now proves a real `0 -> 1 -> 0` progress
+transition and positive log outflow. Mobile acceptance now checks the actual
+train inspector, objective card, and company HUD against all four viewport
+edges, and checks each throttle control vertically inside the inspector as
+well as horizontally inside the viewport.
+
+### Unpadded real trip
+
+The artificial 25-second post-load dwell was removed before adjusting the
+driver. The timer remains immediately before the real purchase click and
+ends at final unload. The real case never calls `setTrainRuntime()` or
+`advanceFixedTicks()`.
+
+Observed browser-first timing sequence:
+
+```text
+No dwell, original cadence RED: 105.405s
+Slower W/coast cadence RED:     111.948s
+First unpadded GREEN:           123.355s
+Exact-gate unpadded GREEN:      130.808s
+```
+
+The final operator cadence uses only selected-train W input, coasting
+between low-speed feedback pulses, and short S braking pulses on approach.
+There are no timer-threshold waits or production physics changes.
+
+Exact-gate final state:
+
+```text
+purchase-to-final-unload: 130.808s
+last-trip revenue:         Â£6,540
+last-trip running cost:    Â£2,240
+last-trip margin:          Â£4,300
+runtime:                   inside Sawmill, stopped, neutral, not derailed
+cargo:                     empty
+objective:                 Route profitable
+```
+
+### Review Round 1 verification
+
+Fresh production build and exact four-file browser gate:
+
+```powershell
+npm run build
+npx playwright test tests/e2e/first-freight-route.test.ts tests/e2e/construction-loop.test.ts tests/e2e/derailed-train-recovery.test.ts tests/e2e/mobile-layout.test.ts --retries=0
+```
+
+Result:
+
+```text
+webpack 5.88.1 compiled with 3 existing performance warnings
+26 passed (4.4m)
+Exit code: 0
+```
+
+Fresh full Jest run:
+
+```text
+97 suites passed
+1,524 tests passed
+Exit code: 0
+```
+
+Fresh world-generation browser benchmark:
+
+```text
+durationMs: 70.89999997615814
+targetMs: 2000
+deterministicReplay: true
+Exit code: 0
+```

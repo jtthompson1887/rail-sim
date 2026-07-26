@@ -11,6 +11,7 @@ import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
 import type { VehicleType } from '../config/VehicleTypes';
 import { ConstructionInspector } from '../ui/ConstructionInspector';
+import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
 import { CompanyHud } from '../ui/CompanyHud';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { FacilityInspector } from '../ui/FacilityInspector';
@@ -50,6 +51,8 @@ export default class EditorUIScene extends Phaser.Scene {
   private firstRouteObjectiveCard!: FirstRouteObjectiveCard;
   private minimapRenderer!: MinimapRenderer;
   private minimapVisible = true;
+  private editorControlsVisible = true;
+  private constructionDecisionActive = false;
   private initialVisible = true;
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
@@ -81,12 +84,14 @@ export default class EditorUIScene extends Phaser.Scene {
   };
 
   private readonly visibleHandler = ({ visible }: { visible: boolean }) => {
+    this.editorControlsVisible = visible;
+    if (!visible) this.constructionDecisionActive = false;
     this.toolbar.setVisible(visible);
     this.propertiesPanel.setVisible(visible);
     this.constructionInspector.setVisible(visible);
     this.companyHud.setVisible(true);
     this.facilityInspector.setVisible(true);
-    this.vehiclePurchasePanel.setVisible(visible);
+    this.syncVehiclePurchaseVisibility();
     this.trainInspector.setVisible(!visible);
     this.firstRouteObjectiveCard.setVisible(true);
     this.validationHint.setVisible(visible);
@@ -100,6 +105,16 @@ export default class EditorUIScene extends Phaser.Scene {
 
   private readonly selectToolHandler = ({ tool }: { tool: string }) => {
     this.toolbar.selectTool(tool as CreateTool);
+  };
+
+  private readonly constructionPreviewHandler = (
+    event: ConstructionPreviewEvent,
+  ) => {
+    this.constructionDecisionActive = this.editorControlsVisible
+      && event.preview !== null
+      && event.phase !== 'idle'
+      && event.phase !== 'committed';
+    this.syncVehiclePurchaseVisibility();
   };
 
   constructor() {
@@ -173,6 +188,7 @@ export default class EditorUIScene extends Phaser.Scene {
     EventBus.on('ui:toolbar-save-state', this.saveStateHandler);
     EventBus.on('ui:toolbar-visible',    this.visibleHandler);
     EventBus.on('ui:toolbar-select-tool', this.selectToolHandler);
+    EventBus.on('construction:preview', this.constructionPreviewHandler);
 
     const startupSaveError = this.initialSaveErrorMessage;
     this.initialSaveErrorMessage = null;
@@ -188,6 +204,7 @@ export default class EditorUIScene extends Phaser.Scene {
       EventBus.off('ui:toolbar-save-state',  this.saveStateHandler);
       EventBus.off('ui:toolbar-visible',     this.visibleHandler);
       EventBus.off('ui:toolbar-select-tool', this.selectToolHandler);
+      EventBus.off('construction:preview', this.constructionPreviewHandler);
       this.toolbar.destroy();
       this.propertiesPanel.destroy();
       this.contextMenu.destroy();
@@ -204,6 +221,12 @@ export default class EditorUIScene extends Phaser.Scene {
 
   update(): void {
     if (this.minimapVisible) this.minimapRenderer.draw();
+  }
+
+  private syncVehiclePurchaseVisibility(): void {
+    this.vehiclePurchasePanel.setVisible(
+      this.editorControlsVisible && !this.constructionDecisionActive,
+    );
   }
 
   /**
