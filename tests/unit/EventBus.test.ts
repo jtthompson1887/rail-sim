@@ -1,4 +1,8 @@
 import { EventBus } from '../../src/services/EventBus';
+import type {
+  FreightPurchaseQuote,
+  FreightPurchaseResult,
+} from '../../src/freight/FreightPurchaseService';
 
 // Re-import to reset singleton state between tests via module re-evaluation
 // EventBus is a singleton, so we test it directly but clear listeners each time.
@@ -130,5 +134,66 @@ describe('EventBus', () => {
     expect(bgm).toHaveBeenCalledWith({ key: 'menu_music' });
     EventBus.off('audio:play-sfx', sfx);
     EventBus.off('audio:play-bgm', bgm);
+  });
+
+  it('round-trips the typed frozen freight quote and purchase result payloads', () => {
+    const quote: FreightPurchaseQuote = Object.freeze({
+      expectedRevision: 7,
+      freightSetId: 'timber-freight-set',
+      trackUUID: 'forest-route',
+      trackT: 0.125,
+      facing: -1,
+      purchasePrice: 90_000,
+      cashAfter: 210_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    const result: FreightPurchaseResult = Object.freeze({
+      ok: true,
+      trainId: 'timber-7',
+      saved: false,
+      saveState: 'unsaved',
+    });
+    const stateListener = jest.fn();
+    const confirmedListener = jest.fn();
+    const resultListener = jest.fn();
+    EventBus.on('ui:freight-purchase-state', stateListener);
+    EventBus.on('freight:purchase-confirmed', confirmedListener);
+    EventBus.on('freight:purchase-result', resultListener);
+
+    EventBus.emit('ui:freight-purchase-state', {
+      quote,
+      cash: 300_000,
+      message: 'Review placement',
+    });
+    EventBus.emit('freight:purchase-confirmed', { quote });
+    EventBus.emit('freight:purchase-result', result);
+
+    expect(stateListener).toHaveBeenCalledWith({
+      quote,
+      cash: 300_000,
+      message: 'Review placement',
+    });
+    expect(confirmedListener).toHaveBeenCalledWith({ quote });
+    expect(resultListener).toHaveBeenCalledWith(result);
+
+    EventBus.off('ui:freight-purchase-state', stateListener);
+    EventBus.off('freight:purchase-confirmed', confirmedListener);
+    EventBus.off('freight:purchase-result', resultListener);
+  });
+
+  it('round-trips the timber-only purchase mode request', () => {
+    const listener = jest.fn();
+    EventBus.on('freight:purchase-mode-requested', listener);
+
+    EventBus.emit('freight:purchase-mode-requested', {
+      freightSetId: 'timber-freight-set',
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      freightSetId: 'timber-freight-set',
+    });
+    EventBus.off('freight:purchase-mode-requested', listener);
   });
 });

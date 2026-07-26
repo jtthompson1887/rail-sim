@@ -6,6 +6,8 @@ import { CommandStack } from '../../src/systems/CommandStack';
 import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
 import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
+import type { FreightPurchaseQuote } from '../../src/freight/FreightPurchaseService';
+import { TrainManager } from '../../src/managers/TrainManager';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -1118,5 +1120,213 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(launchData?.companyCash).toBe(WorldManager.world?.company.cash);
     expect(launchData?.saveState).toBe('saved');
     expect(launchData?.saveErrorMessage).toBeUndefined();
+  });
+
+  it('routes the timber purchase-mode request to the authoritative placement tool', () => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn();
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({
+      freightSetId: 'timber-freight-set',
+    });
+
+    expect(setFreightSetId).toHaveBeenCalledWith('timber-freight-set');
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it('clears stale construction UI/history and selects the committed train without a second save', () => {
+    const scene = new WorldScene() as any;
+    WorldManager.createNew('Committed purchase', 'committed-purchase');
+    const quote: FreightPurchaseQuote = {
+      expectedRevision: 0,
+      freightSetId: 'timber-freight-set',
+      trackUUID: 'forest-route',
+      trackT: 0.1,
+      facing: -1,
+      purchasePrice: 90_000,
+      cashAfter: 910_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    };
+    const purchasedTrain = { getUUID: () => 'purchased-train' };
+    const purchase = jest.fn().mockReturnValue(Object.freeze({
+      ok: true,
+      trainId: 'purchased-train',
+      saved: true,
+      saveState: 'saved',
+    }));
+    scene.freightPurchaseService = { purchase };
+    scene.commandStack = { clear: jest.fn() };
+    scene.selectionManager = {
+      clearSelection: jest.fn(),
+      selectedUUIDs: ['stale-track'],
+    };
+    scene.trainManager = {
+      trains: [purchasedTrain],
+      selectTrain: jest.fn(),
+    };
+    scene.selectedFacilityId = 'sawmill';
+    scene.facilityViews = [{
+      facilityId: 'sawmill',
+      setSelected: jest.fn(),
+    }];
+    const save = jest.spyOn(WorldManager, 'save');
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('committed-purchase');
+
+    scene.freightPurchaseConfirmedHandler({ quote });
+
+    expect(purchase).toHaveBeenCalledTimes(1);
+    const detachedQuote = purchase.mock.calls[0][0];
+    expect(detachedQuote).toEqual(quote);
+    expect(detachedQuote).not.toBe(quote);
+    expect(Object.isFrozen(detachedQuote)).toBe(true);
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+    expect(scene.selectionManager.clearSelection).toHaveBeenCalledTimes(1);
+    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(
+      purchasedTrain,
+    );
+    expect(scene.facilityViews[0].setSelected).toHaveBeenCalledWith(false);
+    expect(scene.selectedFacilityId).toBeNull();
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-undo-state', {
+      canUndo: false,
+      canRedo: false,
+    });
+    expect(emit).toHaveBeenCalledWith('facility:deselected', {
+      facilityId: 'sawmill',
+    });
+    const resultCall = emit.mock.calls.find(
+      ([event]) => event === 'freight:purchase-result',
+    );
+    expect(resultCall?.[1]).toEqual({
+      ok: true,
+      trainId: 'purchased-train',
+      saved: true,
+      saveState: 'saved',
+    });
+    expect(Object.isFrozen(resultCall?.[1])).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does not clear history or selection when purchase precommit fails', () => {
+    const scene = new WorldScene() as any;
+    const quote = Object.freeze({
+      expectedRevision: 0,
+      freightSetId: 'timber-freight-set' as const,
+      trackUUID: 'forest-route',
+      trackT: 0.1,
+      facing: 1 as const,
+      purchasePrice: 90_000 as const,
+      cashAfter: 910_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    scene.freightPurchaseService = {
+      purchase: jest.fn().mockReturnValue({
+        ok: false,
+        blocker: 'live-placement-failed',
+      }),
+    };
+    scene.commandStack = { clear: jest.fn() };
+    scene.selectionManager = { clearSelection: jest.fn() };
+    scene.trainManager = { trains: [], selectTrain: jest.fn() };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.freightPurchaseConfirmedHandler({ quote });
+
+    expect(scene.commandStack.clear).not.toHaveBeenCalled();
+    expect(scene.selectionManager.clearSelection).not.toHaveBeenCalled();
+    expect(scene.trainManager.selectTrain).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(
+      'freight:purchase-result',
+      Object.freeze({
+        ok: false,
+        blocker: 'live-placement-failed',
+      }),
+    );
+  });
+
+  it('adapts TrainManager spawn/place/remove while preserving quote facing', () => {
+    const scene = new WorldScene() as any;
+    const train = { getUUID: () => 'runtime-train' };
+    scene.trainManager = {
+      createFreightTrain: jest.fn().mockReturnValue(train),
+      placeFreightTrain: jest.fn().mockReturnValue(true),
+      removeFreightTrain: jest.fn().mockReturnValue(true),
+    };
+
+    const runtime = scene.createFreightPurchaseRuntimePort();
+
+    expect(runtime.spawn(
+      'runtime-train',
+      'timber-freight-set',
+    )).toBe(train);
+    expect(runtime.place(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    )).toBe(true);
+    runtime.remove('runtime-train');
+    expect(scene.trainManager.placeFreightTrain).toHaveBeenCalledWith(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    );
+    expect(scene.trainManager.removeFreightTrain)
+      .toHaveBeenCalledWith('runtime-train');
+  });
+
+  it('places a provisional freight train on the selected track with exact facing', () => {
+    const { makeScene } = require('../../__mocks__/phaser');
+    const liveTrack = {
+      getCurvePath: jest.fn().mockReturnValue({
+        getPoint: jest.fn().mockReturnValue({ x: 125, y: 250 }),
+      }),
+      getTrackAngle: jest.fn().mockReturnValue(35),
+    };
+    const trackManager = {
+      getTrack: jest.fn().mockReturnValue(liveTrack),
+    };
+    const manager = new TrainManager(
+      makeScene(),
+      trackManager as any,
+      {} as any,
+    );
+    const train = manager.createFreightTrain(
+      'placed-train',
+      'timber-freight-set',
+    );
+    const body = train.getMatterBody();
+    const setPosition = jest.spyOn(body, 'setPosition');
+    const setAngle = jest.spyOn(body, 'setAngle');
+    const setVelocity = jest.spyOn(body, 'setVelocity');
+    const setAngularVelocity = jest.spyOn(body, 'setAngularVelocity');
+
+    expect(manager.placeFreightTrain(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    )).toBe(true);
+
+    expect(trackManager.getTrack).toHaveBeenCalledWith('forest-route');
+    expect(setPosition).toHaveBeenCalledWith(125, 250);
+    expect(setAngle).toHaveBeenCalledWith(215);
+    expect(setVelocity).toHaveBeenCalledWith(0, 0);
+    expect(setAngularVelocity).toHaveBeenCalledWith(0);
+    expect(train.currentTrack).toBe(liveTrack);
+    expect(train.enginePower).toBe(0);
   });
 });

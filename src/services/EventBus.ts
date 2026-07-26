@@ -6,6 +6,10 @@ import type {
   DeletionReviewDTO,
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
+import type {
+  FreightPurchaseQuote,
+  FreightPurchaseResult,
+} from '../freight/FreightPurchaseService';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -69,6 +73,18 @@ interface EventMap {
     economyTick: number;
     constructionIndexBps: number;
   };
+  'freight:purchase-mode-requested': {
+    freightSetId: 'timber-freight-set';
+  };
+  'ui:freight-purchase-state': {
+    quote: FreightPurchaseQuote | null;
+    cash: number;
+    message: string;
+  };
+  'freight:purchase-confirmed': {
+    quote: FreightPurchaseQuote;
+  };
+  'freight:purchase-result': FreightPurchaseResult;
 }
 
 class EventBusClass {

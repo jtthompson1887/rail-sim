@@ -62,6 +62,11 @@ import {
   FacilityView,
   type FacilityViewPlacement,
 } from '../entities/FacilityView';
+import {
+  FreightPurchaseService,
+  type FreightPurchaseQuote,
+  type FreightPurchaseRuntimePort,
+} from '../freight/FreightPurchaseService';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -174,6 +179,7 @@ export default class WorldScene extends Phaser.Scene {
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
   private economySystem = new EconomySystem();
+  private freightPurchaseService!: FreightPurchaseService;
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -336,6 +342,61 @@ export default class WorldScene extends Phaser.Scene {
     placeVehicleTool?.setVehicleType(type);
   };
 
+  private readonly freightPurchaseModeRequestedHandler = ({
+    freightSetId,
+  }: {
+    freightSetId: 'timber-freight-set';
+  }) => {
+    if (GameStateManager.worldMode !== 'create') return;
+    const tool = this.toolRegistry.get(
+      'place-vehicle',
+    ) as PlaceVehicleTool | undefined;
+    tool?.setFreightSetId(freightSetId);
+    EventBus.emit('ui:toolbar-select-tool', { tool: 'place-vehicle' });
+  };
+
+  private readonly freightPurchaseConfirmedHandler = ({
+    quote,
+  }: {
+    quote: FreightPurchaseQuote;
+  }) => {
+    if (GameStateManager.worldMode !== 'create') return;
+    const detachedQuote = Object.freeze({ ...quote });
+    const purchaseResult = this.freightPurchaseService.purchase(
+      detachedQuote,
+    );
+    const detachedResult = Object.freeze({ ...purchaseResult });
+
+    if (purchaseResult.ok) {
+      const report = this.commandStack.onChange;
+      this.commandStack.onChange = undefined;
+      try {
+        this.commandStack.clear();
+      } finally {
+        this.commandStack.onChange = report;
+      }
+      EventBus.emit('ui:toolbar-undo-state', {
+        canUndo: false,
+        canRedo: false,
+      });
+      this.selectionManager.clearSelection();
+      const train = this.trainManager.trains.find(
+        (candidate) => candidate.getUUID() === purchaseResult.trainId,
+      );
+      if (train) this.trainManager.selectTrain(train);
+      this.clearFacilitySelection();
+      this.reportSaveState(purchaseResult.saveState);
+      if (!purchaseResult.saved) {
+        EventBus.emit('ui:toast', {
+          message: SAVE_FAILURE_MESSAGE,
+          type: 'error',
+        });
+      }
+    }
+
+    EventBus.emit('freight:purchase-result', detachedResult);
+  };
+
   constructor() {
     super({ key: 'WorldScene' });
   }
@@ -383,6 +444,10 @@ export default class WorldScene extends Phaser.Scene {
     this.trainManager    = new TrainManager(this, this.trackManager, this.cameraController);
     this.inputManager    = new InputManager(this, this.cameraController);
     this.audioManager    = new AudioManager(this);
+    this.freightPurchaseService = new FreightPurchaseService(
+      WorldManager,
+      this.createFreightPurchaseRuntimePort(),
+    );
 
     // ── Editor systems ─────────────────────────────────────────────────────
     this.snapSystem     = new SnapSystem(this.trackManager);
@@ -411,6 +476,7 @@ export default class WorldScene extends Phaser.Scene {
       this.trackManager,
       this.trainManager,
       this.commandStack,
+      this.freightPurchaseService,
     ));
 
     // Load world content
@@ -435,6 +501,14 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('train:selected', this.trainSelectedHandler);
     EventBus.on('facility:selected', this.facilitySelectedHandler);
     EventBus.on('vehicle:type-changed', this.vehicleTypeChangedHandler);
+    EventBus.on(
+      'freight:purchase-mode-requested',
+      this.freightPurchaseModeRequestedHandler,
+    );
+    EventBus.on(
+      'freight:purchase-confirmed',
+      this.freightPurchaseConfirmedHandler,
+    );
 
     // Expose managers for E2E tests after everything is constructed
     window.__railSimTrainManager = this.trainManager;
@@ -471,6 +545,14 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('train:selected', this.trainSelectedHandler);
       EventBus.off('facility:selected', this.facilitySelectedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
+      EventBus.off(
+        'freight:purchase-mode-requested',
+        this.freightPurchaseModeRequestedHandler,
+      );
+      EventBus.off(
+        'freight:purchase-confirmed',
+        this.freightPurchaseConfirmedHandler,
+      );
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
@@ -690,6 +772,25 @@ export default class WorldScene extends Phaser.Scene {
       { facilityId: source.id, ...source.railAccess },
       { facilityId: destination.id, ...destination.railAccess },
     );
+  }
+
+  private createFreightPurchaseRuntimePort(): FreightPurchaseRuntimePort {
+    return {
+      spawn: (trainId, freightSetId) => (
+        this.trainManager.createFreightTrain(trainId, freightSetId)
+      ),
+      place: (train, trackUUID, trackT, facing) => (
+        this.trainManager.placeFreightTrain(
+          train,
+          trackUUID,
+          trackT,
+          facing,
+        )
+      ),
+      remove: (trainId) => {
+        this.trainManager.removeFreightTrain(trainId);
+      },
+    };
   }
 
   private refreshFacilityPresentation(publishSelected: boolean): void {

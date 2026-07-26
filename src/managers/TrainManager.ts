@@ -74,6 +74,36 @@ export class TrainManager {
     return train;
   }
 
+  placeFreightTrain(
+    train: Train,
+    trackUUID: string,
+    trackT: number,
+    facing: 1 | -1,
+  ): boolean {
+    if (this.trains.indexOf(train) === -1
+      || !Number.isFinite(trackT)
+      || trackT < 0
+      || trackT > 1
+      || (facing !== 1 && facing !== -1)) return false;
+    const track = this.trackManager.getTrack(trackUUID);
+    if (!track) return false;
+    try {
+      const body = train.getMatterBody();
+      const point = track.getCurvePath().getPoint(trackT);
+      body.setPosition(point.x, point.y);
+      train.currentTrack = track;
+      body.setAngle(
+        track.getTrackAngle(body) + (facing === -1 ? 180 : 0),
+      );
+      train.enginePower = 0;
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   removeFreightTrain(trainId: string): boolean {
     const index = this.trains.findIndex(
       (train) => train.getUUID() === trainId,
