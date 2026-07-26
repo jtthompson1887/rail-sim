@@ -20,6 +20,8 @@ import { TerrainMeshBuilder } from './TerrainMeshBuilder';
 import { SceneryInstanceBuilder } from './SceneryInstanceBuilder';
 import { CabInteriorBuilder } from './CabInteriorBuilder';
 import { CabInstrumentBuilder } from './CabInstrumentBuilder';
+import { CabShadowManager } from './CabShadowManager';
+import { CabPostFxManager } from './CabPostFxManager';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -59,6 +61,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private fillLight: HemisphericLight | null = null;
   private interiorLight: PointLight | null = null;
   private reflectionProbe: ReflectionProbe | null = null;
+  private shadowManager: CabShadowManager | null = null;
+  private postFxManager: CabPostFxManager | null = null;
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
   private lastSunAltitudeDeg: number | null = null;
@@ -108,6 +112,12 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
     this.cabInstrumentBuilder?.update(snapshot);
 
+    this.shadowManager?.sync(
+      this.trackMeshBuilder?.getShadowCasters() ?? [],
+      this.sceneryInstanceBuilder?.getShadowCasters() ?? [],
+    );
+    this.postFxManager?.update(snapshot);
+
     this.scene?.render();
   }
 
@@ -124,6 +134,10 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.skyBox = null;
     this.skyMaterial?.dispose();
     this.skyMaterial = null;
+    this.postFxManager?.dispose();
+    this.postFxManager = null;
+    this.shadowManager?.dispose();
+    this.shadowManager = null;
     this.trackMeshBuilder?.dispose();
     this.trackMeshBuilder = null;
     this.terrainMeshBuilder?.dispose();
@@ -178,6 +192,11 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
     this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);
     this.sceneryInstanceBuilder = new SceneryInstanceBuilder(this.scene);
+
+    this.shadowManager = new CabShadowManager(this.scene, this.camera);
+    this.shadowManager.attach(this.sunLight!);
+    this.postFxManager = new CabPostFxManager(this.scene, this.camera);
+    this.postFxManager.attach();
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

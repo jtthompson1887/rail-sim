@@ -94,6 +94,7 @@ export class CabInteriorBuilder {
     }
 
     mesh.isPickable = false;
+    mesh.receiveShadows = false;
     return mesh;
   }
 

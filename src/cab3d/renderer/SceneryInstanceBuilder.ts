@@ -2,6 +2,7 @@ import {
   Scene,
   TransformNode,
   Mesh,
+  AbstractMesh,
   MeshBuilder,
   Vector3,
   Color3,
@@ -86,6 +87,17 @@ export class SceneryInstanceBuilder {
     this.lastScenery = snapshot.scenery;
   }
 
+  /** Return the enabled scenery prototypes that should cast shadows. */
+  getShadowCasters(): AbstractMesh[] {
+    const casters: AbstractMesh[] = [];
+    for (const [type, mesh] of this.prototypes) {
+      if (type !== 'terrain_pond' && mesh.isEnabled()) {
+        casters.push(mesh);
+      }
+    }
+    return casters;
+  }
+
   /** Release the root node, all prototypes and cached materials. */
   dispose(): void {
     this.disposeRoot();
@@ -112,6 +124,7 @@ export class SceneryInstanceBuilder {
       mesh = this.createPrototype(type);
       mesh.parent = this.root;
       mesh.isPickable = false;
+      mesh.receiveShadows = type !== 'terrain_pond';
       this.prototypes.set(type, mesh);
     }
     mesh.setEnabled(true);

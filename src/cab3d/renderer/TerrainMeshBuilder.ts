@@ -89,6 +89,7 @@ export class TerrainMeshBuilder {
     terrain.useVertexColors = true;
     terrain.material = this.createTerrainMaterial();
     terrain.parent = this.root;
+    terrain.receiveShadows = true;
 
     const farRing =
       CabConfig.TERRAIN_RINGS[CabConfig.TERRAIN_RINGS.length - 1];

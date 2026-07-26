@@ -6,6 +6,7 @@ module.exports = {
   testPathIgnorePatterns: ['[\\\\/]tests[\\\\/]e2e[\\\\/]'],
   moduleNameMapper: {
     '^phaser$': '<rootDir>/__mocks__/phaser.js',
+    '^@babylonjs/core$': '<rootDir>/__mocks__/@babylonjs/core.ts',
   },
   coverageProvider: 'v8',
   collectCoverageFrom: [

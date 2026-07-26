@@ -3,6 +3,7 @@ import {
   TransformNode,
   MeshBuilder,
   Mesh,
+  AbstractMesh,
   Vector3,
   Matrix,
   PBRMaterial,
@@ -34,6 +35,11 @@ import { worldToBabylon } from '../model/CabCoordinate';
 export class TrackMeshBuilder {
   private root: TransformNode | null = null;
   private lastRebuildPosition: { x: number; y: number; z: number } | null = null;
+  private leftRail: Mesh | null = null;
+  private rightRail: Mesh | null = null;
+  private leftCap: Mesh | null = null;
+  private rightCap: Mesh | null = null;
+  private sleeperMesh: Mesh | null = null;
 
   constructor(private readonly scene: Scene) {}
 
@@ -69,10 +75,26 @@ export class TrackMeshBuilder {
     this.buildTrackBed(snapshot.path);
   }
 
+  /** Return the rail and sleeper meshes that should cast shadows. */
+  getShadowCasters(): AbstractMesh[] {
+    return [
+      this.leftRail,
+      this.rightRail,
+      this.leftCap,
+      this.rightCap,
+      this.sleeperMesh,
+    ].filter((m): m is Mesh => m !== null);
+  }
+
   /** Release all meshes and GPU buffers. */
   dispose(): void {
     this.root?.dispose();
     this.root = null;
+    this.leftRail = null;
+    this.rightRail = null;
+    this.leftCap = null;
+    this.rightCap = null;
+    this.sleeperMesh = null;
     this.lastRebuildPosition = null;
   }
 
@@ -143,6 +165,15 @@ export class TrackMeshBuilder {
     );
     rightCap.material = capMaterial;
     rightCap.parent = this.root;
+
+    this.leftRail = leftRail;
+    this.rightRail = rightRail;
+    this.leftCap = leftCap;
+    this.rightCap = rightCap;
+
+    for (const mesh of [leftRail, rightRail, leftCap, rightCap]) {
+      mesh.receiveShadows = true;
+    }
   }
 
   private buildTrackBed(path: ReadonlyArray<CabTrackSample>): void {
@@ -238,6 +269,7 @@ export class TrackMeshBuilder {
     );
     mesh.material = this.createSleeperMaterial();
     mesh.parent = this.root;
+    mesh.receiveShadows = true;
 
     const matrices = transforms.map((t) =>
       Matrix.RotationYawPitchRoll(t.yaw, 0, 0).multiply(
@@ -245,6 +277,8 @@ export class TrackMeshBuilder {
       ),
     );
     mesh.thinInstanceAdd(matrices, true);
+
+    this.sleeperMesh = mesh;
   }
 
   private buildPiers(segmentPath: ReadonlyArray<CabTrackSample>): void {

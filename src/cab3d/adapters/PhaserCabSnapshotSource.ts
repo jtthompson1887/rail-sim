@@ -102,6 +102,7 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       path,
       scenery,
       nearestFacilityDistanceM: this.computeNearestFacilityDistance(vehicle),
+      deterministic: GameConfig.CAB3D.DETERMINISTIC,
       elapsedSecs: time / 1000,
       terrain: {
         getHeightAt: (worldX: number, worldY: number) =>

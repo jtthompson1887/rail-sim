@@ -46,4 +46,25 @@ describe('CabConfig', () => {
     expect(CabConfig.FOG_DENSITY).toBe(0.00022);
     expect(CabConfig.FOG_COLOR.r).toBeCloseTo(0.65, 10);
   });
+
+  it('exposes Phase 9 shadow and post-FX tunables', () => {
+    expect(CabConfig.SHADOW_MAP_SIZE).toBe(2048);
+    expect(CabConfig.SHADOW_CASCADES).toBe(3);
+    expect(CabConfig.SHADOW_MAX_Z_M).toBe(200);
+    expect(CabConfig.SHADOW_LAMBDA).toBe(0.7);
+
+    expect(CabConfig.POSTFX_BLOOM_THRESHOLD).toBe(0.85);
+    expect(CabConfig.POSTFX_BLOOM_WEIGHT).toBe(0.35);
+    expect(CabConfig.POSTFX_BLOOM_KERNEL).toBe(48);
+    expect(CabConfig.POSTFX_BLOOM_SCALE).toBe(0.5);
+
+    expect(CabConfig.POSTFX_DOF_FOCUS_DISTANCE_MM).toBe(40000);
+    expect(CabConfig.POSTFX_DOF_FSTOP).toBe(4.0);
+    expect(CabConfig.POSTFX_DOF_FOCAL_LENGTH_MM).toBe(45);
+
+    expect(CabConfig.POSTFX_CHROMATIC_ABERRATION).toBe(12);
+    expect(CabConfig.POSTFX_GRAIN_INTENSITY).toBe(6);
+    expect(CabConfig.POSTFX_MOTION_BLUR_STRENGTH).toBe(0.6);
+    expect(CabConfig.POSTFX_MOTION_BLUR_SAMPLES).toBe(12);
+  });
 });

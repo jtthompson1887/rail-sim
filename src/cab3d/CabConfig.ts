@@ -194,4 +194,38 @@ export const CabConfig = Object.freeze({
    * Mirrors {@link GameConfig.WORLD.CHUNK_SIZE}.
    */
   SCENERY_CHUNK_SIZE_M: 4096,
+
+  /** Shadow map resolution in pixels. */
+  SHADOW_MAP_SIZE: 2048,
+  /** Number of cascades for the cascaded shadow generator. */
+  SHADOW_CASCADES: 3,
+  /** Maximum shadow-casting distance in metres. */
+  SHADOW_MAX_Z_M: 200,
+  /** Cascade split lambda (0 = uniform, 1 = logarithmic). */
+  SHADOW_LAMBDA: 0.7,
+
+  /** MSAA samples for the post-processing pipeline. */
+  POSTFX_SAMPLES: 1,
+  /** Bloom luminance threshold. */
+  POSTFX_BLOOM_THRESHOLD: 0.85,
+  /** Bloom weight in the final image. */
+  POSTFX_BLOOM_WEIGHT: 0.35,
+  /** Bloom blur kernel size. */
+  POSTFX_BLOOM_KERNEL: 48,
+  /** Bloom scale (lower = cheaper). */
+  POSTFX_BLOOM_SCALE: 0.5,
+  /** Depth-of-field focus distance in millimetres. */
+  POSTFX_DOF_FOCUS_DISTANCE_MM: 40000,
+  /** Depth-of-field f-stop. */
+  POSTFX_DOF_FSTOP: 4.0,
+  /** Depth-of-field focal length in millimetres. */
+  POSTFX_DOF_FOCAL_LENGTH_MM: 45,
+  /** Chromatic aberration amount. */
+  POSTFX_CHROMATIC_ABERRATION: 12,
+  /** Film grain intensity. */
+  POSTFX_GRAIN_INTENSITY: 6,
+  /** Motion blur strength. */
+  POSTFX_MOTION_BLUR_STRENGTH: 0.6,
+  /** Motion blur sample count. */
+  POSTFX_MOTION_BLUR_SAMPLES: 12,
 } as const);

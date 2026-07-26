@@ -64,6 +64,9 @@ export interface CabWorldSnapshot {
 
   /** Instanced scenery definitions within the current draw radius. */
   readonly scenery?: ReadonlyArray<SceneryObjectDef>;
+
+  /** When true, all random/animated rendering effects are disabled for determinism. */
+  readonly deterministic?: boolean;
 }
 
 /** Sentinel returned when a snapshot cannot be produced. */
@@ -75,5 +78,6 @@ export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
   path: Object.freeze([]),
   nearestFacilityDistanceM: null,
   scenery: Object.freeze([]),
+  deterministic: false,
   elapsedSecs: 0,
 });
