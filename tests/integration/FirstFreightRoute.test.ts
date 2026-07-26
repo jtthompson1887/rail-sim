@@ -17,6 +17,7 @@ import {
 import type { TrainRuntimeSnapshot } from '../../src/freight/TrainRuntime';
 import type { TrackTopologySnapshot } from '../../src/managers/TrackManager';
 import { WorldManager } from '../../src/managers/WorldManager';
+import { SaveService } from '../../src/services/SaveService';
 import {
   ECONOMY_TICK_MS,
   EconomySystem,
@@ -167,16 +168,65 @@ const purchaseInput = (
   };
 };
 
+interface PurchaseRuntimeProbe {
+  readonly port: FreightPurchaseRuntimePort;
+  readonly spawnCalls: Array<{
+    trainId: string;
+    freightSetId: string;
+  }>;
+  readonly placeCalls: Array<{
+    trainId: string;
+    trackUUID: string;
+    trackT: number;
+    facing: 1 | -1;
+  }>;
+  readonly removeCalls: string[];
+  readonly liveIds: Set<string>;
+}
+
 const purchaseRuntime = (
   overrides: Partial<FreightPurchaseRuntimePort> = {},
-): FreightPurchaseRuntimePort => ({
-  spawn: (trainId) => ({
-    getUUID: () => trainId,
-  } as unknown as Train),
-  place: () => true,
-  remove: () => undefined,
-  ...overrides,
-});
+): PurchaseRuntimeProbe => {
+  const spawnCalls: PurchaseRuntimeProbe['spawnCalls'] = [];
+  const placeCalls: PurchaseRuntimeProbe['placeCalls'] = [];
+  const removeCalls: string[] = [];
+  const liveIds = new Set<string>();
+  const port: FreightPurchaseRuntimePort = {
+    spawn: (trainId, freightSetId) => {
+      spawnCalls.push({ trainId, freightSetId });
+      const spawned = overrides.spawn
+        ? overrides.spawn(trainId, freightSetId)
+        : ({
+          getUUID: () => trainId,
+        } as unknown as Train);
+      if (spawned) liveIds.add(trainId);
+      return spawned;
+    },
+    place: (runtimeTrain, trackUUID, trackT, facing) => {
+      placeCalls.push({
+        trainId: runtimeTrain.getUUID(),
+        trackUUID,
+        trackT,
+        facing,
+      });
+      return overrides.place
+        ? overrides.place(runtimeTrain, trackUUID, trackT, facing)
+        : true;
+    },
+    remove: (trainId) => {
+      removeCalls.push(trainId);
+      liveIds.delete(trainId);
+      overrides.remove?.(trainId);
+    },
+  };
+  return {
+    port,
+    spawnCalls,
+    placeCalls,
+    removeCalls,
+    liveIds,
+  };
+};
 
 const fixedRuntime = (
   overrides: Partial<TrainRuntimeSnapshot> = {},
@@ -278,9 +328,22 @@ describe('Integration: first profitable timber freight route', () => {
       .toBeGreaterThan(completedTrain.operations.lastTripRunningCost);
     expect(completed.firstRouteProgress.profitableDeliveryCompleted)
       .toBe(true);
-    expect(completedSawmill.inventories['structural-timber'].quantity)
-      .toBeGreaterThan(0);
-    expect(consumedLogs).toBeGreaterThan(0);
+    expect(completedSawmill.inventories.logs).toEqual(expect.objectContaining({
+      quantity: 40,
+      recentInflow: 60,
+      recentOutflow: 20,
+    }));
+    expect(completedSawmill.inventories['structural-timber'])
+      .toEqual(expect.objectContaining({
+        quantity: 16,
+        recentInflow: 16,
+        recentOutflow: 0,
+      }));
+    expect(completedSawmill.recipeProgressTicks).toBe(0);
+    expect(consumedLogs / 10).toBe(2);
+    expect(
+      completedSawmill.inventories['structural-timber'].quantity / 8,
+    ).toBe(consumedLogs / 10);
     expect(
       initialLogs + forestProduction,
     ).toBe(
@@ -312,15 +375,23 @@ describe('Integration: first profitable timber freight route', () => {
     expect(train(harness, trainId).cargo?.units).toBe(60);
     harness.setRuntime(trainId, midpointRuntime(harness));
     harness.advanceTicks(1);
-    harness.setRuntime(trainId, {
-      speedWorldUnitsPerSecond: 0,
-      throttle: 0,
-    });
+    expect(harness.runtimeSnapshot(trainId)).toEqual(expect.objectContaining({
+      speedWorldUnitsPerSecond: 12,
+      throttle: 1,
+    }));
     expected = phaseSnapshot(harness, trainId);
     expect(expected.trackT).toBe(0.5);
     expect(expected.operations.currentTripRunningCost).toBe(20);
     harness.saveReload();
     expect(phaseSnapshot(harness, trainId)).toEqual(expected);
+    expect(harness.runtimeSnapshot(trainId)).toEqual(expect.objectContaining({
+      trackUUID: expected.trackUUID,
+      trackT: expected.trackT,
+      facing: expected.facing,
+      speedWorldUnitsPerSecond: 0,
+      throttle: 0,
+      derailed: false,
+    }));
     harness.advanceTicks(1);
     expect(train(harness, trainId).cargo?.units).toBe(60);
     expect(train(harness, trainId).operations.currentTripRunningCost).toBe(20);
@@ -445,9 +516,10 @@ describe('Integration: first profitable timber freight route', () => {
   it('rejects stale, duplicate-ID, live, and install purchase failures atomically', () => {
     harness.buildConnectedRoute();
     let nextId = 1;
+    const serviceProbe = purchaseRuntime();
     const service = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime(),
+      serviceProbe.port,
       () => `failure-matrix-${nextId++}`,
     );
     const staleQuote = service.quote(purchaseInput(harness));
@@ -459,13 +531,26 @@ describe('Integration: first profitable timber freight route', () => {
     });
     expect(JSON.stringify(harness.world)).toBe(before);
 
-    const first = service.purchase(service.quote(purchaseInput(harness)));
+    const firstQuote = service.quote(purchaseInput(harness));
+    const first = service.purchase(firstQuote);
     expect(first.ok).toBe(true);
     if (first.ok === false) throw new Error(first.blocker);
+    expect(serviceProbe.spawnCalls).toEqual([{
+      trainId: first.trainId,
+      freightSetId: 'timber-freight-set',
+    }]);
+    expect(serviceProbe.placeCalls).toEqual([{
+      trainId: first.trainId,
+      trackUUID: firstQuote.trackUUID,
+      trackT: firstQuote.trackT,
+      facing: firstQuote.facing,
+    }]);
+    expect(serviceProbe.removeCalls).toEqual([]);
+    expect([...serviceProbe.liveIds]).toEqual([first.trainId]);
 
     const duplicateService = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime(),
+      purchaseRuntime().port,
       () => first.trainId,
     );
     before = JSON.stringify(harness.world);
@@ -479,44 +564,72 @@ describe('Integration: first profitable timber freight route', () => {
 
     const liveFailures: Array<{
       blocker: 'live-spawn-failed' | 'live-placement-failed';
-      runtime: FreightPurchaseRuntimePort;
+      probe: PurchaseRuntimeProbe;
     }> = [
       {
         blocker: 'live-spawn-failed',
-        runtime: purchaseRuntime({ spawn: () => null }),
+        probe: purchaseRuntime({ spawn: () => null }),
       },
       {
         blocker: 'live-placement-failed',
-        runtime: purchaseRuntime({ place: () => false }),
+        probe: purchaseRuntime({ place: () => false }),
       },
     ];
-    liveFailures.forEach(({ blocker, runtime }, index) => {
+    liveFailures.forEach(({ blocker, probe }, index) => {
+      const trainId = `live-failure-${index}`;
       const failed = new FreightPurchaseService(
         WorldManager,
-        runtime,
-        () => `live-failure-${index}`,
+        probe.port,
+        () => trainId,
       );
+      const quote = failed.quote(purchaseInput(harness));
       before = JSON.stringify(harness.world);
-      expect(failed.purchase(failed.quote(purchaseInput(harness)))).toEqual({
+      expect(failed.purchase(quote)).toEqual({
         ok: false,
         blocker,
       });
+      expect(probe.spawnCalls).toEqual([{
+        trainId,
+        freightSetId: 'timber-freight-set',
+      }]);
+      expect(probe.placeCalls).toEqual(index === 0 ? [] : [{
+        trainId,
+        trackUUID: quote.trackUUID,
+        trackT: quote.trackT,
+        facing: quote.facing,
+      }]);
+      expect(probe.removeCalls).toEqual([trainId]);
+      expect([...probe.liveIds]).toEqual([]);
       expect(JSON.stringify(harness.world)).toBe(before);
     });
 
+    const installProbe = purchaseRuntime();
     const install = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime(),
+      installProbe.port,
       () => 'install-failure',
     );
     const apply = jest.spyOn(WorldManager, 'applyOperationsBatch')
       .mockReturnValue(false);
+    const installQuote = install.quote(purchaseInput(harness));
     before = JSON.stringify(harness.world);
-    expect(install.purchase(install.quote(purchaseInput(harness)))).toEqual({
+    expect(install.purchase(installQuote)).toEqual({
       ok: false,
       blocker: 'world-install-failed',
     });
     apply.mockRestore();
+    expect(installProbe.spawnCalls).toEqual([{
+      trainId: 'install-failure',
+      freightSetId: 'timber-freight-set',
+    }]);
+    expect(installProbe.placeCalls).toEqual([{
+      trainId: 'install-failure',
+      trackUUID: installQuote.trackUUID,
+      trackT: installQuote.trackT,
+      facing: installQuote.facing,
+    }]);
+    expect(installProbe.removeCalls).toEqual(['install-failure']);
+    expect([...installProbe.liveIds]).toEqual([]);
     expect(JSON.stringify(harness.world)).toBe(before);
   });
 
@@ -525,7 +638,7 @@ describe('Integration: first profitable timber freight route', () => {
     let nextId = 1;
     const service = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime(),
+      purchaseRuntime().port,
       () => `affordability-${nextId++}`,
     );
     const save = jest.spyOn(WorldManager, 'save').mockReturnValueOnce(false);
@@ -546,6 +659,10 @@ describe('Integration: first profitable timber freight route', () => {
     }).toEqual(committed);
     expect(retried.metadata.updatedAt)
       .toBeGreaterThanOrEqual(committed.metadata.updatedAt);
+    const persisted = clonePlainData(retried);
+    expect(SaveService.loadWorld(persisted.id)).toEqual(persisted);
+    WorldManager.reset();
+    expect(WorldManager.load(persisted.id)).toEqual(persisted);
 
     while (harness.world.company.cash >= 90_000) {
       const result = service.purchase(service.quote(purchaseInput(harness)));

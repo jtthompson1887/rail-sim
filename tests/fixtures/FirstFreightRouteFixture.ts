@@ -181,6 +181,7 @@ export interface FirstRouteHarness {
     trainId: string,
     snapshot: Partial<TrainRuntimeSnapshot>,
   ): void;
+  runtimeSnapshot(trainId: string): TrainRuntimeSnapshot;
   advanceTicks(count: number): void;
   saveReload(): void;
   readonly world: WorldData;
@@ -417,6 +418,12 @@ class FirstRouteHarnessImpl implements FirstRouteHarness {
       ...clonePlainData(snapshot),
       trainId,
     });
+  }
+
+  runtimeSnapshot(trainId: string): TrainRuntimeSnapshot {
+    const runtime = this.runtimeByTrainId.get(trainId);
+    if (!runtime) throw new Error(`Missing runtime train ${trainId}`);
+    return clonePlainData(runtime);
   }
 
   advanceTicks(count: number): void {

@@ -866,7 +866,39 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(manager.getTrack('fresh-history-track')).toBeDefined();
     expect(stack.undo()).toBe(true);
     expect(stack.undo()).toBe(false);
-    expect(stack.redo()).toBe(true);
+    const beforeStaleRedo = JSON.stringify(WorldManager.world);
+    const liveBeforeStaleRedo = manager.getAllTracks()
+      .map((track) => track.getUUID())
+      .sort();
+    expect(new EconomySystem(WorldManager).update(
+      1_000,
+      true,
+      [],
+    ).authoritativeChanged).toBe(true);
+    const afterOperations = JSON.stringify(WorldManager.world);
+    expect(afterOperations).not.toBe(beforeStaleRedo);
+
+    expect(stack.redo()).toBe(false);
+    expect(JSON.stringify(WorldManager.world)).toBe(afterOperations);
+    expect(manager.getAllTracks().map(
+      (track) => track.getUUID(),
+    ).sort()).toEqual(liveBeforeStaleRedo);
+    expect(manager.getTrack('fresh-history-track')).toBeUndefined();
+
+    const newestQuote = construction.createQuote(
+      { x: 0, y: 1_000 },
+      { x: 300, y: 1_000 },
+      'newest-history-track',
+    );
+    if (!newestQuote) throw new Error('Missing newest history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      newestQuote,
+    ))).toBe(true);
+    expect(manager.getTrack('newest-history-track')).toBeDefined();
+    expect(stack.canRedo).toBe(false);
   });
 
   it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
