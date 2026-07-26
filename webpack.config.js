@@ -7,7 +7,7 @@ module.exports = (env = {}) => ({
     entry: './src/main.ts',
     output: {
         filename: 'main.js',
-        path: path.resolve(__dirname, 'dist'),
+        path: path.resolve(__dirname, 'dist/client'),
     },
     resolve: {
         extensions: ['.tsx', '.ts', '.js'],
@@ -49,8 +49,8 @@ module.exports = (env = {}) => ({
         new CopyPlugin({
             patterns: [
                 { from: 'src/assets', to: 'assets' },
-                { from: 'src/hosting/worker.js', to: 'server/index.js' },
-                { from: '.openai/hosting.json', to: '.openai/hosting.json' },
+                { from: 'src/hosting/worker.js', to: '../server/index.js' },
+                { from: '.openai/hosting.json', to: '../.openai/hosting.json' },
             ],
         })
     ],
