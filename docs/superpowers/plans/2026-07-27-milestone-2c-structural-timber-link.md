@@ -278,6 +278,8 @@ git commit -m "feat: report honest railway operating profit"
 - Modify: `src/freight/FreightSetCatalog.ts`
 - Modify: `src/freight/FreightPurchaseService.ts`
 - Modify: `src/freight/RunningCostSystem.ts`
+- Modify: `src/freight/FreightPresentation.ts`
+- Modify: `src/freight/FirstRouteObjective.ts`
 - Modify: `src/systems/tools/PlaceVehicleTool.ts`
 - Modify: `src/ui/VehiclePurchasePanel.ts`
 - Modify: `src/services/EventBus.ts`
@@ -285,6 +287,8 @@ git commit -m "feat: report honest railway operating profit"
 - Modify: `tests/unit/FreightSetCatalog.test.ts`
 - Modify: `tests/unit/FreightPurchaseService.test.ts`
 - Modify: `tests/unit/RunningCostSystem.test.ts`
+- Modify: `tests/unit/FreightPresentation.test.ts`
+- Modify: `tests/unit/FirstRouteObjective.test.ts`
 - Modify: `tests/unit/EventBus.test.ts`
 - Modify: `tests/unit/PlaceVehicleTool.test.ts`
 - Modify: `tests/unit/VehiclePurchasePanel.test.ts`
@@ -307,7 +311,7 @@ Require:
 Run:
 
 ```powershell
-npx jest tests/unit/FreightSetCatalog.test.ts tests/unit/FreightPurchaseService.test.ts tests/unit/RunningCostSystem.test.ts tests/unit/EventBus.test.ts tests/unit/PlaceVehicleTool.test.ts tests/unit/VehiclePurchasePanel.test.ts tests/unit/Train.test.ts tests/unit/TrainManager.test.ts tests/integration/GeneratedWorldStart.test.ts --runInBand --coverage=false
+npx jest tests/unit/FreightSetCatalog.test.ts tests/unit/FreightPurchaseService.test.ts tests/unit/RunningCostSystem.test.ts tests/unit/FreightPresentation.test.ts tests/unit/FirstRouteObjective.test.ts tests/unit/EventBus.test.ts tests/unit/PlaceVehicleTool.test.ts tests/unit/VehiclePurchasePanel.test.ts tests/unit/Train.test.ts tests/unit/TrainManager.test.ts tests/integration/GeneratedWorldStart.test.ts --runInBand --coverage=false
 ```
 
 Expected: FAIL on the old timber-only ID and compatibility.
@@ -320,6 +324,9 @@ Expected: FAIL on the old timber-only ID and compatibility.
   Sawmill; this milestone reuses that train and does not add a second purchase
   path.
 - Update player copy to `General Flatbed Set`.
+- Mechanically update the current objective and presentation guards to the new
+  ID/name so schema-8 trains remain inspectable; Task 9 still replaces their
+  Logs/Forest/Sawmill-specific cargo logic.
 - Remove every production occurrence of `timber-freight-set`,
   `TIMBER_FREIGHT`, and `Timber Freight Set`.
 
@@ -334,7 +341,7 @@ Expected: tests PASS and scan returns no production matches.
 **Step 3: Commit**
 
 ```powershell
-git add src/freight/FreightSetCatalog.ts src/freight/FreightPurchaseService.ts src/freight/RunningCostSystem.ts src/systems/tools/PlaceVehicleTool.ts src/ui/VehiclePurchasePanel.ts src/services/EventBus.ts src/scenes/WorldScene.ts tests/unit/FreightSetCatalog.test.ts tests/unit/FreightPurchaseService.test.ts tests/unit/RunningCostSystem.test.ts tests/unit/EventBus.test.ts tests/unit/PlaceVehicleTool.test.ts tests/unit/VehiclePurchasePanel.test.ts tests/unit/Train.test.ts tests/unit/TrainManager.test.ts tests/integration/GeneratedWorldStart.test.ts
+git add src/freight/FreightSetCatalog.ts src/freight/FreightPurchaseService.ts src/freight/RunningCostSystem.ts src/freight/FreightPresentation.ts src/freight/FirstRouteObjective.ts src/systems/tools/PlaceVehicleTool.ts src/ui/VehiclePurchasePanel.ts src/services/EventBus.ts src/scenes/WorldScene.ts tests/unit/FreightSetCatalog.test.ts tests/unit/FreightPurchaseService.test.ts tests/unit/RunningCostSystem.test.ts tests/unit/FreightPresentation.test.ts tests/unit/FirstRouteObjective.test.ts tests/unit/EventBus.test.ts tests/unit/PlaceVehicleTool.test.ts tests/unit/VehiclePurchasePanel.test.ts tests/unit/Train.test.ts tests/unit/TrainManager.test.ts tests/integration/GeneratedWorldStart.test.ts
 git commit -m "refactor: generalise the flatbed freight set"
 ```
 
@@ -635,8 +642,10 @@ git commit -m "feat: generate an affordable prefab extension"
 - Modify: `src/services/EventBus.ts`
 - Modify: `src/scenes/WorldScene.ts`
 - Modify: `src/scenes/EditorUIScene.ts`
+- Modify: `src/systems/InputManager.ts`
 - Modify: `tests/unit/EventBus.test.ts`
 - Modify: `tests/unit/EditorUIScene.test.ts`
+- Modify: `tests/unit/InputManager.test.ts`
 - Modify: `tests/unit/WorldSceneEditorGuards.test.ts`
 
 **Step 1: Write failing objective tests**
@@ -678,7 +687,7 @@ Require:
 Run:
 
 ```powershell
-npx jest tests/unit/FreightObjective.test.ts tests/unit/FreightObjectiveCard.test.ts tests/unit/EventBus.test.ts tests/unit/EditorUIScene.test.ts tests/unit/WorldSceneEditorGuards.test.ts --runInBand --coverage=false
+npx jest tests/unit/FreightObjective.test.ts tests/unit/FreightObjectiveCard.test.ts tests/unit/EventBus.test.ts tests/unit/EditorUIScene.test.ts tests/unit/InputManager.test.ts tests/unit/WorldSceneEditorGuards.test.ts --runInBand --coverage=false
 ```
 
 Expected: FAIL until the moved/generalised implementation exists.
@@ -692,13 +701,15 @@ Expected: FAIL until the moved/generalised implementation exists.
 - On second completion, emit one success toast containing product,
   destination, revenue, and trip profit.
 - Preserve pointer containment, responsive layout, and teardown listeners.
+- Replace the old objective selector in `GAMEPLAY_INPUT_PANELS` so keyboard
+  focus over the renamed card remains shielded from train/world controls.
 
 Run the focused command. Expected: PASS.
 
 **Step 3: Commit**
 
 ```powershell
-git add src/freight/FreightObjective.ts src/ui/FreightObjectiveCard.ts src/services/EventBus.ts src/scenes/WorldScene.ts src/scenes/EditorUIScene.ts tests/unit/FreightObjective.test.ts tests/unit/FreightObjectiveCard.test.ts tests/unit/EventBus.test.ts tests/unit/EditorUIScene.test.ts tests/unit/WorldSceneEditorGuards.test.ts
+git add src/freight/FreightObjective.ts src/ui/FreightObjectiveCard.ts src/services/EventBus.ts src/scenes/WorldScene.ts src/scenes/EditorUIScene.ts src/systems/InputManager.ts tests/unit/FreightObjective.test.ts tests/unit/FreightObjectiveCard.test.ts tests/unit/EventBus.test.ts tests/unit/EditorUIScene.test.ts tests/unit/InputManager.test.ts tests/unit/WorldSceneEditorGuards.test.ts
 git add -u
 git commit -m "feat: guide the structural timber objective"
 ```
@@ -878,13 +889,16 @@ one case at 375×667:
 - use genuine W/S input, stop, load, drive, and unload;
 - assert one grant, rail profit separated from bonus income, and the objective
   transition;
+- use grant cash to buy/place a second flatbed on the connected Forest route,
+  switch control from the moving first train to it, and prove the first
+  train's engine power becomes zero before returning control to the journey
+  train;
 - construct a player-chosen Sawmill-to-Prefab line;
 - wait through real fixed ticks for processing;
 - load structural timber in the same selected train;
 - drive/unload and assert the exact delivery product/destination/profit;
 - pause before conservation assertions;
 - save/reload and assert schema/progress/cash/ledger/cargo/inventories;
-- switch between two trains once and prove the previous engine power is zero;
 - assert no console/page errors, no clipped critical action, and one current
   objective step.
 
@@ -997,7 +1011,8 @@ Required:
 
 **Step 3: Record evidence**
 
-The review document records exact commit SHA, test counts, coverage,
+The review document records the exact pre-evidence implementation SHA, test
+counts, coverage,
 performance values, three seed outcomes, mobile viewport result, production
 security scan, reviewer findings/dispositions, and known deferred scope. Do not
 claim a gate that is not represented by fresh command output.
@@ -1009,8 +1024,11 @@ git add docs/superpowers/reviews/2026-07-27-milestone-2c-structural-timber-evide
 git commit -m "docs: record milestone 2c acceptance evidence"
 ```
 
-Run the production build and security tests once more after this documentation
-commit so the deploy SHA itself is verified.
+The evidence commit changes the prospective deploy SHA. Therefore rerun every
+command in Step 2, not only the build/security subset, against the clean
+post-evidence `HEAD`. Capture that final SHA and fresh results for the task
+handoff. The evidence document intentionally does not claim to contain its own
+self-referential commit SHA.
 
 ## Task 15: Publish the Exact Verified Commit through Sites
 
@@ -1027,7 +1045,8 @@ commit so the deploy SHA itself is verified.
 - Confirm the worktree is clean.
 - Push the exact verified commit state required by Sites.
 - Package the production output with the Sites skill helper.
-- Ensure the archive/source commit is the same SHA recorded in evidence.
+- Ensure the archive/source commit is the post-evidence SHA that passed the
+  second complete gate run.
 
 **Step 2: Save and deploy**
 
