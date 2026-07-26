@@ -33,3 +33,16 @@ Phase 1 build requirements:
 - `tsconfig.json` uses `module: esnext` so dynamic imports survive to webpack.
 - `jest.config.js` excludes `src/cab3d/renderer/**/*.ts` from coverage and limits test discovery to `tests/unit` and `tests/integration`.
 - Toggle key is `C` in play mode; controlled by `GameConfig.CAB3D.TOGGLE_KEY`.
+
+### Phase 13 final gates
+
+When closing a cab3d milestone, also run:
+
+```powershell
+npx playwright test --retries=0
+npm run benchmark:construction-drag
+npm run benchmark:world-generation
+git diff --check
+```
+
+Record `dist/main.js` size and compare it to the Phase 1 baseline (or note when no prior baseline exists). The `dist/cab3d.*.chunk.js` lazy chunk should be present and well over 500 KB.
