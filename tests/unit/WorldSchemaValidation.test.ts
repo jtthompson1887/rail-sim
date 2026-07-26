@@ -70,8 +70,20 @@ function currentWorld() {
     opportunityVersion: 1,
     resolvedAttempt: 1,
     sites: [
-      { id: 'site-a', label: 'A', x: -500, y: 0, footprintRadius: 192 },
-      { id: 'site-b', label: 'B', x: 500, y: 0, footprintRadius: 192 },
+      {
+        id: 'managed-forest',
+        label: 'Managed Forest',
+        x: -500,
+        y: 0,
+        footprintRadius: 192,
+      },
+      {
+        id: 'sawmill',
+        label: 'Sawmill',
+        x: 500,
+        y: 0,
+        footprintRadius: 192,
+      },
     ],
     corridors: [
       {

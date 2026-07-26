@@ -77,7 +77,7 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 6 with separate zeroed revisions and a conserved opening balance', () => {
+    it('creates schema 6 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
       expect(w.schemaVersion).toBe(6);
       expect(w.revision).toBe(0);
@@ -101,21 +101,35 @@ describe('WorldManager', () => {
           referenceId: 'opening-balance',
         }],
       });
-      expect(w.economy).toEqual({
-        economyVersion: 1,
-        tick: 0,
-        facilities: [],
-        market: {
-          constructionIndexBps: 10_000,
-          regionalDemandBpsByProduct: {
-            logs: 10_000,
-            'structural-timber': 10_000,
-            'limestone-aggregate': 10_000,
-            cement: 10_000,
-            steel: 10_000,
-            'building-modules': 10_000,
-          },
-        },
+      expect(w.economy.economyVersion).toBe(1);
+      expect(w.economy.tick).toBe(0);
+      expect(w.economy.facilities.map(
+        (facility: any) => facility.id,
+      )).toEqual([
+        'managed-forest',
+        'sawmill',
+        'quarry',
+        'cement-works',
+        'port-interchange',
+        'prefabrication-plant',
+        'town-construction-market',
+      ]);
+      expect(w.economy.market.constructionIndexBps).toBe(10_000);
+      expect(Object.keys(
+        w.economy.market.regionalDemandBpsByProduct,
+      ).sort()).toEqual([
+        'building-modules',
+        'cement',
+        'limestone-aggregate',
+        'logs',
+        'steel',
+        'structural-timber',
+      ]);
+      Object.values(
+        w.economy.market.regionalDemandBpsByProduct,
+      ).forEach((factor: any) => {
+        expect(factor).toBeGreaterThanOrEqual(8_000);
+        expect(factor).toBeLessThanOrEqual(12_000);
       });
       expect(w).not.toHaveProperty('scenarios');
       expect(w).not.toHaveProperty('seed');
@@ -671,5 +685,29 @@ describe('createEmptyWorld()', () => {
     economy.market.regionalDemandBpsByProduct.logs = 8_000;
     expect(world.economy.tick).toBe(0);
     expect(world.economy.market.regionalDemandBpsByProduct.logs).toBe(10_000);
+  });
+
+  it('deep-clones the starter opportunity so caller aliases cannot mutate the world', () => {
+    const opportunity = makeStarterOpportunity('opportunity-alias-seed');
+    const world = createEmptyWorld(
+      'Opportunity alias',
+      'opportunity-alias-seed',
+      'temperate',
+      opportunity,
+    );
+    const originalSiteX = world.starterOpportunity.sites[0].x;
+    const originalWaypointX =
+      world.starterOpportunity.corridors[0].waypoints[0].x;
+
+    expect(world.starterOpportunity).not.toBe(opportunity);
+    expect(world.starterOpportunity.sites).not.toBe(opportunity.sites);
+    expect(world.starterOpportunity.corridors)
+      .not.toBe(opportunity.corridors);
+    opportunity.sites[0].x += 100;
+    opportunity.corridors[0].waypoints[0].x += 100;
+
+    expect(world.starterOpportunity.sites[0].x).toBe(originalSiteX);
+    expect(world.starterOpportunity.corridors[0].waypoints[0].x)
+      .toBe(originalWaypointX);
   });
 });

@@ -85,7 +85,16 @@ describe('WorldOpportunityGenerator', () => {
     if (!result.ok) return;
 
     const { sites, corridors } = result.opportunity;
-    expect(sites).toHaveLength(2);
+    expect(sites).toEqual([
+      expect.objectContaining({
+        id: 'managed-forest',
+        label: 'Managed Forest',
+      }),
+      expect.objectContaining({
+        id: 'sawmill',
+        label: 'Sawmill',
+      }),
+    ]);
     expect(corridors).toHaveLength(2);
     for (const site of sites) {
       expect(Math.abs(site.x) + site.footprintRadius).toBeLessThanOrEqual(8192);
@@ -93,6 +102,16 @@ describe('WorldOpportunityGenerator', () => {
     }
     expect(corridors[0].waypoints).not.toEqual(corridors[1].waypoints);
     expect(corridors[0].dominantTradeoff).not.toBe(corridors[1].dominantTradeoff);
+    corridors.forEach((corridor) => {
+      expect(corridor.waypoints[0]).toEqual({
+        x: sites[0].x,
+        y: sites[0].y,
+      });
+      expect(corridor.waypoints[corridor.waypoints.length - 1]).toEqual({
+        x: sites[1].x,
+        y: sites[1].y,
+      });
+    });
 
     const short = corridors.find((corridor) => corridor.dominantTradeoff === 'short-steep')!;
     const flat = corridors.find((corridor) => corridor.dominantTradeoff === 'long-flat')!;

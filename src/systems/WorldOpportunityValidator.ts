@@ -11,6 +11,7 @@ import type {
   StarterOpportunityDef,
   WorldGenerationConfigDef,
 } from '../config/WorldData';
+import { validateStarterOpportunityData } from '../config/WorldData';
 import {
   ConstructionAnalyzer,
   type ConstructionAnalysisDetail,
@@ -34,14 +35,26 @@ function siteRelief(
   x: number,
   y: number,
   radius: number,
-): number {
+): number | null {
   const samples: number[] = [];
   for (const dx of [-radius, 0, radius]) {
     for (const dy of [-radius, 0, radius]) {
-      samples.push(terrain.getHeightAt(x + dx, y + dy));
+      const sample = terrain.getHeightAt(x + dx, y + dy);
+      if (!Number.isFinite(sample)) return null;
+      samples.push(sample);
     }
   }
   return Math.max(...samples) - Math.min(...samples);
+}
+
+export function validateGeneratedOpportunityData(
+  value: unknown,
+): value is StarterOpportunityDef {
+  return validateStarterOpportunityData(value)
+    && value.sites[0].id === 'managed-forest'
+    && value.sites[0].label === 'Managed Forest'
+    && value.sites[1].id === 'sawmill'
+    && value.sites[1].label === 'Sawmill';
 }
 
 function corridorMetrics(
@@ -118,7 +131,10 @@ export class WorldOpportunityValidator {
       || opportunity.resolvedAttempt < 1
       || opportunity.resolvedAttempt > MAX_OPPORTUNITY_ATTEMPTS
       || opportunity.sites.length !== 2
-      || opportunity.sites[0].id === opportunity.sites[1].id
+      || opportunity.sites[0].id !== 'managed-forest'
+      || opportunity.sites[0].label !== 'Managed Forest'
+      || opportunity.sites[1].id !== 'sawmill'
+      || opportunity.sites[1].label !== 'Sawmill'
       || opportunity.corridors.length !== 2
       || !Number.isFinite(opportunity.recommendedCamera.x)
       || !Number.isFinite(opportunity.recommendedCamera.y)
@@ -128,13 +144,19 @@ export class WorldOpportunityValidator {
     }
 
     for (const site of opportunity.sites) {
+      const relief = siteRelief(
+        this.terrain,
+        site.x,
+        site.y,
+        site.footprintRadius,
+      );
       if (!Number.isFinite(site.x)
         || !Number.isFinite(site.y)
         || site.footprintRadius !== WorldGenerationConfig.SITE_FOOTPRINT_RADIUS
         || Math.abs(site.x) + site.footprintRadius > WorldGenerationConfig.WORLD_HALF_WIDTH
         || Math.abs(site.y) + site.footprintRadius > WorldGenerationConfig.WORLD_HALF_HEIGHT
-        || siteRelief(this.terrain, site.x, site.y, site.footprintRadius)
-          > WorldGenerationConfig.MAX_SITE_RELIEF) {
+        || relief === null
+        || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
         return invalid('unusable planning site');
       }
     }

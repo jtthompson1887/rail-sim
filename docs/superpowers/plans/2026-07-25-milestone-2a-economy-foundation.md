@@ -874,7 +874,7 @@ git commit -m "feat: persist the schema six railway economy"
 - Produces:
   `WorldEconomyGenerator.generate(config, opportunity): EconomyGenerationResult`.
 
-- [ ] **Step 1: Write deterministic generation tests**
+- [x] **Step 1: Write deterministic generation tests**
 
 Prove:
 
@@ -888,7 +888,7 @@ Prove:
 - bounded exhaustion returns `economy-exhausted` and persists no partial world;
 - a new world has no tracks, trains, stations, or scenarios field.
 
-- [ ] **Step 2: Run generation tests and verify failure**
+- [x] **Step 2: Run generation tests and verify failure**
 
 ```powershell
 npx jest tests/unit/WorldOpportunityGenerator.test.ts tests/unit/WorldEconomyGenerator.test.ts tests/integration/GeneratedWorldStart.test.ts --runInBand --coverage=false
@@ -897,7 +897,7 @@ npx jest tests/unit/WorldOpportunityGenerator.test.ts tests/unit/WorldEconomyGen
 Expected: fail because planning sites are generic and no economy generator
 exists.
 
-- [ ] **Step 3: Name the initial opportunity without changing its geometry**
+- [x] **Step 3: Name the initial opportunity without changing its geometry**
 
 Change only the two site IDs/labels:
 
@@ -909,7 +909,7 @@ Change only the two site IDs/labels:
 Keep corridor witnesses, camera, feasibility, topology cost, and deterministic
 attempt selection unchanged.
 
-- [ ] **Step 4: Implement bounded secondary-facility placement**
+- [x] **Step 4: Implement bounded secondary-facility placement**
 
 Use a separate seeded stream `${seed}:economy`. Scan at most 256 jittered grid
 candidates, reject footprints over the existing maximum site relief, enforce a
@@ -928,7 +928,7 @@ Do not generate track or surveyed routes for these later opportunities. Create
 rail-access points at the facility centres for this milestone; Milestone 2B
 uses the persisted radius for transfer proximity.
 
-- [ ] **Step 5: Generate initial economy and market state**
+- [x] **Step 5: Generate initial economy and market state**
 
 Instantiate slots from facility definitions. Resource outputs start at half
 target stock so the first world is active but not full. Processing inputs and
@@ -936,13 +936,13 @@ outputs start empty. Port steel starts at target stock as an explicit import
 boundary. Regional product factors derive deterministically within
 `8_000..12_000`.
 
-- [ ] **Step 6: Make world creation atomic across both generators**
+- [x] **Step 6: Make world creation atomic across both generators**
 
 `WorldManager.tryCreateNew` must generate opportunity, then economy, then create
 and validate one detached schema-6 world, then save it once. A failure before
 the successful save leaves the active world and storage unchanged.
 
-- [ ] **Step 7: Run generation, schema, and worst-case benchmarks**
+- [x] **Step 7: Run generation, schema, and worst-case benchmarks**
 
 ```powershell
 npx jest tests/unit/WorldOpportunityGenerator.test.ts tests/unit/WorldEconomyGenerator.test.ts tests/integration/GeneratedWorldStart.test.ts tests/unit/WorldSchemaValidation.test.ts --runInBand --coverage=false
@@ -952,7 +952,7 @@ npm run benchmark:world-generation
 Expected: tests pass and generation remains below the existing 2-second local
 target with explicit candidate caps.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add src/economy/WorldEconomyGenerator.ts src/systems/WorldOpportunityGenerator.ts src/systems/WorldOpportunityValidator.ts src/managers/WorldManager.ts src/config/WorldGeneration.ts tests

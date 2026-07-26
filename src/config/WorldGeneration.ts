@@ -2,6 +2,7 @@ import { GameConfig } from './GameConfig';
 
 export const MAX_OPPORTUNITY_ATTEMPTS = 12;
 export const MAX_SITE_CANDIDATES_PER_ATTEMPT = 256;
+export const MAX_ECONOMY_SITE_CANDIDATES = 256;
 export const OPPORTUNITY_CAMERA_PADDING = 160;
 
 export const WorldGenerationConfig = {
@@ -11,6 +12,8 @@ export const WorldGenerationConfig = {
   SITE_SEARCH_MARGIN: 640,
   MIN_SITE_SEPARATION: 1_600,
   MAX_SITE_SEPARATION: 4_200,
+  MIN_FACILITY_SEPARATION: 1_000,
+  FACILITY_RAIL_ACCESS_RADIUS: 320,
   MIN_SITE_ELEVATION_DIFFERENCE: 8,
   MAX_PAIR_EVALUATIONS_PER_ATTEMPT: 24,
   DETOUR_OFFSETS: [640, 896, 1_152, 1_408] as readonly number[],

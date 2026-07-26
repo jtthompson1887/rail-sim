@@ -217,7 +217,7 @@ export function createEmptyWorld(
       startingCashForDifficulty(constructionDifficultyId),
     ),
     economy: clonePlainData(economy),
-    starterOpportunity,
+    starterOpportunity: clonePlainData(starterOpportunity),
     tracks: [],
     junctions: [],
     stations: [],
@@ -520,6 +520,12 @@ function isStarterOpportunity(value: unknown): value is StarterOpportunityDef {
     && endpointsMatchSites;
 }
 
+export function validateStarterOpportunityData(
+  value: unknown,
+): value is StarterOpportunityDef {
+  return isStarterOpportunity(value);
+}
+
 function isJunction(value: unknown): value is JunctionDef {
   if (!isRecord(value)) return false;
   return typeof value.uuid === 'string'
@@ -678,6 +684,12 @@ function isEconomyState(value: unknown): value is EconomyStateDef {
     facilityIds.add(facility.id);
   }
   return true;
+}
+
+export function validateEconomyStateData(
+  value: unknown,
+): value is EconomyStateDef {
+  return isEconomyState(value);
 }
 
 function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {

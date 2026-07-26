@@ -1,6 +1,7 @@
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 import { WorldOpportunityValidator } from '../../src/systems/WorldOpportunityValidator';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 
 const terrain = {
   getHeightAt(x: number, y: number): number {
@@ -67,5 +68,21 @@ describe('WorldOpportunityValidator', () => {
     mutate(value);
     expect(new WorldOpportunityValidator(terrain).validate(value, config).valid)
       .toBe(false);
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ])('rejects %s footprint relief samples', (_label, height) => {
+    const nonFiniteTerrain = {
+      getHeightAt: () => height,
+    };
+    const validator = new WorldOpportunityValidator(
+      nonFiniteTerrain,
+      new ConstructionAnalyzer(terrain),
+    );
+
+    expect(validator.validate(opportunity(), config).valid).toBe(false);
   });
 });

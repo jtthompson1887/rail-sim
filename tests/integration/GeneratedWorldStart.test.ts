@@ -7,6 +7,7 @@ import {
 } from '../../src/config/ConstructionConfig';
 import type { WorldGenerationConfigDef } from '../../src/config/WorldData';
 import {
+  type EconomyGeneratorPort,
   type OpportunityGeneratorPort,
   WorldManager,
 } from '../../src/managers/WorldManager';
@@ -20,12 +21,10 @@ import {
 import { GameConfig } from '../../src/config/GameConfig';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
 import { OPPORTUNITY_CAMERA_PADDING } from '../../src/config/WorldGeneration';
-
-const fixtureTerrain = {
-  getHeightAt(x: number, y: number): number {
-    return 120 + x * 0.008 + Math.sin(x / 420) * 32 + Math.cos(y / 510) * 24;
-  },
-};
+import {
+  type EconomyGenerationResult,
+  WorldEconomyGenerator,
+} from '../../src/economy/WorldEconomyGenerator';
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -58,7 +57,9 @@ function successfulResult(
     biome: 'temperate',
     constructionDifficultyId: 'standard',
   };
-  const result = new WorldOpportunityGenerator(fixtureTerrain).generate(config);
+  const result = new WorldOpportunityGenerator(
+    new TerrainGenerator(seed),
+  ).generate(config);
   if (!result.ok) throw new Error('opportunity fixture generation failed');
   return result;
 }
@@ -67,7 +68,67 @@ function successfulPort(): OpportunityGeneratorPort & {
   generate: jest.Mock<OpportunityGenerationResult, [WorldGenerationConfigDef]>;
 } {
   return {
-    generate: jest.fn().mockReturnValue(successfulResult()),
+    generate: jest.fn().mockImplementation(
+      (config: WorldGenerationConfigDef) => successfulResult(config.seed),
+    ),
+  };
+}
+
+function successfulEconomyResult(
+  seed = 'fixture-seed',
+): Extract<EconomyGenerationResult, { ok: true }> {
+  const config: WorldGenerationConfigDef = {
+    generationConfigVersion: 1,
+    seed,
+    biome: 'temperate',
+    constructionDifficultyId: 'standard',
+  };
+  const result = new WorldEconomyGenerator(
+    new TerrainGenerator(seed),
+  ).generate(
+    config,
+    successfulResult(seed).opportunity,
+  );
+  if (!result.ok) throw new Error('economy fixture generation failed');
+  return result;
+}
+
+function successfulEconomyPort(): EconomyGeneratorPort & {
+  generate: jest.Mock<
+    EconomyGenerationResult,
+    [WorldGenerationConfigDef, StarterOpportunityDef]
+  >;
+} {
+  return {
+    generate: jest.fn().mockImplementation((
+      config: WorldGenerationConfigDef,
+      opportunity: StarterOpportunityDef,
+    ) => new WorldEconomyGenerator(
+      new TerrainGenerator(config.seed),
+    ).generate(config, opportunity)),
+  };
+}
+
+function economyPortWith(
+  mutate: (
+    result: Extract<EconomyGenerationResult, { ok: true }>,
+  ) => void,
+): EconomyGeneratorPort {
+  return {
+    generate: jest.fn().mockImplementation((
+      config: WorldGenerationConfigDef,
+      opportunity: StarterOpportunityDef,
+    ) => {
+      const generated = new WorldEconomyGenerator(
+        new TerrainGenerator(config.seed),
+      ).generate(config, opportunity);
+      if (!generated.ok) throw new Error('economy fixture generation failed');
+      const result = JSON.parse(JSON.stringify(
+        generated,
+      )) as Extract<EconomyGenerationResult, { ok: true }>;
+      mutate(result);
+      return result;
+    }),
   };
 }
 
@@ -98,11 +159,14 @@ describe('generated blank-world start', () => {
 
   it('persists a schema-6 opportunity before installing an otherwise blank world', () => {
     const generator = successfulPort();
+    const economyGenerator = successfulEconomyPort();
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
     const result = WorldManager.tryCreateNew(
       'Generated',
       'atomic-seed',
       'alpine',
       generator,
+      economyGenerator,
     );
 
     expect(result.ok).toBe(true);
@@ -113,12 +177,23 @@ describe('generated blank-world start', () => {
       biome: 'alpine',
       constructionDifficultyId: 'standard',
     });
+    expect(economyGenerator.generate).toHaveBeenCalledWith(
+      {
+        generationConfigVersion: 1,
+        seed: 'atomic-seed',
+        biome: 'alpine',
+        constructionDifficultyId: 'standard',
+      },
+      successfulResult('atomic-seed').opportunity,
+    );
     expect(result.world.schemaVersion).toBe(6);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(
-      successfulResult().opportunity,
+      successfulResult('atomic-seed').opportunity,
     );
+    expect(result.world.economy)
+      .toEqual(successfulEconomyResult('atomic-seed').economy);
     const detour = result.world.starterOpportunity.corridors.find(
       (corridor) => corridor.dominantTradeoff === 'long-flat',
     )!;
@@ -133,8 +208,371 @@ describe('generated blank-world start', () => {
     expect(result.world.junctions).toEqual([]);
     expect(result.world.stations).toEqual([]);
     expect(result.world.trains).toEqual([]);
+    expect('scenarios' in result.world).toBe(false);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(WorldManager.world).toBe(result.world);
     expect(SaveService.loadWorld(result.world.id)).toEqual(result.world);
+  });
+
+  it('persists no partial world when bounded economy placement exhausts', () => {
+    const economyGenerator: EconomyGeneratorPort = {
+      generate: jest.fn().mockReturnValue({
+        ok: false,
+        error: {
+          code: 'economy-exhausted',
+          seed: 'economy-failed-seed',
+          candidatesEvaluated: 256,
+          facilitiesPlaced: 2,
+        },
+      }),
+    };
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Economy failed',
+      'economy-failed-seed',
+      'temperate',
+      successfulPort(),
+      economyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'economy-exhausted',
+        seed: 'economy-failed-seed',
+        candidatesEvaluated: 256,
+        facilitiesPlaced: 2,
+      },
+    });
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
+  });
+
+  it('leaves the active world and storage byte-for-byte unchanged on economy exhaustion', () => {
+    const prior = WorldManager.tryCreateNew(
+      'Prior economy',
+      'prior-economy-seed',
+      'temperate',
+      successfulPort(),
+      successfulEconomyPort(),
+    );
+    expect(prior.ok).toBe(true);
+    if (!prior.ok) return;
+    const storageBefore = localStorage.getItem(
+      GameConfig.WORLD.WORLDS_SAVE_KEY,
+    );
+    const economyGenerator: EconomyGeneratorPort = {
+      generate: jest.fn().mockReturnValue({
+        ok: false,
+        error: {
+          code: 'economy-exhausted',
+          seed: 'replacement-economy-failed',
+          candidatesEvaluated: 256,
+          facilitiesPlaced: 4,
+        },
+      }),
+    };
+
+    const result = WorldManager.tryCreateNew(
+      'Failed economy replacement',
+      'replacement-economy-failed',
+      'alpine',
+      successfulPort(),
+      economyGenerator,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(WorldManager.world).toBe(prior.world);
+    expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY))
+      .toBe(storageBefore);
+    expect(SaveService.listWorlds().map((world) => world.id))
+      .toEqual([prior.world.id]);
+  });
+
+  it('validates the detached generated world before attempting its single save', () => {
+    const invalidEconomyGenerator: EconomyGeneratorPort = {
+      generate: jest.fn().mockReturnValue({
+        ok: true,
+        economy: {
+          ...successfulEconomyResult().economy,
+          facilities: [],
+          market: {
+            constructionIndexBps: 10_000,
+            regionalDemandBpsByProduct: {},
+          },
+        },
+        diagnostics: { candidatesEvaluated: 5 },
+      }),
+    };
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Invalid economy',
+      'invalid-economy-seed',
+      'temperate',
+      successfulPort(),
+      invalidEconomyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'world-validation-failed',
+        seed: 'invalid-economy-seed',
+      },
+    });
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
+  });
+
+  it.each([
+    ['generic opportunity labels', (opportunity: any) => {
+      opportunity.sites[0].id = 'site-a';
+      opportunity.sites[0].label = 'Planning Site A';
+      opportunity.sites[1].id = 'site-b';
+      opportunity.sites[1].label = 'Planning Site B';
+    }],
+    ['an empty sites array', (opportunity: any) => {
+      opportunity.sites = [];
+    }],
+  ])('rejects %s before invoking economy generation', (_label, mutate) => {
+    const opportunity = successfulResult().opportunity as any;
+    mutate(opportunity);
+    const opportunityGenerator = {
+      generate: jest.fn().mockReturnValue({
+        ok: true,
+        opportunity,
+        diagnostics: {
+          attemptsEvaluated: 1,
+          maxSiteCandidatesEvaluated: 256,
+        },
+      }),
+    } as OpportunityGeneratorPort;
+    const economyGenerator = successfulEconomyPort();
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Invalid opportunity',
+      'invalid-opportunity-seed',
+      'temperate',
+      opportunityGenerator,
+      economyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'world-validation-failed',
+        seed: 'invalid-opportunity-seed',
+      },
+    });
+    expect(economyGenerator.generate).not.toHaveBeenCalled();
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+  });
+
+  it.each([
+    ['an empty facility graph with an otherwise valid market', (result: any) => {
+      result.economy.facilities = [];
+    }],
+    ['a changed stable facility id', (result: any) => {
+      result.economy.facilities[2].id = 'renamed-quarry';
+    }],
+    ['a mismatched facility definition', (result: any) => {
+      result.economy.facilities[2].definitionId = 'cement-works';
+    }],
+    ['a forest away from its opportunity endpoint', (result: any) => {
+      result.economy.facilities[0].x += 1;
+      result.economy.facilities[0].railAccess.x += 1;
+    }],
+    ['a sawmill away from its opportunity endpoint', (result: any) => {
+      result.economy.facilities[1].y += 1;
+      result.economy.facilities[1].railAccess.y += 1;
+    }],
+    ['non-finite facility geometry', (result: any) => {
+      result.economy.facilities[2].x = Number.NaN;
+      result.economy.facilities[2].railAccess.x = Number.NaN;
+    }],
+    ['an off-centre rail access point', (result: any) => {
+      result.economy.facilities[2].railAccess.x += 1;
+    }],
+    ['an unsupported rail access radius', (result: any) => {
+      result.economy.facilities[2].railAccess.radius += 1;
+    }],
+    ['facilities below the configured separation', (result: any) => {
+      const quarry = result.economy.facilities[2];
+      const cementWorks = result.economy.facilities[3];
+      cementWorks.x = quarry.x;
+      cementWorks.y = quarry.y;
+      cementWorks.railAccess.x = quarry.x;
+      cementWorks.railAccess.y = quarry.y;
+    }],
+    ['invalid initial inventory', (result: any) => {
+      result.economy.facilities[0].inventories.logs.quantity = 241;
+    }],
+    ['invalid generated market state', (result: any) => {
+      result.economy.market.regionalDemandBpsByProduct.logs = 12_001;
+    }],
+  ])('rejects %s before saving or installing', (_label, mutate) => {
+    const economyGenerator = economyPortWith(mutate);
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Invalid generated graph',
+      'invalid-graph-seed',
+      'temperate',
+      successfulPort(),
+      economyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'world-validation-failed',
+        seed: 'invalid-graph-seed',
+      },
+    });
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
+  });
+
+  it.each([
+    ['relabels opportunity sites', (opportunity: any) => {
+      opportunity.sites[0].id = 'site-a';
+      opportunity.sites[0].label = 'Planning Site A';
+      opportunity.sites[1].id = 'site-b';
+      opportunity.sites[1].label = 'Planning Site B';
+    }],
+    ['removes opportunity sites', (opportunity: any) => {
+      opportunity.sites = [];
+    }],
+  ])('rejects an economy port that %s without exposing its mutation', (
+    _label,
+    mutate,
+  ) => {
+    const seed = 'mutating-economy-port-seed';
+    const sourceResult = successfulResult(seed);
+    const sourceOpportunity = sourceResult.opportunity;
+    const sourceSnapshot = JSON.parse(JSON.stringify(sourceOpportunity));
+    const opportunityGenerator: OpportunityGeneratorPort = {
+      generate: jest.fn().mockReturnValue(sourceResult),
+    };
+    let economyPortOpportunity: StarterOpportunityDef | undefined;
+    const economyGenerator: EconomyGeneratorPort = {
+      generate: jest.fn().mockImplementation((
+        config: WorldGenerationConfigDef,
+        opportunity: StarterOpportunityDef,
+      ) => {
+        economyPortOpportunity = opportunity;
+        const stableOpportunity = JSON.parse(JSON.stringify(opportunity));
+        const generated = new WorldEconomyGenerator(
+          new TerrainGenerator(config.seed),
+        ).generate(config, stableOpportunity);
+        mutate(opportunity);
+        return generated;
+      }),
+    };
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Mutating economy port',
+      seed,
+      'temperate',
+      opportunityGenerator,
+      economyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'world-validation-failed', seed },
+    });
+    expect(economyPortOpportunity).not.toBe(sourceOpportunity);
+    expect(sourceOpportunity).toEqual(sourceSnapshot);
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
+  });
+
+  it.each([
+    ['malformed opportunity output', {
+      opportunityGenerator: {
+        generate: jest.fn().mockReturnValue(null),
+      },
+      economyGenerator: successfulEconomyPort(),
+    }],
+    ['an opportunity generator exception', {
+      opportunityGenerator: {
+        generate: jest.fn().mockImplementation(() => {
+          throw new Error('opportunity port failed');
+        }),
+      },
+      economyGenerator: successfulEconomyPort(),
+    }],
+    ['missing opportunity diagnostics', {
+      opportunityGenerator: {
+        generate: jest.fn().mockImplementation((
+          config: WorldGenerationConfigDef,
+        ) => ({
+          ok: true,
+          opportunity: successfulResult(config.seed).opportunity,
+        })),
+      },
+      economyGenerator: successfulEconomyPort(),
+    }],
+    ['malformed economy output', {
+      opportunityGenerator: successfulPort(),
+      economyGenerator: {
+        generate: jest.fn().mockReturnValue(null),
+      },
+    }],
+    ['an economy generator exception', {
+      opportunityGenerator: successfulPort(),
+      economyGenerator: {
+        generate: jest.fn().mockImplementation(() => {
+          throw new Error('economy port failed');
+        }),
+      },
+    }],
+    ['missing economy diagnostics', {
+      opportunityGenerator: successfulPort(),
+      economyGenerator: {
+        generate: jest.fn().mockImplementation((
+          config: WorldGenerationConfigDef,
+          opportunity: StarterOpportunityDef,
+        ) => {
+          const result = new WorldEconomyGenerator(
+            new TerrainGenerator(config.seed),
+          ).generate(config, opportunity) as any;
+          delete result.diagnostics;
+          return result;
+        }),
+      },
+    }],
+  ])('bounds %s as validation failure', (_label, ports) => {
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Malformed generation',
+      'malformed-generation-seed',
+      'temperate',
+      ports.opportunityGenerator as OpportunityGeneratorPort,
+      ports.economyGenerator as EconomyGeneratorPort,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'world-validation-failed',
+        seed: 'malformed-generation-seed',
+      },
+    });
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBeNull();
+    expect(SaveService.listWorlds()).toEqual([]);
   });
 
   it('reloads the persisted opportunity without invoking generation again', () => {

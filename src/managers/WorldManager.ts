@@ -16,12 +16,26 @@ import type {
   WorldGenerationConfigDef,
 } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
+import {
+  WorldEconomyGenerator,
+  type EconomyGenerationResult,
+  validateGeneratedEconomy,
+} from '../economy/WorldEconomyGenerator';
 import { GameConfig } from '../config/GameConfig';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import {
   WorldOpportunityGenerator,
   type OpportunityGenerationResult,
 } from '../systems/WorldOpportunityGenerator';
+import {
+  validateGeneratedOpportunityData,
+  WorldOpportunityValidator,
+} from '../systems/WorldOpportunityValidator';
+import {
+  MAX_ECONOMY_SITE_CANDIDATES,
+  MAX_OPPORTUNITY_ATTEMPTS,
+  MAX_SITE_CANDIDATES_PER_ATTEMPT,
+} from '../config/WorldGeneration';
 import { clonePlainData, equalPlainData } from '../utils/PlainData';
 
 export interface WorldConstructionDraft {
@@ -40,13 +54,63 @@ export interface OpportunityGeneratorPort {
   generate(config: WorldGenerationConfigDef): OpportunityGenerationResult;
 }
 
+export interface EconomyGeneratorPort {
+  generate(
+    config: WorldGenerationConfigDef,
+    opportunity: WorldData['starterOpportunity'],
+  ): EconomyGenerationResult;
+}
+
 export type GeneratedWorldCreationResult =
   | { ok: true; world: WorldData }
   | {
     ok: false;
     error: Extract<OpportunityGenerationResult, { ok: false }>['error']
-      | { code: 'world-save-failed'; seed: string };
+      | Extract<EconomyGenerationResult, { ok: false }>['error']
+      | {
+        code: 'world-save-failed' | 'world-validation-failed';
+        seed: string;
+      };
   };
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isOpportunityFailure(
+  value: unknown,
+  seed: string,
+): value is Extract<OpportunityGenerationResult, { ok: false }> {
+  if (!isRecord(value) || value.ok !== false || !isRecord(value.error)) {
+    return false;
+  }
+  const error = value.error;
+  return error.code === 'opportunity-exhausted'
+    && error.seed === seed
+    && Number.isInteger(error.attemptsEvaluated)
+    && (error.attemptsEvaluated as number) === MAX_OPPORTUNITY_ATTEMPTS
+    && Number.isInteger(error.maxSiteCandidatesEvaluated)
+    && (error.maxSiteCandidatesEvaluated as number)
+      === MAX_SITE_CANDIDATES_PER_ATTEMPT;
+}
+
+function isEconomyFailure(
+  value: unknown,
+  seed: string,
+): value is Extract<EconomyGenerationResult, { ok: false }> {
+  if (!isRecord(value) || value.ok !== false || !isRecord(value.error)) {
+    return false;
+  }
+  const error = value.error;
+  return error.code === 'economy-exhausted'
+    && error.seed === seed
+    && error.candidatesEvaluated === MAX_ECONOMY_SITE_CANDIDATES
+    && Number.isInteger(error.facilitiesPlaced)
+    && (error.facilitiesPlaced as number) >= 0
+    && (error.facilitiesPlaced as number) < 5;
+}
 
 /**
  * WorldManager – singleton that holds the live in-memory world state and
@@ -125,6 +189,7 @@ class WorldManagerClass {
     seed: string = crypto.randomUUID(),
     biome: BiomeType = 'temperate',
     opportunityGenerator?: OpportunityGeneratorPort,
+    economyGenerator?: EconomyGeneratorPort,
   ): GeneratedWorldCreationResult {
     if (this.batchInProgress) {
       return {
@@ -138,19 +203,81 @@ class WorldManagerClass {
       biome,
       constructionDifficultyId: 'standard',
     };
+    const validationFailure: GeneratedWorldCreationResult = {
+      ok: false,
+      error: { code: 'world-validation-failed', seed },
+    };
+    const terrain = new TerrainGenerator(seed);
     const generator = opportunityGenerator
-      ?? new WorldOpportunityGenerator(new TerrainGenerator(seed));
-    const generated = generator.generate(generationConfig);
-    if (generated.ok === false) {
+      ?? new WorldOpportunityGenerator(terrain);
+    let generated: unknown;
+    try {
+      generated = generator.generate(generationConfig);
+    } catch {
+      return validationFailure;
+    }
+    if (isOpportunityFailure(generated, seed)) {
       return { ok: false, error: generated.error };
+    }
+    if (!isRecord(generated)
+      || generated.ok !== true
+      || !isRecord(generated.diagnostics)
+      || !validateGeneratedOpportunityData(generated.opportunity)
+      || !Number.isInteger(generated.diagnostics.attemptsEvaluated)
+      || generated.diagnostics.attemptsEvaluated
+        !== generated.opportunity.resolvedAttempt
+      || generated.diagnostics.maxSiteCandidatesEvaluated
+        !== MAX_SITE_CANDIDATES_PER_ATTEMPT
+      || !new WorldOpportunityValidator(terrain).validate(
+        generated.opportunity,
+        generationConfig,
+      ).valid) {
+      return validationFailure;
+    }
+    const generatedOpportunity = clonePlainData(generated.opportunity);
+    const economyPortOpportunity = clonePlainData(generatedOpportunity);
+    let generatedEconomy: unknown;
+    try {
+      generatedEconomy = (
+        economyGenerator ?? new WorldEconomyGenerator(terrain)
+      ).generate(generationConfig, economyPortOpportunity);
+    } catch {
+      return validationFailure;
+    }
+    if (!equalPlainData(economyPortOpportunity, generatedOpportunity)) {
+      return validationFailure;
+    }
+    if (isEconomyFailure(generatedEconomy, seed)) {
+      return { ok: false, error: generatedEconomy.error };
+    }
+    if (!isRecord(generatedEconomy)
+      || generatedEconomy.ok !== true
+      || !isRecord(generatedEconomy.diagnostics)
+      || !Number.isInteger(generatedEconomy.diagnostics.candidatesEvaluated)
+      || (generatedEconomy.diagnostics.candidatesEvaluated as number) < 5
+      || (generatedEconomy.diagnostics.candidatesEvaluated as number)
+        > MAX_ECONOMY_SITE_CANDIDATES
+      || !validateGeneratedEconomy(
+        generatedEconomy.economy,
+        generatedOpportunity,
+        terrain,
+      )) {
+      return validationFailure;
     }
 
     const detachedWorld = createEmptyWorld(
       name,
       seed,
       biome,
-      generated.opportunity,
+      generatedOpportunity,
+      generatedEconomy.economy,
     );
+    if (!validateWorldData(detachedWorld).compatible) {
+      return {
+        ok: false,
+        error: { code: 'world-validation-failed', seed },
+      };
+    }
     if (!SaveService.saveWorld(detachedWorld)) {
       return {
         ok: false,

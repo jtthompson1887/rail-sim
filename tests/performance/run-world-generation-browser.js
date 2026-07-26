@@ -85,13 +85,18 @@ function startHarnessServer() {
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
     const exactObservedWorstCase = measurement.seed === 'playtest-884'
-      && measurement.result.ok === true
-      && measurement.result.opportunity.resolvedAttempt === 12
-      && measurement.result.diagnostics.attemptsEvaluated === 12
-      && measurement.result.diagnostics.maxSiteCandidatesEvaluated === 256;
+      && measurement.opportunityResult.ok === true
+      && measurement.opportunityResult.opportunity.resolvedAttempt === 12
+      && measurement.opportunityResult.diagnostics.attemptsEvaluated === 12
+      && measurement.opportunityResult.diagnostics.maxSiteCandidatesEvaluated === 256
+      && measurement.economyResult.ok === true
+      && measurement.economyResult.economy.facilities.length === 7
+      && measurement.economyResult.diagnostics.candidatesEvaluated
+        <= measurement.economyCandidatesCap;
     if (!exactObservedWorstCase
       || measurement.attemptsCap !== 12
       || measurement.candidatesCap !== 256
+      || measurement.economyCandidatesCap !== 256
       || measurement.analysisSamplesCap !== 96
       || measurement.deterministicReplay !== true
       || !Number.isFinite(measurement.durationMs)

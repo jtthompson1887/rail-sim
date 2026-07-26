@@ -284,14 +284,14 @@ export class WorldOpportunityGenerator {
 
       const sites: [PlanningSiteDef, PlanningSiteDef] = [
         {
-          id: 'site-a',
-          label: 'Planning Site A',
+          id: 'managed-forest',
+          label: 'Managed Forest',
           ...start,
           footprintRadius: WorldGenerationConfig.SITE_FOOTPRINT_RADIUS,
         },
         {
-          id: 'site-b',
-          label: 'Planning Site B',
+          id: 'sawmill',
+          label: 'Sawmill',
           ...end,
           footprintRadius: WorldGenerationConfig.SITE_FOOTPRINT_RADIUS,
         },
