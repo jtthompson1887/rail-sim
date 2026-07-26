@@ -33,6 +33,7 @@ authoritative construction data.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+S` | Save or retry a failed save |
 | `H` | Pan tool |
+| `C` | Toggle 3-D cab view (play mode) |
 | `Q` / `E` | Zoom in / out |
 | Mouse wheel | Zoom |
 | Middle drag | Pan |

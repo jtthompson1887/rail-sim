@@ -1,8 +1,8 @@
 {
     "compilerOptions": {
-        "target": "es6",
+        "target": "es2017",
         "sourceMap": true,
-        "module": "commonjs",
+        "module": "esnext",
         "allowJs": true,
         "checkJs": false,
         "jsx": "react",
@@ -19,7 +19,7 @@
         "baseUrl": ".",
         "paths": {},
         "types": [],
-        "lib": ["es6", "dom", "es2015.collection"],
+        "lib": ["es6", "dom", "dom.iterable", "es2015.collection"],
         "esModuleInterop": true,
         "allowSyntheticDefaultImports": true,
         "forceConsistentCasingInFileNames": true
