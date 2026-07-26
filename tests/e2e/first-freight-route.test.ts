@@ -640,11 +640,19 @@ test.describe('collective three-seed first freight route acceptance', () => {
       await page.waitForTimeout(60);
       await page.keyboard.up('s');
     };
+    let previousDistance = Math.hypot(
+      runtime(loaded).x - sawmill.railAccess.x,
+      runtime(loaded).y - sawmill.railAccess.y,
+    );
+    let motion: 'approaching' | 'receding' | 'stationary' = 'stationary';
     let unloadingStarted = false;
     const recentRuntime: Array<{
       elapsedSeconds: number;
       distance: number;
       speed: number;
+      signedSpeed: number;
+      motion: typeof motion;
+      throttle: -1 | 0 | 1;
       trackUUID: string | null;
       trackT: number | null;
       x: number;
@@ -658,6 +666,18 @@ test.describe('collective three-seed first freight route acceptance', () => {
           live.x - sawmill.railAccess.x,
           live.y - sawmill.railAccess.y,
         );
+        const distanceDelta = distance - previousDistance;
+        if (Math.abs(distanceDelta) >= 0.5) {
+          motion = distanceDelta < 0 ? 'approaching' : 'receding';
+        } else if (live.speedWorldUnitsPerSecond <= 2) {
+          motion = 'stationary';
+        }
+        previousDistance = distance;
+        const signedSpeed = motion === 'approaching'
+          ? live.speedWorldUnitsPerSecond
+          : motion === 'receding'
+            ? -live.speedWorldUnitsPerSecond
+            : 0;
         unloadingStarted ||= (train(current).cargo?.units ?? 0) < 60;
         recentRuntime.push({
           elapsedSeconds: (
@@ -665,6 +685,9 @@ test.describe('collective three-seed first freight route acceptance', () => {
           ) / 1_000,
           distance,
           speed: live.speedWorldUnitsPerSecond,
+          signedSpeed,
+          motion,
+          throttle: live.throttle,
           trackUUID: live.trackUUID,
           trackT: live.trackT,
           x: live.x,
@@ -689,18 +712,19 @@ test.describe('collective three-seed first freight route acceptance', () => {
         }
         if (unloadingStarted) {
           await setForward(false);
-          if (live.speedWorldUnitsPerSecond > 2) await brakePulse();
+        } else if (motion === 'receding') {
+          await setForward(true);
         } else if (braking) {
-          if (distance > sawmill.railAccess.radius * 0.75) {
+          if (distance > sawmill.railAccess.radius) {
             if (live.speedWorldUnitsPerSecond < 6) {
               await setForward(true);
             } else {
               await setForward(false);
-              if (live.speedWorldUnitsPerSecond > 10) await brakePulse();
+              if (signedSpeed > 10) await brakePulse();
             }
           } else {
             await setForward(false);
-            if (live.speedWorldUnitsPerSecond > 2) await brakePulse();
+            if (signedSpeed > 2) await brakePulse();
           }
         } else if (live.speedWorldUnitsPerSecond < 4) {
           await setForward(true);
