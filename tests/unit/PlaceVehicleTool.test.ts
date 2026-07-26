@@ -7,7 +7,6 @@ import Phaser from 'phaser';
 import { PlaceVehicleTool } from '../../src/systems/tools/PlaceVehicleTool';
 import { EventBus } from '../../src/services/EventBus';
 import RailTrack from '../../src/entities/RailTrack';
-import { WorldManager } from '../../src/managers/WorldManager';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -101,7 +100,6 @@ describe('PlaceVehicleTool', () => {
 
     it('does not create, persist, or report success for a track click', () => {
       const clear = jest.fn();
-      const addTrainDef = jest.spyOn(WorldManager, 'addTrainDef');
       const emit = jest.spyOn(EventBus, 'emit');
       const historyAwareTool = new PlaceVehicleTool(
         scene,
@@ -116,7 +114,6 @@ describe('PlaceVehicleTool', () => {
 
       expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
       expect(trainManager.createCarriage).not.toHaveBeenCalled();
-      expect(addTrainDef).not.toHaveBeenCalled();
       expect(clear).not.toHaveBeenCalled();
       expect(emit).not.toHaveBeenCalledWith(
         'ui:toast',
@@ -128,7 +125,6 @@ describe('PlaceVehicleTool', () => {
       );
       historyAwareTool.destroy();
       emit.mockRestore();
-      addTrainDef.mockRestore();
     });
   });
 

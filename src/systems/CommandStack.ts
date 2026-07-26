@@ -18,7 +18,8 @@ export interface Command {
 /** Opaque authoritative state cursor shared only by revision-aware commands. */
 export interface CommandRevisionContext {
   readonly authority: object;
-  readonly revision: number;
+  readonly rootRevision: number;
+  readonly constructionRevision: number;
 }
 
 export interface RevisionAwareCommand extends Command {
@@ -36,7 +37,9 @@ function sameRevisionContext(
   left: CommandRevisionContext,
   right: CommandRevisionContext,
 ): boolean {
-  return left.authority === right.authority && left.revision === right.revision;
+  return left.authority === right.authority
+    && left.rootRevision === right.rootRevision
+    && left.constructionRevision === right.constructionRevision;
 }
 
 export class CommandStack {
@@ -60,8 +63,12 @@ export class CommandStack {
    * Clears the redo stack (standard linear undo model).
    */
   push(command: Command): boolean {
-    if (!this.matchesLastRevisionContext(command)) return false;
-    if (!command.execute()) return false;
+    const pushContext = this.preparePushRevisionContext(command);
+    if (!pushContext.accepted) return false;
+    if (!command.execute()) {
+      if (pushContext.recovered) this.notify();
+      return false;
+    }
     this.undoStack.push(command);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
@@ -117,9 +124,36 @@ export class CommandStack {
   private matchesLastRevisionContext(command: Command): boolean {
     if (!isRevisionAware(command)) return true;
     const context = command.getRevisionContext();
-    if (!context) return false;
+    if (!context || !this.validRevisionContext(context)) return false;
     return !this.lastRevisionContext
       || sameRevisionContext(context, this.lastRevisionContext);
+  }
+
+  private preparePushRevisionContext(
+    command: Command,
+  ): { accepted: boolean; recovered: boolean } {
+    if (!isRevisionAware(command)) {
+      return { accepted: true, recovered: false };
+    }
+    const context = command.getRevisionContext();
+    if (!context || !this.validRevisionContext(context)) {
+      return { accepted: false, recovered: false };
+    }
+    if (!this.lastRevisionContext
+      || sameRevisionContext(context, this.lastRevisionContext)) {
+      return { accepted: true, recovered: false };
+    }
+    const last = this.lastRevisionContext;
+    const canRecover = context.authority === last.authority
+      && context.rootRevision >= last.rootRevision
+      && context.constructionRevision >= last.constructionRevision
+      && (context.rootRevision > last.rootRevision
+        || context.constructionRevision > last.constructionRevision);
+    if (!canRecover) return { accepted: false, recovered: false };
+    this.undoStack = [];
+    this.redoStack = [];
+    this.lastRevisionContext = context;
+    return { accepted: true, recovered: true };
   }
 
   private captureResultingRevisionContext(command: Command): void {
@@ -131,10 +165,19 @@ export class CommandStack {
   private canRecordRevisionContext(command: Command): boolean {
     if (!isRevisionAware(command)) return true;
     const context = command.getRevisionContext();
-    if (!context) return false;
+    if (!context || !this.validRevisionContext(context)) return false;
     return !this.lastRevisionContext
       || (context.authority === this.lastRevisionContext.authority
-        && context.revision === this.lastRevisionContext.revision + 1);
+        && context.rootRevision === this.lastRevisionContext.rootRevision + 1
+        && context.constructionRevision
+          === this.lastRevisionContext.constructionRevision + 1);
+  }
+
+  private validRevisionContext(context: CommandRevisionContext): boolean {
+    return Number.isSafeInteger(context.rootRevision)
+      && context.rootRevision >= 0
+      && Number.isSafeInteger(context.constructionRevision)
+      && context.constructionRevision >= 0;
   }
 
   private rebaseExposedCommand(command: Command | undefined): void {

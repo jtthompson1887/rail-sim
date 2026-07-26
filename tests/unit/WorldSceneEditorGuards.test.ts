@@ -418,7 +418,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).commandStack = commandStack;
     (scene as any).selectionManager = { selectedUUIDs: [] };
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
     (scene as any).bindCommandStackReporting();
 
@@ -427,7 +426,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(commandStack.redo()).toBe(true);
 
     expect(save).toHaveBeenCalledTimes(3);
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(emit.mock.calls.filter(
       ([event]) => event === 'ui:toolbar-save-state',
     )).toEqual([
@@ -454,7 +452,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -521,7 +518,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     const revision = world.revision;
     const cash = world.company.cash;
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
     GameStateManager.enterCreate(world.id);
 
@@ -534,7 +530,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
 
     expect(save).toHaveBeenCalledTimes(2);
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(world.revision).toBe(revision);
     expect(world.company.cash).toBe(cash);
     expect(emit.mock.calls.filter(
@@ -547,7 +542,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     ]);
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -557,22 +551,18 @@ describe('WorldScene disabled construction bypass guards', () => {
     WorldManager.createNew('Periodic save', 'periodic-seed');
     (scene as any).trainManager = { trains: [], carriages: [] };
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
 
     (scene as any).lastReportedSaveState = 'saved';
     (scene as any).runPeriodicSafetySave();
     expect(save).not.toHaveBeenCalled();
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(emit.mock.calls.some(([event]) => event === 'ui:toast')).toBe(false);
 
     (scene as any).lastReportedSaveState = 'unsaved';
     (scene as any).runPeriodicSafetySave();
     expect(save).toHaveBeenCalledTimes(1);
-    expect(setTrainDefs).not.toHaveBeenCalled();
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -652,8 +642,8 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(world.economy.tick).toBe(1);
     expect(world.trains).toEqual([authoritativeTrain]);
-    expect(world.trains[0]).toBe(authoritativeTrain);
-    expect(trainAtSave).toBe(authoritativeTrain);
+    expect(world.trains[0]).not.toBe(authoritativeTrain);
+    expect(trainAtSave).toBe(world.trains[0]);
     expect(liveTrack.getTrackPosition).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
@@ -809,8 +799,8 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     world.tracks.push(paidTrack);
     const constructionCursor = world.constructionRevision;
-    expect(WorldManager.applyEconomyBatch(world.operationsRevision, (economy) => {
-      economy.tick += 1;
+    expect(WorldManager.applyOperationsBatch(world.revision, (draft) => {
+      draft.economy.tick += 1;
       return true;
     })).toBe(true);
     const push = jest.fn().mockReturnValue(true);

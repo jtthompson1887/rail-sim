@@ -255,27 +255,109 @@ describe('PlaceTrackCommand', () => {
     expect(manager.getTrack('undo-failed')).toBeDefined();
   });
 
-  it('accepts a current construction quote after an economy-only revision', () => {
+  it('rejects a quoted command before live mutation after an operations-only root revision', () => {
     const world = WorldManager.world!;
     const quote = service.createQuote(
       { x: 0, y: 0 },
       { x: 300, y: 0 },
-      'after-economy',
+      'after-operations',
     )!;
-    expect(WorldManager.applyEconomyBatch(
-      world.operationsRevision,
-      (economy) => {
-        economy.tick += 1;
+    expect(WorldManager.applyOperationsBatch(
+      world.revision,
+      (draft) => {
+        draft.economy.tick += 1;
         return true;
       },
     )).toBe(true);
+    const before = JSON.stringify(world);
 
     const command = new PlaceTrackCommand(scene, manager, service, quote);
-    expect(command.execute()).toBe(true);
-    expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['after-economy']);
+    expect(command.execute()).toBe(false);
+    expect(JSON.stringify(world)).toBe(before);
+    expect(manager.getTrack('after-operations')).toBeUndefined();
     expect(world.company.cash).toBe(ledgerCash());
-    expect(world.constructionRevision).toBe(1);
+    expect(world.constructionRevision).toBe(0);
     expect(world.operationsRevision).toBe(1);
+  });
+
+  it('rolls back live placement when operations advance after the initial cursor check', () => {
+    const world = WorldManager.world!;
+    const quote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'reentrant-operations',
+    )!;
+    const command = new PlaceTrackCommand(
+      scene,
+      manager,
+      service,
+      quote,
+      (stage) => {
+        if (stage !== 'after-live-track') return;
+        expect(WorldManager.applyOperationsBatch(
+          world.revision,
+          (draft) => {
+            draft.economy.tick += 1;
+            return true;
+          },
+        )).toBe(true);
+      },
+    );
+
+    expect(command.execute()).toBe(false);
+    expect(manager.getTrack('reentrant-operations')).toBeUndefined();
+    expect(world.tracks).toEqual([]);
+    expect(world.economy.tick).toBe(1);
+    expect(world.revision).toBe(1);
+    expect(world.constructionRevision).toBe(0);
+    expect(world.operationsRevision).toBe(1);
+  });
+
+  it('recovers stale history only through a fresh quoted push', () => {
+    const world = WorldManager.world!;
+    const stack = new CommandStack();
+    const oldQuote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'old-history',
+    )!;
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      service,
+      oldQuote,
+    ))).toBe(true);
+    expect(WorldManager.applyOperationsBatch(
+      world.revision,
+      (draft) => {
+        draft.economy.tick += 1;
+        return true;
+      },
+    )).toBe(true);
+    const staleBefore = JSON.stringify(world);
+    const staleLive = TrackSerializer.toTrackDef(manager.getTrack('old-history')!);
+    expect(stack.undo()).toBe(false);
+    expect(JSON.stringify(world)).toBe(staleBefore);
+    expect(TrackSerializer.toTrackDef(manager.getTrack('old-history')!))
+      .toEqual(staleLive);
+
+    const freshQuote = service.createQuote(
+      { x: 0, y: 200 },
+      { x: 300, y: 200 },
+      'fresh-history',
+    )!;
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      service,
+      freshQuote,
+    ))).toBe(true);
+    expect(stack.canUndo).toBe(true);
+    expect(stack.canRedo).toBe(false);
+    expect(stack.undo()).toBe(true);
+    expect(manager.getTrack('fresh-history')).toBeUndefined();
+    expect(manager.getTrack('old-history')).toBeDefined();
+    expect(stack.undo()).toBe(false);
   });
 
   it('rejects stale and unaffordable quotes with zero mutation', () => {

@@ -10,6 +10,7 @@ import {
 } from '../../src/economy/EconomySystem';
 import { advanceMarketTick } from '../../src/economy/MarketSystem';
 import { WorldManager } from '../../src/managers/WorldManager';
+import type { OperationsDraft } from '../../src/managers/WorldManager';
 import { clonePlainData } from '../../src/utils/PlainData';
 
 const facilitySnapshot = (world: WorldData, facilityId: string) =>
@@ -224,13 +225,18 @@ describe('EconomySystem', () => {
       get world(): WorldData {
         return world;
       },
-      applyEconomyBatch(
-        _expectedEconomyRevision: number,
-        mutate: (draft: WorldData['economy']) => boolean,
+      applyOperationsBatch(
+        _expectedRevision: number,
+        mutate: (draft: OperationsDraft) => boolean,
       ): boolean {
-        const detachedDraft = clonePlainData(world.economy);
+        const detachedDraft: OperationsDraft = clonePlainData({
+          company: world.company,
+          economy: world.economy,
+          trains: world.trains,
+          firstRouteProgress: world.firstRouteProgress,
+        });
         expect(mutate(detachedDraft)).toBe(true);
-        expect(detachedDraft).not.toEqual(world.economy);
+        expect(detachedDraft.economy).not.toEqual(world.economy);
         return false;
       },
     };
@@ -275,18 +281,23 @@ describe('EconomySystem', () => {
       get world(): WorldData {
         return world;
       },
-      applyEconomyBatch(
-        expectedEconomyRevision: number,
-        mutate: (draft: WorldData['economy']) => boolean,
+      applyOperationsBatch(
+        expectedRevision: number,
+        mutate: (draft: OperationsDraft) => boolean,
       ): boolean {
         batchAttempt += 1;
         if (batchAttempt === 1 || batchAttempt === 3) {
-          const detachedDraft = clonePlainData(world.economy);
+          const detachedDraft: OperationsDraft = clonePlainData({
+            company: world.company,
+            economy: world.economy,
+            trains: world.trains,
+            firstRouteProgress: world.firstRouteProgress,
+          });
           expect(mutate(detachedDraft)).toBe(true);
           return false;
         }
-        return WorldManager.applyEconomyBatch(
-          expectedEconomyRevision,
+        return WorldManager.applyOperationsBatch(
+          expectedRevision,
           mutate,
         );
       },
@@ -314,18 +325,23 @@ describe('EconomySystem', () => {
       get world(): WorldData {
         return world;
       },
-      applyEconomyBatch(
-        expectedEconomyRevision: number,
-        mutate: (draft: WorldData['economy']) => boolean,
+      applyOperationsBatch(
+        expectedRevision: number,
+        mutate: (draft: OperationsDraft) => boolean,
       ): boolean {
         if (rejectNext) {
           rejectNext = false;
-          const detachedDraft = clonePlainData(world.economy);
+          const detachedDraft: OperationsDraft = clonePlainData({
+            company: world.company,
+            economy: world.economy,
+            trains: world.trains,
+            firstRouteProgress: world.firstRouteProgress,
+          });
           expect(mutate(detachedDraft)).toBe(true);
           return false;
         }
-        return WorldManager.applyEconomyBatch(
-          expectedEconomyRevision,
+        return WorldManager.applyOperationsBatch(
+          expectedRevision,
           mutate,
         );
       },

@@ -265,16 +265,16 @@ describe('WorldManager', () => {
       expect(world.operationsRevision).toBe(0);
     });
 
-    it('advances only economy and root revisions for an economy batch', () => {
+    it('advances only operations and root revisions for an operations batch', () => {
       const world: any = WorldManager.createNew(
-        'Economy cursor',
+        'Operations cursor',
         'real-terrain-alpha',
       );
 
-      expect((WorldManager as any).applyEconomyBatch(
-        world.operationsRevision,
-        (draft: any) => {
-          draft.tick += 1;
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
           return true;
         },
       )).toBe(true);
@@ -291,10 +291,10 @@ describe('WorldManager', () => {
       );
       const constructionCursor = world.constructionRevision;
 
-      expect((WorldManager as any).applyEconomyBatch(
-        world.operationsRevision,
-        (draft: any) => {
-          draft.tick += 1;
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
           return true;
         },
       )).toBe(true);
@@ -340,17 +340,17 @@ describe('WorldManager', () => {
         world.revision = Number.MAX_SAFE_INTEGER;
         world.operationsRevision = Number.MAX_SAFE_INTEGER;
       }],
-    ])('rejects economy when the world has %s', (_label, corrupt) => {
+    ])('rejects operations when the world has %s', (_label, corrupt) => {
       const world: any = WorldManager.createNew(
-        'Invalid economy cursor',
+        'Invalid operations cursor',
         'real-terrain-alpha',
       );
       corrupt(world);
       const before = JSON.stringify(world);
-      expect(WorldManager.applyEconomyBatch(
-        world.operationsRevision,
-        (economy) => {
-          economy.tick += 1;
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
           return true;
         },
       )).toBe(false);
@@ -364,7 +364,7 @@ describe('WorldManager', () => {
       );
       const before = clonePlainData(world);
       let nestedConstruction: boolean | null = null;
-      let nestedEconomy: boolean | null = null;
+      let nestedOperations: boolean | null = null;
 
       const outer = WorldManager.applyConstructionBatch(
         world.constructionRevision,
@@ -373,10 +373,10 @@ describe('WorldManager', () => {
             world.constructionRevision,
             (nestedDraft) => nestedDraft.addTrack(makeTrackDef('nested-track')),
           );
-          nestedEconomy = WorldManager.applyEconomyBatch(
-            world.operationsRevision,
-            (economy) => {
-              economy.tick += 1;
+          nestedOperations = WorldManager.applyOperationsBatch(
+            world.revision,
+            (operationsDraft: any) => {
+              operationsDraft.economy.tick += 1;
               return true;
             },
           );
@@ -386,7 +386,7 @@ describe('WorldManager', () => {
 
       expect(outer).toBe(false);
       expect(nestedConstruction).toBe(false);
-      expect(nestedEconomy).toBe(false);
+      expect(nestedOperations).toBe(false);
       expect(world).toEqual(before);
     });
 
@@ -430,10 +430,10 @@ describe('WorldManager', () => {
       );
       const before = clonePlainData(world);
 
-      expect(WorldManager.applyEconomyBatch(
-        world.operationsRevision,
-        (economy) => {
-          economy.tick += 1;
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
           world.name = 'mutated behind the draft';
           return true;
         },
@@ -503,6 +503,185 @@ describe('WorldManager', () => {
       expect(world).toEqual(before);
       saveWorld.mockRestore();
     });
+
+    it('commits all four operations domains atomically and detaches the installed state', () => {
+      const world = WorldManager.createNew(
+        'Atomic operations',
+        'real-terrain-alpha',
+      );
+      expect(WorldManager.addTrackDef(
+        makeTrackDef('forest-sawmill-track'),
+      )).toBe(true);
+      const rootBefore = world.revision;
+      const constructionBefore = world.constructionRevision;
+      const operationsBefore = world.operationsRevision;
+      const cashBefore = world.company.cash;
+      let escaped: any = null;
+
+      expect(WorldManager.applyOperationsBatch(
+        rootBefore,
+        (draft) => {
+          escaped = draft;
+          draft.company.cash -= 100;
+          draft.company.ledger.push({
+            id: draft.company.nextLedgerId,
+            tick: draft.economy.tick,
+            category: 'vehicle-capex',
+            ledgerClass: 'capital-expenditure',
+            amount: -100,
+            referenceId: 'train-1',
+          });
+          draft.company.nextLedgerId += 1;
+          draft.economy.facilities[0].name += ' upgraded';
+          draft.trains.push(makeFreightTrainDef());
+          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          return true;
+        },
+      )).toBe(true);
+
+      expect(world.company.cash).toBe(cashBefore - 100);
+      expect(world.company.ledger.at(-1)).toEqual(expect.objectContaining({
+        category: 'vehicle-capex',
+        amount: -100,
+        referenceId: 'train-1',
+      }));
+      expect(world.economy.facilities[0].name).toContain('upgraded');
+      expect(world.trains).toEqual([makeFreightTrainDef()]);
+      expect(world.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+      expect(world.revision).toBe(rootBefore + 1);
+      expect(world.constructionRevision).toBe(constructionBefore);
+      expect(world.operationsRevision).toBe(operationsBefore + 1);
+      expect(world.revision).toBe(
+        world.constructionRevision + world.operationsRevision,
+      );
+
+      const installed = JSON.stringify(world);
+      escaped.company.cash = 0;
+      escaped.economy.tick += 1;
+      escaped.trains[0].trackT = 0.9;
+      escaped.firstRouteProgress.profitableDeliveryCompleted = false;
+      expect(JSON.stringify(world)).toBe(installed);
+    });
+
+    it.each([
+      ['stale root', -1, true, true],
+      ['mutator rejection', 0, true, false],
+      ['true no-op', 0, false, true],
+    ] as const)(
+      'preserves exact world bytes for %s',
+      (_label, revisionOffset, mutateDraft, accepted) => {
+      const world = WorldManager.createNew(
+        'Rejected operations',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+      expect(WorldManager.applyOperationsBatch(
+        world.revision + revisionOffset,
+        (draft) => {
+          if (mutateDraft) draft.economy.tick += 1;
+          return accepted;
+        },
+      )).toBe(false);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+      },
+    );
+
+    it('preserves exact world bytes when an operations mutator throws', () => {
+      const world = WorldManager.createNew(
+        'Thrown operations',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
+          throw new Error('rollback');
+        },
+      )).toBe(false);
+      expect(WorldManager.world).toBe(world);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
+
+    it('preserves exact world bytes for an invalid operations candidate', () => {
+      const world = WorldManager.createNew(
+        'Invalid operations candidate',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.company.cash = -1;
+          return true;
+        },
+      )).toBe(false);
+      expect(WorldManager.world).toBe(world);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
+
+    it('rejects nested operations and construction batches with exact rollback', () => {
+      const world = WorldManager.createNew(
+        'Nested operations',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+      let nestedOperations: boolean | null = null;
+      let nestedConstruction: boolean | null = null;
+
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.economy.tick += 1;
+          nestedOperations = WorldManager.applyOperationsBatch(
+            world.revision,
+            () => true,
+          );
+          nestedConstruction = WorldManager.applyConstructionBatch(
+            world.constructionRevision,
+            () => true,
+          );
+          return false;
+        },
+      )).toBe(false);
+      expect(nestedOperations).toBe(false);
+      expect(nestedConstruction).toBe(false);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
+
+    it('restores every operations domain and revision when installation throws', () => {
+      const world = WorldManager.createNew(
+        'Install failure',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+      Object.defineProperty(world, 'trains', {
+        configurable: true,
+        writable: false,
+        value: world.trains,
+      });
+
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.company.cash -= 1;
+          draft.company.ledger.push({
+            id: draft.company.nextLedgerId,
+            tick: draft.economy.tick,
+            category: 'vehicle-capex',
+            ledgerClass: 'capital-expenditure',
+            amount: -1,
+            referenceId: 'install-failure',
+          });
+          draft.company.nextLedgerId += 1;
+          draft.economy.tick += 1;
+          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          return true;
+        },
+      )).toBe(false);
+      expect(WorldManager.world).toBe(world);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
   });
 
   describe('addJunctionDef() / removeJunctionDef()', () => {
@@ -539,6 +718,8 @@ describe('WorldManager', () => {
       WorldManager.createNew('S', 'real-terrain-alpha');
       WorldManager.addStationDef({ id: 'st-1', name: 'Central', trackUUID: 'abc', trackT: 0.5, passengerSpawnRate: 0.5 });
       expect(WorldManager.world!.stations).toHaveLength(1);
+      expect(WorldManager.world!.constructionRevision).toBe(1);
+      expect(WorldManager.world!.operationsRevision).toBe(0);
       expect(WorldManager.world!.revision).toBe(
         WorldManager.world!.constructionRevision
           + WorldManager.world!.operationsRevision,
@@ -550,61 +731,84 @@ describe('WorldManager', () => {
       WorldManager.addStationDef({ id: 'rm-st', name: 'X', trackUUID: 'abc', trackT: 0, passengerSpawnRate: 0.1 });
       WorldManager.removeStationDef('rm-st');
       expect(WorldManager.world!.stations).toHaveLength(0);
-    });
-  });
-
-  describe('addTrainDef() / removeTrainDef() / updateTrainDef()', () => {
-    it('adds a train definition', () => {
-      WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef(makeFreightTrainDef());
-      expect(WorldManager.world!.trains).toHaveLength(1);
-      expect(WorldManager.world!.operationsRevision).toBe(1);
+      expect(WorldManager.world!.revision).toBe(2);
+      expect(WorldManager.world!.constructionRevision).toBe(2);
+      expect(WorldManager.world!.operationsRevision).toBe(0);
       expect(WorldManager.world!.revision).toBe(
         WorldManager.world!.constructionRevision
           + WorldManager.world!.operationsRevision,
       );
     });
 
-    it('removes a train definition', () => {
-      WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'rm-train' }));
-      WorldManager.removeTrainDef('rm-train');
-      expect(WorldManager.world!.trains).toHaveLength(0);
+    it('does not mutate when the construction cursor cannot advance', () => {
+      const world = WorldManager.createNew('S', 'real-terrain-alpha');
+      world.constructionRevision = Number.MAX_SAFE_INTEGER;
+      const before = JSON.stringify(world);
+
+      expect(WorldManager.addStationDef({
+        id: 'blocked',
+        name: 'Blocked',
+        trackUUID: 'abc',
+        trackT: 0.5,
+        passengerSpawnRate: 0.5,
+      })).toBe(false);
+      expect(JSON.stringify(world)).toBe(before);
+    });
+  });
+
+  describe('addSceneryDef() / removeSceneryDef()', () => {
+    it('advances root and construction together for add and remove', () => {
+      const world = WorldManager.createNew('Scenery', 'real-terrain-alpha');
+      expect(WorldManager.addSceneryDef({
+        id: 'tree',
+        type: 'tree_oak',
+        x: 0,
+        y: 0,
+        rotation: 0,
+        scale: 1,
+        variant: 0,
+      })).toBe(true);
+      expect(world.revision).toBe(1);
+      expect(world.constructionRevision).toBe(1);
+      expect(world.operationsRevision).toBe(0);
+      expect(WorldManager.removeSceneryDef('tree')).toBe(true);
+      expect(world.revision).toBe(2);
+      expect(world.constructionRevision).toBe(2);
+      expect(world.operationsRevision).toBe(0);
+      expect(world.revision).toBe(
+        world.constructionRevision + world.operationsRevision,
+      );
+    });
+  });
+
+  describe('train authority', () => {
+    it('removes the public train mutation helpers', () => {
+      expect(WorldManager).not.toHaveProperty('addTrainDef');
+      expect(WorldManager).not.toHaveProperty('removeTrainDef');
+      expect(WorldManager).not.toHaveProperty('updateTrainDef');
+      expect(WorldManager).not.toHaveProperty('setTrainDefs');
     });
 
-    it('updates a train definition', () => {
-      WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'upd-train' }));
-      WorldManager.updateTrainDef({ id: 'upd-train', trackT: 0.42 });
-      expect(WorldManager.world!.trains[0].trackT).toBe(0.42);
-    });
+    it('changes trains only through the operations root and preserves the invariant', () => {
+      const world = WorldManager.createNew('Tr', 'real-terrain-alpha');
+      expect(WorldManager.addTrackDef(
+        makeTrackDef('forest-sawmill-track'),
+      )).toBe(true);
+      const rootBefore = world.revision;
 
-    it('replaces all train definitions via setTrainDefs', () => {
-      WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'old' }));
-      WorldManager.setTrainDefs([
-        makeFreightTrainDef({ id: 'new1', trackT: 0.5 }),
-        makeFreightTrainDef({ id: 'new2', trackT: 0.8 }),
-      ]);
-      expect(WorldManager.world!.trains).toHaveLength(2);
-      expect(WorldManager.world!.trains[0].id).toBe('new1');
-      expect(WorldManager.world!.trains[1].id).toBe('new2');
-    });
-
-    it('setTrainDefs does nothing when no world is loaded', () => {
-      WorldManager.reset();
-      expect(() => WorldManager.setTrainDefs([
-        makeFreightTrainDef({ id: 'x' }),
-      ])).not.toThrow();
-    });
-
-    it('does not advance revision when setTrainDefs receives identical data', () => {
-      WorldManager.createNew('Tr', 'real-terrain-alpha');
-      const defs = [makeFreightTrainDef({ id: 'same' })];
-      expect(WorldManager.setTrainDefs(defs)).toBe(true);
-      const revision = WorldManager.world!.revision;
-      expect(WorldManager.setTrainDefs(defs.map((train) => ({ ...train })))).toBe(false);
-      expect(WorldManager.world!.revision).toBe(revision);
+      expect(WorldManager.applyOperationsBatch(
+        rootBefore,
+        (draft) => {
+          draft.trains.push(makeFreightTrainDef());
+          return true;
+        },
+      )).toBe(true);
+      expect(world.trains).toEqual([makeFreightTrainDef()]);
+      expect(world.revision).toBe(rootBefore + 1);
+      expect(world.operationsRevision).toBe(1);
+      expect(world.revision).toBe(
+        world.constructionRevision + world.operationsRevision,
+      );
     });
   });
 

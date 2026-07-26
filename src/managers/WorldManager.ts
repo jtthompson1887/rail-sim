@@ -6,6 +6,7 @@ import {
 } from '../config/WorldData';
 import type {
   EconomyStateDef,
+  FirstRouteProgressDef,
   WorldData,
   TrackDef,
   JunctionDef,
@@ -48,6 +49,13 @@ export interface WorldConstructionDraft {
   updateTrack(def: TrackDef): boolean;
   addJunction(def: JunctionDef, index?: number): boolean;
   removeJunction(uuid: string): boolean;
+}
+
+export interface OperationsDraft {
+  company: CompanyStateDef;
+  economy: EconomyStateDef;
+  trains: TrainDef[];
+  firstRouteProgress: FirstRouteProgressDef;
 }
 
 export interface OpportunityGeneratorPort {
@@ -163,7 +171,9 @@ class WorldManagerClass {
         }
       });
       Object.keys(source).forEach((key) => {
-        target[key] = clonePlainData(source[key]);
+        if (!equalPlainData(target[key], source[key])) {
+          target[key] = clonePlainData(source[key]);
+        }
       });
       this._world = world;
     } catch {
@@ -172,7 +182,7 @@ class WorldManagerClass {
     return false;
   }
 
-  private incrementRevision(
+  private canAdvanceDomainRevision(
     authority: 'construction' | 'operations',
   ): boolean {
     if (!this.canAdvanceRevision()) return false;
@@ -182,6 +192,13 @@ class WorldManagerClass {
     if (!Number.isSafeInteger(authorityRevision)
       || authorityRevision < 0
       || authorityRevision >= Number.MAX_SAFE_INTEGER) return false;
+    return true;
+  }
+
+  private advanceDomainRevision(
+    authority: 'construction' | 'operations',
+  ): boolean {
+    if (!this.canAdvanceDomainRevision(authority)) return false;
     this._world!.revision += 1;
     if (authority === 'construction') {
       this._world!.constructionRevision += 1;
@@ -443,49 +460,67 @@ class WorldManagerClass {
     }
   }
 
-  applyEconomyBatch(
-    expectedOperationsRevision: number,
-    mutate: (draft: EconomyStateDef) => boolean,
+  applyOperationsBatch(
+    expectedRevision: number,
+    mutate: (draft: OperationsDraft) => boolean,
   ): boolean {
     const world = this._world;
     if (this.batchInProgress
       || !world
-      || world.operationsRevision !== expectedOperationsRevision
+      || world.revision !== expectedRevision
       || !this.canAdvanceRevision()
       || !Number.isSafeInteger(world.operationsRevision)
       || world.operationsRevision < 0
       || world.operationsRevision >= Number.MAX_SAFE_INTEGER) return false;
     if (!validateWorldData(world).compatible) return false;
     const snapshot = clonePlainData(world);
-    const rootRevision = world.revision;
-    const economy = clonePlainData(world.economy);
+    const draft: OperationsDraft = {
+      company: clonePlainData(world.company),
+      economy: clonePlainData(world.economy),
+      trains: clonePlainData(world.trains),
+      firstRouteProgress: clonePlainData(world.firstRouteProgress),
+    };
     this.batchInProgress = true;
     try {
       let accepted: boolean;
       try {
-        accepted = mutate(economy);
+        accepted = mutate(draft);
       } catch {
         return this.restoreBatchSnapshot(world, snapshot);
       }
       if (!accepted
         || this._world !== world
         || !equalPlainData(world, snapshot)
-        || equalPlainData(economy, snapshot.economy)) {
+        || (equalPlainData(draft.company, snapshot.company)
+          && equalPlainData(draft.economy, snapshot.economy)
+          && equalPlainData(draft.trains, snapshot.trains)
+          && equalPlainData(
+            draft.firstRouteProgress,
+            snapshot.firstRouteProgress,
+          ))) {
         return this.restoreBatchSnapshot(world, snapshot);
       }
 
       const candidate: WorldData = {
         ...snapshot,
-        revision: rootRevision + 1,
-        operationsRevision: expectedOperationsRevision + 1,
-        economy,
+        revision: snapshot.revision + 1,
+        operationsRevision: snapshot.operationsRevision + 1,
+        company: draft.company,
+        economy: draft.economy,
+        trains: draft.trains,
+        firstRouteProgress: draft.firstRouteProgress,
       };
       if (!validateWorldData(candidate).compatible) {
         return this.restoreBatchSnapshot(world, snapshot);
       }
 
       try {
+        world.company = clonePlainData(candidate.company);
         world.economy = clonePlainData(candidate.economy);
+        world.trains = clonePlainData(candidate.trains);
+        world.firstRouteProgress = clonePlainData(
+          candidate.firstRouteProgress,
+        );
         world.revision = candidate.revision;
         world.operationsRevision = candidate.operationsRevision;
       } catch {
@@ -532,67 +567,33 @@ class WorldManagerClass {
   // ── Station mutations ──────────────────────────────────────────────────────
 
   addStationDef(def: WorldStationDef): boolean {
-    if (!this._world || !this.canAdvanceRevision()
+    if (!this._world || !this.canAdvanceDomainRevision('construction')
       || this._world.stations.some((station) => station.id === def.id)) return false;
     this._world.stations.push(def);
-    return this.incrementRevision('construction');
+    return this.advanceDomainRevision('construction');
   }
 
   removeStationDef(id: string): boolean {
-    if (!this._world || !this.canAdvanceRevision()
+    if (!this._world || !this.canAdvanceDomainRevision('construction')
       || !this._world.stations.some((station) => station.id === id)) return false;
     this._world.stations = this._world.stations.filter((s) => s.id !== id);
-    return this.incrementRevision('construction');
-  }
-
-  // ── Train mutations ────────────────────────────────────────────────────────
-
-  addTrainDef(def: TrainDef): boolean {
-    if (!this._world || !this.canAdvanceRevision()
-      || this._world.trains.some((train) => train.id === def.id)) return false;
-    this._world.trains.push(def);
-    return this.incrementRevision('operations');
-  }
-
-  removeTrainDef(id: string): boolean {
-    if (!this._world || !this.canAdvanceRevision()
-      || !this._world.trains.some((train) => train.id === id)) return false;
-    this._world.trains = this._world.trains.filter((t) => t.id !== id);
-    return this.incrementRevision('operations');
-  }
-
-  updateTrainDef(updated: Partial<TrainDef> & { id: string }): boolean {
-    if (!this._world || !this.canAdvanceRevision()) return false;
-    const idx = this._world.trains.findIndex((t) => t.id === updated.id);
-    if (idx === -1) return false;
-    const next = { ...this._world.trains[idx], ...updated };
-    if (JSON.stringify(next) === JSON.stringify(this._world.trains[idx])) return false;
-    this._world.trains[idx] = next;
-    return this.incrementRevision('operations');
-  }
-
-  /** Replace the authoritative persisted train array. */
-  setTrainDefs(defs: TrainDef[]): boolean {
-    if (!this._world || !this.canAdvanceRevision()
-      || JSON.stringify(this._world.trains) === JSON.stringify(defs)) return false;
-    this._world.trains = defs;
-    return this.incrementRevision('operations');
+    return this.advanceDomainRevision('construction');
   }
 
   // ── Scenery mutations ──────────────────────────────────────────────────────
 
   addSceneryDef(def: SceneryObjectDef): boolean {
-    if (!this._world || !this.canAdvanceRevision()
+    if (!this._world || !this.canAdvanceDomainRevision('construction')
       || this._world.scenery.some((scenery) => scenery.id === def.id)) return false;
     this._world.scenery.push(def);
-    return this.incrementRevision('construction');
+    return this.advanceDomainRevision('construction');
   }
 
   removeSceneryDef(id: string): boolean {
-    if (!this._world || !this.canAdvanceRevision()
+    if (!this._world || !this.canAdvanceDomainRevision('construction')
       || !this._world.scenery.some((scenery) => scenery.id === id)) return false;
     this._world.scenery = this._world.scenery.filter((s) => s.id !== id);
-    return this.incrementRevision('construction');
+    return this.advanceDomainRevision('construction');
   }
 
   /** Return all scenery objects whose position falls within the given chunk. */

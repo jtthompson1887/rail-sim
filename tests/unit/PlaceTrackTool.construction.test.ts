@@ -72,6 +72,7 @@ function preview(valid = true): ConstructionPreview {
   const quote: ConstructionQuote | null = valid ? {
     quoteId: 'quote-1',
     newTrackUUID: 'new-track',
+    rootRevision: 0,
     constructionRevision: 0,
     expectedCash: 10_000,
     proposal: analyzed,
@@ -121,6 +122,7 @@ function makeHarness(options: {
     createPreview: jest.fn().mockReturnValue(options.analyzed ?? preview()),
   };
   (WorldManager as any)._world = {
+    revision: 0,
     constructionRevision: 0,
     company: {
       cash: options.affordable === false ? 0 : 10_000,

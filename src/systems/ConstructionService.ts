@@ -38,6 +38,7 @@ export interface PredictedEndpointConnectionDef {
 export interface ConstructionQuote {
   readonly quoteId: string;
   readonly newTrackUUID: string;
+  readonly rootRevision: number;
   readonly constructionRevision: number;
   readonly expectedCash: number;
   readonly proposal: ConstructionProposal;
@@ -269,6 +270,7 @@ export class ConstructionService {
       quote = deepFreeze({
         quoteId: crypto.randomUUID(),
         newTrackUUID,
+        rootRevision: world.revision,
         constructionRevision: world.constructionRevision,
         expectedCash: world.company.cash,
         proposal,
@@ -319,24 +321,40 @@ export class ConstructionService {
   }
 
   revalidateQuote(quote: ConstructionQuote): boolean {
-    return this.validateQuoteState(quote, true, quote.expectedCash);
+    return this.validateQuoteState(
+      quote,
+      quote.rootRevision,
+      quote.constructionRevision,
+      quote.expectedCash,
+    );
   }
 
-  revalidateQuoteForRedo(quote: ConstructionQuote, expectedCash: number): boolean {
-    return this.validateQuoteState(quote, false, expectedCash);
+  revalidateQuoteForRedo(
+    quote: ConstructionQuote,
+    expectedCash: number,
+    expectedRootRevision = quote.rootRevision,
+    expectedConstructionRevision = quote.constructionRevision,
+  ): boolean {
+    return this.validateQuoteState(
+      quote,
+      expectedRootRevision,
+      expectedConstructionRevision,
+      expectedCash,
+    );
   }
 
   private validateQuoteState(
     quote: ConstructionQuote,
-    requireCapturedRevision: boolean,
+    expectedRootRevision: number,
+    expectedConstructionRevision: number,
     expectedCash: number,
   ): boolean {
     const world = WorldManager.world;
     if (!world || this.quoteWorlds.get(quote) !== world
       || !WorldManager.canAdvanceRevision()
       || !this.liveTracksMatchWorld(world)
-      || (requireCapturedRevision
-        && world.constructionRevision !== quote.constructionRevision)
+      || world.revision !== expectedRootRevision
+      || world.constructionRevision !== expectedConstructionRevision
       || world.company.cash !== expectedCash
       || !quote.quoteId || !quote.newTrackUUID
       || this.trackManager.getTrack(quote.newTrackUUID)

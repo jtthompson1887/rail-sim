@@ -1,5 +1,8 @@
-import type { EconomyStateDef, WorldData } from '../config/WorldData';
-import { WorldManager } from '../managers/WorldManager';
+import type { WorldData } from '../config/WorldData';
+import {
+  WorldManager,
+  type OperationsDraft,
+} from '../managers/WorldManager';
 import { equalPlainData } from '../utils/PlainData';
 import type {
   FacilityId,
@@ -26,9 +29,9 @@ export interface EconomyUpdateResult {
 
 export interface EconomyWorldPort {
   readonly world: WorldData | null;
-  applyEconomyBatch(
-    expectedOperationsRevision: number,
-    mutate: (draft: EconomyStateDef) => boolean,
+  applyOperationsBatch(
+    expectedRevision: number,
+    mutate: (draft: OperationsDraft) => boolean,
   ): boolean;
 }
 
@@ -78,16 +81,17 @@ export class EconomySystem {
       const world = this.worldPort.world;
       if (world === null) break;
 
-      const expectedOperationsRevision = world.operationsRevision;
+      const expectedRevision = world.revision;
       const seed = world.generationConfig.seed;
       let tickChangedFacilityIds: FacilityId[] = [];
       let tickBlockers: EconomyBlockerResult[] = [];
-      const committed = this.worldPort.applyEconomyBatch(
-        expectedOperationsRevision,
+      const committed = this.worldPort.applyOperationsBatch(
+        expectedRevision,
         (draft) => {
-          if (draft.tick >= Number.MAX_SAFE_INTEGER) return false;
+          const economy = draft.economy;
+          if (economy.tick >= Number.MAX_SAFE_INTEGER) return false;
 
-          const orderedFacilities = draft.facilities
+          const orderedFacilities = economy.facilities
             .map((facility, index) => ({ facility, index }))
             .sort((left, right) => compareIds(
               left.facility,
@@ -111,14 +115,14 @@ export class EconomySystem {
               blocker: result.blocker,
             });
             if (!equalPlainData(facility, result.facility)) {
-              draft.facilities[index] = result.facility;
+              economy.facilities[index] = result.facility;
               tickChangedFacilityIds.push(facility.id);
             }
           }
 
-          const nextTick = draft.tick + 1;
-          draft.tick = nextTick;
-          draft.market = advanceMarketTick(draft.market, seed, nextTick);
+          const nextTick = economy.tick + 1;
+          economy.tick = nextTick;
+          economy.market = advanceMarketTick(economy.market, seed, nextTick);
           return true;
         },
       );
