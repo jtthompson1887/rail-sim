@@ -128,6 +128,37 @@ describe('WorldScene disabled construction bypass guards', () => {
     WorldManager.reset();
     localStorage.clear();
     GameStateManager.enterCreate('test-world');
+    delete (globalThis as any).__RAIL_SIM_TEST_CONTROLS__;
+  });
+
+  it('does not expose privileged browser controls in production mode', () => {
+    createStartupScene('create', true);
+
+    expect((window as any).__railSimTrainManager).toBeUndefined();
+    expect((window as any).__railSimTrackManager).toBeUndefined();
+    expect((window as any).__railSimConstructionSnapshot).toBeUndefined();
+    expect((window as any).__railSimFirstRouteHarness).toBeUndefined();
+  });
+
+  it('retains privileged browser controls in an explicit test build', () => {
+    (globalThis as any).__RAIL_SIM_TEST_CONTROLS__ = true;
+
+    createStartupScene('create', true);
+
+    expect((window as any).__railSimTrainManager).toBeDefined();
+    expect((window as any).__railSimTrackManager).toBeDefined();
+    expect((window as any).__railSimConstructionSnapshot).toEqual(
+      expect.any(Function),
+    );
+    expect((window as any).__railSimFirstRouteHarness).toEqual(
+      expect.objectContaining({
+        snapshot: expect.any(Function),
+        setMode: expect.any(Function),
+        advanceFixedTicks: expect.any(Function),
+        setTrainRuntime: expect.any(Function),
+        retrySave: expect.any(Function),
+      }),
+    );
   });
 
   it.each(['generator', 'completer', 'junction', 'eraser'] as const)(

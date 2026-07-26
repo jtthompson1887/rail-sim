@@ -23,7 +23,12 @@ declare global {
   }
 }
 
-window.__railSimRecoverDerailedFollowerOnTrack = recoverDerailedFollowerOnTrack;
+if (
+  typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+  && __RAIL_SIM_TEST_CONTROLS__
+) {
+  window.__railSimRecoverDerailedFollowerOnTrack = recoverDerailedFollowerOnTrack;
+}
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -58,4 +63,10 @@ const config: Phaser.Types.Core.GameConfig = {
   ],
 };
 
-window.__railSimGame = new Phaser.Game(config);
+const game = new Phaser.Game(config);
+if (
+  typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+  && __RAIL_SIM_TEST_CONTROLS__
+) {
+  window.__railSimGame = game;
+}

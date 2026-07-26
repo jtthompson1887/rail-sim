@@ -501,9 +501,13 @@ export default class WorldScene extends Phaser.Scene {
       this.scene.start('WorldSelectScene');
       return;
     }
-    // Expose scene identity and E2E accessors
-    window.__railSimScene = 'WorldScene';
-    window.__railSimWorldDerailCount = 0;
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimScene = 'WorldScene';
+      window.__railSimWorldDerailCount = 0;
+    }
 
     // ── Terrain system ──────────────────────────────────────────────────────
     const world = WorldManager.world;
@@ -588,35 +592,41 @@ export default class WorldScene extends Phaser.Scene {
       this.freightPurchaseConfirmedHandler,
     );
 
-    // Expose managers for E2E tests after everything is constructed
-    window.__railSimTrainManager = this.trainManager;
-    window.__railSimTrackManager = this.trackManager;
-    window.__railSimConstructionSnapshot = () => {
-      const placeTrack = this.toolRegistry.get('place-track') as PlaceTrackTool | undefined;
-      const camera = this.cameras.main;
-      return clonePlainData({
-        phase: placeTrack?.phase ?? 'idle',
-        preview: placeTrack?.previewModel ?? null,
-        camera: {
-          scrollX: camera.scrollX,
-          scrollY: camera.scrollY,
-          zoom: camera.zoom,
-          width: camera.width,
-          height: camera.height,
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimTrainManager = this.trainManager;
+      window.__railSimTrackManager = this.trackManager;
+      window.__railSimConstructionSnapshot = () => {
+        const placeTrack = this.toolRegistry.get(
+          'place-track',
+        ) as PlaceTrackTool | undefined;
+        const camera = this.cameras.main;
+        return clonePlainData({
+          phase: placeTrack?.phase ?? 'idle',
+          preview: placeTrack?.previewModel ?? null,
+          camera: {
+            scrollX: camera.scrollX,
+            scrollY: camera.scrollY,
+            zoom: camera.zoom,
+            width: camera.width,
+            height: camera.height,
+          },
+          world: WorldManager.world,
+          topology: this.trackManager.captureTopology(),
+        });
+      };
+      window.__railSimFirstRouteHarness = {
+        snapshot: () => this.captureFirstRouteBrowserSnapshot(),
+        setMode: (mode) => this.setFirstRouteBrowserMode(mode),
+        advanceFixedTicks: (count) => this.advanceFirstRouteFixedTicks(count),
+        setTrainRuntime: (trainId, runtime) => {
+          this.setFirstRouteTrainRuntime(trainId, runtime);
         },
-        world: WorldManager.world,
-        topology: this.trackManager.captureTopology(),
-      });
-    };
-    window.__railSimFirstRouteHarness = {
-      snapshot: () => this.captureFirstRouteBrowserSnapshot(),
-      setMode: (mode) => this.setFirstRouteBrowserMode(mode),
-      advanceFixedTicks: (count) => this.advanceFirstRouteFixedTicks(count),
-      setTrainRuntime: (trainId, runtime) => {
-        this.setFirstRouteTrainRuntime(trainId, runtime);
-      },
-      retrySave: () => this.saveWorldAndReport(),
-    };
+        retrySave: () => this.saveWorldAndReport(),
+      };
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',        this.modeChangedHandler);
@@ -652,10 +662,15 @@ export default class WorldScene extends Phaser.Scene {
       this.selectedFacilityId = null;
       this.operationsLockedTrainIds.clear();
       this.cargoStatusByTrainId.clear();
-      window.__railSimTrainManager = undefined;
-      window.__railSimTrackManager = undefined;
-      window.__railSimConstructionSnapshot = undefined;
-      window.__railSimFirstRouteHarness = undefined;
+      if (
+        typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+        && __RAIL_SIM_TEST_CONTROLS__
+      ) {
+        window.__railSimTrainManager = undefined;
+        window.__railSimTrackManager = undefined;
+        window.__railSimConstructionSnapshot = undefined;
+        window.__railSimFirstRouteHarness = undefined;
+      }
     });
 
     // Input routing
