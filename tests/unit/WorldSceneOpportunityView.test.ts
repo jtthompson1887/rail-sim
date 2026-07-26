@@ -202,7 +202,7 @@ describe('WorldScene persisted opportunity view', () => {
     const scene = new WorldScene() as any;
     const createdViews: any[] = [];
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([]),
+      captureTopology: jest.fn().mockReturnValue([]),
     };
     scene.createFacilityView = jest.fn((
       placement: unknown,
@@ -234,7 +234,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(scene.facilityViews).toHaveLength(7);
   });
 
-  it('uses the exact endpoint-in-access-radius test without creating railway objects', () => {
+  it('uses persisted endpoints and captured topology without creating railway objects', () => {
     const created = WorldManager.tryCreateNew(
       'Rail access',
       'facility-rail-seed',
@@ -245,35 +245,44 @@ describe('WorldScene persisted opportunity view', () => {
     const facility = created.world.economy.facilities[0];
     const addTrack = jest.fn();
     const createStation = jest.fn();
-    const candidate = {
-      getControlPoints: () => ({
-        p0: {
-          x: facility.railAccess.x + facility.railAccess.radius - 1,
-          y: facility.railAccess.y,
-        },
-        p1: { x: 0, y: 0 },
-        p2: { x: 0, y: 0 },
-        p3: {
-          x: facility.railAccess.x + facility.railAccess.radius + 1,
-          y: facility.railAccess.y,
-        },
-      }),
-    };
+    created.world.tracks.push({
+      uuid: 'facility-endpoint',
+      geometryVersion: 1,
+      p0: {
+        x: facility.railAccess.x + facility.railAccess.radius,
+        y: facility.railAccess.y,
+      },
+      p1: { x: facility.railAccess.x + 20, y: facility.railAccess.y },
+      p2: { x: facility.railAccess.x + 40, y: facility.railAccess.y },
+      p3: { x: facility.railAccess.x + 60, y: facility.railAccess.y },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [
+          { t: 0, elevation: 0 },
+          { t: 1, elevation: 0 },
+        ],
+      },
+      structures: [],
+      paidBuildCost: 0,
+    });
     const scene = new WorldScene() as any;
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([candidate]),
+      captureTopology: jest.fn().mockReturnValue([{
+        kind: 'track',
+        uuid: 'facility-endpoint',
+        previous: null,
+        next: null,
+      }]),
       addTrack,
       createStation,
     };
 
     expect(scene.isFacilityRailConnected(facility)).toBe(true);
-    expect(scene.trackManager.getTracksInRadius).toHaveBeenCalledWith(
-      facility.railAccess,
-      facility.railAccess.radius,
-    );
+    expect(scene.trackManager.captureTopology).toHaveBeenCalledTimes(1);
     expect(addTrack).not.toHaveBeenCalled();
     expect(createStation).not.toHaveBeenCalled();
-    expect(created.world.tracks).toHaveLength(0);
+    expect(created.world.tracks.map((track) => track.uuid))
+      .toEqual(['facility-endpoint']);
     expect(created.world.stations).toHaveLength(0);
   });
 
@@ -299,7 +308,7 @@ describe('WorldScene persisted opportunity view', () => {
       deselectTrain: jest.fn(),
     };
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([]),
+      captureTopology: jest.fn().mockReturnValue([]),
     };
     const emit = jest.spyOn(EventBus, 'emit');
 

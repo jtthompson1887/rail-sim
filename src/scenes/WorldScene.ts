@@ -42,6 +42,10 @@ import type {
 } from '../ui/PropertiesPanel';
 import { clonePlainData } from '../utils/PlainData';
 import { captureTrainRuntime } from '../freight/TrainRuntime';
+import {
+  queryRailAccessConnectivity,
+  type RailAccessConnectivityResult,
+} from '../freight/RailAccessConnectivity';
 import { TrainSerializer } from '../utils/TrainSerializer';
 import type { WorldData } from '../config/WorldData';
 import type {
@@ -649,19 +653,28 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private isFacilityRailConnected(facility: FacilityEconomyDef): boolean {
-    return this.trackManager
-      .getTracksInRadius(facility.railAccess, facility.railAccess.radius)
-      .some((track) => {
-        const { p0, p3 } = track.getControlPoints();
-        return Math.hypot(
-          p0.x - facility.railAccess.x,
-          p0.y - facility.railAccess.y,
-        ) <= facility.railAccess.radius
-          || Math.hypot(
-            p3.x - facility.railAccess.x,
-            p3.y - facility.railAccess.y,
-          ) <= facility.railAccess.radius;
-      });
+    return this.queryFacilityRailConnectivity(facility, facility).connected;
+  }
+
+  private queryFacilityRailConnectivity(
+    source: FacilityEconomyDef,
+    destination: FacilityEconomyDef,
+  ): RailAccessConnectivityResult {
+    const world = WorldManager.world;
+    if (!world) {
+      return {
+        connected: false,
+        sourceEndpointTrackUUIDs: [],
+        destinationEndpointTrackUUIDs: [],
+        connectedTrackUUIDs: [],
+      };
+    }
+    return queryRailAccessConnectivity(
+      world.tracks,
+      this.trackManager.captureTopology(),
+      { facilityId: source.id, ...source.railAccess },
+      { facilityId: destination.id, ...destination.railAccess },
+    );
   }
 
   private refreshFacilityPresentation(publishSelected: boolean): void {
