@@ -1,4 +1,5 @@
 import type { BiomeType, StructureType } from '../../config/WorldData';
+import type { ITerrainSampler } from '../contracts/ITerrainSampler';
 
 export type { BiomeType, StructureType };
 
@@ -51,6 +52,9 @@ export interface CabWorldSnapshot {
   readonly path: ReadonlyArray<CabTrackSample>;
   /** Elapsed simulation time in seconds. */
   readonly elapsedSecs: number;
+
+  /** Optional height sampler used by the terrain mesh builder. */
+  readonly terrain?: ITerrainSampler;
 }
 
 /** Sentinel returned when a snapshot cannot be produced. */

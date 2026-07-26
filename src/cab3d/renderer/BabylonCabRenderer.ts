@@ -8,6 +8,7 @@ import {
 } from '@babylonjs/core';
 import { CabCanvasMount } from './CabCanvasMount';
 import { TrackMeshBuilder } from './TrackMeshBuilder';
+import { TerrainMeshBuilder } from './TerrainMeshBuilder';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -34,6 +35,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private camera: UniversalCamera | null = null;
   private cameraRig: CabCameraRig | null = null;
   private trackMeshBuilder: TrackMeshBuilder | null = null;
+  private terrainMeshBuilder: TerrainMeshBuilder | null = null;
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
 
@@ -70,6 +72,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
     }
 
     this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
+    this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
+    this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
 
     this.scene?.render();
   }
@@ -77,6 +81,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
   destroy(): void {
     this.trackMeshBuilder?.dispose();
     this.trackMeshBuilder = null;
+    this.terrainMeshBuilder?.dispose();
+    this.terrainMeshBuilder = null;
     this.engine?.dispose();
     this.mount.destroy();
     this.engine = null;
@@ -115,6 +121,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     );
 
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
+    this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

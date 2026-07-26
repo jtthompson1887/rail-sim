@@ -81,6 +81,10 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       vehicle,
       path,
       elapsedSecs: time / 1000,
+      terrain: {
+        getHeightAt: (worldX: number, worldY: number) =>
+          this.terrainGenerator.getHeightAt(worldX, worldY),
+      },
     });
   }
 }

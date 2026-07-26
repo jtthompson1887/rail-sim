@@ -15,4 +15,15 @@ describe('CabConfig', () => {
       (CabConfig as any).ENABLED = false;
     }).toThrow();
   });
+
+  it('exposes Phase 4 terrain tunables', () => {
+    expect(CabConfig.TERRAIN_RINGS).toHaveLength(3);
+    expect(CabConfig.TERRAIN_RINGS[0].extent).toBe(1024);
+    expect(CabConfig.TERRAIN_RINGS[0].resolution).toBe(8);
+    expect(CabConfig.TERRAIN_RINGS[2].extent).toBe(12288);
+    expect(CabConfig.TERRAIN_REBUILD_DISTANCE_M).toBe(64);
+    expect(CabConfig.TERRAIN_SKIRT_DEPTH_M).toBe(60);
+    expect(CabConfig.TERRAIN_WATER_ALPHA).toBe(0.72);
+    expect(CabConfig.TERRAIN_WATER_ROUGHNESS).toBe(0.08);
+  });
 });

@@ -119,4 +119,27 @@ export const CabConfig = Object.freeze({
   LOOK_PITCH_MAX_DEG: 25,
   /** Look-controller spring frequency, in radians per second. */
   LOOK_OMEGA: 10,
+
+  /** LOD rings for the 3-D terrain mesh, innermost first. */
+  TERRAIN_RINGS: [
+    { extent: 1024, resolution: 8, innerExtent: 0 },
+    { extent: 4096, resolution: 32, innerExtent: 1024 },
+    { extent: 12288, resolution: 128, innerExtent: 4096 },
+  ],
+
+  /** Distance the eye must travel before the terrain rings are re-centred. */
+  TERRAIN_REBUILD_DISTANCE_M: 64,
+
+  /** How far the terrain skirt drops below the surface edge. */
+  TERRAIN_SKIRT_DEPTH_M: 60,
+
+  /** Water plane alpha. */
+  TERRAIN_WATER_ALPHA: 0.72,
+
+  /** Water roughness. */
+  TERRAIN_WATER_ROUGHNESS: 0.08,
+
+  /** Scrolling speed of the water normal map (UV offset per second). */
+  TERRAIN_WATER_SCROLL_U: 0.02,
+  TERRAIN_WATER_SCROLL_V: 0.03,
 } as const);
