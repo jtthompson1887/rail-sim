@@ -548,7 +548,35 @@ describe('proposeCargoTick loading conservation and capacity', () => {
     expect(result.trains).toEqual(input.trains);
   });
 
-  it('processes every train once in stable ID order with at most one batch', () => {
+  it('preserves unsorted train authority byte-for-byte for a no-op tick', () => {
+    const input = makeInput();
+    const trainB = makeFreightTrainDef({ id: 'train-b' });
+    const trainA = makeFreightTrainDef({ id: 'train-a' });
+    const trains = [trainB, trainA];
+
+    const result = proposeCargoTick({
+      ...input,
+      operating: false,
+      trains,
+      runtime: [
+        makeRuntime('train-b'),
+        makeRuntime('train-a'),
+      ],
+    });
+
+    expect(result.changed).toBe(false);
+    expect(JSON.stringify(result.trains)).toBe(JSON.stringify(trains));
+    expect(result.trains.map(({ id }) => id)).toEqual([
+      'train-b',
+      'train-a',
+    ]);
+    expect(result.statuses.map(({ trainId }) => trainId)).toEqual([
+      'train-a',
+      'train-b',
+    ]);
+  });
+
+  it('processes shared inventory by stable ID without reordering train authority', () => {
     const input = makeInput();
     const forest = facility(input.economy, 'managed-forest');
     forest.inventories.logs.quantity = 15;
@@ -573,10 +601,10 @@ describe('proposeCargoTick loading conservation and capacity', () => {
       5,
     ]);
     expect(result.trains.map(({ id }) => id)).toEqual([
-      'train-a',
       'train-b',
+      'train-a',
     ]);
-    expect(result.trains.map(({ cargo }) => cargo?.units)).toEqual([10, 5]);
+    expect(result.trains.map(({ cargo }) => cargo?.units)).toEqual([5, 10]);
     expect(facility(
       result.economy,
       'managed-forest',
@@ -608,6 +636,106 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     })];
     return input;
   };
+
+  it('unloads destination-accepted cargo even when the freight set is unavailable', () => {
+    const input = loadedAtSawmill(10, {
+      currentTripRevenue: 100,
+      currentTripRunningCost: 20,
+      lifetimeDeliveredUnits: 4,
+      lifetimeRevenue: 400,
+    });
+    input.trains[0].freightSetId = 'unavailable-freight-set';
+    const sawmill = facility(input.economy, 'sawmill');
+    const beforeSlot = { ...sawmill.inventories.logs };
+    const quote = quoteLocalProduct(
+      'logs',
+      input.economy.market,
+      beforeSlot,
+    );
+    if (quote.ok === false) {
+      throw new Error(`Unexpected quote rejection: ${quote.code}`);
+    }
+    const batchRevenue = quote.unitPrice * 10;
+
+    const result = proposeCargoTick(input);
+
+    expect(result.statuses[0]).toEqual({
+      trainId: 'train-1',
+      facilityId: sawmill.id,
+      kind: 'unloading',
+      blocker: null,
+      batchUnits: 10,
+      cargoUnits: 0,
+      capacityUnits: 0,
+      batchRevenue,
+    });
+    expect(facility(result.economy, 'sawmill').inventories.logs).toEqual({
+      ...beforeSlot,
+      quantity: beforeSlot.quantity + 10,
+      recentInflow: beforeSlot.recentInflow + 10,
+    });
+    expect(result.company.cash).toBe(input.company.cash + batchRevenue);
+    expect(result.company.ledger).toEqual([
+      ...input.company.ledger,
+      {
+        id: input.company.nextLedgerId,
+        tick: input.economy.tick,
+        category: 'delivery-revenue',
+        ledgerClass: 'revenue',
+        amount: batchRevenue,
+        referenceId: `train-1:${input.economy.tick}:${sawmill.id}`,
+      },
+    ]);
+    expect(result.trains[0].cargo).toBeNull();
+    expect(result.trains[0].operations).toEqual({
+      currentTripRevenue: 0,
+      currentTripRunningCost: 0,
+      lastTripRevenue: 100 + batchRevenue,
+      lastTripRunningCost: 20,
+      lifetimeDeliveredUnits: 14,
+      lifetimeRevenue: 400 + batchRevenue,
+      lifetimeRunningCost: 0,
+    });
+    expect(result.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+    expect(result.completedDeliveries).toEqual([{
+      trainId: 'train-1',
+      destinationFacilityId: sawmill.id,
+      tick: input.economy.tick,
+      revenue: 100 + batchRevenue,
+      runningCost: 20,
+      operatingProfit: 80 + batchRevenue,
+    }]);
+  });
+
+  it('rejects cargo held in a Sawmill output slot without changing accounting', () => {
+    const input = loadedAtSawmill(4, {
+      currentTripRevenue: 100,
+      currentTripRunningCost: 20,
+      lifetimeDeliveredUnits: 3,
+      lifetimeRevenue: 300,
+    });
+    input.trains[0].freightSetId = 'unavailable-freight-set';
+    input.trains[0].cargo = {
+      productId: 'structural-timber',
+      units: 4,
+      originFacilityId: 'other-sawmill',
+    };
+
+    const result = proposeCargoTick(input);
+
+    expectSingleBlocked(result, 'Cargo is not accepted here');
+    expect(result.statuses[0]).toEqual(expect.objectContaining({
+      facilityId: 'sawmill',
+      cargoUnits: 4,
+      capacityUnits: 0,
+    }));
+    expect(result.company).toEqual(input.company);
+    expect(result.company.ledger).toEqual(input.company.ledger);
+    expect(result.economy).toEqual(input.economy);
+    expect(result.trains).toEqual(input.trains);
+    expect(result.firstRouteProgress).toEqual(input.firstRouteProgress);
+    expect(result.completedDeliveries).toEqual([]);
+  });
 
   it('quotes the pre-batch destination and posts accepted-only revenue', () => {
     const input = loadedAtSawmill(14, {

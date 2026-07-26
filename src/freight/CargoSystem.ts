@@ -10,7 +10,11 @@ import type {
 } from '../economy/EconomyData';
 import { postLedgerEntry } from '../economy/FinanceLedger';
 import { quoteLocalProduct } from '../economy/MarketSystem';
-import { getProduct } from '../economy/ProductCatalog';
+import {
+  getFacilityDefinition,
+  getProduct,
+  getRecipe,
+} from '../economy/ProductCatalog';
 import { clonePlainData } from '../utils/PlainData';
 import {
   capacityForProduct,
@@ -150,9 +154,17 @@ const sourceSlot = (
 const destinationSlot = (
   facility: FacilityEconomyDef,
   productId: string,
-): InventorySlotDef | null => facility.definitionId === 'sawmill'
-  ? facility.inventories[productId] ?? null
-  : null;
+): InventorySlotDef | null => {
+  if (facility.definitionId !== 'sawmill'
+    || facility.activeRecipeId === null) return null;
+  const definition = getFacilityDefinition(facility.definitionId);
+  const recipe = getRecipe(facility.activeRecipeId);
+  const acceptsProduct = definition !== undefined
+    && definition.recipeIds.indexOf(facility.activeRecipeId) !== -1
+    && recipe !== undefined
+    && recipe.inputs.some((input) => input.productId === productId);
+  return acceptsProduct ? facility.inventories[productId] ?? null : null;
+};
 
 const sourceAvailability = (slot: InventorySlotDef): number =>
   slot.quantity - slot.reservedQuantity;
@@ -173,10 +185,9 @@ const canLoadAt = (
 
 const canUnloadAt = (
   train: TrainDef,
-  capacityUnits: number,
   facility: FacilityEconomyDef,
 ): boolean => {
-  if (!train.cargo || capacityUnits <= 0) return false;
+  if (!train.cargo) return false;
   const slot = destinationSlot(facility, train.cargo.productId);
   return slot !== null && slot.quantity < slot.capacity;
 };
@@ -195,7 +206,6 @@ const containedFacilities = (
 const eligibleFacilities = (
   train: TrainDef,
   capacityUnits: number,
-  economy: EconomyStateDef,
   contained: readonly ContainedFacility[],
 ): EligibleFacility[] => {
   const eligible: EligibleFacility[] = [];
@@ -205,7 +215,6 @@ const eligibleFacilities = (
     }
     if (canUnloadAt(
       train,
-      capacityUnits,
       candidate.facility,
     )) {
       eligible.push({ ...candidate, kind: 'unloading' });
@@ -232,7 +241,7 @@ const blockerForContainedFacility = (
   }
 
   if (facility.definitionId === 'sawmill') {
-    if (!train.cargo || capacityUnits <= 0) {
+    if (!train.cargo) {
       return 'Cargo is not accepted here';
     }
     const slot = destinationSlot(facility, train.cargo.productId);
@@ -407,7 +416,8 @@ const unloadBatch = (
 export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   let company = clonePlainData(input.company);
   const economy = clonePlainData(input.economy);
-  const trains = [...clonePlainData(input.trains)]
+  const trains = [...clonePlainData(input.trains)];
+  const trainsById = [...trains]
     .sort((left, right) => left.id.localeCompare(right.id));
   const firstRouteProgress = clonePlainData(input.firstRouteProgress);
   const runtimeByTrainId = new Map(
@@ -417,7 +427,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   const completedDeliveries: FreightDeliveryEvent[] = [];
   let changed = false;
 
-  trains.forEach((train) => {
+  trainsById.forEach((train) => {
     const productId = train.cargo?.productId ?? 'logs';
     const capacityUnits = cargoCapacity(train, productId);
     const runtime = runtimeByTrainId.get(train.id);
@@ -456,7 +466,6 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
     const eligible = eligibleFacilities(
       train,
       capacityUnits,
-      economy,
       contained,
     );
     const selected = eligible[0];
