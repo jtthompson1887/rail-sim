@@ -977,7 +977,7 @@ git commit -m "feat: generate the construction supply economy"
 - Produces:
   `EconomySystem.update(deltaMs, operating): EconomyUpdateResult`.
 
-- [ ] **Step 1: Write fixed-step red tests**
+- [x] **Step 1: Write fixed-step red tests**
 
 Prove:
 
@@ -991,7 +991,7 @@ Prove:
   revision;
 - save/reload resumes at the exact tick, recipe progress, and inventories.
 
-- [ ] **Step 2: Run the economy-system tests and verify failure**
+- [x] **Step 2: Run the economy-system tests and verify failure**
 
 ```powershell
 npx jest tests/unit/EconomySystem.test.ts tests/integration/EconomyPersistence.test.ts --runInBand --coverage=false
@@ -999,7 +999,7 @@ npx jest tests/unit/EconomySystem.test.ts tests/integration/EconomyPersistence.t
 
 Expected: fail because `EconomySystem.ts` does not exist.
 
-- [ ] **Step 3: Implement fixed tick orchestration**
+- [x] **Step 3: Implement fixed tick orchestration**
 
 Use:
 
@@ -1014,13 +1014,13 @@ for the new tick. Commit through Task 5's `applyEconomyBatch`, using
 `economyRevision` as the expected cursor. Return changed facility IDs and
 blockers for presentation.
 
-- [ ] **Step 4: Integrate only with generated `WorldScene` Operate mode**
+- [x] **Step 4: Integrate only with generated `WorldScene` Operate mode**
 
 Call `update(delta, this.mode === 'play' && !this.scene.isPaused())` from
 `WorldScene.update`. Use the existing save-state/retry path after changed
 economy batches; do not add economy logic to legacy `GameScene`.
 
-- [ ] **Step 5: Run economy and existing world-loop tests**
+- [x] **Step 5: Run economy and existing world-loop tests**
 
 ```powershell
 npx jest tests/unit/EconomySystem.test.ts tests/integration/EconomyPersistence.test.ts tests/unit/WorldSceneEditorGuards.test.ts tests/integration/GameFlow.test.ts --runInBand --coverage=false
@@ -1028,7 +1028,7 @@ npx jest tests/unit/EconomySystem.test.ts tests/integration/EconomyPersistence.t
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/economy/EconomySystem.ts src/managers/WorldManager.ts src/scenes/WorldScene.ts tests

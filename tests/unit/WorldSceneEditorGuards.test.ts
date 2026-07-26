@@ -10,6 +10,23 @@ import { applyConstructionTransaction } from '../../src/systems/ConstructionEcon
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
 
+  function prepareWorldLoop(scene: any): void {
+    scene.scene = { isPaused: jest.fn().mockReturnValue(false) };
+    scene.cameraController = { update: jest.fn() };
+    scene.publishDebugState = jest.fn();
+    scene.terrainChunkManager = { update: jest.fn() };
+    scene.sceneryManager = { update: jest.fn() };
+    scene.updateTerrainOverlay = jest.fn();
+    scene.inputManager = { handleTrainMovement: jest.fn() };
+    scene.trainManager = {
+      selectedTrain: null,
+      trains: [],
+      update: jest.fn(),
+    };
+    scene.contentLoader = { stations: [] };
+    scene.publishHUDState = jest.fn();
+  }
+
   function createStartupScene(
     mode: 'create' | 'play',
     saveResult: boolean,
@@ -517,6 +534,72 @@ describe('WorldScene disabled construction bypass guards', () => {
     setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
+  });
+
+  it('ticks the generated economy only while play mode is operating', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew(
+      'World-loop economy',
+      'world-loop-economy',
+    );
+    prepareWorldLoop(scene);
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+
+    GameStateManager.enterCreate(world.id);
+    scene.update(0, 4_000);
+    expect(world.economy.tick).toBe(0);
+
+    GameStateManager.enterPlay(world.id);
+    scene.update(4_000, 250);
+    scene.update(4_250, 250);
+    scene.update(4_500, 250);
+    scene.update(4_750, 250);
+    expect(world.economy.tick).toBe(1);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    scene.scene.isPaused.mockReturnValue(true);
+    scene.update(5_000, 4_000);
+    expect(world.economy.tick).toBe(1);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    scene.scene.isPaused.mockReturnValue(false);
+    GameStateManager.pause();
+    scene.update(9_000, 4_000);
+    expect(world.economy.tick).toBe(1);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed economy save and retries through the next changed batch', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew(
+      'Economy retry',
+      'world-loop-economy-retry',
+    );
+    prepareWorldLoop(scene);
+    const save = jest.spyOn(WorldManager, 'save')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(world.economy.tick).toBe(1);
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'unsaved' },
+    );
+    expect(emit.mock.calls.some(([event]) => event === 'ui:toast'))
+      .toBe(false);
+
+    scene.update(1_000, 1_000);
+
+    expect(world.economy.tick).toBe(2);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'saved' },
+    );
   });
 
   it('forwards the canceling pointer to pointer-aware construction tools', () => {

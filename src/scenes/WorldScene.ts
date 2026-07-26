@@ -47,6 +47,7 @@ import type {
   ConstructionPreviewModel,
   ConstructionToolPhase,
 } from '../ui/ConstructionPreviewOverlay';
+import { EconomySystem } from '../economy/EconomySystem';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -157,6 +158,7 @@ export default class WorldScene extends Phaser.Scene {
   private capturingStartupSaveOutcome = false;
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
+  private economySystem = new EconomySystem();
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -303,6 +305,7 @@ export default class WorldScene extends Phaser.Scene {
     this.lastReportedSaveState = 'saved';
     this.pendingStartupSaveError = null;
     this.capturingStartupSaveOutcome = false;
+    this.economySystem = new EconomySystem();
     if (data.worldId && !WorldManager.load(data.worldId)) {
       this.worldLoadFailed = true;
       return;
@@ -579,6 +582,16 @@ export default class WorldScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     this.cameraController.update(time, delta);
     this.publishDebugState();
+
+    const economyResult = this.economySystem.update(
+      delta,
+      GameStateManager.worldMode === 'play'
+        && GameStateManager.state === 'playing'
+        && !this.scene.isPaused(),
+    );
+    if (economyResult.ticksAdvanced > 0) {
+      this.saveWorldAndReport(false);
+    }
 
     // Stream terrain chunks and scenery around the camera
     const cam = this.cameras.main;
