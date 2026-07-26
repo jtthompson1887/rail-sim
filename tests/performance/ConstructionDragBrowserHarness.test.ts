@@ -18,7 +18,6 @@ describe('construction drag browser harness composition', () => {
       'new SnapSystem',
       'new ConstructionAnalyzer',
       'new ConstructionService',
-      'new ConstructionEconomy',
       'new CommandStack',
       'new PlaceTrackTool',
       'WorldManager.createNew',

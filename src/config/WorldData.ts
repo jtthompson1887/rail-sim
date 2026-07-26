@@ -8,6 +8,25 @@ import {
   MAX_OPPORTUNITY_ATTEMPTS,
   WorldGenerationConfig,
 } from './WorldGeneration';
+import type {
+  CompanyStateDef,
+  FacilityEconomyDef,
+  InventorySlotDef,
+  MarketStateDef,
+} from '../economy/EconomyData';
+import {
+  INITIAL_PRODUCTS,
+} from '../economy/InitialEconomyContent';
+import {
+  getFacilityDefinition,
+  getProduct,
+  getRecipe,
+} from '../economy/ProductCatalog';
+import {
+  createCompanyState,
+  validateCompanyState,
+} from '../economy/FinanceLedger';
+import { clonePlainData } from '../utils/PlainData';
 
 export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
 
@@ -77,19 +96,6 @@ export interface TrainDef {
   type: VehicleType;
 }
 
-/** A player-authored scenario objective active during play mode. */
-export type ScenarioObjectiveType = 'delivery' | 'timed';
-
-export interface ScenarioDef {
-  id: string;
-  type: ScenarioObjectiveType;
-  description: string;
-  targetStationId?: string;
-  passengerCount?: number;
-  timeLimitSecs?: number;
-  scoreReward: number;
-}
-
 /** Asset type identifiers for scenery objects. */
 export type SceneryType =
   | 'tree_oak' | 'tree_pine' | 'tree_birch' | 'tree_dead'
@@ -111,10 +117,6 @@ export interface SceneryObjectDef {
 export type BiomeType = 'temperate' | 'alpine' | 'arid' | 'tropical';
 
 export type ConstructionDifficultyId = 'standard';
-
-export interface CompanyConstructionState {
-  cash: number;
-}
 
 export interface WorldGenerationConfigDef {
   generationConfigVersion: 1;
@@ -157,20 +159,29 @@ export interface StarterOpportunityDef {
   recommendedCamera: { x: number; y: number; zoom: number };
 }
 
+export interface EconomyStateDef {
+  economyVersion: 1;
+  tick: number;
+  facilities: FacilityEconomyDef[];
+  market: MarketStateDef;
+}
+
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 5;
+  schemaVersion: 6;
   revision: number;
+  constructionRevision: number;
+  economyRevision: number;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
-  company: CompanyConstructionState;
+  company: CompanyStateDef;
+  economy: EconomyStateDef;
   starterOpportunity: StarterOpportunityDef;
   tracks: TrackDef[];
   junctions: JunctionDef[];
   stations: WorldStationDef[];
   trains: TrainDef[];
-  scenarios: ScenarioDef[];
   /** Persisted scenery object placements (player edits are saved here). */
   scenery: SceneryObjectDef[];
   metadata: {
@@ -185,12 +196,15 @@ export function createEmptyWorld(
   seed: string,
   biome: BiomeType,
   starterOpportunity: StarterOpportunityDef,
+  economy: EconomyStateDef = createEmptyEconomyState(),
 ): WorldData {
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
+    constructionRevision: 0,
+    economyRevision: 0,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
@@ -199,13 +213,15 @@ export function createEmptyWorld(
       biome,
       constructionDifficultyId,
     },
-    company: { cash: startingCashForDifficulty(constructionDifficultyId) },
+    company: createCompanyState(
+      startingCashForDifficulty(constructionDifficultyId),
+    ),
+    economy: clonePlainData(economy),
     starterOpportunity,
     tracks: [],
     junctions: [],
     stations: [],
     trains: [],
-    scenarios: [],
     scenery: [],
     metadata: { createdAt: now, updatedAt: now },
   };
@@ -216,6 +232,22 @@ export const INCOMPATIBLE_WORLD_ACTION = 'Start a new world.' as const;
 export interface CompatibleWorldResult {
   compatible: true;
   world: WorldData;
+}
+
+export function createEmptyEconomyState(): EconomyStateDef {
+  const regionalDemandBpsByProduct: Record<string, number> = {};
+  INITIAL_PRODUCTS.forEach((product) => {
+    regionalDemandBpsByProduct[product.id] = 10_000;
+  });
+  return {
+    economyVersion: 1,
+    tick: 0,
+    facilities: [],
+    market: {
+      constructionIndexBps: 10_000,
+      regionalDemandBpsByProduct,
+    },
+  };
 }
 
 export interface IncompatibleWorldResult {
@@ -516,17 +548,6 @@ function isTrain(value: unknown): value is TrainDef {
     && (value.type === 'locomotive' || value.type === 'passenger-carriage');
 }
 
-function isScenario(value: unknown): value is ScenarioDef {
-  if (!isRecord(value)) return false;
-  return typeof value.id === 'string'
-    && (value.type === 'delivery' || value.type === 'timed')
-    && typeof value.description === 'string'
-    && (value.targetStationId === undefined || typeof value.targetStationId === 'string')
-    && (value.passengerCount === undefined || isFiniteNumber(value.passengerCount))
-    && (value.timeLimitSecs === undefined || isFiniteNumber(value.timeLimitSecs))
-    && isFiniteNumber(value.scoreReward);
-}
-
 function isScenery(value: unknown): value is SceneryObjectDef {
   if (!isRecord(value)) return false;
   const sceneryTypes: SceneryType[] = [
@@ -541,6 +562,122 @@ function isScenery(value: unknown): value is SceneryObjectDef {
     && isFiniteNumber(value.rotation)
     && isFiniteNumber(value.scale)
     && isFiniteNumber(value.variant);
+}
+
+const isNonNegativeSafeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+function isInventorySlot(
+  value: unknown,
+  productId: string,
+  expectedCapacity: number,
+  expectedTargetStock: number,
+): value is InventorySlotDef {
+  if (!isRecord(value)) return false;
+  return value.productId === productId
+    && getProduct(productId) !== undefined
+    && isNonNegativeSafeInteger(value.quantity)
+    && isNonNegativeSafeInteger(value.reservedQuantity)
+    && Number.isSafeInteger(value.capacity)
+    && value.capacity === expectedCapacity
+    && isNonNegativeSafeInteger(value.recentInflow)
+    && isNonNegativeSafeInteger(value.recentOutflow)
+    && Number.isSafeInteger(value.targetStock)
+    && value.targetStock === expectedTargetStock
+    && (value.reservedQuantity as number) <= (value.quantity as number)
+    && (value.quantity as number) <= (value.capacity as number)
+    && (value.targetStock as number) > 0
+    && (value.targetStock as number) <= (value.capacity as number);
+}
+
+function isFacilityEconomy(value: unknown): value is FacilityEconomyDef {
+  if (!isRecord(value)
+    || typeof value.id !== 'string'
+    || value.id.trim().length === 0
+    || typeof value.definitionId !== 'string'
+    || typeof value.name !== 'string'
+    || value.name.trim().length === 0
+    || !isFiniteNumber(value.x)
+    || !isFiniteNumber(value.y)
+    || !isRecord(value.railAccess)
+    || !isFiniteNumber(value.railAccess.x)
+    || !isFiniteNumber(value.railAccess.y)
+    || !isFiniteNumber(value.railAccess.radius)
+    || value.railAccess.radius <= 0
+    || !isRecord(value.inventories)
+    || !isNonNegativeSafeInteger(value.recipeProgressTicks)) {
+    return false;
+  }
+
+  const definition = getFacilityDefinition(value.definitionId);
+  if (!definition) return false;
+  const expectedSlots = new Map(
+    definition.inventory.map((slot) => [slot.productId, slot]),
+  );
+  const inventoryKeys = Object.keys(value.inventories);
+  if (inventoryKeys.length !== expectedSlots.size) return false;
+  for (const productId of inventoryKeys) {
+    const expected = expectedSlots.get(productId);
+    if (!expected || !isInventorySlot(
+      value.inventories[productId],
+      productId,
+      expected.capacity,
+      expected.targetStock,
+    )) return false;
+  }
+
+  if (value.activeRecipeId === null) {
+    return value.recipeProgressTicks === 0;
+  }
+  if (typeof value.activeRecipeId !== 'string'
+    || definition.recipeIds.indexOf(value.activeRecipeId) === -1) {
+    return false;
+  }
+  const recipe = getRecipe(value.activeRecipeId);
+  return recipe !== undefined
+    && value.recipeProgressTicks < recipe.cycleTicks;
+}
+
+function isMarketState(value: unknown): value is MarketStateDef {
+  if (!isRecord(value)
+    || !Number.isSafeInteger(value.constructionIndexBps)
+    || (value.constructionIndexBps as number) < 8_500
+    || (value.constructionIndexBps as number) > 11_500
+    || !isRecord(value.regionalDemandBpsByProduct)) {
+    return false;
+  }
+  const expectedProductIds = INITIAL_PRODUCTS
+    .map((product) => product.id)
+    .sort();
+  const actualProductIds = Object.keys(value.regionalDemandBpsByProduct)
+    .sort();
+  if (actualProductIds.length !== expectedProductIds.length
+    || actualProductIds.some((productId, index) => (
+      productId !== expectedProductIds[index]
+    ))) return false;
+  return actualProductIds.every((productId) => {
+    const factor = value.regionalDemandBpsByProduct[productId];
+    return Number.isSafeInteger(factor)
+      && (factor as number) >= 8_000
+      && (factor as number) <= 12_000;
+  });
+}
+
+function isEconomyState(value: unknown): value is EconomyStateDef {
+  if (!isRecord(value)
+    || value.economyVersion !== 1
+    || !isNonNegativeSafeInteger(value.tick)
+    || !Array.isArray(value.facilities)
+    || !value.facilities.every(isFacilityEconomy)
+    || !isMarketState(value.market)) {
+    return false;
+  }
+  const facilityIds = new Set<string>();
+  for (const facility of value.facilities as FacilityEconomyDef[]) {
+    if (facilityIds.has(facility.id)) return false;
+    facilityIds.add(facility.id);
+  }
+  return true;
 }
 
 function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
@@ -563,12 +700,13 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 5) {
+  if (raw.schemaVersion !== 6) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
   }
-  if ('seed' in raw || 'terrainSeed' in raw || 'biome' in raw) {
+  if ('seed' in raw || 'terrainSeed' in raw || 'biome' in raw
+    || 'scenarios' in raw) {
     return incompatible(raw, 'legacy generation fields are not supported.');
   }
 
@@ -587,23 +725,24 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   const metadata = raw.metadata;
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
-    || !Number.isSafeInteger(raw.revision)
-    || (raw.revision as number) < 0
+    || !isNonNegativeSafeInteger(raw.revision)
+    || !isNonNegativeSafeInteger(raw.constructionRevision)
+    || !isNonNegativeSafeInteger(raw.economyRevision)
+    || (raw.constructionRevision as number) > (raw.revision as number)
+    || (raw.economyRevision as number)
+      > (raw.revision as number) - (raw.constructionRevision as number)
     || !Array.isArray(raw.tracks) || !raw.tracks.every(isTrack)
     || !Array.isArray(raw.junctions) || !raw.junctions.every(isJunction)
     || !Array.isArray(raw.stations) || !raw.stations.every(isStation)
     || !Array.isArray(raw.trains) || !raw.trains.every(isTrain)
-    || !Array.isArray(raw.scenarios) || !raw.scenarios.every(isScenario)
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
-    || !isRecord(company)
-    || Object.keys(company).length !== 1
-    || !Number.isSafeInteger(company.cash)
-    || (company.cash as number) < 0
+    || validateCompanyState(company).valid === false
+    || !isEconomyState(raw.economy)
     || !isStarterOpportunity(raw.starterOpportunity)
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 5.');
+    return incompatible(raw, 'data does not match schema version 6.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

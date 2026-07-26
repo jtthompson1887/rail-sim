@@ -7,7 +7,6 @@ import TrackManager from '../../src/managers/TrackManager';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
-import { ConstructionEconomy } from '../../src/systems/ConstructionEconomy';
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { TrackSerializer } from '../../src/utils/TrackSerializer';
@@ -16,6 +15,11 @@ import { WorldContentLoader } from '../../src/services/WorldContentLoader';
 import { ENDPOINT_CONNECTION_COST } from '../../src/config/ConstructionConfig';
 
 const { makeScene } = require('../../__mocks__/phaser');
+
+function ledgerCash(): number {
+  const company = WorldManager.world!.company;
+  return company.ledger.reduce((cash, entry) => cash + entry.amount, 0);
+}
 
 describe('PlaceTrackCommand', () => {
   let scene: Phaser.Scene;
@@ -42,7 +46,6 @@ describe('PlaceTrackCommand', () => {
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
     );
@@ -50,6 +53,12 @@ describe('PlaceTrackCommand', () => {
     expect(stack.push(command)).toBe(true);
     expect(world.revision).toBe(1);
     expect(world.company.cash).toBe(initialCash - quote.totalCost);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.company.ledger[1]).toEqual(expect.objectContaining({
+      category: 'construction-capex',
+      amount: -quote.totalCost,
+      referenceId: quote.newTrackUUID,
+    }));
     expect(world.tracks[0]).toEqual(expect.objectContaining({
       uuid: 'built',
       ...quote.proposal.geometry,
@@ -60,12 +69,22 @@ describe('PlaceTrackCommand', () => {
     expect(stack.undo()).toBe(true);
     expect(world.revision).toBe(2);
     expect(world.company.cash).toBe(initialCash);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.company.ledger[2]).toEqual(expect.objectContaining({
+      amount: quote.totalCost,
+      reversalOf: world.company.ledger[1].id,
+    }));
     expect(world.tracks).toEqual([]);
     expect(manager.getTrack('built')).toBeUndefined();
 
     expect(stack.redo()).toBe(true);
     expect(world.revision).toBe(3);
     expect(world.company.cash).toBe(initialCash - quote.totalCost);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.company.ledger[3]).toEqual(expect.objectContaining({
+      amount: -quote.totalCost,
+      referenceId: quote.newTrackUUID,
+    }));
     expect(world.tracks[0].uuid).toBe('built');
   });
 
@@ -73,7 +92,6 @@ describe('PlaceTrackCommand', () => {
     const world = WorldManager.world!;
     const initialCash = world.company.cash;
     const stack = new CommandStack();
-    const economy = new ConstructionEconomy(world.company);
     const firstQuote = service.createQuote(
       { x: 0, y: 0 },
       { x: 300, y: 0 },
@@ -82,7 +100,6 @@ describe('PlaceTrackCommand', () => {
     expect(stack.push(new PlaceTrackCommand(
       scene,
       manager,
-      economy,
       service,
       firstQuote,
     ))).toBe(true);
@@ -94,7 +111,6 @@ describe('PlaceTrackCommand', () => {
     expect(stack.push(new PlaceTrackCommand(
       scene,
       manager,
-      economy,
       service,
       secondQuote,
     ))).toBe(true);
@@ -102,11 +118,13 @@ describe('PlaceTrackCommand', () => {
     expect(world.company.cash).toBe(
       initialCash - firstQuote.totalCost - secondQuote.totalCost,
     );
+    expect(world.company.cash).toBe(ledgerCash());
 
     expect(stack.undo()).toBe(true);
     expect(stack.undo()).toBe(true);
     expect(world.revision).toBe(4);
     expect(world.company.cash).toBe(initialCash);
+    expect(world.company.cash).toBe(ledgerCash());
     expect(world.tracks).toEqual([]);
     expect(manager.tracks).toEqual([]);
 
@@ -116,6 +134,7 @@ describe('PlaceTrackCommand', () => {
     expect(world.company.cash).toBe(
       initialCash - firstQuote.totalCost - secondQuote.totalCost,
     );
+    expect(world.company.cash).toBe(ledgerCash());
     expect(world.tracks.map((track) => track.uuid)).toEqual([
       'first-built',
       'second-built',
@@ -139,7 +158,6 @@ describe('PlaceTrackCommand', () => {
     expect(stack.push(new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(originalWorld.company),
       service,
       quote,
     ))).toBe(true);
@@ -177,7 +195,6 @@ describe('PlaceTrackCommand', () => {
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
       (stage) => {
@@ -189,7 +206,29 @@ describe('PlaceTrackCommand', () => {
     expect(WorldManager.world).toBe(world);
     expect(world.company).toBe(company);
     expect(JSON.stringify(world)).toBe(before);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.company.ledger).toHaveLength(1);
     expect(manager.getTrack('failed')).toBeUndefined();
+  });
+
+  it('writes no construction ledger entry when the persisted batch rejects', () => {
+    const world = WorldManager.world!;
+    const quote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'persisted-failure',
+    )!;
+    const before = clonePlainData(world);
+    const apply = jest.spyOn(WorldManager, 'applyConstructionBatch')
+      .mockReturnValue(false);
+    const command = new PlaceTrackCommand(scene, manager, service, quote);
+
+    expect(command.execute()).toBe(false);
+    apply.mockRestore();
+    expect(world).toEqual(before);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.company.ledger).toHaveLength(1);
+    expect(manager.getTrack('persisted-failure')).toBeUndefined();
   });
 
   it.each([
@@ -202,7 +241,6 @@ describe('PlaceTrackCommand', () => {
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
       (stage) => {
@@ -213,17 +251,43 @@ describe('PlaceTrackCommand', () => {
     const beforeUndo = JSON.stringify(world);
     expect(command.undo()).toBe(false);
     expect(JSON.stringify(world)).toBe(beforeUndo);
+    expect(world.company.cash).toBe(ledgerCash());
     expect(manager.getTrack('undo-failed')).toBeDefined();
+  });
+
+  it('accepts a current construction quote after an economy-only revision', () => {
+    const world = WorldManager.world!;
+    const quote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'after-economy',
+    )!;
+    expect(WorldManager.applyEconomyBatch(
+      world.economyRevision,
+      (economy) => {
+        economy.tick += 1;
+        return true;
+      },
+    )).toBe(true);
+
+    const command = new PlaceTrackCommand(scene, manager, service, quote);
+    expect(command.execute()).toBe(true);
+    expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['after-economy']);
+    expect(world.company.cash).toBe(ledgerCash());
+    expect(world.constructionRevision).toBe(1);
+    expect(world.economyRevision).toBe(1);
   });
 
   it('rejects stale and unaffordable quotes with zero mutation', () => {
     const world = WorldManager.world!;
     const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'stale')!;
-    world.company.cash = 0;
+    world.company = {
+      ...clonePlainData(world.company),
+      cash: 0,
+    };
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
     );
@@ -233,13 +297,12 @@ describe('PlaceTrackCommand', () => {
     expect(manager.getTrack('stale')).toBeUndefined();
   });
 
-  it('rejects redo after an intervening authoritative revision', () => {
+  it('does not stale redo after an unrelated root-only revision', () => {
     const world = WorldManager.world!;
     const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'redo-stale')!;
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
     );
@@ -254,8 +317,10 @@ describe('PlaceTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(command.execute()).toBe(false);
-    expect(manager.getTrack('redo-stale')).toBeUndefined();
+    expect(command.execute()).toBe(true);
+    expect(manager.getTrack('redo-stale')).toBeDefined();
+    expect(world.scenery.map(({ id }) => id)).toEqual(['intervening']);
+    expect(world.company.cash).toBe(ledgerCash());
   });
 
   it('rejects redo when a new live track crosses the quoted route', () => {
@@ -268,7 +333,6 @@ describe('PlaceTrackCommand', () => {
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(world.company),
       service,
       quote,
     );
@@ -326,7 +390,6 @@ describe('PlaceTrackCommand', () => {
     const command = new PlaceTrackCommand(
       scene,
       manager,
-      new ConstructionEconomy(WorldManager.world!.company),
       service,
       quote,
     );

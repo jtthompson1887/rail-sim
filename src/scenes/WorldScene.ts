@@ -15,7 +15,6 @@ import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
 import { ConstructionAnalyzer } from '../systems/ConstructionAnalyzer';
 import { ConstructionService } from '../systems/ConstructionService';
-import { ConstructionEconomy } from '../systems/ConstructionEconomy';
 import { SnapSystem } from '../systems/SnapSystem';
 import { CommandStack } from '../systems/CommandStack';
 import { TrainSerializer } from '../utils/TrainSerializer';
@@ -95,12 +94,6 @@ function deletionBlockingReason(
       .filter((station) => selected.has(station.trackUUID))
       .map((station) => station.id),
   );
-  if (world.scenarios.some((scenario) => (
-    scenario.targetStationId !== undefined
-    && stationIds.has(scenario.targetStationId)
-  ))) {
-    return 'Deletion blocked · A scenario depends on a station here';
-  }
   if (stationIds.size > 0) {
     return 'Deletion blocked · Remove stations from these tracks first';
   }
@@ -242,7 +235,7 @@ export default class WorldScene extends Phaser.Scene {
       return track ? sum + demolitionRefund(track.paidBuildCost) : Number.NaN;
     }, 0);
     if (!world
-      || intent.expectedRevision !== world.revision
+      || intent.expectedConstructionRevision !== world.constructionRevision
       || !exactSelection
       || !Number.isSafeInteger(refund)
       || refund !== intent.expectedRefund) {
@@ -266,7 +259,6 @@ export default class WorldScene extends Phaser.Scene {
       this.trackManager,
       this,
       intent.uuids,
-      new ConstructionEconomy(world.company),
     );
     if (!this.commandStack.push(command)) {
       EventBus.emit('ui:toast', {
@@ -368,7 +360,6 @@ export default class WorldScene extends Phaser.Scene {
         this.trackManager,
         this.snapSystem,
         constructionService,
-        new ConstructionEconomy(world.company),
         this.commandStack,
       ));
     }
@@ -742,7 +733,7 @@ export default class WorldScene extends Phaser.Scene {
           0,
         )
         : 0,
-      expectedRevision: world?.revision ?? -1,
+      expectedConstructionRevision: world?.constructionRevision ?? -1,
       available: complete && uuids.length > 0 && blockingReason === '',
       blockingReason,
     });

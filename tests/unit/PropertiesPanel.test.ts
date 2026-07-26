@@ -122,7 +122,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['track-1'],
       expectedRefund: 617,
-      expectedRevision: 4,
+      expectedConstructionRevision: 4,
       available: true,
       blockingReason: '',
     });
@@ -159,7 +159,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a', 'b'],
       expectedRefund: 101,
-      expectedRevision: 7,
+      expectedConstructionRevision: 7,
       available: true,
       blockingReason: '',
     });
@@ -180,7 +180,7 @@ describe('PropertiesPanel', () => {
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({
       uuids: ['a', 'b'],
       expectedRefund: 101,
-      expectedRevision: 7,
+      expectedConstructionRevision: 7,
     }));
   });
 
@@ -202,7 +202,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a'],
       expectedRefund: 50,
-      expectedRevision: 4,
+      expectedConstructionRevision: 4,
       available: true,
       blockingReason: '',
     });
@@ -217,7 +217,7 @@ describe('PropertiesPanel', () => {
     expect(onDelete).toHaveBeenCalledWith({
       uuids: ['a'],
       expectedRefund: 50,
-      expectedRevision: 4,
+      expectedConstructionRevision: 4,
     });
   });
 
@@ -239,7 +239,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a'],
       expectedRefund: 50,
-      expectedRevision: 4,
+      expectedConstructionRevision: 4,
       available: true,
       blockingReason: '',
     });
@@ -249,7 +249,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a'],
       expectedRefund: 50,
-      expectedRevision: 5,
+      expectedConstructionRevision: 5,
       available: true,
       blockingReason: '',
     });
@@ -263,7 +263,7 @@ describe('PropertiesPanel', () => {
     expect(onDelete).not.toHaveBeenCalled();
     (EventBus as any).emit('ui:delete-request', { uuids: ['a'] });
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({
-      expectedRevision: 5,
+      expectedConstructionRevision: 5,
     }));
   });
 
@@ -286,7 +286,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a', 'b'],
       expectedRefund: 101,
-      expectedRevision: 7,
+      expectedConstructionRevision: 7,
       available: true,
       blockingReason: '',
     });
@@ -324,7 +324,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a'],
       expectedRefund: 50,
-      expectedRevision: 9,
+      expectedConstructionRevision: 9,
       available: true,
       blockingReason: '',
     });
@@ -359,7 +359,7 @@ describe('PropertiesPanel', () => {
     EventBus.emit('ui:deletion-review', {
       uuids: ['a'],
       expectedRefund: 0,
-      expectedRevision: 12,
+      expectedConstructionRevision: 12,
       available: false,
       blockingReason: 'Deletion blocked · Move trains off these tracks first',
     });

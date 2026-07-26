@@ -140,7 +140,7 @@ type CompanyValidationResult =
     postCode: 'invalid-company' | 'unsafe-ledger-id';
   };
 
-const validateCompanyState = (
+export const validateCompanyState = (
   value: unknown,
 ): CompanyValidationResult => {
   if (!isRecord(value)

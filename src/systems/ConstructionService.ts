@@ -38,7 +38,7 @@ export interface PredictedEndpointConnectionDef {
 export interface ConstructionQuote {
   readonly quoteId: string;
   readonly newTrackUUID: string;
-  readonly worldRevision: number;
+  readonly constructionRevision: number;
   readonly expectedCash: number;
   readonly proposal: ConstructionProposal;
   readonly expectedAffectedTracks: ReadonlyArray<{
@@ -269,7 +269,7 @@ export class ConstructionService {
       quote = deepFreeze({
         quoteId: crypto.randomUUID(),
         newTrackUUID,
-        worldRevision: world.revision,
+        constructionRevision: world.constructionRevision,
         expectedCash: world.company.cash,
         proposal,
         expectedAffectedTracks,
@@ -335,7 +335,8 @@ export class ConstructionService {
     if (!world || this.quoteWorlds.get(quote) !== world
       || !WorldManager.canAdvanceRevision()
       || !this.liveTracksMatchWorld(world)
-      || (requireCapturedRevision && world.revision !== quote.worldRevision)
+      || (requireCapturedRevision
+        && world.constructionRevision !== quote.constructionRevision)
       || world.company.cash !== expectedCash
       || !quote.quoteId || !quote.newTrackUUID
       || this.trackManager.getTrack(quote.newTrackUUID)

@@ -102,6 +102,9 @@ describe('ConstructionService', () => {
     })]);
     expect(quote!.topologyCost).toBe(ENDPOINT_CONNECTION_COST);
     expect(quote!.totalCost).toBe(quote!.proposal.costs.total + ENDPOINT_CONNECTION_COST);
+    expect(quote!.constructionRevision).toBe(
+      WorldManager.world!.constructionRevision,
+    );
     expect(Object.isFrozen(quote)).toBe(true);
     expect(Object.isFrozen(quote!.proposal.geometry.p0)).toBe(true);
   });
@@ -206,7 +209,10 @@ describe('ConstructionService', () => {
   });
 
   it('captures exact cash before and after for an unaffordable quote-null preview', () => {
-    WorldManager.world!.company.cash = 100;
+    WorldManager.world!.company = {
+      ...WorldManager.world!.company,
+      cash: 100,
+    };
     const result = service.createPreview(
       { x: 0, y: 0 },
       { x: 300, y: 0 },
@@ -390,15 +396,21 @@ describe('ConstructionService', () => {
     expect(service.revalidateQuote(quote!)).toBe(true);
   });
 
-  it('rejects a quote after revision, cash, or affected geometry changes', () => {
+  it('rejects a quote after construction revision, cash, or affected geometry changes', () => {
     const neighbour = addTrack(manager, scene);
     const quote = service.createQuote({ x: 5, y: 0 }, { x: 300, y: 0 }, 'new-track')!;
-    WorldManager.world!.company.cash -= 1;
+    WorldManager.world!.company = {
+      ...WorldManager.world!.company,
+      cash: WorldManager.world!.company.cash - 1,
+    };
     expect(service.revalidateQuote(quote)).toBe(false);
-    WorldManager.world!.company.cash += 1;
-    WorldManager.world!.revision += 1;
+    WorldManager.world!.company = {
+      ...WorldManager.world!.company,
+      cash: WorldManager.world!.company.cash + 1,
+    };
+    WorldManager.world!.constructionRevision += 1;
     expect(service.revalidateQuote(quote)).toBe(false);
-    WorldManager.world!.revision -= 1;
+    WorldManager.world!.constructionRevision -= 1;
     manager.updateTrackVectors(
       neighbour.getUUID(),
       new Phaser.Math.Vector2(-300, 0),
@@ -407,6 +419,24 @@ describe('ConstructionService', () => {
       new Phaser.Math.Vector2(0, 0),
     );
     expect(service.revalidateQuote(quote)).toBe(false);
+  });
+
+  it('keeps a quote current across an economy-only batch', () => {
+    const quote = service.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'economy-independent',
+    )!;
+    const world = WorldManager.world!;
+
+    expect(WorldManager.applyEconomyBatch(
+      world.economyRevision,
+      (economy) => {
+        economy.tick += 1;
+        return true;
+      },
+    )).toBe(true);
+    expect(service.revalidateQuote(quote)).toBe(true);
   });
 
   it('rejects a quote when an unrelated live track crosses it after pricing', () => {

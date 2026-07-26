@@ -14,7 +14,7 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
   private beforeDef: TrackDef;
   private afterDef: TrackDef;
   private readonly worldIdentity: WorldData | null;
-  private expectedRevision: number;
+  private expectedConstructionRevision: number;
 
   constructor(
     trackManager: TrackManager,
@@ -27,12 +27,16 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
     this.beforeDef = before;
     this.afterDef = after;
     this.worldIdentity = WorldManager.world;
-    this.expectedRevision = this.worldIdentity?.revision ?? -1;
+    this.expectedConstructionRevision =
+      this.worldIdentity?.constructionRevision ?? -1;
   }
 
   getRevisionContext(): CommandRevisionContext | null {
     return this.worldIdentity
-      ? { authority: this.worldIdentity, revision: this.expectedRevision }
+      ? {
+          authority: this.worldIdentity,
+          revision: this.expectedConstructionRevision,
+        }
       : null;
   }
 
@@ -40,7 +44,7 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
     if (context.authority !== this.worldIdentity
       || !Number.isSafeInteger(context.revision)
       || context.revision < 0) return false;
-    this.expectedRevision = context.revision;
+    this.expectedConstructionRevision = context.revision;
     return true;
   }
 
@@ -50,18 +54,19 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
   private apply(def: TrackDef): boolean {
     const track = this.trackManager.getTrack(this.uuid);
     if (!track || WorldManager.world !== this.worldIdentity
-      || WorldManager.world?.revision !== this.expectedRevision
+      || WorldManager.world?.constructionRevision
+        !== this.expectedConstructionRevision
       || !WorldManager.canAdvanceRevision()) return false;
     const current = WorldManager.world!.tracks.find((item) => item.uuid === this.uuid);
     if (!current || !this.trackManager.applyTrackDef(def)) return false;
     if (!WorldManager.applyConstructionBatch(
-      this.expectedRevision,
+      this.expectedConstructionRevision,
       (draft) => draft.updateTrack(def),
     )) {
       this.trackManager.applyTrackDef(current);
       return false;
     }
-    this.expectedRevision += 1;
+    this.expectedConstructionRevision += 1;
     return true;
   }
 }

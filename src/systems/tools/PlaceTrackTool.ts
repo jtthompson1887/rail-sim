@@ -4,7 +4,6 @@ import type TrackManager from '../../managers/TrackManager';
 import { WorldManager } from '../../managers/WorldManager';
 import { EventBus } from '../../services/EventBus';
 import type { CommandStack } from '../CommandStack';
-import type { ConstructionEconomy } from '../ConstructionEconomy';
 import type {
   ConstructionInputAnchor,
   ConstructionPreview,
@@ -75,7 +74,6 @@ export class PlaceTrackTool implements IEditorTool {
     private readonly trackManager: TrackManager,
     private readonly snapSystem: SnapSystem,
     private readonly constructionService: ConstructionService,
-    private readonly economy: ConstructionEconomy,
     private readonly commandStack: CommandStack,
     private readonly overlay: PreviewOverlay = new ConstructionPreviewOverlay(scene),
   ) {}
@@ -214,7 +212,6 @@ export class PlaceTrackTool implements IEditorTool {
     const command = new PlaceTrackCommand(
       this.scene,
       this.trackManager,
-      this.economy,
       this.constructionService,
       preview.quote,
     );
@@ -304,8 +301,10 @@ export class PlaceTrackTool implements IEditorTool {
   private publishModel(stale: boolean): void {
     const preview = this.currentPreview;
     if (!preview) return;
+    const cash = WorldManager.world?.company.cash;
     const affordable = preview.affordable !== false
-      && this.economy.canAfford(preview.totalCost);
+      && Number.isSafeInteger(cash)
+      && (cash as number) >= preview.totalCost;
     const engineeringReady = !stale
       && preview.proposal.valid
       && affordable
@@ -403,7 +402,7 @@ export class PlaceTrackTool implements IEditorTool {
       this.snapSystem.gridEnabled,
       this.snapSystem.gridSize,
       this.snapSystem.snapRadius,
-      world?.revision ?? 'none',
+      world?.constructionRevision ?? 'none',
       world?.company.cash ?? 'none',
     ].join('|');
   }

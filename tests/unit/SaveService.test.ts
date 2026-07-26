@@ -3,13 +3,19 @@
  */
 import { SaveService, SaveData } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
-import type { WorldData } from '../../src/config/WorldData';
+import {
+  createEmptyEconomyState,
+  type WorldData,
+} from '../../src/config/WorldData';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
+    constructionRevision: 0,
+    economyRevision: 0,
     id,
     name,
     generationConfig: {
@@ -18,13 +24,13 @@ function makeWorld(id: string, name: string, seed: string, timestamp: number): W
       biome: 'temperate',
       constructionDifficultyId: 'standard',
     },
-    company: { cash: 876_543 },
+    company: createCompanyState(876_543),
+    economy: createEmptyEconomyState(),
     starterOpportunity: makeStarterOpportunity(seed),
     tracks: [],
     junctions: [],
     stations: [],
     trains: [],
-    scenarios: [],
     scenery: [],
     metadata: { createdAt: timestamp, updatedAt: timestamp },
   };
@@ -35,7 +41,7 @@ describe('SaveService', () => {
     localStorage.clear();
   });
 
-  it('preserves schema-5 revision, company cash, and paid track value exactly', () => {
+  it('preserves schema-6 revisions, economy, ledger cash, and paid track value exactly', () => {
     const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
     world.tracks.push({
       geometryVersion: 1,
@@ -61,6 +67,10 @@ describe('SaveService', () => {
     expect(SaveService.saveWorld(world)).toBe(true);
     const loaded = SaveService.loadWorld(world.id)!;
     expect(loaded.company.cash).toBe(876_543);
+    expect(loaded.company.ledger).toEqual(world.company.ledger);
+    expect(loaded.economy).toEqual(world.economy);
+    expect(loaded.constructionRevision).toBe(0);
+    expect(loaded.economyRevision).toBe(0);
     expect(loaded.tracks[0].paidBuildCost).toBe(12_345);
   });
 

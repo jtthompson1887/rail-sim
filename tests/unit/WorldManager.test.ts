@@ -9,6 +9,7 @@ import type { TrackDef } from '../../src/config/WorldData';
 import { EventBus } from '../../src/services/EventBus';
 import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
+import { clonePlainData } from '../../src/utils/PlainData';
 
 function makeTrackDef(
   uuid: string,
@@ -76,17 +77,47 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 5 at revision zero with deterministic company cash', () => {
-      const w = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(5);
+    it('creates schema 6 with separate zeroed revisions and a conserved opening balance', () => {
+      const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
+      expect(w.schemaVersion).toBe(6);
       expect(w.revision).toBe(0);
+      expect(w.constructionRevision).toBe(0);
+      expect(w.economyRevision).toBe(0);
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
         biome: 'alpine',
         constructionDifficultyId: 'standard',
       });
-      expect(w.company).toEqual({ cash: STANDARD_STARTING_CASH });
+      expect(w.company).toEqual({
+        cash: STANDARD_STARTING_CASH,
+        nextLedgerId: 2,
+        ledger: [{
+          id: 1,
+          tick: 0,
+          category: 'opening-balance',
+          ledgerClass: 'opening',
+          amount: STANDARD_STARTING_CASH,
+          referenceId: 'opening-balance',
+        }],
+      });
+      expect(w.economy).toEqual({
+        economyVersion: 1,
+        tick: 0,
+        facilities: [],
+        market: {
+          constructionIndexBps: 10_000,
+          regionalDemandBpsByProduct: {
+            logs: 10_000,
+            'structural-timber': 10_000,
+            'limestone-aggregate': 10_000,
+            cement: 10_000,
+            steel: 10_000,
+            'building-modules': 10_000,
+          },
+        },
+      });
+      expect(w).not.toHaveProperty('scenarios');
       expect(w).not.toHaveProperty('seed');
       expect(w).not.toHaveProperty('terrainSeed');
       expect(w).not.toHaveProperty('biome');
@@ -198,6 +229,260 @@ describe('WorldManager', () => {
       WorldManager.createNew('No bypass', 'real-terrain-alpha');
       expect((WorldManager.addTrackDef as any)(makeTrackDef('one'), false)).toBe(true);
       expect(WorldManager.world!.revision).toBe(1);
+    });
+
+    it('advances only construction and root revisions for a construction batch', () => {
+      const world: any = WorldManager.createNew(
+        'Construction cursor',
+        'real-terrain-alpha',
+      );
+
+      expect(WorldManager.applyConstructionBatch(
+        world.constructionRevision,
+        (draft) => draft.addTrack(makeTrackDef('cursor-track')),
+      )).toBe(true);
+      expect(world.revision).toBe(1);
+      expect(world.constructionRevision).toBe(1);
+      expect(world.economyRevision).toBe(0);
+    });
+
+    it('advances only economy and root revisions for an economy batch', () => {
+      const world: any = WorldManager.createNew(
+        'Economy cursor',
+        'real-terrain-alpha',
+      );
+
+      expect((WorldManager as any).applyEconomyBatch(
+        world.economyRevision,
+        (draft: any) => {
+          draft.tick += 1;
+          return true;
+        },
+      )).toBe(true);
+      expect(world.revision).toBe(1);
+      expect(world.constructionRevision).toBe(0);
+      expect(world.economyRevision).toBe(1);
+      expect(world.economy.tick).toBe(1);
+    });
+
+    it('keeps a current construction cursor usable after an economy-only batch', () => {
+      const world: any = WorldManager.createNew(
+        'Independent cursors',
+        'real-terrain-alpha',
+      );
+      const constructionCursor = world.constructionRevision;
+
+      expect((WorldManager as any).applyEconomyBatch(
+        world.economyRevision,
+        (draft: any) => {
+          draft.tick += 1;
+          return true;
+        },
+      )).toBe(true);
+      expect(WorldManager.applyConstructionBatch(
+        constructionCursor,
+        (draft) => draft.addTrack(makeTrackDef('after-economy')),
+      )).toBe(true);
+      expect(world.revision).toBe(2);
+      expect(world.constructionRevision).toBe(1);
+      expect(world.economyRevision).toBe(1);
+      expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['after-economy']);
+    });
+
+    it.each([
+      ['negative root revision', (world: any) => { world.revision = -1; }],
+      ['negative construction revision', (world: any) => {
+        world.constructionRevision = -1;
+      }],
+      ['maximum construction revision', (world: any) => {
+        world.revision = Number.MAX_SAFE_INTEGER;
+        world.constructionRevision = Number.MAX_SAFE_INTEGER;
+      }],
+    ])('rejects construction when the world has %s', (_label, corrupt) => {
+      const world: any = WorldManager.createNew(
+        'Invalid construction cursor',
+        'real-terrain-alpha',
+      );
+      corrupt(world);
+      const before = JSON.stringify(world);
+      expect(WorldManager.applyConstructionBatch(
+        world.constructionRevision,
+        (draft) => draft.addTrack(makeTrackDef('never-added')),
+      )).toBe(false);
+      expect(JSON.stringify(world)).toBe(before);
+    });
+
+    it.each([
+      ['negative root revision', (world: any) => { world.revision = -1; }],
+      ['negative economy revision', (world: any) => {
+        world.economyRevision = -1;
+      }],
+      ['maximum economy revision', (world: any) => {
+        world.revision = Number.MAX_SAFE_INTEGER;
+        world.economyRevision = Number.MAX_SAFE_INTEGER;
+      }],
+    ])('rejects economy when the world has %s', (_label, corrupt) => {
+      const world: any = WorldManager.createNew(
+        'Invalid economy cursor',
+        'real-terrain-alpha',
+      );
+      corrupt(world);
+      const before = JSON.stringify(world);
+      expect(WorldManager.applyEconomyBatch(
+        world.economyRevision,
+        (economy) => {
+          economy.tick += 1;
+          return true;
+        },
+      )).toBe(false);
+      expect(JSON.stringify(world)).toBe(before);
+    });
+
+    it('rejects nested same-domain and cross-domain batches without side effects', () => {
+      const world = WorldManager.createNew(
+        'Nested batches',
+        'real-terrain-alpha',
+      );
+      const before = clonePlainData(world);
+      let nestedConstruction: boolean | null = null;
+      let nestedEconomy: boolean | null = null;
+
+      const outer = WorldManager.applyConstructionBatch(
+        world.constructionRevision,
+        (draft) => {
+          nestedConstruction = WorldManager.applyConstructionBatch(
+            world.constructionRevision,
+            (nestedDraft) => nestedDraft.addTrack(makeTrackDef('nested-track')),
+          );
+          nestedEconomy = WorldManager.applyEconomyBatch(
+            world.economyRevision,
+            (economy) => {
+              economy.tick += 1;
+              return true;
+            },
+          );
+          return draft.addTrack(makeTrackDef('outer-track')) && false;
+        },
+      );
+
+      expect(outer).toBe(false);
+      expect(nestedConstruction).toBe(false);
+      expect(nestedEconomy).toBe(false);
+      expect(world).toEqual(before);
+    });
+
+    it.each(['false', 'throw'] as const)(
+      'rolls back direct live-world mutation when a construction callback returns %s',
+      (outcome) => {
+        const world = WorldManager.createNew(
+          'Direct mutation rollback',
+          'real-terrain-alpha',
+        );
+        const before = clonePlainData(world);
+
+        const result = WorldManager.applyConstructionBatch(
+          world.constructionRevision,
+          (draft) => {
+            world.name = 'escaped mutation';
+            world.scenery.push({
+              id: 'escaped',
+              type: 'tree_oak',
+              x: 0,
+              y: 0,
+              rotation: 0,
+              scale: 1,
+              variant: 0,
+            });
+            draft.addTrack(makeTrackDef('draft-track'));
+            if (outcome === 'throw') throw new Error('rollback');
+            return false;
+          },
+        );
+
+        expect(result).toBe(false);
+        expect(world).toEqual(before);
+      },
+    );
+
+    it('rejects and rolls back a direct live mutation even when the callback returns true', () => {
+      const world = WorldManager.createNew(
+        'Successful escape',
+        'real-terrain-alpha',
+      );
+      const before = clonePlainData(world);
+
+      expect(WorldManager.applyEconomyBatch(
+        world.economyRevision,
+        (economy) => {
+          economy.tick += 1;
+          world.name = 'mutated behind the draft';
+          return true;
+        },
+      )).toBe(false);
+      expect(world).toEqual(before);
+    });
+
+    it('rejects an invalid candidate and does not expose an escaped draft', () => {
+      const world = WorldManager.createNew(
+        'Candidate isolation',
+        'real-terrain-alpha',
+      );
+      const before = clonePlainData(world);
+      let escaped: any = null;
+      expect(WorldManager.applyConstructionBatch(
+        world.constructionRevision,
+        (draft) => {
+          escaped = draft;
+          draft.company = { cash: 0, nextLedgerId: 2, ledger: [] };
+          return draft.addTrack(makeTrackDef('invalid-company'));
+        },
+      )).toBe(false);
+      expect(world).toEqual(before);
+
+      escaped.addTrack(makeTrackDef('late-escape'));
+      escaped.company.cash = 123;
+      expect(world).toEqual(before);
+    });
+
+    it('blocks persistence and lifecycle reentrancy while a batch callback is active', () => {
+      const world = WorldManager.createNew(
+        'Reentrant lifecycle',
+        'real-terrain-alpha',
+      );
+      const before = clonePlainData(world);
+      const saveWorld = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.applyConstructionBatch(
+        world.constructionRevision,
+        () => {
+          world.name = 'transient name';
+          expect(WorldManager.save()).toBe(false);
+          expect(WorldManager.load('other-world')).toBeNull();
+          expect(WorldManager.tryCreateNew(
+            'Nested world',
+            'nested-seed',
+          )).toEqual({
+            ok: false,
+            error: {
+              code: 'world-save-failed',
+              seed: 'nested-seed',
+            },
+          });
+          expect(() => WorldManager.createNew(
+            'Nested throwing world',
+            'nested-throw-seed',
+          )).toThrow('World creation failed: world-save-failed');
+          WorldManager.reset();
+          expect(WorldManager.world).toBe(world);
+          return false;
+        },
+      );
+
+      expect(result).toBe(false);
+      expect(saveWorld).not.toHaveBeenCalled();
+      expect(WorldManager.world).toBe(world);
+      expect(world).toEqual(before);
+      saveWorld.mockRestore();
     });
   });
 
@@ -347,8 +632,44 @@ describe('createEmptyWorld()', () => {
     expect(w.junctions).toEqual([]);
     expect(w.stations).toEqual([]);
     expect(w.trains).toEqual([]);
-    expect(w.scenarios).toEqual([]);
+    expect(w).not.toHaveProperty('scenarios');
     expect(w.metadata.createdAt).toBeGreaterThan(0);
     expect(w.metadata.updatedAt).toBeGreaterThan(0);
+  });
+
+  it('deep-clones an injected economy so caller aliases cannot mutate the world', () => {
+    const economy: any = {
+      economyVersion: 1,
+      tick: 0,
+      facilities: [],
+      market: {
+        constructionIndexBps: 10_000,
+        regionalDemandBpsByProduct: {
+          logs: 10_000,
+          'structural-timber': 10_000,
+          'limestone-aggregate': 10_000,
+          cement: 10_000,
+          steel: 10_000,
+          'building-modules': 10_000,
+        },
+      },
+    };
+    const world = createEmptyWorld(
+      'Aliased',
+      'alias-seed',
+      'temperate',
+      makeStarterOpportunity('alias-seed'),
+      economy,
+    );
+
+    expect(world.economy).not.toBe(economy);
+    expect(world.economy.market).not.toBe(economy.market);
+    expect(world.economy.market.regionalDemandBpsByProduct).not.toBe(
+      economy.market.regionalDemandBpsByProduct,
+    );
+    economy.tick = 9;
+    economy.market.regionalDemandBpsByProduct.logs = 8_000;
+    expect(world.economy.tick).toBe(0);
+    expect(world.economy.market.regionalDemandBpsByProduct.logs).toBe(10_000);
   });
 });

@@ -11,9 +11,8 @@ import TrackManager, {
 } from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 import {
-  ConstructionEconomy,
+  applyConstructionTransaction,
   demolitionRefund,
-  type ConstructionTransaction,
 } from '../systems/ConstructionEconomy';
 import { TrackSerializer } from '../utils/TrackSerializer';
 import { clonePlainData, equalPlainData } from '../utils/PlainData';
@@ -38,7 +37,8 @@ interface IndexedJunctionDef {
 
 interface RefundRecord {
   snapshotIndex: number;
-  transaction: ConstructionTransaction;
+  forwardEntryId: number;
+  magnitude: number;
 }
 
 function restoreTrack(scene: Phaser.Scene, def: TrackDef): RailTrack {
@@ -64,7 +64,6 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
   private readonly uuids: string[];
   private readonly snapshots: IndexedTrackDef[];
   private readonly junctionSnapshots: IndexedJunctionDef[];
-  private readonly refundLifecycles: object[];
   private readonly worldIdentity: WorldData | null;
   private readonly worldTracksBefore: TrackDef[];
   private readonly worldJunctionsBefore: JunctionDef[];
@@ -75,21 +74,18 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
   private transactions: RefundRecord[] | null = null;
   private topologyAfter: TrackTopologySnapshot | null = null;
   private applied = false;
-  private expectedRevision: number;
+  private expectedConstructionRevision: number;
 
   constructor(
     private readonly trackManager: TrackManager,
     private readonly scene: Phaser.Scene,
     uuids: string[],
-    private readonly economy: ConstructionEconomy = new ConstructionEconomy(
-      WorldManager.world?.company ?? { cash: 0 },
-    ),
     private readonly injectFailure?: DeleteTracksFailureInjector,
   ) {
     this.uuids = Array.from(new Set(uuids));
     const world = WorldManager.world;
     this.worldIdentity = world;
-    this.expectedRevision = world?.revision ?? -1;
+    this.expectedConstructionRevision = world?.constructionRevision ?? -1;
     this.worldTracksBefore = clonePlainData(world?.tracks ?? []);
     this.worldJunctionsBefore = clonePlainData(world?.junctions ?? []);
     this.snapshots = this.uuids
@@ -114,7 +110,6 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       .filter((track) => !deletedTrackIds.has(track.uuid));
     this.worldJunctionsAfter = this.worldJunctionsBefore
       .filter((junction) => !deletedJunctionIds.has(junction.uuid));
-    this.refundLifecycles = this.snapshots.map(() => ({}));
     this.topologyBefore = this.trackManager.captureTopology();
     for (const { def } of this.junctionSnapshots) {
       const live = this.trackManager.getJunction(def.uuid);
@@ -124,7 +119,10 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
 
   getRevisionContext(): CommandRevisionContext | null {
     return this.worldIdentity
-      ? { authority: this.worldIdentity, revision: this.expectedRevision }
+      ? {
+        authority: this.worldIdentity,
+        revision: this.expectedConstructionRevision,
+      }
       : null;
   }
 
@@ -132,49 +130,26 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     if (context.authority !== this.worldIdentity
       || !Number.isSafeInteger(context.revision)
       || context.revision < 0) return false;
-    this.expectedRevision = context.revision;
+    this.expectedConstructionRevision = context.revision;
     return true;
   }
 
   execute(): boolean {
     const world = WorldManager.world;
     if (this.applied || !world || world !== this.worldIdentity
-      || world.revision !== this.expectedRevision
-      || !this.economy.isBoundTo(world.company)
+      || world.constructionRevision !== this.expectedConstructionRevision
       || this.uuids.length === 0
       || this.snapshots.length !== this.uuids.length
       || !equalPlainData(world.tracks, this.worldTracksBefore)
       || !equalPlainData(world.junctions, this.worldJunctionsBefore)
       || !equalPlainData(this.trackManager.captureTopology(), this.topologyBefore)
       || !this.liveStateMatchesBefore()
-      || this.hasGameplayReferences()
-      || !this.canApplyRefunds(world.company.cash)) return false;
+      || this.hasGameplayReferences()) return false;
 
     const removedTracks: IndexedTrackDef[] = [];
     const removedJunctions: IndexedJunctionDef[] = [];
-    const appliedRefunds: RefundRecord[] = [];
-    const firstExecution = this.transactions === null;
+    let postedRefunds: RefundRecord[] = [];
     try {
-      if (this.transactions) {
-        for (const refund of this.transactions) {
-          if (!this.economy.reapply(refund.transaction)) {
-            throw new Error('refund reapply failed');
-          }
-          appliedRefunds.push(refund);
-        }
-      } else {
-        for (let index = 0; index < this.snapshots.length; index++) {
-          const refundAmount = demolitionRefund(this.snapshots[index].def.paidBuildCost);
-          if (refundAmount === 0) continue;
-          const transaction = this.economy.refundDemolition(
-            this.refundLifecycles[index],
-            this.snapshots[index].def.paidBuildCost,
-          );
-          if (!transaction) throw new Error('refund failed');
-          appliedRefunds.push({ snapshotIndex: index, transaction });
-        }
-      }
-
       for (const snapshot of this.junctionSnapshots) {
         if (!this.trackManager.removeJunction(snapshot.def.uuid)) {
           throw new Error('junction removal failed');
@@ -190,7 +165,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       this.injectFailure?.('after-live-removal');
 
       const committed = WorldManager.applyConstructionBatch(
-        this.expectedRevision,
+        this.expectedConstructionRevision,
         (draft) => {
           for (const snapshot of this.junctionSnapshots) {
             if (!draft.removeJunction(snapshot.def.uuid)) return false;
@@ -199,18 +174,44 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
             if (!draft.removeTrack(snapshot.def.uuid)) return false;
           }
           this.injectFailure?.('after-draft-removal');
+          let company = draft.company;
+          const nextRefunds: RefundRecord[] = [];
+          for (let index = 0; index < this.snapshots.length; index++) {
+            const magnitude = demolitionRefund(
+              this.snapshots[index].def.paidBuildCost,
+            );
+            if (magnitude === 0) continue;
+            const transaction = applyConstructionTransaction(
+              company,
+              {
+                kind: 'demolition-refund',
+                magnitude,
+                referenceId: this.snapshots[index].def.uuid,
+                direction: 'forward',
+              },
+              draft.economyTick,
+            );
+            if (transaction.ok === false) return false;
+            company = transaction.company;
+            nextRefunds.push({
+              snapshotIndex: index,
+              forwardEntryId: transaction.entry.id,
+              magnitude,
+            });
+          }
+          draft.company = company;
+          postedRefunds = nextRefunds;
           return true;
         },
       );
       if (!committed) throw new Error('persisted demolition transaction failed');
 
-      this.expectedRevision += 1;
-      if (firstExecution) this.transactions = appliedRefunds;
+      this.expectedConstructionRevision += 1;
+      this.transactions = postedRefunds;
       this.topologyAfter = this.trackManager.captureTopology();
       this.applied = true;
       return true;
     } catch {
-      this.reverseAppliedRefunds(appliedRefunds, firstExecution);
       this.restoreRemovedLive(removedTracks, removedJunctions);
       this.trackManager.restoreTopology(this.topologyBefore);
       return false;
@@ -221,8 +222,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     const world = WorldManager.world;
     if (!this.applied || !this.transactions || !world
       || world !== this.worldIdentity
-      || world.revision !== this.expectedRevision
-      || !this.economy.isBoundTo(world.company)
+      || world.constructionRevision !== this.expectedConstructionRevision
       || !equalPlainData(world.tracks, this.worldTracksAfter)
       || !equalPlainData(world.junctions, this.worldJunctionsAfter)
       || !this.topologyAfter
@@ -232,17 +232,9 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       return false;
     }
 
-    const reversed: RefundRecord[] = [];
     const restoredTracks: IndexedTrackDef[] = [];
     const restoredJunctions: IndexedJunctionDef[] = [];
     try {
-      for (let index = this.transactions.length - 1; index >= 0; index--) {
-        const refund = this.transactions[index];
-        if (!this.economy.reverse(refund.transaction)) {
-          throw new Error('refund reversal failed');
-        }
-        reversed.push(refund);
-      }
       for (const snapshot of this.snapshots) {
         this.trackManager.addTrack(restoreTrack(this.scene, snapshot.def));
         restoredTracks.push(snapshot);
@@ -257,7 +249,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       this.injectFailure?.('after-live-restore');
 
       const committed = WorldManager.applyConstructionBatch(
-        this.expectedRevision,
+        this.expectedConstructionRevision,
         (draft) => {
           for (const snapshot of [...this.snapshots].sort((a, b) => a.index - b.index)) {
             if (!draft.addTrack(snapshot.def, snapshot.index)) return false;
@@ -266,12 +258,30 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
             if (!draft.addJunction(snapshot.def, snapshot.index)) return false;
           }
           this.injectFailure?.('after-draft-restore');
+          let company = draft.company;
+          for (let index = this.transactions!.length - 1; index >= 0; index--) {
+            const refund = this.transactions![index];
+            const transaction = applyConstructionTransaction(
+              company,
+              {
+                kind: 'demolition-refund',
+                magnitude: refund.magnitude,
+                referenceId: this.snapshots[refund.snapshotIndex].def.uuid,
+                direction: 'reversal',
+                reversalOf: refund.forwardEntryId,
+              },
+              draft.economyTick,
+            );
+            if (transaction.ok === false) return false;
+            company = transaction.company;
+          }
+          draft.company = company;
           return true;
         },
       );
       if (!committed) throw new Error('persisted demolition undo transaction failed');
 
-      this.expectedRevision += 1;
+      this.expectedConstructionRevision += 1;
       this.applied = false;
       return true;
     } catch {
@@ -281,34 +291,8 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       for (const snapshot of restoredTracks) {
         this.trackManager.removeTrack(snapshot.def.uuid);
       }
-      for (let index = reversed.length - 1; index >= 0; index--) {
-        this.economy.reapply(reversed[index].transaction);
-      }
       if (this.topologyAfter) this.trackManager.restoreTopology(this.topologyAfter);
       return false;
-    }
-  }
-
-  private canApplyRefunds(cash: number): boolean {
-    if (!Number.isSafeInteger(cash) || cash < 0) return false;
-    let projectedCash = cash;
-    for (const { def } of this.snapshots) {
-      const refund = demolitionRefund(def.paidBuildCost);
-      if (!Number.isSafeInteger(projectedCash + refund)) return false;
-      projectedCash += refund;
-    }
-    return true;
-  }
-
-  private reverseAppliedRefunds(refunds: RefundRecord[], cancel: boolean): void {
-    for (let index = refunds.length - 1; index >= 0; index--) {
-      const refund = refunds[index];
-      if (this.economy.reverse(refund.transaction) && cancel) {
-        this.economy.cancelDemolitionRefund(
-          this.refundLifecycles[refund.snapshotIndex],
-          refund.transaction,
-        );
-      }
     }
   }
 
@@ -331,10 +315,8 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
         .map((station) => station.id),
     );
     return stationIds.size > 0
-      || world.trains.some((train) => this.uuids.indexOf(train.trackUUID) !== -1)
-      || world.scenarios.some((scenario) => (
-        scenario.targetStationId !== undefined
-        && stationIds.has(scenario.targetStationId)
+      || world.trains.some((train) => (
+        this.uuids.indexOf(train.trackUUID) !== -1
       ));
   }
 

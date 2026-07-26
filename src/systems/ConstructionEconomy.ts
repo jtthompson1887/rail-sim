@@ -2,27 +2,22 @@ import {
   DEMOLITION_REFUND_RATE,
   startingCashForDifficulty,
 } from '../config/ConstructionConfig';
-import type { CompanyConstructionState } from '../config/WorldData';
+import type { CompanyStateDef } from '../economy/EconomyData';
+import {
+  postLedgerEntry,
+  type LedgerPostResult,
+} from '../economy/FinanceLedger';
 
 export { startingCashForDifficulty };
-export type { CompanyConstructionState };
 
-export interface ConstructionTransaction {
-  amount: number;
-  beforeCash: number;
-  afterCash: number;
-}
+export type ConstructionTransactionResult = LedgerPostResult;
 
-interface TransactionMetadata {
-  state: 'applied' | 'reversed';
-}
-
-function isValidCash(cash: number): boolean {
-  return Number.isSafeInteger(cash) && cash >= 0;
-}
-
-function isValidAmount(amount: number): boolean {
-  return Number.isSafeInteger(amount) && amount !== 0;
+export interface ConstructionTransactionRequest {
+  kind: 'purchase' | 'demolition-refund';
+  magnitude: number;
+  referenceId: string;
+  direction: 'forward' | 'reversal';
+  reversalOf?: number;
 }
 
 export function demolitionRefund(paidBuildCost: number): number {
@@ -30,113 +25,21 @@ export function demolitionRefund(paidBuildCost: number): number {
   return Math.floor(paidBuildCost * DEMOLITION_REFUND_RATE);
 }
 
-/**
- * Pure construction-cash state machine. It mutates only the injected company
- * state and tracks transaction identity in memory for command undo/redo.
- */
-export class ConstructionEconomy {
-  private readonly transactionMetadata =
-    new WeakMap<ConstructionTransaction, TransactionMetadata>();
-  private readonly demolitionRefunds =
-    new WeakMap<object, ConstructionTransaction>();
-
-  /**
-   * This instance is scoped to the injected company object. Recreate it after
-   * loading or restoring a world, because those operations replace that object.
-   */
-  constructor(private readonly company: CompanyConstructionState) {}
-
-  isBoundTo(company: CompanyConstructionState): boolean {
-    return this.company === company;
-  }
-
-  canAfford(amount: number): boolean {
-    if (!isValidCash(this.company.cash)
-      || !Number.isSafeInteger(amount)
-      || amount <= 0) {
-      return false;
-    }
-    return this.company.cash - amount >= 0;
-  }
-
-  purchase(amount: number): ConstructionTransaction | null {
-    if (!this.canAfford(amount)) return null;
-    return this.applySignedAmount(amount);
-  }
-
-  refundDemolition(
-    demolitionLifecycle: object,
-    paidBuildCost: number,
-  ): ConstructionTransaction | null {
-    if (this.demolitionRefunds.has(demolitionLifecycle)) return null;
-    const refund = demolitionRefund(paidBuildCost);
-    if (refund === 0) return null;
-    const transaction = this.applySignedAmount(-refund);
-    if (transaction) {
-      this.demolitionRefunds.set(demolitionLifecycle, transaction);
-    }
-    return transaction;
-  }
-
-  cancelDemolitionRefund(
-    demolitionLifecycle: object,
-    transaction: ConstructionTransaction,
-  ): boolean {
-    if (this.demolitionRefunds.get(demolitionLifecycle) !== transaction
-      || this.transactionMetadata.get(transaction)?.state !== 'reversed') return false;
-    this.demolitionRefunds.delete(demolitionLifecycle);
-    this.transactionMetadata.delete(transaction);
-    return true;
-  }
-
-  private applySignedAmount(amount: number): ConstructionTransaction | null {
-    if (!isValidCash(this.company.cash)
-      || !isValidAmount(amount)
-      || !Number.isSafeInteger(this.company.cash - amount)
-      || this.company.cash - amount < 0) {
-      return null;
-    }
-    const beforeCash = this.company.cash;
-    const transaction = Object.freeze({
-      amount,
-      beforeCash,
-      afterCash: beforeCash - amount,
-    });
-    this.company.cash = transaction.afterCash;
-    this.transactionMetadata.set(transaction, { state: 'applied' });
-    return transaction;
-  }
-
-  reverse(transaction: ConstructionTransaction): boolean {
-    if (!this.isKnownValidTransaction(transaction, 'applied')
-      || this.company.cash !== transaction.afterCash) {
-      return false;
-    }
-    const metadata = this.transactionMetadata.get(transaction)!;
-    this.company.cash = transaction.beforeCash;
-    metadata.state = 'reversed';
-    return true;
-  }
-
-  reapply(transaction: ConstructionTransaction): boolean {
-    if (!this.isKnownValidTransaction(transaction, 'reversed')
-      || this.company.cash !== transaction.beforeCash) {
-      return false;
-    }
-    const metadata = this.transactionMetadata.get(transaction)!;
-    this.company.cash = transaction.afterCash;
-    metadata.state = 'applied';
-    return true;
-  }
-
-  private isKnownValidTransaction(
-    transaction: ConstructionTransaction,
-    expectedState: TransactionMetadata['state'],
-  ): boolean {
-    return this.transactionMetadata.get(transaction)?.state === expectedState
-      && isValidAmount(transaction.amount)
-      && isValidCash(transaction.beforeCash)
-      && isValidCash(transaction.afterCash)
-      && transaction.afterCash === transaction.beforeCash - transaction.amount;
-  }
+export function applyConstructionTransaction(
+  company: CompanyStateDef,
+  request: ConstructionTransactionRequest,
+  tick: number,
+): ConstructionTransactionResult {
+  return postLedgerEntry(company, {
+    category: request.kind === 'purchase'
+      ? 'construction-capex'
+      : 'construction-refund',
+    magnitude: request.magnitude,
+    tick,
+    referenceId: request.referenceId,
+    direction: request.direction,
+    ...(request.reversalOf === undefined
+      ? {}
+      : { reversalOf: request.reversalOf }),
+  });
 }

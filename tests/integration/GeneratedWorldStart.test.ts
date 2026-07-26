@@ -12,6 +12,7 @@ import {
 } from '../../src/managers/WorldManager';
 import { SaveService } from '../../src/services/SaveService';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
 import {
   WorldOpportunityGenerator,
   type OpportunityGenerationResult,
@@ -70,6 +71,24 @@ function successfulPort(): OpportunityGeneratorPort & {
   };
 }
 
+function spendCompanyCashTo(targetCash: number): void {
+  const world = WorldManager.world!;
+  expect(WorldManager.applyConstructionBatch(
+    world.constructionRevision,
+    (draft) => {
+      const transaction = applyConstructionTransaction(draft.company, {
+        kind: 'purchase',
+        magnitude: draft.company.cash - targetCash,
+        referenceId: `test-cash-${targetCash}`,
+        direction: 'forward',
+      }, draft.economyTick);
+      if (!transaction.ok) return false;
+      draft.company = transaction.company;
+      return true;
+    },
+  )).toBe(true);
+}
+
 describe('generated blank-world start', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -77,7 +96,7 @@ describe('generated blank-world start', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists a schema-5 opportunity before installing an otherwise blank world', () => {
+  it('persists a schema-6 opportunity before installing an otherwise blank world', () => {
     const generator = successfulPort();
     const result = WorldManager.tryCreateNew(
       'Generated',
@@ -94,7 +113,7 @@ describe('generated blank-world start', () => {
       biome: 'alpine',
       constructionDifficultyId: 'standard',
     });
-    expect(result.world.schemaVersion).toBe(5);
+    expect(result.world.schemaVersion).toBe(6);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(
@@ -201,7 +220,7 @@ describe('generated blank-world start', () => {
     );
     expect(prior.ok).toBe(true);
     if (!prior.ok) return;
-    prior.world.company.cash = 765_432;
+    spendCompanyCashTo(765_432);
     const failingGenerator: OpportunityGeneratorPort = {
       generate: jest.fn().mockReturnValue({
         ok: false,
@@ -237,7 +256,7 @@ describe('generated blank-world start', () => {
     );
     expect(prior.ok).toBe(true);
     if (!prior.ok) return;
-    prior.world.company.cash = 654_321;
+    spendCompanyCashTo(654_321);
     jest.spyOn(SaveService, 'saveWorld').mockReturnValue(false);
 
     const result = WorldManager.tryCreateNew(

@@ -12,7 +12,7 @@ import {
 export interface DeleteTracksIntent {
   uuids: string[];
   expectedRefund: number;
-  expectedRevision: number;
+  expectedConstructionRevision: number;
 }
 
 export interface DeleteReviewRequest {
@@ -22,7 +22,7 @@ export interface DeleteReviewRequest {
 export interface DeletionReviewDTO {
   readonly uuids: ReadonlyArray<string>;
   readonly expectedRefund: number;
-  readonly expectedRevision: number;
+  readonly expectedConstructionRevision: number;
   readonly available: boolean;
   readonly blockingReason: string;
 }
@@ -470,7 +470,7 @@ export class PropertiesPanel {
     const intent: DeleteTracksIntent = {
       uuids,
       expectedRefund: review.expectedRefund,
-      expectedRevision: review.expectedRevision,
+      expectedConstructionRevision: review.expectedConstructionRevision,
     };
     if (!this.deleteArmed) {
       this.deleteArmed = true;
@@ -483,7 +483,8 @@ export class PropertiesPanel {
     const armed = this.armedDelete;
     this.disarmDelete();
     if (!armed
-      || armed.expectedRevision !== intent.expectedRevision
+      || armed.expectedConstructionRevision
+        !== intent.expectedConstructionRevision
       || armed.expectedRefund !== intent.expectedRefund
       || armed.uuids.length !== intent.uuids.length
       || armed.uuids.some((uuid, index) => uuid !== intent.uuids[index])) {

@@ -11,9 +11,14 @@ import { WorldManager } from '../../src/managers/WorldManager';
 import type { TrackDef } from '../../src/config/WorldData';
 import { TrackSerializer } from '../../src/utils/TrackSerializer';
 import { clonePlainData } from '../../src/utils/PlainData';
-import { ConstructionEconomy } from '../../src/systems/ConstructionEconomy';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 const { makeScene } = require('../../__mocks__/phaser');
+
+function ledgerCash(): number {
+  const company = WorldManager.world!.company;
+  return company.ledger.reduce((cash, entry) => cash + entry.amount, 0);
+}
 
 function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 100, y2 = 0): RailTrack {
   const Phaser = require('phaser');
@@ -315,14 +320,9 @@ describe('CommandStack revision-aware history', () => {
 
   it('preserves history and notifications when an external mutation blocks undo', () => {
     expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
-    expect(WorldManager.addSceneryDef({
-      id: 'external-before-undo',
-      type: 'tree_oak',
-      x: 0,
-      y: 0,
-      rotation: 0,
-      scale: 1,
-      variant: 0,
+    expect(WorldManager.addTrackDef({
+      ...clonePlainData(first),
+      uuid: 'external-before-undo',
     })).toBe(true);
     const revisionAfterExternalMutation = WorldManager.world!.revision;
     const onChange = jest.fn();
@@ -338,14 +338,9 @@ describe('CommandStack revision-aware history', () => {
 
   it('does not let a current-revision push launder an external mutation into old history', () => {
     expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
-    expect(WorldManager.addSceneryDef({
-      id: 'external-before-push',
-      type: 'tree_oak',
-      x: 0,
-      y: 0,
-      rotation: 0,
-      scale: 1,
-      variant: 0,
+    expect(WorldManager.addTrackDef({
+      ...clonePlainData(first),
+      uuid: 'external-before-push',
     })).toBe(true);
     const revisionAfterExternalMutation = WorldManager.world!.revision;
     const onChange = jest.fn();
@@ -425,11 +420,23 @@ describe('DeleteTracksCommand', () => {
 
     expect(cmd.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash + 500);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
+    const refundEntry = WorldManager.world!.company.ledger[1];
+    expect(refundEntry).toEqual(expect.objectContaining({
+      category: 'construction-refund',
+      amount: 500,
+      referenceId: track.getUUID(),
+    }));
     expect(WorldManager.world!.revision).toBe(beforeRevision + 1);
     expect(cmd.execute()).toBe(false);
     expect(WorldManager.world!.company.cash).toBe(beforeCash + 500);
     expect(cmd.undo()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
+    expect(WorldManager.world!.company.ledger[2]).toEqual(expect.objectContaining({
+      amount: -500,
+      reversalOf: refundEntry.id,
+    }));
     expect(WorldManager.world!.revision).toBe(beforeRevision + 2);
   });
 
@@ -442,9 +449,11 @@ describe('DeleteTracksCommand', () => {
     const command = new DeleteTracksCommand(trackManager, scene, [track.getUUID()]);
     expect(command.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.company.ledger).toHaveLength(1);
     expect(trackManager.getTrack(track.getUUID())).toBeUndefined();
     expect(command.undo()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
   });
 
   it('applies mixed zero and nonzero refunds exactly', () => {
@@ -464,8 +473,10 @@ describe('DeleteTracksCommand', () => {
     );
     expect(command.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash + 1);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
     expect(command.undo()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
   });
 
   it('rejects the whole batch when one track is missing or referenced', () => {
@@ -510,10 +521,23 @@ describe('DeleteTracksCommand', () => {
     );
     expect(cmd.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash + 1_000);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
     expect(cmd.undo()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
     expect(cmd.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(beforeCash + 1_000);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
+    expect(WorldManager.world!.company.ledger.slice(1).map((entry) => (
+      [entry.referenceId, entry.amount, entry.reversalOf]
+    ))).toEqual([
+      [tracks[0].getUUID(), 500, undefined],
+      [tracks[1].getUUID(), 500, undefined],
+      [tracks[1].getUUID(), -500, 3],
+      [tracks[0].getUUID(), -500, 2],
+      [tracks[0].getUUID(), 500, undefined],
+      [tracks[1].getUUID(), 500, undefined],
+    ]);
     expect(WorldManager.world!.revision).toBe(beforeRevision + 3);
   });
 
@@ -605,7 +629,9 @@ describe('DeleteTracksCommand', () => {
       trackManager.addTrack(track);
       WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
     }
-    WorldManager.world!.company.cash = Number.MAX_SAFE_INTEGER - 1;
+    WorldManager.world!.company = createCompanyState(
+      Number.MAX_SAFE_INTEGER - 1,
+    );
     const command = new DeleteTracksCommand(
       trackManager,
       scene,
@@ -613,7 +639,7 @@ describe('DeleteTracksCommand', () => {
     );
     expect(command.execute()).toBe(false);
     expect(trackManager.tracks).toHaveLength(2);
-    WorldManager.world!.company.cash = 100;
+    WorldManager.world!.company = createCompanyState(100);
     expect(command.execute()).toBe(true);
     expect(WorldManager.world!.company.cash).toBe(102);
   });
@@ -636,7 +662,6 @@ describe('DeleteTracksCommand', () => {
         trackManager,
         scene,
         [track.getUUID()],
-        new ConstructionEconomy(world.company),
         (stage) => {
           if (inject && stage === failureStage) throw new Error('injected execute failure');
         },
@@ -647,6 +672,8 @@ describe('DeleteTracksCommand', () => {
       expect(world.junctions).toEqual(beforeJunctions);
       expect(topologyOf(trackManager)).toEqual(beforeTopology);
       expect(world.company.cash).toBe(beforeCash);
+      expect(world.company.cash).toBe(ledgerCash());
+      expect(world.company.ledger).toHaveLength(1);
       expect(world.revision).toBe(beforeRevision);
 
       inject = false;
@@ -668,7 +695,6 @@ describe('DeleteTracksCommand', () => {
         trackManager,
         scene,
         [track.getUUID()],
-        new ConstructionEconomy(world.company),
         (stage) => {
           if (inject && stage === failureStage) throw new Error('injected undo failure');
         },
@@ -686,6 +712,7 @@ describe('DeleteTracksCommand', () => {
       expect(world.junctions).toEqual(appliedJunctions);
       expect(topologyOf(trackManager)).toEqual(appliedTopology);
       expect(world.company.cash).toBe(appliedCash);
+      expect(world.company.cash).toBe(ledgerCash());
       expect(world.revision).toBe(appliedRevision);
 
       inject = false;
@@ -710,7 +737,6 @@ describe('DeleteTracksCommand', () => {
       trackManager,
       scene,
       [track.getUUID()],
-      new ConstructionEconomy(WorldManager.world!.company),
       (stage: string) => {
         if (stage === 'after-live-removal') {
           WorldManager.addTrackDef(intervening);
@@ -741,7 +767,6 @@ describe('DeleteTracksCommand', () => {
       trackManager,
       scene,
       [track.getUUID()],
-      new ConstructionEconomy(WorldManager.world!.company),
       (stage: string) => {
         if (stage === 'after-live-restore') {
           WorldManager.addTrackDef(intervening);
@@ -755,7 +780,7 @@ describe('DeleteTracksCommand', () => {
     expect(WorldManager.world!.tracks.map((def) => def.uuid)).toEqual([intervening.uuid]);
   });
 
-  it('rejects undo and redo after any intervening authoritative revision', () => {
+  it('keeps undo and redo current across unrelated root-only revisions', () => {
     const track = makeTrack(scene);
     trackManager.addTrack(track);
     WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
@@ -770,7 +795,7 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(command.undo()).toBe(false);
+    expect(command.undo()).toBe(true);
 
     WorldManager.reset();
     WorldManager.createNew('Redo stale', 'real-terrain-alpha');
@@ -790,7 +815,8 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(redo.execute()).toBe(false);
+    expect(redo.execute()).toBe(true);
+    expect(WorldManager.world!.company.cash).toBe(ledgerCash());
   });
 });
 
@@ -856,7 +882,7 @@ describe('ReshapeTrackCommand', () => {
     expect(cmd.execute()).toBe(false);
   });
 
-  it('rejects undo and redo after an intervening authoritative revision', () => {
+  it('keeps reshape undo and redo current across root-only revisions', () => {
     const track = makeTrack(scene, 0, 0, 100, 0);
     trackManager.addTrack(track);
     const uuid = track.getUUID();
@@ -880,7 +906,7 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleUndo.undo()).toBe(false);
+    expect(staleUndo.undo()).toBe(true);
 
     WorldManager.reset();
     WorldManager.createNew('Reshape redo stale', 'real-terrain-alpha');
@@ -901,6 +927,6 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleRedo.execute()).toBe(false);
+    expect(staleRedo.execute()).toBe(true);
   });
 });

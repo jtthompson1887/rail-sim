@@ -1,7 +1,11 @@
 import { SaveService } from '../services/SaveService';
 import { EventBus } from '../services/EventBus';
-import { createEmptyWorld } from '../config/WorldData';
+import {
+  createEmptyWorld,
+  validateWorldData,
+} from '../config/WorldData';
 import type {
+  EconomyStateDef,
   WorldData,
   TrackDef,
   JunctionDef,
@@ -11,6 +15,7 @@ import type {
   BiomeType,
   WorldGenerationConfigDef,
 } from '../config/WorldData';
+import type { CompanyStateDef } from '../economy/EconomyData';
 import { GameConfig } from '../config/GameConfig';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import {
@@ -20,6 +25,8 @@ import {
 import { clonePlainData, equalPlainData } from '../utils/PlainData';
 
 export interface WorldConstructionDraft {
+  company: CompanyStateDef;
+  readonly economyTick: number;
   getTrack(uuid: string): TrackDef | undefined;
   getJunction(uuid: string): JunctionDef | undefined;
   addTrack(def: TrackDef, index?: number): boolean;
@@ -51,6 +58,7 @@ export type GeneratedWorldCreationResult =
  */
 class WorldManagerClass {
   private _world: WorldData | null = null;
+  private batchInProgress = false;
 
   // ── Accessors ──────────────────────────────────────────────────────────────
 
@@ -68,9 +76,36 @@ class WorldManagerClass {
   }
 
   canAdvanceRevision(): boolean {
-    return this._world !== null
+    return !this.batchInProgress
+      && this._world !== null
       && Number.isSafeInteger(this._world.revision)
+      && this._world.revision >= 0
       && this._world.revision < Number.MAX_SAFE_INTEGER;
+  }
+
+  private restoreBatchSnapshot(
+    world: WorldData,
+    snapshot: WorldData,
+  ): false {
+    if (this._world === world && equalPlainData(world, snapshot)) {
+      return false;
+    }
+    const target = world as unknown as Record<string, unknown>;
+    const source = snapshot as unknown as Record<string, unknown>;
+    try {
+      Object.keys(target).forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) {
+          delete target[key];
+        }
+      });
+      Object.keys(source).forEach((key) => {
+        target[key] = clonePlainData(source[key]);
+      });
+      this._world = world;
+    } catch {
+      this._world = clonePlainData(snapshot);
+    }
+    return false;
   }
 
   private incrementRevision(): boolean {
@@ -91,6 +126,12 @@ class WorldManagerClass {
     biome: BiomeType = 'temperate',
     opportunityGenerator?: OpportunityGeneratorPort,
   ): GeneratedWorldCreationResult {
+    if (this.batchInProgress) {
+      return {
+        ok: false,
+        error: { code: 'world-save-failed', seed },
+      };
+    }
     const generationConfig: WorldGenerationConfigDef = {
       generationConfigVersion: 1,
       seed,
@@ -131,6 +172,7 @@ class WorldManagerClass {
 
   /** Load an existing world from storage by id. Returns null if not found. */
   load(id: string): WorldData | null {
+    if (this.batchInProgress) return null;
     const world = SaveService.loadWorld(id);
     if (world) {
       this._world = world;
@@ -143,7 +185,7 @@ class WorldManagerClass {
 
   /** Persist the current in-memory world to localStorage. */
   save(): boolean {
-    if (!this._world) return false;
+    if (this.batchInProgress || !this._world) return false;
     const saved = SaveService.saveWorld(this._world);
     if (!saved) return false;
     EventBus.emit('world:saved', { worldId: this._world.id });
@@ -152,20 +194,38 @@ class WorldManagerClass {
 
   /** Reset – unload the current world without saving. */
   reset(): void {
+    if (this.batchInProgress) return;
     this._world = null;
   }
 
   // ── Track mutations ────────────────────────────────────────────────────────
 
   applyConstructionBatch(
-    expectedRevision: number,
+    expectedConstructionRevision: number,
     mutate: (draft: WorldConstructionDraft) => boolean,
   ): boolean {
     const world = this._world;
-    if (!world || world.revision !== expectedRevision || !this.canAdvanceRevision()) return false;
+    if (this.batchInProgress
+      || !world
+      || world.constructionRevision !== expectedConstructionRevision
+      || !this.canAdvanceRevision()
+      || !Number.isSafeInteger(world.constructionRevision)
+      || world.constructionRevision < 0
+      || world.constructionRevision >= Number.MAX_SAFE_INTEGER) return false;
+    if (!validateWorldData(world).compatible) return false;
+    const snapshot = clonePlainData(world);
+    const rootRevision = world.revision;
     const tracks = clonePlainData(world.tracks);
     const junctions = clonePlainData(world.junctions);
+    let company = clonePlainData(world.company);
     const draft: WorldConstructionDraft = {
+      get company() {
+        return company;
+      },
+      set company(nextCompany: CompanyStateDef) {
+        company = clonePlainData(nextCompany);
+      },
+      economyTick: world.economy.tick,
       getTrack: (uuid) => tracks.find((track) => track.uuid === uuid),
       getJunction: (uuid) => junctions.find((junction) => junction.uuid === uuid),
       addTrack: (def, index = tracks.length) => {
@@ -199,35 +259,118 @@ class WorldManagerClass {
         return true;
       },
     };
+    this.batchInProgress = true;
     try {
-      if (!mutate(draft)
+      let accepted: boolean;
+      try {
+        accepted = mutate(draft);
+      } catch {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+      if (!accepted
         || this._world !== world
-        || world.revision !== expectedRevision
-        || (equalPlainData(tracks, world.tracks)
-          && equalPlainData(junctions, world.junctions))) return false;
-    } catch {
-      return false;
+        || !equalPlainData(world, snapshot)
+        || (equalPlainData(tracks, snapshot.tracks)
+          && equalPlainData(junctions, snapshot.junctions)
+          && equalPlainData(company, snapshot.company))) {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+
+      const candidate: WorldData = {
+        ...snapshot,
+        revision: rootRevision + 1,
+        constructionRevision: expectedConstructionRevision + 1,
+        tracks,
+        junctions,
+        company,
+      };
+      if (!validateWorldData(candidate).compatible) {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+
+      try {
+        world.tracks = clonePlainData(candidate.tracks);
+        world.junctions = clonePlainData(candidate.junctions);
+        world.company = clonePlainData(candidate.company);
+        world.revision = candidate.revision;
+        world.constructionRevision = candidate.constructionRevision;
+      } catch {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+      return true;
+    } finally {
+      this.batchInProgress = false;
     }
-    world.tracks = clonePlainData(tracks);
-    world.junctions = clonePlainData(junctions);
-    world.revision += 1;
-    return true;
+  }
+
+  applyEconomyBatch(
+    expectedEconomyRevision: number,
+    mutate: (draft: EconomyStateDef) => boolean,
+  ): boolean {
+    const world = this._world;
+    if (this.batchInProgress
+      || !world
+      || world.economyRevision !== expectedEconomyRevision
+      || !this.canAdvanceRevision()
+      || !Number.isSafeInteger(world.economyRevision)
+      || world.economyRevision < 0
+      || world.economyRevision >= Number.MAX_SAFE_INTEGER) return false;
+    if (!validateWorldData(world).compatible) return false;
+    const snapshot = clonePlainData(world);
+    const rootRevision = world.revision;
+    const economy = clonePlainData(world.economy);
+    this.batchInProgress = true;
+    try {
+      let accepted: boolean;
+      try {
+        accepted = mutate(economy);
+      } catch {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+      if (!accepted
+        || this._world !== world
+        || !equalPlainData(world, snapshot)
+        || equalPlainData(economy, snapshot.economy)) {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+
+      const candidate: WorldData = {
+        ...snapshot,
+        revision: rootRevision + 1,
+        economyRevision: expectedEconomyRevision + 1,
+        economy,
+      };
+      if (!validateWorldData(candidate).compatible) {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+
+      try {
+        world.economy = clonePlainData(candidate.economy);
+        world.revision = candidate.revision;
+        world.economyRevision = candidate.economyRevision;
+      } catch {
+        return this.restoreBatchSnapshot(world, snapshot);
+      }
+      return true;
+    } finally {
+      this.batchInProgress = false;
+    }
   }
 
   addTrackDef(def: TrackDef): boolean {
-    const revision = this._world?.revision;
+    const revision = this._world?.constructionRevision;
     return revision !== undefined
       && this.applyConstructionBatch(revision, (draft) => draft.addTrack(def));
   }
 
   removeTrackDef(uuid: string): boolean {
-    const revision = this._world?.revision;
+    const revision = this._world?.constructionRevision;
     return revision !== undefined
       && this.applyConstructionBatch(revision, (draft) => draft.removeTrack(uuid));
   }
 
   updateTrackDef(updated: TrackDef): boolean {
-    const revision = this._world?.revision;
+    const revision = this._world?.constructionRevision;
     return revision !== undefined
       && this.applyConstructionBatch(revision, (draft) => draft.updateTrack(updated));
   }
@@ -235,13 +378,13 @@ class WorldManagerClass {
   // ── Junction mutations ─────────────────────────────────────────────────────
 
   addJunctionDef(def: JunctionDef): boolean {
-    const revision = this._world?.revision;
+    const revision = this._world?.constructionRevision;
     return revision !== undefined
       && this.applyConstructionBatch(revision, (draft) => draft.addJunction(def));
   }
 
   removeJunctionDef(uuid: string): boolean {
-    const revision = this._world?.revision;
+    const revision = this._world?.constructionRevision;
     return revision !== undefined
       && this.applyConstructionBatch(revision, (draft) => draft.removeJunction(uuid));
   }

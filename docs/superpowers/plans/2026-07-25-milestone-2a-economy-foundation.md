@@ -723,7 +723,7 @@ git commit -m "feat: add conserved company ledger and pnl"
 - Produces a construction draft that commits tracks, junctions, company cash,
   and ledger together.
 
-- [ ] **Step 1: Write the schema-6 red tests**
+- [x] **Step 1: Write the schema-6 red tests**
 
 Prove:
 
@@ -738,7 +738,7 @@ Prove:
 - economy mutations advance `revision` and `economyRevision` without making
   construction command history stale.
 
-- [ ] **Step 2: Run schema and world-manager tests**
+- [x] **Step 2: Run schema and world-manager tests**
 
 ```powershell
 npx jest tests/unit/WorldSchemaValidation.test.ts tests/unit/WorldManager.test.ts --runInBand --coverage=false
@@ -746,7 +746,7 @@ npx jest tests/unit/WorldSchemaValidation.test.ts tests/unit/WorldManager.test.t
 
 Expected: fail against schema 5.
 
-- [ ] **Step 3: Replace the saved-world root**
+- [x] **Step 3: Replace the saved-world root**
 
 Use:
 
@@ -775,7 +775,7 @@ deletion guard in `WorldScene` so it no longer checks saved scenarios.
 `createEmptyWorld` uses `createCompanyState(startingCash)` and accepts an
 economy state argument.
 
-- [ ] **Step 4: Add strict economy and ledger validation**
+- [x] **Step 4: Add strict economy and ledger validation**
 
 Validate unique facility IDs, definition IDs, product/recipe references, all
 slot fields, rail-access geometry, active recipe compatibility, tick and
@@ -793,7 +793,7 @@ company.cash === company.ledger.reduce(
 Reject unknown extra root fields only where current validation already does so;
 do not add a general reflection framework.
 
-- [ ] **Step 5: Write failing construction-ledger tests**
+- [x] **Step 5: Write failing construction-ledger tests**
 
 Prove build, undo, redo, demolition refund, demolition undo, and rollback each
 leave cash equal to the ledger sum. Reversal entries must reference the original
@@ -802,7 +802,7 @@ failure commits neither track/junction data nor company/ledger state, so failed
 construction writes no ledger entry. Economy-only revisions must not invalidate
 an otherwise current construction command.
 
-- [ ] **Step 6: Draft construction money with construction data**
+- [x] **Step 6: Draft construction money with construction data**
 
 Extend `WorldConstructionDraft` with a cloned `company` and the current economy
 tick. Refactor `ConstructionEconomy` into a pure draft operation:
@@ -837,7 +837,7 @@ cursor from `worldRevision` to `constructionRevision`; have
 `ConstructionService.build` revalidate that same cursor so economy-only ticks
 cannot stale a live construction preview or quote.
 
-- [ ] **Step 7: Run all affected construction/persistence tests**
+- [x] **Step 7: Run all affected construction/persistence tests**
 
 ```powershell
 npx jest tests/unit/WorldSchemaValidation.test.ts tests/unit/WorldManager.test.ts tests/unit/SaveService.test.ts tests/unit/ConstructionEconomy.test.ts tests/unit/PlaceTrackCommand.test.ts tests/unit/ConstructionService.test.ts tests/unit/TrackManager.test.ts --runInBand --coverage=false
@@ -845,7 +845,7 @@ npx jest tests/unit/WorldSchemaValidation.test.ts tests/unit/WorldManager.test.t
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add src/config/WorldData.ts src/managers/WorldManager.ts src/systems/ConstructionEconomy.ts src/systems/ConstructionService.ts src/commands src/scenes/WorldScene.ts tests/unit

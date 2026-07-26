@@ -5,6 +5,7 @@ import { WorldManager } from '../../src/managers/WorldManager';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
+import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
 
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
@@ -405,8 +406,16 @@ describe('WorldScene disabled construction bypass guards', () => {
     const world = WorldManager.createNew('Failure authority', 'failure-seed');
     const priorRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
     const priorStored = SaveService.loadWorld(world.id);
-    world.company.cash -= 2_800;
+    const transaction = applyConstructionTransaction(world.company, {
+      kind: 'purchase',
+      magnitude: 2_800,
+      referenceId: 'test-live-command',
+      direction: 'forward',
+    }, world.economy.tick);
+    if (transaction.ok === false) throw new Error(transaction.code);
+    world.company = transaction.company;
     world.revision += 1;
+    world.constructionRevision += 1;
     const liveAfterCommand = JSON.parse(JSON.stringify(world));
     (scene as any).commandStack = {};
     (scene as any).selectionManager = { selectedUUIDs: [] };
@@ -538,7 +547,8 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).editorDeleteHandler({
       uuids: ['paid-track'],
       expectedRefund: 50,
-      expectedRevision: WorldManager.world!.revision + 1,
+      expectedConstructionRevision:
+        WorldManager.world!.constructionRevision + 1,
     });
 
     expect(push).not.toHaveBeenCalled();
@@ -588,12 +598,81 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).editorDeleteHandler({
       uuids: ['paid-track'],
       expectedRefund: 50,
-      expectedRevision: world.revision,
+      expectedConstructionRevision: world.constructionRevision,
     });
 
     expect(push).toHaveBeenCalledWith(expect.objectContaining({
       description: 'Delete track(s)',
     }));
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+    WorldManager.reset();
+  });
+
+  it('keeps deletion confirmation current across economy-only revisions and rejects construction changes', () => {
+    const scene = new WorldScene();
+    const world = WorldManager.createNew('Delete cursor', 'quote-seed');
+    const paidTrack = {
+      uuid: 'paid-track',
+      geometryVersion: 1 as const,
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1 as const,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface' as const,
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 101,
+    };
+    world.tracks.push(paidTrack);
+    const constructionCursor = world.constructionRevision;
+    expect(WorldManager.applyEconomyBatch(world.economyRevision, (economy) => {
+      economy.tick += 1;
+      return true;
+    })).toBe(true);
+    const push = jest.fn().mockReturnValue(true);
+    const clearSelection = jest.fn();
+    (scene as any).commandStack = { push };
+    (scene as any).trackManager = {
+      captureTopology: jest.fn().mockReturnValue({
+        connections: [],
+        junctions: [],
+      }),
+      getJunction: jest.fn(),
+    };
+    (scene as any).selectionManager = {
+      selectedUUIDs: ['paid-track'],
+      clearSelection,
+    };
+    GameStateManager.enterCreate(world.id);
+    const intent = {
+      uuids: ['paid-track'],
+      expectedRefund: 50,
+      expectedConstructionRevision: constructionCursor,
+    };
+
+    (scene as any).editorDeleteHandler(intent);
+
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+
+    expect(WorldManager.applyConstructionBatch(
+      constructionCursor,
+      (draft) => draft.addTrack({
+        ...paidTrack,
+        uuid: 'external-construction',
+      }),
+    )).toBe(true);
+    (scene as any).editorDeleteHandler(intent);
+
+    expect(push).toHaveBeenCalledTimes(1);
     expect(clearSelection).toHaveBeenCalledTimes(1);
     WorldManager.reset();
   });
@@ -640,7 +719,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(emit).toHaveBeenCalledWith('ui:deletion-review', {
       uuids: ['paid-track'],
       expectedRefund: 50,
-      expectedRevision: world.revision,
+      expectedConstructionRevision: world.constructionRevision,
       available: false,
       blockingReason: expect.stringContaining('Remove stations'),
     });
@@ -648,7 +727,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).editorDeleteHandler({
       uuids: ['paid-track'],
       expectedRefund: 50,
-      expectedRevision: world.revision,
+      expectedConstructionRevision: world.constructionRevision,
     });
     expect((scene as any).commandStack.push).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('ui:toast', {

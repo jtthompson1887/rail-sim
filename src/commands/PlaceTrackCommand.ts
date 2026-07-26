@@ -7,10 +7,7 @@ import type {
   CommandRevisionContext,
   RevisionAwareCommand,
 } from '../systems/CommandStack';
-import {
-  ConstructionEconomy,
-  type ConstructionTransaction,
-} from '../systems/ConstructionEconomy';
+import { applyConstructionTransaction } from '../systems/ConstructionEconomy';
 import {
   ConstructionService,
   type ConstructionQuote,
@@ -60,26 +57,28 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
   readonly description = 'Place track';
   private readonly def: TrackDef;
   private readonly worldIdentity: WorldData | null;
-  private transaction: ConstructionTransaction | null = null;
+  private forwardEntryId: number | null = null;
   private applied = false;
-  private expectedRevision: number;
+  private expectedConstructionRevision: number;
 
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly trackManager: TrackManager,
-    private readonly economy: ConstructionEconomy,
     private readonly constructionService: ConstructionService,
     readonly quote: ConstructionQuote,
     private readonly injectFailure?: PlaceTrackFailureInjector,
   ) {
     this.def = trackDefFromQuote(quote);
     this.worldIdentity = WorldManager.world;
-    this.expectedRevision = quote.worldRevision;
+    this.expectedConstructionRevision = quote.constructionRevision;
   }
 
   getRevisionContext(): CommandRevisionContext | null {
     return this.worldIdentity
-      ? { authority: this.worldIdentity, revision: this.expectedRevision }
+      ? {
+        authority: this.worldIdentity,
+        revision: this.expectedConstructionRevision,
+      }
       : null;
   }
 
@@ -87,7 +86,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     if (context.authority !== this.worldIdentity
       || !Number.isSafeInteger(context.revision)
       || context.revision < 0) return false;
-    this.expectedRevision = context.revision;
+    this.expectedConstructionRevision = context.revision;
     return true;
   }
 
@@ -95,60 +94,62 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     if (this.applied) return false;
     if (!WorldManager.world
       || WorldManager.world !== this.worldIdentity
-      || WorldManager.world.revision !== this.expectedRevision
-      || !this.economy.isBoundTo(WorldManager.world.company)) return false;
-    const isRedo = this.transaction !== null;
+      || WorldManager.world.constructionRevision
+        !== this.expectedConstructionRevision) return false;
+    const isRedo = this.forwardEntryId !== null;
     const valid = isRedo
       ? this.constructionService.revalidateQuoteForRedo(
         this.quote,
-        this.transaction!.beforeCash,
+        this.quote.expectedCash,
       )
       : this.constructionService.revalidateQuote(this.quote);
     if (!valid) return false;
 
-    let debited = false;
     let liveAdded = false;
     let createdTrack: RailTrack | null = null;
-    let transaction: ConstructionTransaction | null = this.transaction;
+    let postedEntryId = 0;
     try {
-      if (transaction) {
-        if (!this.economy.reapply(transaction)) return false;
-      } else {
-        transaction = this.economy.purchase(this.quote.totalCost);
-        if (!transaction) return false;
-      }
-      debited = true;
-      this.injectFailure?.('after-debit');
-
       createdTrack = railTrackFromDef(this.scene, this.def);
       this.trackManager.addTrack(createdTrack);
       liveAdded = true;
       this.injectFailure?.('after-live-track');
 
       const committed = WorldManager.applyConstructionBatch(
-        this.expectedRevision,
+        this.expectedConstructionRevision,
         (draft) => {
           if (!draft.addTrack(this.def)) return false;
           this.injectFailure?.('after-world-def');
+          const transaction = applyConstructionTransaction(
+            draft.company,
+            {
+              kind: 'purchase',
+              magnitude: this.quote.totalCost,
+              referenceId: this.def.uuid,
+              direction: 'forward',
+            },
+            draft.economyTick,
+          );
+          if (transaction.ok === false) return false;
+          draft.company = transaction.company;
+          postedEntryId = transaction.entry.id;
+          this.injectFailure?.('after-debit');
           return true;
         },
       );
       if (!committed) throw new Error('persisted track transaction failed');
-      this.expectedRevision += 1;
-      this.transaction = transaction;
+      this.expectedConstructionRevision += 1;
+      this.forwardEntryId = postedEntryId;
       this.applied = true;
       return true;
     } catch {
       if (liveAdded) this.trackManager.removeTrack(this.def.uuid);
       else createdTrack?.destroy();
-      if (debited && transaction) this.economy.reverse(transaction);
-      if (!isRedo) this.transaction = null;
       return false;
     }
   }
 
   undo(): boolean {
-    const transaction = this.transaction;
+    const forwardEntryId = this.forwardEntryId;
     const world = WorldManager.world;
     const live = this.trackManager.getTrack(this.def.uuid);
     const persisted = world?.tracks.find((track) => track.uuid === this.def.uuid);
@@ -159,40 +160,46 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     } catch {
       liveMatches = false;
     }
-    if (!this.applied || !transaction || !world || world !== this.worldIdentity || !live
-      || world.revision !== this.expectedRevision
-      || !this.economy.isBoundTo(world.company)
+    if (!this.applied || forwardEntryId === null || !world
+      || world !== this.worldIdentity || !live
+      || world.constructionRevision !== this.expectedConstructionRevision
       || !equalPlainData(persisted, this.def)
       || !liveMatches
       || !WorldManager.canAdvanceRevision()) return false;
 
     let liveRemoved = false;
-    let cashRestored = false;
     try {
       if (!this.trackManager.removeTrack(this.def.uuid)) return false;
       liveRemoved = true;
       this.injectFailure?.('undo-after-live-track');
 
-      if (!this.economy.reverse(transaction)) {
-        throw new Error('cash reversal failed');
-      }
-      cashRestored = true;
-      this.injectFailure?.('undo-after-refund');
-
       const committed = WorldManager.applyConstructionBatch(
-        this.expectedRevision,
+        this.expectedConstructionRevision,
         (draft) => {
           if (!draft.removeTrack(this.def.uuid)) return false;
           this.injectFailure?.('undo-after-world-def');
+          const transaction = applyConstructionTransaction(
+            draft.company,
+            {
+              kind: 'purchase',
+              magnitude: this.quote.totalCost,
+              referenceId: this.def.uuid,
+              direction: 'reversal',
+              reversalOf: forwardEntryId,
+            },
+            draft.economyTick,
+          );
+          if (transaction.ok === false) return false;
+          draft.company = transaction.company;
+          this.injectFailure?.('undo-after-refund');
           return true;
         },
       );
       if (!committed) throw new Error('persisted track transaction failed');
-      this.expectedRevision += 1;
+      this.expectedConstructionRevision += 1;
       this.applied = false;
       return true;
     } catch {
-      if (cashRestored) this.economy.reapply(transaction);
       if (liveRemoved) {
         try {
           this.trackManager.addTrack(railTrackFromDef(this.scene, this.def));

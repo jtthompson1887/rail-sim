@@ -10,7 +10,6 @@ import TrackManager from '../../src/managers/TrackManager';
 import { SnapSystem } from '../../src/systems/SnapSystem';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import { ConstructionService } from '../../src/systems/ConstructionService';
-import { ConstructionEconomy } from '../../src/systems/ConstructionEconomy';
 import { CommandStack } from '../../src/systems/CommandStack';
 
 const { makeScene } = require('../../__mocks__/phaser');
@@ -73,7 +72,7 @@ function preview(valid = true): ConstructionPreview {
   const quote: ConstructionQuote | null = valid ? {
     quoteId: 'quote-1',
     newTrackUUID: 'new-track',
-    worldRevision: 0,
+    constructionRevision: 0,
     expectedCash: 10_000,
     proposal: analyzed,
     expectedAffectedTracks: [],
@@ -121,8 +120,11 @@ function makeHarness(options: {
   const constructionService = {
     createPreview: jest.fn().mockReturnValue(options.analyzed ?? preview()),
   };
-  const economy = {
-    canAfford: jest.fn().mockReturnValue(options.affordable ?? true),
+  (WorldManager as any)._world = {
+    constructionRevision: 0,
+    company: {
+      cash: options.affordable === false ? 0 : 10_000,
+    },
   };
   const commandStack = {
     push: jest.fn().mockReturnValue(options.pushResult ?? true),
@@ -137,7 +139,6 @@ function makeHarness(options: {
     {} as any,
     snapSystem as any,
     constructionService as any,
-    economy as any,
     commandStack as any,
     overlay as any,
   );
@@ -145,7 +146,6 @@ function makeHarness(options: {
     tool,
     snapSystem,
     constructionService,
-    economy,
     commandStack,
     overlay,
   };
@@ -218,7 +218,7 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps one pending UUID while geometry changes and invalidates cache on authority changes', () => {
+  it('keeps one pending UUID and invalidates cache only on construction or cash authority changes', () => {
     WorldManager.createNew('Cache authority', 'cache-authority');
     const harness = makeHarness();
     harness.tool.onPointerDown(0, 0, pointer());
@@ -228,6 +228,9 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(harness.constructionService.createPreview.mock.calls[1][2]).toBe(firstUUID);
 
     WorldManager.world!.revision += 1;
+    harness.tool.onPointerMove(350, 0, pointer());
+    expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(2);
+    WorldManager.world!.constructionRevision += 1;
     harness.tool.onPointerMove(350, 0, pointer());
     WorldManager.world!.company.cash -= 1;
     harness.tool.onPointerMove(350, 0, pointer());
@@ -418,7 +421,6 @@ describe('PlaceTrackTool live construction workflow', () => {
       trackManager,
       snapSystem,
       service,
-      new ConstructionEconomy(world.company),
       stack,
       overlay as any,
     );

@@ -3,10 +3,10 @@ import TrackManager from '../../src/managers/TrackManager';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
-import { ConstructionEconomy } from '../../src/systems/ConstructionEconomy';
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import { SnapSystem } from '../../src/systems/SnapSystem';
 import { PlaceTrackTool } from '../../src/systems/tools/PlaceTrackTool';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 declare global {
   interface Window {
@@ -40,8 +40,8 @@ class ConstructionBenchmarkScene extends Phaser.Scene {
       'construction-browser-benchmark',
     );
     // The benchmark never commits; this simply keeps every valid preview
-    // affordable while retaining a real schema-5 company state.
-    world.company.cash = 1_000_000_000;
+    // affordable while retaining a real ledger-backed company state.
+    world.company = createCompanyState(1_000_000_000);
 
     const trackManager = new TrackManager(this);
     const snapSystem = new SnapSystem(trackManager);
@@ -54,7 +54,6 @@ class ConstructionBenchmarkScene extends Phaser.Scene {
       ),
     });
     const service = new ConstructionService(trackManager, analyzer);
-    const economy = new ConstructionEconomy(world.company);
     const commandStack = new CommandStack();
 
     readyTool = new PlaceTrackTool(
@@ -62,7 +61,6 @@ class ConstructionBenchmarkScene extends Phaser.Scene {
       trackManager,
       snapSystem,
       service,
-      economy,
       commandStack,
     );
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
