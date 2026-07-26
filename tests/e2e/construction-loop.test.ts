@@ -409,6 +409,7 @@ test.describe('fixed-seed construction decision loop', () => {
       fixture.id = 'e2e-low-cash-world';
       fixture.name = 'Low Cash Construction Fixture';
       fixture.company.cash = 1;
+      fixture.company.ledger[0].amount = 1;
       fixture.metadata.createdAt = Date.now() + 1;
       fixture.metadata.updatedAt = Date.now() + 1;
       localStorage.setItem(key, JSON.stringify({ [fixture.id]: fixture }));
