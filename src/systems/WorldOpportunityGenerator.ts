@@ -26,7 +26,10 @@ import {
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
 import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
-import { deriveAutomaticCubic } from './TrackGeometry';
+import {
+  deriveAutomaticCubic,
+  deriveTrackEndpointOutward,
+} from './TrackGeometry';
 import {
   MAX_STARTER_CORRIDOR_COST,
   WorldOpportunityValidator,
@@ -273,24 +276,26 @@ export class WorldOpportunityGenerator {
         || Math.abs(waypoint.y) > WorldGenerationConfig.WORLD_HALF_HEIGHT) {
         continue;
       }
-      const through = { x: dx, y: dy };
       const firstDetail = this.analyzer.analyzeDetailed(
         deriveAutomaticCubic({
           start,
           end: waypoint,
-          endOutward: { x: -through.x, y: -through.y },
-        }),
-      );
-      const secondDetail = this.analyzer.analyzeDetailed(
-        deriveAutomaticCubic({
-          start: waypoint,
-          end,
-          startOutward: through,
         }),
       );
       const firstLeg = firstDetail.proposal;
+      if (!firstLeg.valid) continue;
+      const secondDetail = this.analyzer.analyzeDetailed(
+        deriveAutomaticCubic({
+          start: firstLeg.geometry.p3,
+          end,
+          startOutward: deriveTrackEndpointOutward(
+            firstLeg.geometry,
+            'end',
+          ),
+        }),
+      );
       const secondLeg = secondDetail.proposal;
-      if (!firstLeg.valid || !secondLeg.valid) continue;
+      if (!secondLeg.valid) continue;
 
       const detourLength = firstLeg.length + secondLeg.length;
       const directMeanGrade = meanAbsoluteEngineeredGrade([directDetail]);

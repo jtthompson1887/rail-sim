@@ -1,6 +1,10 @@
 import TrackManager from '../managers/TrackManager';
 import { GameConfig } from '../config/GameConfig';
 import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
+import {
+  deriveTrackEndpointOutward,
+  type TrackGeometryDef,
+} from './TrackGeometry';
 
 export interface SnapResult {
   x: number;
@@ -22,22 +26,6 @@ export interface ResolvedTrackEndpoint {
   readonly open: boolean;
 }
 
-function normalisedOutward(
-  x: number,
-  y: number,
-  reverse: boolean,
-): { x: number; y: number } {
-  const length = Math.hypot(x, y);
-  const direction = length > 0 ? { x: x / length, y: y / length } : { x: 1, y: 0 };
-  const outward = reverse
-    ? { x: -direction.x, y: -direction.y }
-    : direction;
-  return {
-    x: Object.is(outward.x, -0) ? 0 : outward.x,
-    y: Object.is(outward.y, -0) ? 0 : outward.y,
-  };
-}
-
 /**
  * Resolve one endpoint deterministically. Construction preview and quoting
  * share this function so the displayed port can never differ from authority.
@@ -54,10 +42,17 @@ export function resolveTrackEndpoint(
   for (const track of trackManager.tracks) {
     const trackUUID = track.getUUID();
     if (excluded.has(trackUUID)) continue;
-    const curve = track.getCurvePath();
+    const controls = track.getControlPoints();
+    const geometry: TrackGeometryDef = {
+      geometryVersion: 1,
+      p0: { x: controls.p0.x, y: controls.p0.y },
+      p1: { x: controls.p1.x, y: controls.p1.y },
+      p2: { x: controls.p2.x, y: controls.p2.y },
+      p3: { x: controls.p3.x, y: controls.p3.y },
+    };
     const endpointDefs = [
-      { endpoint: 'start' as const, point: curve.getStartPoint(), t: 0, reverse: true },
-      { endpoint: 'end' as const, point: curve.getEndPoint(), t: 1, reverse: false },
+      { endpoint: 'start' as const, point: geometry.p0 },
+      { endpoint: 'end' as const, point: geometry.p3 },
     ];
     for (const definition of endpointDefs) {
       const distance = Math.hypot(
@@ -65,13 +60,15 @@ export function resolveTrackEndpoint(
         definition.point.y - wy,
       );
       if (distance > radius) continue;
-      const tangent = curve.getTangent(definition.t);
       candidates.push({
         x: definition.point.x,
         y: definition.point.y,
         trackUUID,
         endpoint: definition.endpoint,
-        outward: normalisedOutward(tangent.x, tangent.y, definition.reverse),
+        outward: deriveTrackEndpointOutward(
+          geometry,
+          definition.endpoint,
+        ),
         open: !trackManager.endpointHasConnection(
           track,
           definition.endpoint === 'start',

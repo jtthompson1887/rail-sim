@@ -91,8 +91,8 @@ function startHarnessServer() {
       && audit.seedsEvaluated === 284
       && audit.seedsResolved === 284
       && audit.seedsExhausted === 0
-      && audit.maxResolvedAttempt === 9
-      && audit.firstWorstSeed === 'playtest-644'
+      && audit.maxResolvedAttempt === 11
+      && audit.firstWorstSeed === 'playtest-753'
       && Number.isFinite(audit.durationMs)
       && audit.durationMs > 0;
     const exactObservedWorstCase = exactOpportunityAudit

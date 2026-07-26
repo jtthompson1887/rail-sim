@@ -18,9 +18,18 @@ import {
   meanAbsoluteEngineeredGrade,
 } from '../../src/systems/ConstructionGradeMetrics';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
-import { deriveAutomaticCubic } from '../../src/systems/TrackGeometry';
+import {
+  deriveAutomaticCubic,
+  deriveTrackEndpointOutward,
+} from '../../src/systems/TrackGeometry';
 import TrackManager from '../../src/managers/TrackManager';
-import { SnapSystem } from '../../src/systems/SnapSystem';
+import {
+  resolveTrackEndpoint,
+  SnapSystem,
+} from '../../src/systems/SnapSystem';
+import { ConstructionService } from '../../src/systems/ConstructionService';
+import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
+import { WorldManager } from '../../src/managers/WorldManager';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -141,6 +150,150 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
+  it('persists the keydiag detour as two production-sequential construction quotes', () => {
+    const seed = 'task15-manual-ash-keydiag';
+    const terrain = new TerrainGenerator(seed);
+    const result = new WorldOpportunityGenerator(terrain).generate({
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const detour = result.opportunity.corridors.find(
+      ({ id }) => id === 'detour',
+    );
+    expect(detour).toBeDefined();
+    if (!detour) return;
+    expect(detour.feasibilityWitness.segments).toHaveLength(2);
+    const [persistedFirst, persistedSecond] =
+      detour.feasibilityWitness.segments;
+
+    const scene = makeScene();
+    const manager = new TrackManager(scene);
+    WorldManager.createNew('Sequential detour', seed);
+    try {
+      const service = new ConstructionService(
+        manager,
+        new ConstructionAnalyzer(terrain),
+      );
+      const snap = new SnapSystem(manager);
+      const firstStart = snap.snapConstructionPoint(
+        detour.waypoints[0].x,
+        detour.waypoints[0].y,
+      );
+      const firstEnd = snap.snapConstructionPoint(
+        detour.waypoints[1].x,
+        detour.waypoints[1].y,
+      );
+      expect(['none', 'grid']).toContain(firstStart.type);
+      expect(['none', 'grid']).toContain(firstEnd.type);
+      const firstPreview = service.createPreview(
+        firstStart.type === 'grid'
+          ? {
+            x: firstStart.x,
+            y: firstStart.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: firstStart.x,
+            y: firstStart.y,
+            snapped: false,
+            type: 'none',
+          },
+        firstEnd.type === 'grid'
+          ? {
+            x: firstEnd.x,
+            y: firstEnd.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: firstEnd.x,
+            y: firstEnd.y,
+            snapped: false,
+            type: 'none',
+          },
+        'keydiag-first',
+      );
+      expect(firstPreview?.proposal.valid).toBe(true);
+      expect(firstPreview?.quote).not.toBeNull();
+      expect(new PlaceTrackCommand(
+        scene,
+        manager,
+        service,
+        firstPreview!.quote!,
+      ).execute()).toBe(true);
+
+      const installedEndpoint = resolveTrackEndpoint(
+        manager,
+        detour.waypoints[1].x,
+        detour.waypoints[1].y,
+        0,
+      );
+      expect(installedEndpoint).toEqual(expect.objectContaining({
+        trackUUID: 'keydiag-first',
+        endpoint: 'end',
+        open: true,
+      }));
+      const secondEnd = snap.snapConstructionPoint(
+        detour.waypoints[2].x,
+        detour.waypoints[2].y,
+      );
+      expect(['none', 'grid']).toContain(secondEnd.type);
+      const secondPreview = service.createPreview(
+        {
+          ...installedEndpoint!,
+          snapped: true,
+          type: 'endpoint',
+        },
+        secondEnd.type === 'grid'
+          ? {
+            x: secondEnd.x,
+            y: secondEnd.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: secondEnd.x,
+            y: secondEnd.y,
+            snapped: false,
+            type: 'none',
+          },
+        'keydiag-second',
+      );
+
+      expect(secondPreview?.proposal.valid).toBe(true);
+      expect(secondPreview?.quote).not.toBeNull();
+      expect(firstPreview!.proposal).toEqual(expect.objectContaining({
+        geometry: persistedFirst.geometry,
+        verticalProfile: persistedFirst.verticalProfile,
+        structures: persistedFirst.structures,
+        costs: persistedFirst.costs,
+      }));
+      expect(secondPreview!.proposal).toEqual(expect.objectContaining({
+        geometry: persistedSecond.geometry,
+        verticalProfile: persistedSecond.verticalProfile,
+        structures: persistedSecond.structures,
+        costs: persistedSecond.costs,
+      }));
+      expect(firstPreview!.quote!.totalCost).toBe(
+        persistedFirst.costs.total + persistedFirst.topologyCost,
+      );
+      expect(secondPreview!.quote!.totalCost).toBe(
+        persistedSecond.costs.total + persistedSecond.topologyCost,
+      );
+      expect(
+        firstPreview!.quote!.totalCost + secondPreview!.quote!.totalCost,
+      ).toBe(detour.estimatedCost);
+    } finally {
+      WorldManager.reset();
+    }
+  });
+
   it('exposes the old raw diagnostic route as too steep after real construction snapping', () => {
     const seed = 'task15-manual-ash-dry';
     const terrain = new TerrainGenerator(seed);
@@ -396,7 +549,7 @@ describe('WorldOpportunityGenerator', () => {
     });
   });
 
-  it('chains the two-leg detour exactly with a continuous through tangent', () => {
+  it('chains the two-leg detour with exact shared endpoint control geometry', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -405,20 +558,12 @@ describe('WorldOpportunityGenerator', () => {
       (corridor) => corridor.dominantTradeoff === 'long-flat',
     )!;
     const [first, second] = detour.feasibilityWitness.segments;
+    expect(second.geometry).toEqual(deriveAutomaticCubic({
+      start: first.geometry.p3,
+      end: second.geometry.p3,
+      startOutward: deriveTrackEndpointOutward(first.geometry, 'end'),
+    }));
     expect(first.geometry.p3).toEqual(second.geometry.p0);
-
-    const incoming = {
-      x: first.geometry.p3.x - first.geometry.p2.x,
-      y: first.geometry.p3.y - first.geometry.p2.y,
-    };
-    const outgoing = {
-      x: second.geometry.p1.x - second.geometry.p0.x,
-      y: second.geometry.p1.y - second.geometry.p0.y,
-    };
-    const cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
-    const dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
-    expect(Math.abs(cross)).toBeLessThan(1e-8);
-    expect(dot).toBeGreaterThan(0);
   });
 
   it('centres the recommendation on the complete opportunity envelope', () => {
