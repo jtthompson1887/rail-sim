@@ -155,6 +155,11 @@ async function dragRoute(page: Page, start: Point, end: Point): Promise<void> {
   await page.mouse.up();
 }
 
+async function activateButton(page: Page, testId: string): Promise<void> {
+  await page.locator(`[data-testid="${testId}"]`).focus();
+  await page.keyboard.press('Enter');
+}
+
 async function frameSurfaceDetour(page: Page): Promise<ConstructionSnapshot> {
   const before = await snapshot(page);
   await page.keyboard.press('h');
@@ -260,7 +265,7 @@ test.describe('fixed-seed construction decision loop', () => {
     expect(invalid.world.company.cash).toBe(blank.world.company.cash);
     await page.keyboard.press('Enter');
     expect((await snapshot(page)).world.tracks).toHaveLength(0);
-    await page.locator('[data-testid="construction-cancel"]').click();
+    await activateButton(page, 'construction-cancel');
 
     await dragRoute(page, start, end);
     const firstReview = await snapshot(page);
@@ -284,7 +289,7 @@ test.describe('fixed-seed construction decision loop', () => {
       );
       secondReview = await snapshot(page);
       if (secondReview.preview?.canConfirm) break;
-      await page.locator('[data-testid="construction-back"]').click();
+      await activateButton(page, 'construction-back');
     }
     expect(secondReview).not.toBeNull();
     if (!secondReview) throw new Error('No chained preview was produced');
@@ -299,7 +304,7 @@ test.describe('fixed-seed construction decision loop', () => {
     await expect(page.locator('[data-testid="construction-detail"]')).toContainText(
       `Topology £${secondReview.preview?.topologyCost.toLocaleString('en-GB')}`,
     );
-    await page.locator('[data-testid="construction-confirm"]').click();
+    await activateButton(page, 'construction-confirm');
     const bothBuilt = await snapshot(page);
     expect(bothBuilt.world.tracks).toHaveLength(2);
     expect(bothBuilt.world.tracks[1].paidBuildCost).toBe(secondReview.preview?.totalCost);
@@ -374,7 +379,7 @@ test.describe('fixed-seed construction decision loop', () => {
       };
     });
 
-    await page.locator('[data-testid="construction-confirm"]').click();
+    await activateButton(page, 'construction-confirm');
     const liveAfterFailure = await snapshot(page);
     expect(liveAfterFailure.world.tracks).toHaveLength(1);
     expect(liveAfterFailure.world.company.cash).toBe(review.preview?.cashAfter);
@@ -388,7 +393,8 @@ test.describe('fixed-seed construction decision loop', () => {
     await expect(retry).toHaveAccessibleName('Retry Save');
 
     await page.evaluate(() => window.__railSimRestoreStorageWrite?.());
-    await retry.click();
+    await retry.focus();
+    await page.keyboard.press('Enter');
     await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Saved');
     await expect(retry).toBeHidden();
     const retriedConstruction = persistedConstruction(await snapshot(page));

@@ -12,6 +12,12 @@ export interface TrainRuntimeSnapshot {
   readonly derailed: boolean;
 }
 
+export function freezeTrainRuntimeSnapshot(
+  snapshot: TrainRuntimeSnapshot,
+): TrainRuntimeSnapshot {
+  return Object.freeze({ ...snapshot });
+}
+
 export function captureTrainRuntime(train: Train): TrainRuntimeSnapshot {
   const body = train.getMatterBody();
   const velocity = body.body.velocity;
@@ -26,7 +32,7 @@ export function captureTrainRuntime(train: Train): TrainRuntimeSnapshot {
     facing = forwardX * tangent.x + forwardY * tangent.y >= 0 ? 1 : -1;
   }
 
-  return {
+  return freezeTrainRuntimeSnapshot({
     trainId: train.getUUID(),
     trackUUID: currentTrack?.getUUID() ?? null,
     trackT,
@@ -36,5 +42,5 @@ export function captureTrainRuntime(train: Train): TrainRuntimeSnapshot {
     speedWorldUnitsPerSecond: Math.hypot(velocity.x, velocity.y) * 60,
     throttle: train.enginePower < 0 ? -1 : train.enginePower > 0 ? 1 : 0,
     derailed: train.derailed,
-  };
+  });
 }

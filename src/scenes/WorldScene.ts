@@ -44,7 +44,10 @@ import type {
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
 import { clonePlainData } from '../utils/PlainData';
-import { captureTrainRuntime } from '../freight/TrainRuntime';
+import {
+  captureTrainRuntime,
+  type TrainRuntimeSnapshot,
+} from '../freight/TrainRuntime';
 import type {
   CargoBlocker,
   CargoTransferStatus,
@@ -61,7 +64,11 @@ import type {
   ConstructionPreviewModel,
   ConstructionToolPhase,
 } from '../ui/ConstructionPreviewOverlay';
-import { EconomySystem } from '../economy/EconomySystem';
+import {
+  ECONOMY_TICK_MS,
+  EconomySystem,
+  type EconomyUpdateResult,
+} from '../economy/EconomySystem';
 import {
   buildFacilityInspection,
   type FacilityInspectionDto,
@@ -83,6 +90,7 @@ import {
 import {
   deriveFirstRouteObjective,
   firstRouteCelebrationSession,
+  type FirstRouteObjectiveDto,
 } from '../freight/FirstRouteObjective';
 
 interface ConstructionE2ESnapshot {
@@ -99,6 +107,34 @@ interface ConstructionE2ESnapshot {
   readonly topology: TrackTopologySnapshot;
 }
 
+export interface FirstRouteBrowserSnapshot {
+  readonly world: WorldData;
+  readonly runtime: readonly TrainRuntimeSnapshot[];
+  readonly saveState: 'saved' | 'unsaved' | 'saving';
+  readonly objective: FirstRouteObjectiveDto;
+  readonly camera: {
+    readonly scrollX: number;
+    readonly scrollY: number;
+    readonly zoom: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+export interface FirstRouteBrowserHarness {
+  snapshot(): FirstRouteBrowserSnapshot;
+  setMode(mode: 'create' | 'play'): void;
+  advanceFixedTicks(count: number): void;
+  setTrainRuntime(
+    trainId: string,
+    runtime: Pick<
+      TrainRuntimeSnapshot,
+      'x' | 'y' | 'speedWorldUnitsPerSecond' | 'throttle' | 'derailed'
+    >,
+  ): void;
+  retrySave(): boolean;
+}
+
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
   interface Window {
@@ -108,6 +144,7 @@ declare global {
     __railSimTrackManager: TrackManager | undefined;
     __railSimConstructionSnapshot:
       (() => ConstructionE2ESnapshot) | undefined;
+    __railSimFirstRouteHarness: FirstRouteBrowserHarness | undefined;
   }
 }
 
@@ -118,6 +155,17 @@ const OPPORTUNITY_CORRIDOR_WIDTH_PX = 24;
 const OPPORTUNITY_CORRIDOR_LABEL_OFFSET_PX = 34;
 const OPPORTUNITY_CORRIDOR_LABEL_SEPARATION_PX = 24;
 type SaveState = 'saved' | 'unsaved' | 'saving';
+
+const deepFreezePlainData = <T>(value: T): T => {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    const record = value as Record<string, unknown>;
+    Object.keys(record).forEach(
+      (key) => deepFreezePlainData(record[key]),
+    );
+    Object.freeze(value);
+  }
+  return value;
+};
 
 function deletionBlockingReason(
   world: WorldData,
@@ -201,6 +249,7 @@ export default class WorldScene extends Phaser.Scene {
   private readonly cargoStatusByTrainId =
     new Map<string, CargoTransferStatus>();
   private constructionHistoryClearedForOperations = false;
+  private firstRouteHarnessControlsRuntime = false;
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -434,6 +483,7 @@ export default class WorldScene extends Phaser.Scene {
     this.operationsLockedTrainIds.clear();
     this.cargoStatusByTrainId.clear();
     this.constructionHistoryClearedForOperations = false;
+    this.firstRouteHarnessControlsRuntime = false;
     if (data.worldId && !WorldManager.load(data.worldId)) {
       this.worldLoadFailed = true;
       return;
@@ -558,6 +608,15 @@ export default class WorldScene extends Phaser.Scene {
         topology: this.trackManager.captureTopology(),
       });
     };
+    window.__railSimFirstRouteHarness = {
+      snapshot: () => this.captureFirstRouteBrowserSnapshot(),
+      setMode: (mode) => this.setFirstRouteBrowserMode(mode),
+      advanceFixedTicks: (count) => this.advanceFirstRouteFixedTicks(count),
+      setTrainRuntime: (trainId, runtime) => {
+        this.setFirstRouteTrainRuntime(trainId, runtime);
+      },
+      retrySave: () => this.saveWorldAndReport(),
+    };
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('mode:changed',        this.modeChangedHandler);
@@ -596,6 +655,7 @@ export default class WorldScene extends Phaser.Scene {
       window.__railSimTrainManager = undefined;
       window.__railSimTrackManager = undefined;
       window.__railSimConstructionSnapshot = undefined;
+      window.__railSimFirstRouteHarness = undefined;
     });
 
     // Input routing
@@ -902,11 +962,63 @@ export default class WorldScene extends Phaser.Scene {
     const operating = GameStateManager.worldMode === 'play'
       && GameStateManager.state === 'playing'
       && !this.scene.isPaused();
-    const economyResult = this.economySystem.update(
-      delta,
-      operating,
-      runtime,
-    );
+    const economyResult = this.firstRouteHarnessControlsRuntime
+      ? null
+      : this.economySystem.update(
+        delta,
+        operating,
+        runtime,
+      );
+    if (economyResult) this.applyEconomyUpdateResult(economyResult);
+    this.publishFreightPresentation(runtime);
+
+    if (this.operationsLockedTrainIds.size > 0) {
+      this.trainManager.stopFreightTrains(
+        Array.from(this.operationsLockedTrainIds).sort(),
+      );
+    }
+
+    // Stream terrain chunks and scenery around the camera
+    const cam = this.cameras.main;
+    const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
+    const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
+    this.updateStarterOpportunityLabelScale();
+    this.updateFacilityViewScale();
+    this.terrainChunkManager.update(camCX, camCY, cam.zoom);
+    this.sceneryManager.update(camCX, camCY, cam.zoom);
+
+    // Terrain overlay when tool is active
+    this.updateTerrainOverlay();
+
+    if (GameStateManager.worldMode === 'create') {
+      this.activeEditorTool?.update(delta);
+      this.autoSaveTimer += delta / 1000;
+      if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
+        this.autoSaveTimer = 0;
+        this.runPeriodicSafetySave();
+      }
+      GameStateManager.tick(delta / 1000);
+    } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
+      if (!this.firstRouteHarnessControlsRuntime) {
+        this.inputManager.handleTrainMovement(
+          this.trainManager.selectedTrain,
+          this.operationsLockedTrainIds,
+        );
+        this.trainManager.update(
+          time,
+          delta,
+          this.operationsLockedTrainIds,
+        );
+      }
+      this.contentLoader.stations.forEach((s) => s.update(delta));
+      GameStateManager.tick(delta / 1000);
+      this.publishHUDState();
+    }
+  }
+
+  private applyEconomyUpdateResult(
+    economyResult: EconomyUpdateResult,
+  ): void {
     if (economyResult.authoritativeChanged) {
       this.clearConstructionHistoryForOperations();
       const lockedBefore = new Set(this.operationsLockedTrainIds);
@@ -943,47 +1055,136 @@ export default class WorldScene extends Phaser.Scene {
     } else if (economyResult.authoritativeChanged) {
       this.saveWorldAndReport(false, false);
     }
-    this.publishFreightPresentation(runtime);
-    if (this.operationsLockedTrainIds.size > 0) {
-      this.trainManager.stopFreightTrains(
-        Array.from(this.operationsLockedTrainIds).sort(),
-      );
+  }
+
+  private captureFirstRouteBrowserSnapshot(): FirstRouteBrowserSnapshot {
+    const world = WorldManager.world;
+    if (!world) throw new Error('No world is loaded');
+    const camera = this.cameras.main;
+    const runtime = this.trainManager.trains.map(captureTrainRuntime);
+    return deepFreezePlainData(clonePlainData({
+      world,
+      runtime,
+      saveState: this.lastReportedSaveState,
+      objective: deriveFirstRouteObjective(
+        world,
+        this.trackManager.captureTopology(),
+      ),
+      camera: {
+        scrollX: camera.scrollX,
+        scrollY: camera.scrollY,
+        zoom: camera.zoom,
+        width: camera.width,
+        height: camera.height,
+      },
+    }));
+  }
+
+  private setFirstRouteBrowserMode(mode: 'create' | 'play'): void {
+    const worldId = WorldManager.currentWorldId ?? '';
+    if (mode === 'play') {
+      GameStateManager.enterPlay(worldId);
+    } else if (GameStateManager.worldMode === 'play') {
+      GameStateManager.returnToCreate();
+    } else {
+      GameStateManager.enterCreate(worldId);
     }
+  }
 
-    // Stream terrain chunks and scenery around the camera
-    const cam = this.cameras.main;
-    const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
-    const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
-    this.updateStarterOpportunityLabelScale();
-    this.updateFacilityViewScale();
-    this.terrainChunkManager.update(camCX, camCY, cam.zoom);
-    this.sceneryManager.update(camCX, camCY, cam.zoom);
+  private advanceFirstRouteFixedTicks(count: number): void {
+    if (!Number.isSafeInteger(count) || count < 0 || count > 10_000) {
+      throw new RangeError('Fixed tick count must be between 0 and 10,000');
+    }
+    if (GameStateManager.worldMode !== 'play'
+      || GameStateManager.state !== 'playing') {
+      throw new Error('Fixed ticks require play mode');
+    }
+    this.firstRouteHarnessControlsRuntime = true;
+    for (let index = 0; index < count; index += 1) {
+      const runtime = this.trainManager.trains.map(captureTrainRuntime);
+      const result = this.economySystem.update(
+        ECONOMY_TICK_MS,
+        true,
+        runtime,
+      );
+      this.applyEconomyUpdateResult(result);
+      GameStateManager.tick(ECONOMY_TICK_MS / 1_000);
+    }
+    this.publishFreightPresentation(
+      this.trainManager.trains.map(captureTrainRuntime),
+    );
+    this.publishHUDState();
+  }
 
-    // Terrain overlay when tool is active
-    this.updateTerrainOverlay();
+  private setFirstRouteTrainRuntime(
+    trainId: string,
+    runtime: Pick<
+      TrainRuntimeSnapshot,
+      'x' | 'y' | 'speedWorldUnitsPerSecond' | 'throttle' | 'derailed'
+    >,
+  ): void {
+    if (!Number.isFinite(runtime.x)
+      || !Number.isFinite(runtime.y)
+      || !Number.isFinite(runtime.speedWorldUnitsPerSecond)
+      || runtime.speedWorldUnitsPerSecond < 0
+      || [-1, 0, 1].indexOf(runtime.throttle) === -1
+      || typeof runtime.derailed !== 'boolean') {
+      throw new RangeError('Invalid train runtime');
+    }
+    const train = this.trainManager.trains.find(
+      (candidate) => candidate.getUUID() === trainId,
+    );
+    if (!train) throw new Error(`Unknown train runtime: ${trainId}`);
+    this.firstRouteHarnessControlsRuntime = true;
+    const body = train.getMatterBody();
+    body.setPosition(runtime.x, runtime.y);
 
-    if (GameStateManager.worldMode === 'create') {
-      this.activeEditorTool?.update(delta);
-      this.autoSaveTimer += delta / 1000;
-      if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
-        this.autoSaveTimer = 0;
-        this.runPeriodicSafetySave();
+    if (runtime.derailed) {
+      train.derailed = true;
+      train.currentTrack = null;
+    } else {
+      if (train.derailed) {
+        if (!this.trainManager.tryRecoverDerailedTrain(train)) {
+          throw new Error(`Could not re-rail train runtime: ${trainId}`);
+        }
+      } else {
+        const closest = this.trackManager.getClosestTrack(
+          { x: runtime.x, y: runtime.y },
+          Math.max(GameConfig.TRACK.MAX_CLOSE_DISTANCE, 120),
+          train.currentTrack ?? undefined,
+        );
+        if (!closest) {
+          throw new Error(`Train runtime is outside player track: ${trainId}`);
+        }
+        train.currentTrack = closest;
+        const authoritative = WorldManager.world?.trains.find(
+          ({ id }) => id === trainId,
+        );
+        body.setAngle(
+          closest.getTrackAngle(body)
+          + (authoritative?.facing === -1 ? 180 : 0),
+        );
       }
-      GameStateManager.tick(delta / 1000);
-    } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
-      this.inputManager.handleTrainMovement(
-        this.trainManager.selectedTrain,
-        this.operationsLockedTrainIds,
-      );
-      this.trainManager.update(
-        time,
-        delta,
-        this.operationsLockedTrainIds,
-      );
-      this.contentLoader.stations.forEach((s) => s.update(delta));
-      GameStateManager.tick(delta / 1000);
-      this.publishHUDState();
+      train.derailed = false;
     }
+
+    train.enginePower = runtime.throttle * GameConfig.TRAIN.ENGINE_POWER;
+    const speedPerFrame = runtime.speedWorldUnitsPerSecond / 60;
+    const matterBody = body.body as {
+      force?: { x: number; y: number };
+    };
+    if (matterBody.force) {
+      matterBody.force.x = 0;
+      matterBody.force.y = 0;
+    }
+    body.setAngularVelocity(0);
+    body.setVelocity(
+      Math.cos(body.rotation) * speedPerFrame,
+      Math.sin(body.rotation) * speedPerFrame,
+    );
+    this.publishFreightPresentation(
+      this.trainManager.trains.map(captureTrainRuntime),
+    );
   }
 
   private reconcileLiveTrainRuntimeFromAuthority(): void {
@@ -1133,7 +1334,10 @@ export default class WorldScene extends Phaser.Scene {
     if (this.activeTool === 'place-track') this.clearFacilitySelection();
     this.updateFacilitySelectionAvailability();
     EventBus.emit('ui:toolbar-visible', { visible: true });
-    this.saveWorldAndReport();
+    this.saveWorldAndReport(
+      true,
+      !this.capturingStartupSaveOutcome,
+    );
   }
 
   private saveWorldAndReport(
