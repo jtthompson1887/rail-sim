@@ -897,6 +897,7 @@ export default class WorldScene extends Phaser.Scene {
       this.refreshFacilityPresentation(true);
     }
     if (economyResult.commitRejected) {
+      this.reconcileLiveTrainRuntimeFromAuthority();
       EventBus.emit('ui:toast', {
         message: 'Freight state changed · retry operation',
         type: 'info',
@@ -944,6 +945,24 @@ export default class WorldScene extends Phaser.Scene {
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
+  }
+
+  private reconcileLiveTrainRuntimeFromAuthority(): void {
+    const world = WorldManager.world;
+    if (!world) return;
+    const liveById = new Map(
+      this.trainManager.trains.map((train) => [train.getUUID(), train]),
+    );
+    world.trains.forEach((authoritative) => {
+      const live = liveById.get(authoritative.id);
+      if (!live) return;
+      this.trainManager.placeFreightTrain(
+        live,
+        authoritative.trackUUID,
+        authoritative.trackT,
+        authoritative.facing,
+      );
+    });
   }
 
   private clearConstructionHistoryForOperations(): void {
