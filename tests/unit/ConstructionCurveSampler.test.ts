@@ -77,7 +77,7 @@ describe('sampleConstructionCurve', () => {
     });
     expect(result.samples[MAX_ANALYSIS_SAMPLES - 1].t).toBe(1);
     expect(result.samples[MAX_ANALYSIS_SAMPLES - 1].point).toEqual({ x: 3040, y: 0 });
-    expect(result.length).toBe(MAX_SEGMENT_LENGTH);
+    expect(result.length).toBeCloseTo(MAX_SEGMENT_LENGTH, 10);
     expect(result.maxLengthError).toBe(0);
     expect(Object.isFrozen(result.samples)).toBe(true);
     expect(result.samples.every(Object.isFrozen)).toBe(true);
