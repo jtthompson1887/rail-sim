@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PlaceTrackCommand } from '../../commands/PlaceTrackCommand';
+import { GameConfig } from '../../config/GameConfig';
 import { STARTER_ROUTE_RESERVE } from '../../freight/FreightSetCatalog';
 import type TrackManager from '../../managers/TrackManager';
 import { WorldManager } from '../../managers/WorldManager';
@@ -53,6 +54,28 @@ function outwardFromGeometry(
   return length > 0
     ? { x: dx / length, y: dy / length }
     : { x: 1, y: 0 };
+}
+
+function nearestStarterWaypoint(
+  worldX: number,
+  worldY: number,
+): Readonly<{ x: number; y: number }> {
+  const corridors = WorldManager.world?.starterOpportunity?.corridors ?? [];
+  const radius = GameConfig.WORLD.SNAP_GRID_SIZE * 0.25;
+  const candidates: Array<{
+    point: Readonly<{ x: number; y: number }>;
+    distance: number;
+  }> = [];
+  for (const corridor of corridors) {
+    for (const point of corridor.waypoints) {
+      const distance = Math.hypot(point.x - worldX, point.y - worldY);
+      if (distance <= radius) candidates.push({ point, distance });
+    }
+  }
+  candidates.sort((left, right) => left.distance - right.distance
+      || left.point.x - right.point.x
+      || left.point.y - right.point.y);
+  return candidates[0]?.point ?? { x: worldX, y: worldY };
 }
 
 /**
@@ -379,6 +402,7 @@ export class PlaceTrackTool implements IEditorTool {
   }
 
   private snapConstructionPoint(worldX: number, worldY: number): SnapResult {
+    const planned = nearestStarterWaypoint(worldX, worldY);
     const snap = this.snapSystem as SnapSystem & {
       snapConstructionPoint?: (
         x: number,
@@ -387,8 +411,8 @@ export class PlaceTrackTool implements IEditorTool {
       ) => SnapResult;
     };
     return snap.snapConstructionPoint
-      ? snap.snapConstructionPoint(worldX, worldY)
-      : snap.snapPoint(worldX, worldY);
+      ? snap.snapConstructionPoint(planned.x, planned.y)
+      : snap.snapPoint(planned.x, planned.y);
   }
 
   private previewKey(

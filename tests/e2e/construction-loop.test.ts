@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
 const VIEWPORT = { width: 1920, height: 1400 };
 const WORLD_SEED = 'real-terrain-alpha';
@@ -138,13 +139,10 @@ async function toScreen(
 ): Promise<Point> {
   const canvas = await page.locator('canvas').boundingBox();
   if (!canvas) throw new Error('Canvas is not visible');
-  const internalX = state.camera.width / 2
-    + (point.x - state.camera.scrollX - state.camera.width / 2) * state.camera.zoom;
-  const internalY = state.camera.height / 2
-    + (point.y - state.camera.scrollY - state.camera.height / 2) * state.camera.zoom;
+  const internal = worldToCameraPoint(point, state.camera);
   return {
-    x: canvas.x + internalX * canvas.width / state.camera.width,
-    y: canvas.y + internalY * canvas.height / state.camera.height,
+    x: canvas.x + internal.x * canvas.width / state.camera.width,
+    y: canvas.y + internal.y * canvas.height / state.camera.height,
   };
 }
 

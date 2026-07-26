@@ -9,6 +9,7 @@ import {
 import {
   ConstructionConfig,
   ENDPOINT_CONNECTION_COST,
+  STANDARD_STARTING_CASH,
 } from '../../src/config/ConstructionConfig';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
@@ -30,6 +31,7 @@ import {
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
 import { WorldManager } from '../../src/managers/WorldManager';
+import { STARTER_ROUTE_RESERVE } from '../../src/freight/FreightSetCatalog';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -150,8 +152,22 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
-  it('persists the keydiag detour as two production-sequential construction quotes', () => {
-    const seed = 'task15-manual-ash-keydiag';
+  it.each([
+    {
+      seed: 'task15-manual-ash-keydiag',
+      expectedCost: null,
+      guaranteesStarterReserve: false,
+    },
+    {
+      seed: 'task15-manual-larch',
+      expectedCost: 179_259,
+      guaranteesStarterReserve: true,
+    },
+  ])('persists $seed as exact production-sequential construction quotes', ({
+    seed,
+    expectedCost,
+    guaranteesStarterReserve,
+  }) => {
     const terrain = new TerrainGenerator(seed);
     const result = new WorldOpportunityGenerator(terrain).generate({
       generationConfigVersion: 1,
@@ -289,6 +305,38 @@ describe('WorldOpportunityGenerator', () => {
       expect(
         firstPreview!.quote!.totalCost + secondPreview!.quote!.totalCost,
       ).toBe(detour.estimatedCost);
+      expect(new PlaceTrackCommand(
+        scene,
+        manager,
+        service,
+        secondPreview!.quote!,
+      ).execute()).toBe(true);
+      const built = WorldManager.world!;
+      const authoritativeCost = built.tracks.reduce(
+        (sum, track) => sum + track.paidBuildCost,
+        0,
+      );
+      expect(authoritativeCost).toBe(detour.estimatedCost);
+      expect(built.company.ledger
+        .filter(({ category }) => category === 'construction-capex')
+        .reduce((sum, entry) => sum + Math.abs(entry.amount), 0))
+        .toBe(authoritativeCost);
+      expect(built.company.cash)
+        .toBe(STANDARD_STARTING_CASH - authoritativeCost);
+      if (expectedCost !== null) {
+        expect(authoritativeCost).toBe(expectedCost);
+      }
+      if (guaranteesStarterReserve) {
+        expect([...result.opportunity.corridors].sort((
+          left,
+          right,
+        ) => left.estimatedCost - right.estimatedCost
+          || left.id.localeCompare(right.id))[0]).toBe(detour);
+        expect(authoritativeCost).toBeLessThanOrEqual(
+          STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE,
+        );
+        expect(built.company.cash).toBeGreaterThanOrEqual(STARTER_ROUTE_RESERVE);
+      }
     } finally {
       WorldManager.reset();
     }

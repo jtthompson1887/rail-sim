@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
 const DESKTOP = { width: 1920, height: 1400 };
 const MOBILE = { width: 375, height: 667 };
@@ -290,21 +291,10 @@ async function toScreen(
 ): Promise<Point> {
   const canvas = await page.locator('canvas').boundingBox();
   if (!canvas) throw new Error('Canvas is not visible');
-  const internalX = state.camera.width / 2
-    + (
-      worldPoint.x
-      - state.camera.scrollX
-      - state.camera.width / 2
-    ) * state.camera.zoom;
-  const internalY = state.camera.height / 2
-    + (
-      worldPoint.y
-      - state.camera.scrollY
-      - state.camera.height / 2
-    ) * state.camera.zoom;
+  const internal = worldToCameraPoint(worldPoint, state.camera);
   return {
-    x: canvas.x + internalX * canvas.width / state.camera.width,
-    y: canvas.y + internalY * canvas.height / state.camera.height,
+    x: canvas.x + internal.x * canvas.width / state.camera.width,
+    y: canvas.y + internal.y * canvas.height / state.camera.height,
   };
 }
 
@@ -366,6 +356,9 @@ async function buildWitnessCorridor(
   ).toBe('complete');
   expect(categoryTotal(built, 'construction-capex')).toBeLessThanOrEqual(
     890_000,
+  );
+  expect(categoryTotal(built, 'construction-capex')).toBe(
+    selected.corridor.estimatedCost,
   );
   expect(
     built.world.tracks.reduce(

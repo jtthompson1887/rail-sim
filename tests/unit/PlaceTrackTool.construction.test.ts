@@ -155,6 +155,34 @@ function makeHarness(options: {
 }
 
 describe('PlaceTrackTool live construction workflow', () => {
+  it('canonicalizes near-pixel gestures to the exact generated waypoint', () => {
+    const harness = makeHarness();
+    Object.assign(WorldManager.world!, {
+      starterOpportunity: {
+        corridors: [{
+          waypoints: [
+            { x: -3_078.8076774910087, y: -7_314.43685271889 },
+          ],
+        }],
+      },
+    });
+
+    harness.tool.onPointerDown(
+      -3_079.395960821125,
+      -7_316.201580996318,
+      { ...pointer(), id: 1 },
+    );
+
+    expect(harness.snapSystem.snapPoint).toHaveBeenCalledWith(
+      -3_078.8076774910087,
+      -7_314.43685271889,
+    );
+    expect(harness.tool.startAnchor).toEqual(expect.objectContaining({
+      x: -3_078.8076774910087,
+      y: -7_314.43685271889,
+    }));
+  });
+
   it('publishes one immutable authoritative decision DTO with exact finances', () => {
     const analyzed = preview() as any;
     analyzed.topologyCost = 2_500;
