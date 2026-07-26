@@ -54,6 +54,15 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).companyHud = {
       containsScreenPoint: jest.fn((x: number, y: number) => x < 400 && y < 80),
     };
+    (scene as any).vehiclePurchasePanel = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x > 1300 && y > 700),
+    };
+    (scene as any).trainInspector = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x > 1250 && y > 500),
+    };
+    (scene as any).firstRouteObjectiveCard = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x < 500 && y < 300),
+    };
     (scene as any).minimapRenderer = {
       containsScreenPoint: jest.fn((x: number, y: number) => x >= 1084 && y >= 584),
     };
@@ -64,6 +73,9 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(scene.containsScreenPoint(900, 800)).toBe(true);
     expect(scene.containsScreenPoint(1500, 300)).toBe(true);
     expect(scene.containsScreenPoint(200, 30)).toBe(true);
+    expect(scene.containsScreenPoint(1400, 800)).toBe(true);
+    expect(scene.containsScreenPoint(1300, 600)).toBe(true);
+    expect(scene.containsScreenPoint(450, 250)).toBe(true);
     expect(scene.containsScreenPoint(1174, 644)).toBe(true);
     expect(scene.containsScreenPoint(900, 400)).toBe(false);
   });
@@ -97,6 +109,9 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).constructionInspector = hidden();
     (scene as any).companyHud = hidden();
     (scene as any).facilityInspector = hidden();
+    (scene as any).vehiclePurchasePanel = hidden();
+    (scene as any).trainInspector = hidden();
+    (scene as any).firstRouteObjectiveCard = hidden();
     (scene as any).validationHint = hidden();
 
     (scene as any).visibleHandler({ visible: false });
@@ -111,6 +126,12 @@ describe('EditorUIScene construction UI boundary', () => {
     }
     expect((scene as any).companyHud.setVisible).toHaveBeenCalledWith(true);
     expect((scene as any).facilityInspector.setVisible)
+      .toHaveBeenCalledWith(true);
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenCalledWith(false);
+    expect((scene as any).trainInspector.setVisible)
+      .toHaveBeenCalledWith(true);
+    expect((scene as any).firstRouteObjectiveCard.setVisible)
       .toHaveBeenCalledWith(true);
     expect((scene as any).constructionInspector.clear).toHaveBeenCalled();
     expect((scene as any).validationHint.clear).toHaveBeenCalled();

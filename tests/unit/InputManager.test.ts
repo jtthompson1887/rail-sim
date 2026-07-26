@@ -1,4 +1,7 @@
-import { InputManager } from '../../src/systems/InputManager';
+import {
+  InputManager,
+  isGameplayInputFocused,
+} from '../../src/systems/InputManager';
 import { TrainManager } from '../../src/managers/TrainManager';
 import Train from '../../src/entities/Train';
 import RailTrack from '../../src/entities/RailTrack';
@@ -257,5 +260,45 @@ describe('InputManager drag recovery regression', () => {
     );
 
     expect(train.enginePower).toBe(0);
+  });
+
+  it.each([
+    ['button', null],
+    ['input', null],
+    ['select', null],
+    ['textarea', null],
+    ['span', 'construction-inspector'],
+    ['span', 'facility-inspector'],
+    ['span', 'vehicle-purchase-panel'],
+    ['span', 'train-inspector'],
+    ['span', 'first-route-objective'],
+  ])('recognises focused %s controls inside %s', (tag, testId) => {
+    const parent = document.createElement('section');
+    if (testId) parent.dataset.testid = testId;
+    const child = document.createElement(tag);
+    parent.append(child);
+    document.body.append(parent);
+
+    expect(isGameplayInputFocused(child)).toBe(true);
+    expect(isGameplayInputFocused(document.body)).toBe(false);
+    parent.remove();
+  });
+
+  it('sets no new keyboard or mobile throttle while gameplay input is focused', () => {
+    const train = trainManager.createInitialTrain('focused-train');
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = -0.25;
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+
+    (inputManager as any).wKey.isDown = false;
+    EventBus.emit('mobile:throttle', { value: 1 });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+    input.remove();
   });
 });

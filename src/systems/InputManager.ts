@@ -6,6 +6,32 @@ import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { ITrackFollower } from '../config/VehicleTypes';
 
+const GAMEPLAY_INPUT_PANELS = [
+  '[data-testid="construction-inspector"]',
+  '[data-testid="facility-inspector"]',
+  '[data-testid="vehicle-purchase-panel"]',
+  '[data-testid="train-inspector"]',
+  '[data-testid="first-route-objective"]',
+].join(',');
+
+export function isGameplayInputFocused(
+  activeElement: Element | null = document.activeElement,
+): boolean {
+  if (!activeElement) return false;
+  const interactive = activeElement.closest(
+    'button,input,select,textarea',
+  );
+  if (interactive) return true;
+  let candidate: Element | null = activeElement;
+  while (candidate) {
+    if (candidate instanceof HTMLElement && candidate.isContentEditable) {
+      return true;
+    }
+    candidate = candidate.parentElement;
+  }
+  return activeElement.closest(GAMEPLAY_INPUT_PANELS) !== null;
+}
+
 export class InputManager {
   private scene: Phaser.Scene;
   private cameraController: CameraController;
@@ -118,6 +144,7 @@ export class InputManager {
       selectedTrain.enginePower = 0;
       return;
     }
+    if (isGameplayInputFocused()) return;
     // Keyboard input takes priority over mobile throttle buttons
     if (this.wKey.isDown) {
       selectedTrain.enginePower = GameConfig.TRAIN.ENGINE_POWER;

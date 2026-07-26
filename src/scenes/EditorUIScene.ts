@@ -14,6 +14,10 @@ import { ConstructionInspector } from '../ui/ConstructionInspector';
 import { CompanyHud } from '../ui/CompanyHud';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { FacilityInspector } from '../ui/FacilityInspector';
+import { VehiclePurchasePanel } from '../ui/VehiclePurchasePanel';
+import { TrainInspector } from '../ui/TrainInspector';
+import { FirstRouteObjectiveCard } from '../ui/FirstRouteObjectiveCard';
+import type { OperatingSummaryDto } from '../freight/FreightPresentation';
 
 /**
  * EditorUIScene
@@ -41,6 +45,9 @@ export default class EditorUIScene extends Phaser.Scene {
   private constructionInspector!: ConstructionInspector;
   private companyHud!: CompanyHud;
   private facilityInspector!: FacilityInspector;
+  private vehiclePurchasePanel!: VehiclePurchasePanel;
+  private trainInspector!: TrainInspector;
+  private firstRouteObjectiveCard!: FirstRouteObjectiveCard;
   private minimapRenderer!: MinimapRenderer;
   private minimapVisible = true;
   private initialVisible = true;
@@ -49,6 +56,15 @@ export default class EditorUIScene extends Phaser.Scene {
   private initialSaveErrorMessage: string | null = null;
   private initialEconomyTick = 0;
   private initialConstructionIndexBps = 10_000;
+  private initialOperatingSummary: OperatingSummaryDto = {
+    fromTick: 0,
+    throughTick: 0,
+    deliveryRevenue: 0,
+    runningExpenses: 0,
+    operatingProfit: 0,
+    capitalExpenditure: 0,
+    cashFlow: 0,
+  };
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -70,6 +86,9 @@ export default class EditorUIScene extends Phaser.Scene {
     this.constructionInspector.setVisible(visible);
     this.companyHud.setVisible(true);
     this.facilityInspector.setVisible(true);
+    this.vehiclePurchasePanel.setVisible(visible);
+    this.trainInspector.setVisible(!visible);
+    this.firstRouteObjectiveCard.setVisible(true);
     this.validationHint.setVisible(visible);
     this.minimapVisible = visible;
     if (!visible) {
@@ -96,6 +115,7 @@ export default class EditorUIScene extends Phaser.Scene {
     saveErrorMessage?: string;
     economyTick?: number;
     constructionIndexBps?: number;
+    operatingSummary?: OperatingSummaryDto;
   }): void {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
@@ -106,6 +126,15 @@ export default class EditorUIScene extends Phaser.Scene {
     this.initialEconomyTick = data.economyTick ?? 0;
     this.initialConstructionIndexBps =
       data.constructionIndexBps ?? 10_000;
+    this.initialOperatingSummary = data.operatingSummary ?? {
+      fromTick: 0,
+      throughTick: this.initialEconomyTick,
+      deliveryRevenue: 0,
+      runningExpenses: 0,
+      operatingProfit: 0,
+      capitalExpenditure: 0,
+      cashFlow: 0,
+    };
   }
 
   create(): void {
@@ -122,6 +151,9 @@ export default class EditorUIScene extends Phaser.Scene {
     this.constructionInspector = new ConstructionInspector();
     this.companyHud = new CompanyHud();
     this.facilityInspector = new FacilityInspector();
+    this.vehiclePurchasePanel = new VehiclePurchasePanel();
+    this.trainInspector = new TrainInspector();
+    this.firstRouteObjectiveCard = new FirstRouteObjectiveCard();
     this.minimapRenderer = new MinimapRenderer(
       this,
       this.trackManager,
@@ -132,6 +164,7 @@ export default class EditorUIScene extends Phaser.Scene {
       saveState: this.initialSaveState,
       economyTick: this.initialEconomyTick,
       constructionIndexBps: this.initialConstructionIndexBps,
+      operatingSummary: this.initialOperatingSummary,
     });
     this.visibleHandler({ visible: this.initialVisible });
 
@@ -162,6 +195,9 @@ export default class EditorUIScene extends Phaser.Scene {
       this.constructionInspector.destroy();
       this.companyHud.destroy();
       this.facilityInspector.destroy();
+      this.vehiclePurchasePanel.destroy();
+      this.trainInspector.destroy();
+      this.firstRouteObjectiveCard.destroy();
       this.minimapRenderer.destroy();
     });
   }
@@ -194,6 +230,9 @@ export default class EditorUIScene extends Phaser.Scene {
       || this.propertiesPanel.containsScreenPoint(x, y)
       || this.constructionInspector.containsScreenPoint(x, y)
       || this.facilityInspector.containsScreenPoint(x, y)
+      || this.vehiclePurchasePanel.containsScreenPoint(x, y)
+      || this.trainInspector.containsScreenPoint(x, y)
+      || this.firstRouteObjectiveCard.containsScreenPoint(x, y)
       || this.companyHud.containsScreenPoint(x, y)
       || (this.minimapVisible && this.minimapRenderer.containsScreenPoint(x, y));
   }

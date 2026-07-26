@@ -337,6 +337,32 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(onKeyDown).not.toHaveBeenCalled();
   });
 
+  it('uses the shared focus gate for shortcuts inside every freight panel', () => {
+    const scene = new WorldScene();
+    const onKeyDown = jest.fn();
+    (scene as any).activeEditorTool = { onKeyDown };
+    GameStateManager.enterCreate('test-world');
+
+    for (const testId of [
+      'vehicle-purchase-panel',
+      'train-inspector',
+      'first-route-objective',
+    ]) {
+      const panel = document.createElement('section');
+      panel.dataset.testid = testId;
+      const child = document.createElement('span');
+      panel.append(child);
+      (scene as any).handleKeyDown({
+        code: 'KeyP',
+        ctrlKey: false,
+        altKey: false,
+        target: child,
+      });
+    }
+
+    expect(onKeyDown).not.toHaveBeenCalled();
+  });
+
   it('cancels pending construction before undo changes the authority revision', () => {
     const scene = new WorldScene();
     const cancel = jest.fn();
@@ -487,6 +513,15 @@ describe('WorldScene disabled construction bypass guards', () => {
       economyTick: WorldManager.world!.economy.tick,
       constructionIndexBps:
         WorldManager.world!.economy.market.constructionIndexBps,
+      operatingSummary: {
+        fromTick: 0,
+        throughTick: 0,
+        deliveryRevenue: 0,
+        runningExpenses: 0,
+        operatingProfit: 0,
+        capitalExpenditure: 0,
+        cashFlow: WorldManager.world!.company.cash,
+      },
     });
     expect(emit).toHaveBeenCalledWith('ui:company-state', {
       cash: WorldManager.world!.company.cash,
@@ -494,6 +529,15 @@ describe('WorldScene disabled construction bypass guards', () => {
       economyTick: WorldManager.world!.economy.tick,
       constructionIndexBps:
         WorldManager.world!.economy.market.constructionIndexBps,
+      operatingSummary: {
+        fromTick: 0,
+        throughTick: 0,
+        deliveryRevenue: 0,
+        runningExpenses: 0,
+        operatingProfit: 0,
+        capitalExpenditure: 0,
+        cashFlow: WorldManager.world!.company.cash,
+      },
     });
 
     emit.mockRestore();
@@ -749,10 +793,50 @@ describe('WorldScene disabled construction bypass guards', () => {
       'ui:cash-pulse',
       expect.objectContaining({ amount: expect.any(Number) }),
     );
+    expect(emit).toHaveBeenCalledWith(
+      'ui:freight-delivery-completed',
+      expect.objectContaining({
+        trainId,
+        destinationFacilityId: 'sawmill',
+      }),
+    );
 
     scene.update(4_000, 1_000);
 
     expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
+    const world = installFirstRouteWorld();
+    world.firstRouteProgress.profitableDeliveryCompleted = true;
+    const topology = [{
+      kind: 'track' as const,
+      uuid: 'forest-sawmill-track',
+      previous: null,
+      next: null,
+    }];
+    const firstScene = new WorldScene() as any;
+    const reloadedScene = new WorldScene() as any;
+    firstScene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue(topology),
+    };
+    reloadedScene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue(topology),
+    };
+    firstScene.trainManager = { selectedTrain: null };
+    reloadedScene.trainManager = { selectedTrain: null };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    firstScene.publishFreightPresentation([]);
+    reloadedScene.publishFreightPresentation([]);
+
+    expect(emit.mock.calls.filter(
+      ([event]) => event === 'ui:first-route-objective',
+    )).toHaveLength(2);
+    expect(emit.mock.calls.filter(
+      ([event, payload]) => event === 'ui:toast'
+        && (payload as any).message === 'First freight route complete',
+    )).toHaveLength(1);
   });
 
   it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {
@@ -1390,6 +1474,15 @@ describe('WorldScene disabled construction bypass guards', () => {
         saveState: 'unsaved',
         economyTick: expect.any(Number),
         constructionIndexBps: expect.any(Number),
+        operatingSummary: {
+          fromTick: 0,
+          throughTick: 0,
+          deliveryRevenue: 0,
+          runningExpenses: 0,
+          operatingProfit: 0,
+          capitalExpenditure: 0,
+          cashFlow: 0,
+        },
       },
     );
     expect(emitSpy).toHaveBeenCalledWith(

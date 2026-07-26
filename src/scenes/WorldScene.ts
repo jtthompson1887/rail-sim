@@ -9,7 +9,10 @@ import {
   CameraController,
   clampCameraZoom,
 } from '../systems/CameraController';
-import { InputManager } from '../systems/InputManager';
+import {
+  InputManager,
+  isGameplayInputFocused,
+} from '../systems/InputManager';
 import { TerrainGenerator } from '../systems/TerrainGenerator';
 import { TerrainChunkManager } from '../systems/TerrainChunkManager';
 import { TerrainValidator } from '../systems/TerrainValidator';
@@ -73,6 +76,14 @@ import {
   type FreightPurchaseQuote,
   type FreightPurchaseRuntimePort,
 } from '../freight/FreightPurchaseService';
+import {
+  buildOperatingSummary,
+  buildTrainInspection,
+} from '../freight/FreightPresentation';
+import {
+  deriveFirstRouteObjective,
+  firstRouteCelebrationSession,
+} from '../freight/FirstRouteObjective';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -329,6 +340,10 @@ export default class WorldScene extends Phaser.Scene {
     this.clearFacilitySelection();
   };
 
+  private readonly trainDeselectedHandler = () => {
+    EventBus.emit('ui:train-inspection', { inspection: null });
+  };
+
   private readonly facilitySelectedHandler = ({
     facilityId,
   }: {
@@ -511,6 +526,7 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('construction:intent', this.constructionIntentHandler);
     EventBus.on('selection:changed', this.selectionChangedHandler);
     EventBus.on('train:selected', this.trainSelectedHandler);
+    EventBus.on('train:deselected', this.trainDeselectedHandler);
     EventBus.on('facility:selected', this.facilitySelectedHandler);
     EventBus.on('vehicle:type-changed', this.vehicleTypeChangedHandler);
     EventBus.on(
@@ -555,6 +571,7 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('construction:intent', this.constructionIntentHandler);
       EventBus.off('selection:changed', this.selectionChangedHandler);
       EventBus.off('train:selected', this.trainSelectedHandler);
+      EventBus.off('train:deselected', this.trainDeselectedHandler);
       EventBus.off('facility:selected', this.facilitySelectedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
       EventBus.off(
@@ -618,6 +635,17 @@ export default class WorldScene extends Phaser.Scene {
       economyTick: world?.economy.tick ?? 0,
       constructionIndexBps:
         world?.economy.market.constructionIndexBps ?? 10_000,
+      operatingSummary: world
+        ? buildOperatingSummary(world.company, world.economy.tick)
+        : {
+          fromTick: 0,
+          throughTick: 0,
+          deliveryRevenue: 0,
+          runningExpenses: 0,
+          operatingProfit: 0,
+          capitalExpenditure: 0,
+          cashFlow: 0,
+        },
       saveState: this.lastReportedSaveState,
       saveErrorMessage: this.pendingStartupSaveError ?? undefined,
     });
@@ -626,6 +654,16 @@ export default class WorldScene extends Phaser.Scene {
     this.applyStarterOpportunityCamera();
     this.renderStarterOpportunitySurvey();
     this.renderFacilities();
+    EventBus.emit('ui:freight-purchase-state', {
+      quote: null,
+      cash: world?.company.cash ?? 0,
+      message: 'Click on player track to place the Timber Freight Set',
+    });
+    this.publishFreightPresentation(
+      (this.trainManager?.trains ?? []).map(
+        (train) => captureTrainRuntime(train),
+      ),
+    );
   }
 
   /** Frame the persisted planning opportunity without regenerating it. */
@@ -905,6 +943,7 @@ export default class WorldScene extends Phaser.Scene {
     } else if (economyResult.authoritativeChanged) {
       this.saveWorldAndReport(false, false);
     }
+    this.publishFreightPresentation(runtime);
     if (this.operationsLockedTrainIds.size > 0) {
       this.trainManager.stopFreightTrains(
         Array.from(this.operationsLockedTrainIds).sort(),
@@ -1061,6 +1100,9 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private presentCompletedDelivery(event: FreightDeliveryEvent): void {
+    EventBus.emit('ui:freight-delivery-completed', Object.freeze({
+      ...event,
+    }));
     EventBus.emit('ui:toast', {
       message:
         `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
@@ -1236,12 +1278,68 @@ export default class WorldScene extends Phaser.Scene {
   private publishCompanyState(
     saveState: SaveState,
   ): void {
+    const world = WorldManager.world;
     EventBus.emit('ui:company-state', {
-      cash: WorldManager.world?.company.cash ?? 0,
+      cash: world?.company.cash ?? 0,
       saveState,
-      economyTick: WorldManager.world?.economy.tick ?? 0,
+      economyTick: world?.economy.tick ?? 0,
       constructionIndexBps:
-        WorldManager.world?.economy.market.constructionIndexBps ?? 10_000,
+        world?.economy.market.constructionIndexBps ?? 10_000,
+      operatingSummary: world
+        ? buildOperatingSummary(world.company, world.economy.tick)
+        : {
+          fromTick: 0,
+          throughTick: 0,
+          deliveryRevenue: 0,
+          runningExpenses: 0,
+          operatingProfit: 0,
+          capitalExpenditure: 0,
+          cashFlow: 0,
+        },
+    });
+  }
+
+  private publishFreightPresentation(
+    runtime: readonly ReturnType<typeof captureTrainRuntime>[],
+  ): void {
+    const world = WorldManager.world;
+    if (!world || !this.trackManager) {
+      EventBus.emit('ui:train-inspection', { inspection: null });
+      return;
+    }
+    const objective = deriveFirstRouteObjective(
+      world,
+      this.trackManager.captureTopology(),
+    );
+    EventBus.emit('ui:first-route-objective', objective);
+    if (firstRouteCelebrationSession.consume(world.id, objective)) {
+      EventBus.emit('ui:toast', {
+        message: 'First freight route complete',
+        type: 'success',
+      });
+    }
+
+    const selectedId = this.trainManager?.selectedTrain?.getUUID();
+    const selectedRuntime = runtime.find(
+      ({ trainId }) => trainId === selectedId,
+    );
+    if (!selectedRuntime) {
+      EventBus.emit('ui:train-inspection', { inspection: null });
+      return;
+    }
+    const train = world.trains.find(({ id }) => id === selectedId);
+    const transfer = this.cargoStatusByTrainId.get(selectedId) ?? {
+      trainId: selectedId,
+      facilityId: null,
+      kind: 'idle' as const,
+      blocker: null,
+      batchUnits: 0,
+      cargoUnits: train?.cargo?.units ?? 0,
+      capacityUnits: 60,
+      batchRevenue: 0,
+    };
+    EventBus.emit('ui:train-inspection', {
+      inspection: buildTrainInspection(world, selectedRuntime, transfer),
     });
   }
 
@@ -1287,13 +1385,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    const target = event.target;
-    if (target instanceof HTMLElement && (
-      target.isContentEditable
-      || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].indexOf(target.tagName) !== -1
-      || target.closest('[data-testid="construction-inspector"]') !== null
-      || target.closest('[data-testid="facility-inspector"]') !== null
-    )) return;
+    if (isGameplayInputFocused(event.target as Element | null)) return;
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
       if (event.ctrlKey) {

@@ -3,6 +3,13 @@ import type {
   FreightPurchaseQuote,
   FreightPurchaseResult,
 } from '../../src/freight/FreightPurchaseService';
+import type {
+  FreightPurchaseDto,
+  OperatingSummaryDto,
+  TrainInspectionDto,
+} from '../../src/freight/FreightPresentation';
+import type { FirstRouteObjectiveDto } from '../../src/freight/FirstRouteObjective';
+import type { FreightDeliveryEvent } from '../../src/freight/CargoSystem';
 
 // Re-import to reset singleton state between tests via module re-evaluation
 // EventBus is a singleton, so we test it directly but clear listeners each time.
@@ -195,5 +202,120 @@ describe('EventBus', () => {
       freightSetId: 'timber-freight-set',
     });
     EventBus.off('freight:purchase-mode-requested', listener);
+  });
+
+  it('round-trips detached freight inspection, objective, company summary, and delivery payloads', () => {
+    const transfer = Object.freeze({
+      trainId: 'train-1',
+      facilityId: 'sawmill',
+      kind: 'unloading' as const,
+      blocker: null,
+      batchUnits: 4,
+      cargoUnits: 40,
+      capacityUnits: 60,
+      batchRevenue: 500,
+    });
+    const inspection: TrainInspectionDto = Object.freeze({
+      trainId: 'train-1',
+      displayName: 'Timber Freight Set',
+      direction: 'forward',
+      throttle: 1,
+      movementState: 'stopped',
+      cargo: Object.freeze({
+        productLabel: 'Logs',
+        units: 40,
+        capacityUnits: 60,
+        text: 'Logs 40 / 60 t',
+      }),
+      nearestEligibleFacility: 'Sawmill',
+      transfer,
+      currentTrip: Object.freeze({
+        revenue: 500,
+        runningCost: 100,
+        operatingProfit: 400,
+      }),
+      lastDelivery: Object.freeze({
+        revenue: 1_000,
+        runningCost: 250,
+        operatingProfit: 750,
+      }),
+      lifetime: Object.freeze({
+        deliveredUnits: 60,
+        revenue: 1_000,
+        runningCost: 250,
+        operatingProfit: 750,
+      }),
+    });
+    const objective: FirstRouteObjectiveDto = Object.freeze({
+      objectiveVersion: 1,
+      achieved: false,
+      steps: Object.freeze([Object.freeze({
+        id: 'connect-route',
+        label: 'Connect the route',
+        state: 'current',
+      })]),
+    });
+    const operatingSummary: OperatingSummaryDto = Object.freeze({
+      fromTick: 1,
+      throughTick: 24,
+      deliveryRevenue: 1_000,
+      runningExpenses: 250,
+      operatingProfit: 750,
+      capitalExpenditure: 0,
+      cashFlow: 750,
+    });
+    const delivery: FreightDeliveryEvent = Object.freeze({
+      trainId: 'train-1',
+      destinationFacilityId: 'sawmill',
+      tick: 24,
+      revenue: 1_000,
+      runningCost: 250,
+      operatingProfit: 750,
+    });
+    const purchase: FreightPurchaseDto = Object.freeze({
+      freightSetId: 'timber-freight-set',
+      displayName: 'Timber Freight Set',
+      price: 90_000,
+      compatibleCargoLabel: 'Logs',
+      capacityLabel: '60 tonnes',
+      runningCostLabel: '£20 / active tick',
+      cashAfter: 10_000,
+      affordable: true,
+      validPlacement: true,
+      remedy: '',
+    });
+    expect(purchase.validPlacement).toBe(true);
+
+    const trainListener = jest.fn();
+    const objectiveListener = jest.fn();
+    const companyListener = jest.fn();
+    const deliveryListener = jest.fn();
+    EventBus.on('ui:train-inspection', trainListener);
+    EventBus.on('ui:first-route-objective', objectiveListener);
+    EventBus.on('ui:company-state', companyListener);
+    EventBus.on('ui:freight-delivery-completed', deliveryListener);
+
+    EventBus.emit('ui:train-inspection', { inspection });
+    EventBus.emit('ui:first-route-objective', objective);
+    EventBus.emit('ui:company-state', {
+      cash: 100_000,
+      saveState: 'saved',
+      economyTick: 24,
+      constructionIndexBps: 10_000,
+      operatingSummary,
+    });
+    EventBus.emit('ui:freight-delivery-completed', delivery);
+
+    expect(trainListener).toHaveBeenCalledWith({ inspection });
+    expect(objectiveListener).toHaveBeenCalledWith(objective);
+    expect(companyListener).toHaveBeenCalledWith(expect.objectContaining({
+      operatingSummary,
+    }));
+    expect(deliveryListener).toHaveBeenCalledWith(delivery);
+
+    EventBus.off('ui:train-inspection', trainListener);
+    EventBus.off('ui:first-route-objective', objectiveListener);
+    EventBus.off('ui:company-state', companyListener);
+    EventBus.off('ui:freight-delivery-completed', deliveryListener);
   });
 });

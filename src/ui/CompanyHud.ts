@@ -1,10 +1,15 @@
 import { EventBus } from '../services/EventBus';
+import type { OperatingSummaryDto } from '../freight/FreightPresentation';
 
 const CASH = new Intl.NumberFormat('en-GB', {
   style: 'currency',
   currency: 'GBP',
   maximumFractionDigits: 0,
 });
+
+const formatSignedCash = (value: number): string => value < 0
+  ? `−${CASH.format(Math.abs(value))}`
+  : CASH.format(value);
 
 const ECONOMY_TICKS_PER_DAY = 24;
 
@@ -13,6 +18,7 @@ export interface CompanyHudState {
   saveState: 'saved' | 'unsaved' | 'saving';
   economyTick: number;
   constructionIndexBps: number;
+  operatingSummary: OperatingSummaryDto;
 }
 
 /** Compact authoritative company state shared by Build and Operate modes. */
@@ -22,12 +28,22 @@ export class CompanyHud {
   private readonly saveState = document.createElement('span');
   private readonly economyTime = document.createElement('span');
   private readonly constructionIndex = document.createElement('span');
+  private readonly deliveryRevenue = document.createElement('span');
+  private readonly runningExpenses = document.createElement('span');
+  private readonly operatingProfit = document.createElement('strong');
+  private readonly capitalExpenditure = document.createElement('span');
+  private readonly cashFlow = document.createElement('span');
+  private readonly cashPulse = document.createElement('strong');
   private visible = true;
   private readonly resizeHandler = () => this.applyLayout();
 
   private readonly stateHandler = (state: CompanyHudState) => (
     this.setState(state)
   );
+  private readonly cashPulseHandler = ({ amount }: { amount: number }) => {
+    this.cashPulse.textContent = `+${CASH.format(amount)}`;
+    this.cashPulse.style.display = amount > 0 ? 'inline' : 'none';
+  };
 
   constructor() {
     this.root.dataset.testid = 'company-hud';
@@ -59,16 +75,31 @@ export class CompanyHud {
     this.economyTime.style.cssText = 'color:#bad3e2';
     this.constructionIndex.dataset.testid = 'company-construction-index';
     this.constructionIndex.style.cssText = 'color:#9feaff';
+    this.deliveryRevenue.dataset.testid = 'company-delivery-revenue';
+    this.runningExpenses.dataset.testid = 'company-running-expenses';
+    this.operatingProfit.dataset.testid = 'company-operating-profit';
+    this.operatingProfit.style.cssText = 'color:#9af0b6';
+    this.capitalExpenditure.dataset.testid = 'company-capital-expenditure';
+    this.cashFlow.dataset.testid = 'company-cash-flow';
+    this.cashPulse.dataset.testid = 'company-cash-pulse';
+    this.cashPulse.style.cssText = 'display:none;color:#9af0b6';
     this.root.append(
       this.cash,
       this.saveState,
       this.economyTime,
       this.constructionIndex,
+      this.deliveryRevenue,
+      this.runningExpenses,
+      this.operatingProfit,
+      this.capitalExpenditure,
+      this.cashFlow,
+      this.cashPulse,
     );
     document.body.append(this.root);
     this.applyLayout();
     this.setVisible(true);
     EventBus.on('ui:company-state', this.stateHandler);
+    EventBus.on('ui:cash-pulse', this.cashPulseHandler);
     window.addEventListener('resize', this.resizeHandler);
   }
 
@@ -83,6 +114,16 @@ export class CompanyHud {
     const day = Math.floor(state.economyTick / ECONOMY_TICKS_PER_DAY) + 1;
     this.economyTime.textContent = `Day ${day.toLocaleString('en-GB')} · Tick ${state.economyTick.toLocaleString('en-GB')}`;
     this.constructionIndex.textContent = `Construction index ${(state.constructionIndexBps / 100).toFixed(1)}`;
+    this.deliveryRevenue.textContent =
+      `Revenue ${CASH.format(state.operatingSummary.deliveryRevenue)}`;
+    this.runningExpenses.textContent =
+      `Running ${CASH.format(state.operatingSummary.runningExpenses)}`;
+    this.operatingProfit.textContent =
+      `Operating profit ${formatSignedCash(state.operatingSummary.operatingProfit)}`;
+    this.capitalExpenditure.textContent =
+      `Capex ${CASH.format(state.operatingSummary.capitalExpenditure)}`;
+    this.cashFlow.textContent =
+      `Cash flow ${formatSignedCash(state.operatingSummary.cashFlow)}`;
   }
 
   private applyLayout(): void {
@@ -114,6 +155,7 @@ export class CompanyHud {
 
   destroy(): void {
     EventBus.off('ui:company-state', this.stateHandler);
+    EventBus.off('ui:cash-pulse', this.cashPulseHandler);
     window.removeEventListener('resize', this.resizeHandler);
     this.root.remove();
   }
