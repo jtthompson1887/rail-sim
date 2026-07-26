@@ -520,6 +520,33 @@ describe('FreightPurchaseService', () => {
     expect(authoritativeSnapshot(world)).toBe(before);
   });
 
+  it('cleans up a throwing partial live spawn without spending cash', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime();
+    runtime.port.spawn = jest.fn((trainId: string) => {
+      runtime.live.set(trainId, { getUUID: () => trainId } as Train);
+      throw new Error('spawn failed after registration');
+    });
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'partial-spawn-cleaned',
+    );
+
+    const result = service.purchase(service.quote(connectedInput()));
+
+    expect(result).toEqual({
+      ok: false,
+      blocker: 'live-spawn-failed',
+    });
+    expect(runtime.port.remove).toHaveBeenCalledWith(
+      'partial-spawn-cleaned',
+    );
+    expect(runtime.live.has('partial-spawn-cleaned')).toBe(false);
+    expect(authoritativeSnapshot(world)).toBe(before);
+  });
+
   it('reports exceptional cleanup after a throwing partial live spawn', () => {
     const world = setupWorld();
     const before = authoritativeSnapshot(world);
@@ -543,6 +570,7 @@ describe('FreightPurchaseService', () => {
       ok: false,
       blocker: 'live-rollback-failed',
     });
+    expect(runtime.port.remove).toHaveBeenCalledWith('partial-spawn');
     expect(runtime.live.has('partial-spawn')).toBe(true);
     expect(authoritativeSnapshot(world)).toBe(before);
   });
