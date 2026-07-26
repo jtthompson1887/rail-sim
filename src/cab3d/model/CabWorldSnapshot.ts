@@ -1,7 +1,7 @@
-import type { BiomeType, StructureType } from '../../config/WorldData';
+import type { BiomeType, StructureType, SceneryObjectDef } from '../../config/WorldData';
 import type { ITerrainSampler } from '../contracts/ITerrainSampler';
 
-export type { BiomeType, StructureType };
+export type { BiomeType, StructureType, SceneryObjectDef };
 
 export interface CabTrackSample {
   /** World X coordinate in metres. */
@@ -61,6 +61,9 @@ export interface CabWorldSnapshot {
 
   /** Optional height sampler used by the terrain mesh builder. */
   readonly terrain?: ITerrainSampler;
+
+  /** Instanced scenery definitions within the current draw radius. */
+  readonly scenery?: ReadonlyArray<SceneryObjectDef>;
 }
 
 /** Sentinel returned when a snapshot cannot be produced. */
@@ -71,5 +74,6 @@ export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
   vehicle: null,
   path: Object.freeze([]),
   nearestFacilityDistanceM: null,
+  scenery: Object.freeze([]),
   elapsedSecs: 0,
 });

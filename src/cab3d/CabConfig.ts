@@ -186,4 +186,12 @@ export const CabConfig = Object.freeze({
   FOG_DENSITY: 0.00022,
   /** Horizon colour used for scene fog (matches the sky horizon). */
   FOG_COLOR: Object.freeze({ r: 0.65, g: 0.75, b: 0.85 }),
+
+  /** Maximum straight-line distance from the eye to draw instanced scenery. */
+  SCENERY_DRAW_RADIUS_M: 800,
+  /**
+   * World chunk side length used to drive scenery instancing rebuilds.
+   * Mirrors {@link GameConfig.WORLD.CHUNK_SIZE}.
+   */
+  SCENERY_CHUNK_SIZE_M: 4096,
 } as const);

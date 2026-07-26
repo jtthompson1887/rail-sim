@@ -8,6 +8,7 @@ describe('CabWorldSnapshot', () => {
     expect(INVALID_SNAPSHOT.valid).toBe(false);
     expect(INVALID_SNAPSHOT.vehicle).toBeNull();
     expect(INVALID_SNAPSHOT.path).toEqual([]);
+    expect(INVALID_SNAPSHOT.scenery).toEqual([]);
     expect(INVALID_SNAPSHOT.biome).toBe('temperate');
   });
 
@@ -23,5 +24,29 @@ describe('CabWorldSnapshot', () => {
     const frozen = Object.freeze(snapshot);
     expect(Object.isFrozen(frozen)).toBe(true);
     expect(frozen.biome).toBe('arid');
+  });
+
+  it('supports an optional scenery array', () => {
+    const snapshot: CabWorldSnapshot = {
+      valid: true,
+      seed: 's1',
+      biome: 'temperate',
+      vehicle: null,
+      path: [],
+      scenery: Object.freeze([
+        {
+          id: 's1',
+          type: 'tree_oak',
+          x: 10,
+          y: 20,
+          rotation: 1,
+          scale: 0.8,
+          variant: 0,
+        },
+      ]),
+      elapsedSecs: 0,
+    };
+    expect(snapshot.scenery).toHaveLength(1);
+    expect(snapshot.scenery![0].type).toBe('tree_oak');
   });
 });

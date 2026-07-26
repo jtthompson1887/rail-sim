@@ -10,8 +10,10 @@ import {
   type CabWorldSnapshot,
   type CabVehicleSnapshot,
   type CabTrackSample,
+  type SceneryObjectDef,
 } from '../model/CabWorldSnapshot';
 import type { BiomeType } from '../model/CabWorldSnapshot';
+import { SceneryGenerator } from '../../systems/SceneryGenerator';
 import { computeSpeedMps } from '../model/CabSpeed';
 import { CabPathSampler } from '../model/CabPathSampler';
 import { buildCabTrackSpans } from './CabTrackGraphAdapter';
@@ -34,7 +36,11 @@ export type CabFacilityProvider = () => ReadonlyArray<CabFacilityPlacement>;
  * the existing managers/entities.
  */
 export class PhaserCabSnapshotSource implements ICabSnapshotSource {
+  private static readonly EMPTY_SCENERY: ReadonlyArray<SceneryObjectDef> = Object.freeze([]);
   private readonly pathSampler = new CabPathSampler();
+  private readonly sceneryGenerator: SceneryGenerator;
+  private lastSceneryChunkKey: string | null = null;
+  private lastScenery: ReadonlyArray<SceneryObjectDef> = PhaserCabSnapshotSource.EMPTY_SCENERY;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -44,7 +50,9 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
     private readonly seed: string = '',
     private readonly biome: BiomeType = 'temperate',
     private readonly facilityProvider: CabFacilityProvider = () => [],
-  ) {}
+  ) {
+    this.sceneryGenerator = new SceneryGenerator(terrainGenerator);
+  }
 
   capture(time: number, delta: number): Readonly<CabWorldSnapshot> {
     const train = this.trainManager.selectedTrain;
@@ -84,12 +92,15 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       });
     }
 
+    const scenery = this.ensureScenery(vehicle);
+
     return Object.freeze({
       valid: true,
       seed: this.seed,
       biome: this.biome,
       vehicle,
       path,
+      scenery,
       nearestFacilityDistanceM: this.computeNearestFacilityDistance(vehicle),
       elapsedSecs: time / 1000,
       terrain: {
@@ -97,6 +108,33 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
           this.terrainGenerator.getHeightAt(worldX, worldY),
       },
     });
+  }
+
+  private ensureScenery(vehicle: CabVehicleSnapshot): ReadonlyArray<SceneryObjectDef> {
+    const eyeDistance = CabConfig.EYE_FORWARD_OFFSET_M;
+    const eyeX = vehicle.x + Math.cos(vehicle.headingRad) * eyeDistance;
+    const eyeY = vehicle.y + Math.sin(vehicle.headingRad) * eyeDistance;
+
+    const chunkSize = GameConfig.WORLD.CHUNK_SIZE;
+    const chunkX = Math.floor(eyeX / chunkSize) * chunkSize;
+    const chunkY = Math.floor(eyeY / chunkSize) * chunkSize;
+    const chunkKey = `${chunkX}:${chunkY}`;
+
+    if (chunkKey === this.lastSceneryChunkKey) {
+      return this.lastScenery;
+    }
+
+    const generated = this.sceneryGenerator.generateForChunk(chunkX, chunkY, this.seed, this.biome);
+    const radius = CabConfig.SCENERY_DRAW_RADIUS_M;
+    const filtered = generated.filter(
+      (def) => Math.hypot(def.x - eyeX, def.y - eyeY) <= radius,
+    );
+
+    this.lastSceneryChunkKey = chunkKey;
+    this.lastScenery = filtered.length > 0
+      ? Object.freeze(filtered)
+      : PhaserCabSnapshotSource.EMPTY_SCENERY;
+    return this.lastScenery;
   }
 
   private computeNearestFacilityDistance(vehicle: CabVehicleSnapshot): number | null {

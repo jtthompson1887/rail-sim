@@ -17,6 +17,7 @@ import { SkyMaterial } from '@babylonjs/materials';
 import { CabCanvasMount } from './CabCanvasMount';
 import { TrackMeshBuilder } from './TrackMeshBuilder';
 import { TerrainMeshBuilder } from './TerrainMeshBuilder';
+import { SceneryInstanceBuilder } from './SceneryInstanceBuilder';
 import { CabInteriorBuilder } from './CabInteriorBuilder';
 import { CabInstrumentBuilder } from './CabInstrumentBuilder';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
@@ -48,6 +49,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private cameraRig: CabCameraRig | null = null;
   private trackMeshBuilder: TrackMeshBuilder | null = null;
   private terrainMeshBuilder: TerrainMeshBuilder | null = null;
+  private sceneryInstanceBuilder: SceneryInstanceBuilder | null = null;
   private cabInteriorBuilder: CabInteriorBuilder | null = null;
   private cabInstrumentBuilder: CabInstrumentBuilder | null = null;
   private cabBody: TransformNode | null = null;
@@ -102,6 +104,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
 
     this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
+    this.sceneryInstanceBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
     this.cabInstrumentBuilder?.update(snapshot);
 
@@ -125,6 +128,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.trackMeshBuilder = null;
     this.terrainMeshBuilder?.dispose();
     this.terrainMeshBuilder = null;
+    this.sceneryInstanceBuilder?.dispose();
+    this.sceneryInstanceBuilder = null;
     this.cabInstrumentBuilder = null;
     this.cabInteriorBuilder?.dispose();
     this.cabInteriorBuilder = null;
@@ -172,6 +177,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
 
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
     this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);
+    this.sceneryInstanceBuilder = new SceneryInstanceBuilder(this.scene);
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

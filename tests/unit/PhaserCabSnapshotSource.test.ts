@@ -5,6 +5,7 @@ import { PhaserCabSnapshotSource } from '../../src/cab3d/adapters/PhaserCabSnaps
 import type { CabFacilityProvider } from '../../src/cab3d/adapters/PhaserCabSnapshotSource';
 import { GameConfig } from '../../src/config/GameConfig';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { SceneryGenerator } from '../../src/systems/SceneryGenerator';
 import type TrackManager from '../../src/managers/TrackManager';
 import type { TrainManager } from '../../src/managers/TrainManager';
 import type { BiomeType } from '../../src/cab3d/model/CabWorldSnapshot';
@@ -46,17 +47,26 @@ describe('PhaserCabSnapshotSource', () => {
     };
   }
 
+  function createTerrain(): TerrainGenerator {
+    return {
+      getHeightAt: jest.fn().mockReturnValue(10),
+      getBandAt: jest.fn().mockReturnValue('LOWLAND'),
+      slopeAt: jest.fn().mockReturnValue(0),
+    } as unknown as TerrainGenerator;
+  }
+
   function createSource(
     selectedTrain: unknown,
     seed = 's1',
     biome: BiomeType = 'arid',
     facilityProvider: CabFacilityProvider = () => [],
+    terrain: TerrainGenerator = createTerrain(),
   ): PhaserCabSnapshotSource {
     return new PhaserCabSnapshotSource(
       {} as any,
       {} as TrackManager,
       { selectedTrain } as unknown as TrainManager,
-      {} as TerrainGenerator,
+      terrain,
       seed,
       biome,
       facilityProvider,
@@ -186,5 +196,48 @@ describe('PhaserCabSnapshotSource', () => {
     const result = source.capture(0, 1000);
 
     expect(result.nearestFacilityDistanceM).toBe(Math.hypot(60, 80));
+  });
+
+  it('populates scenery when a chunk is available and filters to draw radius', () => {
+    const generate = jest.spyOn(SceneryGenerator.prototype, 'generateForChunk')
+      .mockReturnValue([
+        { id: 'a', type: 'tree_oak', x: 100, y: 200, rotation: 1, scale: 1, variant: 0 },
+        { id: 'b', type: 'tree_pine', x: 950, y: 200, rotation: 0, scale: 1, variant: 0 },
+      ]);
+
+    const train = createTrain({ x: 100, y: 200, rotation: 1 });
+    const source = createSource(train);
+    const result = source.capture(0, 1000);
+
+    expect(generate).toHaveBeenCalledWith(0, 0, 's1', 'arid');
+    expect(result.scenery).toHaveLength(1);
+    expect(result.scenery![0].id).toBe('a');
+
+    generate.mockRestore();
+  });
+
+  it('caches scenery for the same chunk', () => {
+    const generate = jest.spyOn(SceneryGenerator.prototype, 'generateForChunk')
+      .mockReturnValue([
+        { id: 'a', type: 'tree_oak', x: 100, y: 200, rotation: 0, scale: 1, variant: 0 },
+      ]);
+
+    const source = createSource(createTrain({ x: 100, y: 200 }));
+    source.capture(0, 1000);
+    source.capture(1000, 1000);
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    generate.mockRestore();
+  });
+
+  it('returns empty scenery when the generator yields no placements', () => {
+    const generate = jest.spyOn(SceneryGenerator.prototype, 'generateForChunk')
+      .mockReturnValue([]);
+
+    const source = createSource(createTrain());
+    const result = source.capture(0, 1000);
+
+    expect(result.scenery).toEqual([]);
+    generate.mockRestore();
   });
 });
