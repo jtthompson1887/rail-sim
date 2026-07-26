@@ -61,6 +61,44 @@ export class TrainManager {
     return train;
   }
 
+  createFreightTrain(id: string, freightSetId: string): Train {
+    const train = new Train(this.scene, 0, 500, id, freightSetId);
+    train.getMatterBody().angle = 90;
+    this.trains.push(train);
+    this.trackSolvers.set(
+      train,
+      new TrackFlowSolver(this.trackManager, train),
+    );
+    TrainManager.bodyToTrain.set(train.getMatterBody(), train);
+    GameStateManager.setActiveTrains(this.trains.length);
+    return train;
+  }
+
+  removeFreightTrain(trainId: string): boolean {
+    const index = this.trains.findIndex(
+      (train) => train.getUUID() === trainId,
+    );
+    if (index === -1) return false;
+
+    const train = this.trains[index];
+    if (this._selectedTrain === train) this.deselectTrain();
+    this.trains.splice(index, 1);
+    this.trackSolvers.delete(train);
+    const body = train.getMatterBody();
+    TrainManager.bodyToTrain.delete(body);
+    body.destroy();
+    train.destroy();
+    GameStateManager.setActiveTrains(this.trains.length);
+    return true;
+  }
+
+  stopFreightTrains(trainIds: readonly string[]): void {
+    const requested = new Set(trainIds);
+    for (const train of this.trains) {
+      if (requested.has(train.getUUID())) train.enginePower = 0;
+    }
+  }
+
   createCarriage(id?: string): Carriage {
     const carriage = new Carriage(this.scene, 0, 500, id);
     carriage.getMatterBody().angle = 90;

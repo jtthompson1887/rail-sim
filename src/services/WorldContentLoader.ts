@@ -4,7 +4,11 @@ import { Station } from '../entities/Station';
 import type TrackManager from '../managers/TrackManager';
 import type { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
-import type { TrackDef, WorldStationDef } from '../config/WorldData';
+import type {
+  TrackDef,
+  TrainDef,
+  WorldStationDef,
+} from '../config/WorldData';
 
 /**
  * WorldContentLoader – responsible for loading/restoring world content
@@ -20,7 +24,7 @@ export class WorldContentLoader {
   constructor(
     scene: Phaser.Scene,
     trackManager: TrackManager,
-    _trainManager: TrainManager,
+    private readonly trainManager: TrainManager,
   ) {
     this.scene = scene;
     this.trackManager = trackManager;
@@ -33,9 +37,7 @@ export class WorldContentLoader {
 
     for (const def of world.tracks)   { this.restoreTrack(def); }
     for (const def of world.stations) { this.restoreStation(def); }
-
-    // Schema-7 trains remain persisted but deliberately have no legacy
-    // passenger-vehicle materialisation. Task 4 installs the freight adapter.
+    for (const def of world.trains)   { this.restoreVehicle(def); }
   }
 
   private restoreTrack(def: TrackDef): void {
@@ -64,6 +66,26 @@ export class WorldContentLoader {
       passengerSpawnRate: def.passengerSpawnRate,
     };
     this.stations.push(new Station(this.scene, stationDef, track));
+  }
+
+  private restoreVehicle(def: TrainDef): void {
+    const track = this.trackManager.getTrack(def.trackUUID);
+    if (!track) return;
+
+    const vehicle = this.trainManager.createFreightTrain(
+      def.id,
+      def.freightSetId,
+    );
+    const body = vehicle.getMatterBody();
+    const point = track.getCurvePath().getPoint(def.trackT);
+    body.setPosition(point.x, point.y);
+    vehicle.currentTrack = track;
+    body.setAngle(
+      track.getTrackAngle(body) + (def.facing === -1 ? 180 : 0),
+    );
+    vehicle.enginePower = 0;
+    body.setVelocity(0, 0);
+    body.setAngularVelocity(0);
   }
 
 }

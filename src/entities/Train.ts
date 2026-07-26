@@ -22,16 +22,24 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
+  readonly freightSetId: string | null;
   readonly vehicleType: VehicleType = 'locomotive';
   readonly passengerCapacity: number = 20;
   public debugGraphics!: Phaser.GameObjects.Graphics;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, id?: string) {
+  constructor(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    id?: string,
+    freightSetId: string | null = null,
+  ) {
     super(scene);
     this.scene = scene;
     this.scene.add.existing(this);
     this.texture = 'train1';
     this.uuid = id ?? crypto.randomUUID();
+    this.freightSetId = freightSetId;
     this._pidControllerFront = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);

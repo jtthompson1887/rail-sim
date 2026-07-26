@@ -600,7 +600,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('does not overwrite authoritative freight trains from legacy live vehicles before save', () => {
+  it('merges moved runtime while retaining detached derailed authority before save', () => {
     const scene = new WorldScene() as any;
     const world = WorldManager.createNew(
       'Truthful economy save',
@@ -608,48 +608,141 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     world.tracks = makeFirstFreightRouteWorld().tracks;
     const authoritativeTrain = makeFreightTrainDef({
-      id: 'freight-train',
+      id: 'moving-train',
       trackT: 0.1,
+      cargo: {
+        productId: 'logs',
+        units: 11,
+        originFacilityId: 'managed-forest',
+      },
+      operations: {
+        currentTripRevenue: 1,
+        currentTripRunningCost: 2,
+        lastTripRevenue: 3,
+        lastTripRunningCost: 4,
+        lifetimeDeliveredUnits: 5,
+        lifetimeRevenue: 6,
+        lifetimeRunningCost: 7,
+      },
     });
-    world.trains = [authoritativeTrain];
+    const derailedAuthoritative = makeFreightTrainDef({
+      id: 'derailed-train',
+      trackT: 0.4,
+      cargo: {
+        productId: 'logs',
+        units: 8,
+        originFacilityId: 'managed-forest',
+      },
+    });
+    world.trains = [authoritativeTrain, derailedAuthoritative];
     const liveTrack = {
       getUUID: jest.fn().mockReturnValue('forest-sawmill-track'),
       getTrackPosition: jest.fn().mockReturnValue(0.75),
+      getCurvePath: jest.fn().mockReturnValue({
+        getTangent: jest.fn().mockReturnValue({ x: 1, y: 0 }),
+      }),
     };
     const liveTrain = {
       currentTrack: liveTrack,
-      getUUID: jest.fn().mockReturnValue('legacy-live-train'),
-      getMatterBody: jest.fn().mockReturnValue({ x: 750, y: 20 }),
-      getPassengerCount: jest.fn().mockReturnValue(7),
-      vehicleType: 'locomotive',
+      derailed: false,
+      enginePower: -1,
+      getUUID: jest.fn().mockReturnValue('moving-train'),
+      getMatterBody: jest.fn().mockReturnValue({
+        x: 750,
+        y: 20,
+        rotation: Math.PI,
+        body: { velocity: { x: 0, y: 0 } },
+      }),
+    };
+    const derailedTrain = {
+      currentTrack: liveTrack,
+      derailed: true,
+      enginePower: 1,
+      getUUID: jest.fn().mockReturnValue('derailed-train'),
+      getMatterBody: jest.fn().mockReturnValue({
+        x: 900,
+        y: 40,
+        rotation: 0,
+        body: { velocity: { x: 2, y: 0 } },
+      }),
     };
     prepareWorldLoop(scene);
     scene.trainManager = {
       selectedTrain: liveTrain,
-      trains: [liveTrain],
+      trains: [liveTrain, derailedTrain],
       carriages: [],
       update: jest.fn(),
     };
-    let trainAtSave: typeof world.trains[number] | undefined;
+    const applyBatch = jest.spyOn(WorldManager, 'applyOperationsBatch');
+    let trainsAtSave: typeof world.trains | undefined;
     const save = jest.spyOn(WorldManager, 'save').mockImplementation(() => {
-      trainAtSave = WorldManager.world?.trains[0];
+      trainsAtSave = WorldManager.world?.trains;
       return true;
     });
-    const emit = jest.spyOn(EventBus, 'emit');
-    GameStateManager.enterPlay(world.id);
 
-    scene.update(0, 1_000);
+    expect(scene.syncTrainLocationsAndSave()).toBe(true);
 
-    expect(world.economy.tick).toBe(1);
-    expect(world.trains).toEqual([authoritativeTrain]);
+    expect(applyBatch).toHaveBeenCalledTimes(1);
+    expect(world.trains).toEqual([
+      {
+        ...authoritativeTrain,
+        trackUUID: 'forest-sawmill-track',
+        trackT: 0.75,
+        facing: -1,
+      },
+      derailedAuthoritative,
+    ]);
     expect(world.trains[0]).not.toBe(authoritativeTrain);
-    expect(trainAtSave).toBe(world.trains[0]);
-    expect(liveTrack.getTrackPosition).not.toHaveBeenCalled();
+    expect(world.trains[0].cargo).toEqual(authoritativeTrain.cargo);
+    expect(world.trains[0].cargo).not.toBe(authoritativeTrain.cargo);
+    expect(world.trains[0].operations).toEqual(authoritativeTrain.operations);
+    expect(world.trains[0].operations).not.toBe(authoritativeTrain.operations);
+    expect(world.trains[1]).not.toBe(derailedAuthoritative);
+    expect(world.trains.every((train) => train !== null)).toBe(true);
+    expect(trainsAtSave).toBe(world.trains);
     expect(save).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledWith(
-      'ui:toolbar-save-state',
-      { state: 'saved' },
-    );
+  });
+
+  it('saves directly without committing when runtime locations are unchanged', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew('No-op train save', 'no-op-save');
+    world.tracks = makeFirstFreightRouteWorld().tracks;
+    const authoritative = makeFreightTrainDef({
+      id: 'stationary-train',
+      trackT: 0.1,
+      facing: 1,
+    });
+    world.trains = [authoritative];
+    const revision = world.revision;
+    scene.trainManager = {
+      trains: [{
+        currentTrack: {
+          getUUID: () => authoritative.trackUUID,
+          getTrackPosition: () => authoritative.trackT,
+          getCurvePath: () => ({
+            getTangent: () => ({ x: 1, y: 0 }),
+          }),
+        },
+        derailed: false,
+        enginePower: 0,
+        getUUID: () => authoritative.id,
+        getMatterBody: () => ({
+          x: 0,
+          y: 0,
+          rotation: 0,
+          body: { velocity: { x: 0, y: 0 } },
+        }),
+      }],
+    };
+    const applyBatch = jest.spyOn(WorldManager, 'applyOperationsBatch');
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+
+    expect(scene.syncTrainLocationsAndSave()).toBe(true);
+
+    expect(applyBatch).toHaveBeenCalledTimes(1);
+    expect(world.revision).toBe(revision);
+    expect(world.trains).toEqual([authoritative]);
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it('reports a failed economy save and retries through the next changed batch', () => {

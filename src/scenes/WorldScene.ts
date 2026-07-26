@@ -41,6 +41,8 @@ import type {
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
 import { clonePlainData } from '../utils/PlainData';
+import { captureTrainRuntime } from '../freight/TrainRuntime';
+import { TrainSerializer } from '../utils/TrainSerializer';
 import type { WorldData } from '../config/WorldData';
 import type {
   ConstructionPreviewModel,
@@ -779,7 +781,42 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private saveWorldAndReport(showFailureToast = true): boolean {
-    return this.saveAndReport(() => WorldManager.save(), showFailureToast);
+    return this.saveAndReport(
+      () => this.syncTrainLocationsAndSave(),
+      showFailureToast,
+    );
+  }
+
+  private syncTrainLocationsAndSave(): boolean {
+    const world = WorldManager.world;
+    if (!world) return WorldManager.save();
+
+    const runtimeById = new Map(
+      (this.trainManager?.trains ?? []).map((train) => [
+        train.getUUID(),
+        captureTrainRuntime(train),
+      ]),
+    );
+
+    WorldManager.applyOperationsBatch(world.revision, (draft) => {
+      let changed = false;
+      draft.trains = draft.trains.map((authoritative) => {
+        const runtime = runtimeById.get(authoritative.id);
+        const merged = runtime
+          ? TrainSerializer.mergeRuntime(authoritative, runtime)
+          : null;
+        if (merged
+          && (merged.trackUUID !== authoritative.trackUUID
+            || merged.trackT !== authoritative.trackT
+            || merged.facing !== authoritative.facing)) {
+          changed = true;
+        }
+        return merged ?? clonePlainData(authoritative);
+      });
+      return changed;
+    });
+
+    return WorldManager.save();
   }
 
   private saveAndReport(

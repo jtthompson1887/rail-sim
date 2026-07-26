@@ -131,24 +131,40 @@ describe('WorldContentLoader exact track restoration', () => {
     expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
   });
 
-  it('leaves schema-7 freight trains persisted without legacy materialisation', () => {
-    const world = WorldManager.createNew('Freight restore gap', 'freight-gap');
+  it('restores aggregate freight placement, facing, and stopped state', () => {
+    const world = WorldManager.createNew('Freight restore', 'freight-restore');
     const freightTrain = makeFreightTrainDef({
       trackUUID: 'persisted-track',
-      trackT: 0.25,
+      trackT: 0.75,
+      facing: -1,
     });
     world.trains = [freightTrain];
+    const scene = makeScene();
+    const liveTrain = new (require('../../src/entities/Train').default)(
+      scene,
+      0,
+      0,
+      freightTrain.id,
+      freightTrain.freightSetId,
+    );
+    liveTrain.enginePower = 1;
+    liveTrain.getMatterBody().setVelocity(3, 4);
+    liveTrain.getMatterBody().setAngularVelocity(0.5);
+    const track = {
+      getCurvePath: jest.fn().mockReturnValue({
+        getPoint: jest.fn().mockReturnValue({ x: 750, y: 25 }),
+      }),
+      getTrackAngle: jest.fn().mockReturnValue(45),
+    };
     const trainManager = {
-      createInitialTrain: jest.fn(),
+      createFreightTrain: jest.fn().mockReturnValue(liveTrain),
       createCarriage: jest.fn(),
     };
     const loader = new WorldContentLoader(
-      makeScene(),
+      scene,
       {
         addTrack: jest.fn(),
-        getTrack: jest.fn().mockReturnValue({
-          getCurvePath: jest.fn(),
-        }),
+        getTrack: jest.fn().mockReturnValue(track),
       } as any,
       trainManager as any,
     );
@@ -156,7 +172,39 @@ describe('WorldContentLoader exact track restoration', () => {
     loader.load();
 
     expect(world.trains).toEqual([freightTrain]);
-    expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
+    expect(trainManager.createFreightTrain).toHaveBeenCalledWith(
+      freightTrain.id,
+      freightTrain.freightSetId,
+    );
+    expect(trainManager.createCarriage).not.toHaveBeenCalled();
+    expect(liveTrain.currentTrack).toBe(track);
+    expect(liveTrain.getMatterBody().x).toBe(750);
+    expect(liveTrain.getMatterBody().y).toBe(25);
+    expect(liveTrain.getMatterBody().angle).toBe(225);
+    expect(liveTrain.getMatterBody().body.velocity).toEqual({ x: 0, y: 0 });
+    expect(liveTrain.getMatterBody().body.angularVelocity).toBe(0);
+    expect(liveTrain.enginePower).toBe(0);
+  });
+
+  it('skips a freight train whose referenced track is missing', () => {
+    const world = WorldManager.createNew('Missing track', 'missing-track');
+    world.trains = [makeFreightTrainDef({ trackUUID: 'missing' })];
+    const trainManager = {
+      createFreightTrain: jest.fn(),
+      createCarriage: jest.fn(),
+    };
+    const loader = new WorldContentLoader(
+      makeScene(),
+      {
+        addTrack: jest.fn(),
+        getTrack: jest.fn().mockReturnValue(undefined),
+      } as any,
+      trainManager as any,
+    );
+
+    loader.load();
+
+    expect(trainManager.createFreightTrain).not.toHaveBeenCalled();
     expect(trainManager.createCarriage).not.toHaveBeenCalled();
   });
 });
