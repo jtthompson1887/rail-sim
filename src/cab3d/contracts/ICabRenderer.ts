@@ -17,7 +17,7 @@ export interface ICabRenderer {
   hide(): void;
 
   /** Render a single frame from the supplied world snapshot. */
-  render(snapshot: CabWorldSnapshot): void;
+  render(snapshot: CabWorldSnapshot, deltaMs: number): void;
 
   /** Dispose the renderer and release all DOM/WebGL resources. */
   destroy(): void;

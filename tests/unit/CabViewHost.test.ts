@@ -19,32 +19,43 @@ describe('CabViewHost', () => {
 
   let stateEvents: Array<{ active: boolean }> = [];
   let stateHandler: (data: { active: boolean }) => void;
+  let hosts: CabViewHost[] = [];
+
+  const createHost = (
+    source: ICabSnapshotSource,
+    loader: () => Promise<ICabRenderer> = () => Promise.resolve(createRenderer()),
+  ): CabViewHost => {
+    const host = new CabViewHost(source, loader);
+    hosts.push(host);
+    return host;
+  };
 
   beforeEach(() => {
     stateEvents = [];
+    hosts = [];
     stateHandler = (data) => stateEvents.push(data);
     EventBus.on('cab:state', stateHandler);
   });
 
   afterEach(() => {
     EventBus.off('cab:state', stateHandler);
+    hosts.forEach((host) => host.destroy());
+    hosts = [];
   });
 
   it('starts inactive and does not call the source or renderer', () => {
     const source = createSource();
-    const host = new CabViewHost(source, () => Promise.resolve(createRenderer()));
+    const host = createHost(source);
 
     expect(host.isActive).toBe(false);
     host.update(0, 16);
     expect(source.capture).not.toHaveBeenCalled();
-
-    host.destroy();
   });
 
   it('toggles active, loads the renderer, and emits cab:state', async () => {
     const renderer = createRenderer();
     const source = createSource();
-    const host = new CabViewHost(source, () => Promise.resolve(renderer));
+    const host = createHost(source, () => Promise.resolve(renderer));
 
     EventBus.emit('cab:toggle', {});
 
@@ -54,8 +65,6 @@ describe('CabViewHost', () => {
     expect(host.isActive).toBe(true);
     expect(renderer.show).toHaveBeenCalled();
     expect(stateEvents).toContainEqual({ active: true });
-
-    host.destroy();
   });
 
   it('renders valid snapshots only when active and ready', async () => {
@@ -69,7 +78,7 @@ describe('CabViewHost', () => {
     };
     const renderer = createRenderer();
     const source = createSource(snapshot);
-    const host = new CabViewHost(source, () => Promise.resolve(renderer));
+    const host = createHost(source, () => Promise.resolve(renderer));
 
     EventBus.emit('cab:toggle', {});
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -77,14 +86,12 @@ describe('CabViewHost', () => {
     host.update(1000, 16);
 
     expect(source.capture).toHaveBeenCalledWith(1000, 16);
-    expect(renderer.render).toHaveBeenCalledWith(snapshot);
-
-    host.destroy();
+    expect(renderer.render).toHaveBeenCalledWith(snapshot, 16);
   });
 
   it('hides the renderer and emits inactive on second toggle', async () => {
     const renderer = createRenderer();
-    const host = new CabViewHost(createSource(), () => Promise.resolve(renderer));
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
 
     EventBus.emit('cab:toggle', {});
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -93,13 +100,11 @@ describe('CabViewHost', () => {
     expect(host.isActive).toBe(false);
     expect(renderer.hide).toHaveBeenCalled();
     expect(stateEvents).toContainEqual({ active: false });
-
-    host.destroy();
   });
 
   it('destroys the renderer and unsubscribes from cab:toggle', async () => {
     const renderer = createRenderer();
-    const host = new CabViewHost(createSource(), () => Promise.resolve(renderer));
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
 
     EventBus.emit('cab:toggle', {});
     await new Promise((resolve) => setTimeout(resolve, 10));

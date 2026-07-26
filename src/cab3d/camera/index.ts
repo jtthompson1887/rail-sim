@@ -1,1 +1,3 @@
-// Placeholder for the cab camera rig, ride model, and look controller.
+export { CabCameraRig, type CabEyeTransform } from './CabCameraRig';
+export { CabRideModel, type CabRideState, type CabRideParams } from './CabRideModel';
+export { CabLookController, type CabLookState } from './CabLookController';

@@ -395,6 +395,8 @@ export default class WorldScene extends Phaser.Scene {
           this.trackManager,
           this.trainManager,
           this.terrainGenerator,
+          terrainSeed,
+          biome,
         ),
       );
     }

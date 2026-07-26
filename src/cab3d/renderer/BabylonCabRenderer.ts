@@ -11,8 +11,16 @@ import {
 import { CabCanvasMount } from './CabCanvasMount';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
-import { worldToBabylon } from '../model/CabCoordinate';
+import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
 import { CabConfig } from '../CabConfig';
+
+declare global {
+  interface Window {
+    __railSimCab3d?: {
+      snapshot: () => { eye: CabEyeTransform | null; snapshot: CabWorldSnapshot | null };
+    };
+  }
+}
 
 /**
  * Babylon.js cab renderer.
@@ -25,6 +33,9 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private engine: Engine | null = null;
   private scene: Scene | null = null;
   private camera: UniversalCamera | null = null;
+  private cameraRig: CabCameraRig | null = null;
+  private lastSnapshot: CabWorldSnapshot | null = null;
+  private lastEye: CabEyeTransform | null = null;
 
   constructor() {
     this.mount = new CabCanvasMount();
@@ -45,17 +56,18 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.mount.hide();
   }
 
-  render(snapshot: CabWorldSnapshot): void {
-    if (!this.isReady() || !snapshot.vehicle) return;
+  render(snapshot: CabWorldSnapshot, deltaMs: number): void {
+    if (!this.isReady()) return;
+    this.lastSnapshot = snapshot;
 
-    const { x, y, z } = worldToBabylon(
-      snapshot.vehicle.x,
-      snapshot.vehicle.y,
-      this.terrainHeightAt(snapshot.vehicle.x, snapshot.vehicle.y) + CabConfig.EYE_HEIGHT_M,
-    );
-
-    this.camera?.position.set(x, y, z);
-    this.camera?.rotation.set(0, snapshot.vehicle.headingRad, 0);
+    if (snapshot.vehicle) {
+      if (!this.cameraRig) {
+        this.cameraRig = new CabCameraRig();
+      }
+      this.lastEye = this.cameraRig.update(deltaMs, snapshot);
+      this.camera?.position.set(this.lastEye.position.x, this.lastEye.position.y, this.lastEye.position.z);
+      this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
+    }
 
     this.scene?.render();
   }
@@ -66,6 +78,11 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.engine = null;
     this.scene = null;
     this.camera = null;
+    this.cameraRig = null;
+  }
+
+  private snapshot() {
+    return { eye: this.lastEye, snapshot: this.lastSnapshot };
   }
 
   private createEngine(): void {
@@ -103,10 +120,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     material.albedoColor = new Color3(0.3, 0.35, 0.25);
     material.roughness = 0.8;
     ground.material = material;
-  }
 
-  private terrainHeightAt(_worldX: number, _worldY: number): number {
-    // Phase 1: flat placeholder. Phase 2 will query TerrainGenerator.
-    return 0;
+    window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }
 }

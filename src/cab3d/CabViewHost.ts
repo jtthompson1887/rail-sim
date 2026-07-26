@@ -47,7 +47,7 @@ export class CabViewHost {
     if (!this.active || !this.renderer?.isReady()) return;
     const snapshot = this.source.capture(time, delta);
     if (snapshot.valid) {
-      this.renderer.render(snapshot);
+      this.renderer.render(snapshot, delta);
     }
   }
 

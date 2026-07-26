@@ -43,4 +43,41 @@ export const CabConfig = Object.freeze({
 
   /** Distance the eye must travel before the track mesh is rebuilt. */
   PATH_REBUILD_DISTANCE_M: 64,
+
+  /** Sleeper / rail joint spacing, in metres. */
+  RAIL_JOINT_SPACING_M: 18.29,
+  /** Vertical impulse magnitude when a wheel crosses a rail joint. */
+  RAIL_JOINT_IMPULSE_M: 0.004,
+  /** Exponential decay time constant for a rail-joint impulse, in seconds. */
+  RAIL_JOINT_DECAY_TAU_S: 0.09,
+
+  /** Fundamental bounce frequency, in hertz. */
+  BOUNCE_FREQ_HZ: 2.1,
+  /** Fundamental bounce amplitude, in metres. */
+  BOUNCE_AMP_M: 0.012,
+  /** Bounce harmonic frequency, in hertz. */
+  BOUNCE_HARMONIC_FREQ_HZ: 4.3,
+  /** Relative amplitude of the bounce harmonic. */
+  BOUNCE_HARMONIC_AMP: 0.7,
+
+  /** Lateral sway frequency, in hertz. */
+  SWAY_FREQ_HZ: 1.3,
+  /** Lateral sway amplitude, in metres. */
+  SWAY_AMP_M: 0.009,
+
+  /** Curve roll coefficient: roll = factor * curvature * speed^2. */
+  CURVE_ROLL_FACTOR: -0.055,
+  /** Maximum curve roll, in degrees. */
+  CURVE_ROLL_MAX_DEG: 2.5,
+  /** Maximum grade pitch, in degrees. */
+  GRADE_PITCH_MAX_DEG: 1.5,
+
+  /** Maximum look yaw, in degrees. */
+  LOOK_YAW_MAX_DEG: 120,
+  /** Minimum look pitch, in degrees. */
+  LOOK_PITCH_MIN_DEG: -35,
+  /** Maximum look pitch, in degrees. */
+  LOOK_PITCH_MAX_DEG: 25,
+  /** Look-controller spring frequency, in radians per second. */
+  LOOK_OMEGA: 10,
 } as const);
