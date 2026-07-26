@@ -6,6 +6,10 @@ import { CommandStack } from '../../src/systems/CommandStack';
 import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
 import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
+import {
+  makeFirstFreightRouteWorld,
+  makeFreightTrainDef,
+} from '../fixtures/FirstFreightRouteFixture';
 
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
@@ -565,7 +569,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).lastReportedSaveState = 'unsaved';
     (scene as any).runPeriodicSafetySave();
     expect(save).toHaveBeenCalledTimes(1);
-    expect(setTrainDefs).toHaveBeenCalledWith([]);
+    expect(setTrainDefs).not.toHaveBeenCalled();
 
     emit.mockRestore();
     setTrainDefs.mockRestore();
@@ -606,26 +610,25 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('syncs live train positions into the same successful Operate tick save', () => {
+  it('does not overwrite authoritative freight trains from legacy live vehicles before save', () => {
     const scene = new WorldScene() as any;
     const world = WorldManager.createNew(
       'Truthful economy save',
       'truthful-economy-save',
     );
-    world.trains = [{
-      id: 'live-train',
-      trackUUID: 'track-live',
+    world.tracks = makeFirstFreightRouteWorld().tracks;
+    const authoritativeTrain = makeFreightTrainDef({
+      id: 'freight-train',
       trackT: 0.1,
-      passengers: 3,
-      type: 'locomotive',
-    }];
+    });
+    world.trains = [authoritativeTrain];
     const liveTrack = {
-      getUUID: jest.fn().mockReturnValue('track-live'),
+      getUUID: jest.fn().mockReturnValue('forest-sawmill-track'),
       getTrackPosition: jest.fn().mockReturnValue(0.75),
     };
     const liveTrain = {
       currentTrack: liveTrack,
-      getUUID: jest.fn().mockReturnValue('live-train'),
+      getUUID: jest.fn().mockReturnValue('legacy-live-train'),
       getMatterBody: jest.fn().mockReturnValue({ x: 750, y: 20 }),
       getPassengerCount: jest.fn().mockReturnValue(7),
       vehicleType: 'locomotive',
@@ -648,14 +651,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(0, 1_000);
 
     expect(world.economy.tick).toBe(1);
-    expect(world.trains).toEqual([{
-      id: 'live-train',
-      trackUUID: 'track-live',
-      trackT: 0.75,
-      passengers: 7,
-      type: 'locomotive',
-    }]);
-    expect(trainAtSave).toEqual(world.trains[0]);
+    expect(world.trains).toEqual([authoritativeTrain]);
+    expect(world.trains[0]).toBe(authoritativeTrain);
+    expect(trainAtSave).toBe(authoritativeTrain);
+    expect(liveTrack.getTrackPosition).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
       'ui:toolbar-save-state',
@@ -810,7 +809,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     world.tracks.push(paidTrack);
     const constructionCursor = world.constructionRevision;
-    expect(WorldManager.applyEconomyBatch(world.economyRevision, (economy) => {
+    expect(WorldManager.applyEconomyBatch(world.operationsRevision, (economy) => {
       economy.tick += 1;
       return true;
     })).toBe(true);

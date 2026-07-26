@@ -83,7 +83,7 @@ describe('EconomySystem', () => {
 
     expect(result.ticksAdvanced).toBe(MAX_ECONOMY_TICKS_PER_FRAME);
     expect(world.economy.tick).toBe(4);
-    expect(world.economyRevision).toBe(4);
+    expect(world.operationsRevision).toBe(4);
 
     expect(system.update(0, true).ticksAdvanced)
       .toBe(MAX_ECONOMY_TICKS_PER_FRAME);
@@ -161,7 +161,7 @@ describe('EconomySystem', () => {
     expect(result.ticksAdvanced).toBe(3);
     expect(world.economy.tick).toBe(3);
     expect(world.revision).toBe(3);
-    expect(world.economyRevision).toBe(3);
+    expect(world.operationsRevision).toBe(3);
     expect(world.constructionRevision).toBe(constructionRevision);
   });
 

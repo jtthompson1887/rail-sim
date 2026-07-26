@@ -4,41 +4,35 @@ import type TrackManager from '../../managers/TrackManager';
 import type { TrainManager } from '../../managers/TrainManager';
 import type RailTrack from '../../entities/RailTrack';
 import { EventBus } from '../../services/EventBus';
-import { VehicleType, getVehicleTypeInfo } from '../../config/VehicleTypes';
-import { TrainSerializer } from '../../utils/TrainSerializer';
-import { WorldManager } from '../../managers/WorldManager';
+import type { VehicleType } from '../../config/VehicleTypes';
 import type { CommandStack } from '../CommandStack';
 
 /**
- * PlaceVehicleTool – click on an existing track to place a locomotive or carriage.
+ * PlaceVehicleTool – retained for track hover preview until train purchase exists.
  *
  * Hovering near a track shows a ghost preview snapped to the track curve.
- * Clicking commits the vehicle at the snapped position and angle.
+ * Clicking does not create a free legacy vehicle.
  */
 export class PlaceVehicleTool implements IEditorTool {
   private scene: Phaser.Scene;
   private trackManager: TrackManager;
-  private trainManager: TrainManager;
   private ghostGraphics: Phaser.GameObjects.Graphics;
-  private activeVehicleType: VehicleType = 'locomotive';
-
   /** How close the cursor must be to a track for snapping (world units). */
   private readonly SNAP_THRESHOLD = 80;
 
   constructor(
     scene: Phaser.Scene,
     trackManager: TrackManager,
-    trainManager: TrainManager,
-    private readonly commandStack?: CommandStack,
+    _trainManager: TrainManager,
+    _commandStack?: CommandStack,
   ) {
     this.scene = scene;
     this.trackManager = trackManager;
-    this.trainManager = trainManager;
     this.ghostGraphics = scene.add.graphics().setDepth(598);
   }
 
   setVehicleType(type: VehicleType): void {
-    this.activeVehicleType = type;
+    void type;
   }
 
   activate(): void {
@@ -66,41 +60,8 @@ export class PlaceVehicleTool implements IEditorTool {
       return;
     }
 
-    const info = getVehicleTypeInfo(this.activeVehicleType);
-    const t = this.getTrackTAtPoint(track, worldX, worldY);
-    const point = track.getCurvePath().getPoint(t);
-    const angle = track.getTrackAngle({ x: point.x, y: point.y });
-
-    let vehicle;
-    if (this.activeVehicleType === 'locomotive') {
-      vehicle = this.trainManager.createInitialTrain();
-    } else {
-      vehicle = this.trainManager.createCarriage();
-    }
-
-    vehicle.getMatterBody().setPosition(point.x, point.y);
-    vehicle.getMatterBody().setAngle(angle);
-    vehicle.currentTrack = track;
-
-    const def = TrainSerializer.toTrainDef(vehicle);
-    let persistenceDelegated = false;
-    if (def && WorldManager.addTrainDef(def)) {
-      // Vehicle placement is not yet a command. Explicitly invalidate prior
-      // revision-aware history so a later construction push is not stale.
-      // WorldScene owns immediate persistence through this stack notification.
-      if (this.commandStack) {
-        persistenceDelegated = true;
-        this.commandStack.clear();
-      }
-    }
-
-    EventBus.emit('ui:toast', {
-      message: `${info?.displayName ?? 'Vehicle'} placed`,
-      type: 'success',
-    });
-    if (!persistenceDelegated) {
-      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    }
+    // Schema-7 train creation is purchase-authoritative. Until Task 7 adds
+    // that path, a track click must not create free legacy vehicles.
   }
 
   onPointerMove(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {

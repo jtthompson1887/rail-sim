@@ -33,7 +33,7 @@ describe('Integration: persisted fixed-tick economy', () => {
 
     const expectedEconomy = clonePlainData(world.economy);
     const expectedRevision = world.revision;
-    const expectedEconomyRevision = world.economyRevision;
+    const expectedOperationsRevision = world.operationsRevision;
     const expectedConstructionRevision = world.constructionRevision;
     const worldId = world.id;
     WorldManager.reset();
@@ -42,7 +42,7 @@ describe('Integration: persisted fixed-tick economy', () => {
 
     expect(reloaded?.economy).toEqual(expectedEconomy);
     expect(reloaded?.revision).toBe(expectedRevision);
-    expect(reloaded?.economyRevision).toBe(expectedEconomyRevision);
+    expect(reloaded?.operationsRevision).toBe(expectedOperationsRevision);
     expect(reloaded?.constructionRevision)
       .toBe(expectedConstructionRevision);
   });

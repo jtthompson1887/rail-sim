@@ -2,26 +2,28 @@ import Phaser from 'phaser';
 import RailTrack from '../entities/RailTrack';
 import { Station } from '../entities/Station';
 import type TrackManager from '../managers/TrackManager';
-import { TrainManager } from '../managers/TrainManager';
+import type { TrainManager } from '../managers/TrainManager';
 import { WorldManager } from '../managers/WorldManager';
-import type { TrackDef, WorldStationDef, TrainDef } from '../config/WorldData';
+import type { TrackDef, WorldStationDef } from '../config/WorldData';
 
 /**
  * WorldContentLoader – responsible for loading/restoring world content
- * (tracks, stations, trains) from saved state or generating starter content.
+ * (tracks and stations) from saved state.
  *
  * Extracted from WorldScene to separate orchestration from data loading.
  */
 export class WorldContentLoader {
   private readonly scene: Phaser.Scene;
   private readonly trackManager: TrackManager;
-  private readonly trainManager: TrainManager;
   readonly stations: Station[] = [];
 
-  constructor(scene: Phaser.Scene, trackManager: TrackManager, trainManager: TrainManager) {
+  constructor(
+    scene: Phaser.Scene,
+    trackManager: TrackManager,
+    _trainManager: TrainManager,
+  ) {
     this.scene = scene;
     this.trackManager = trackManager;
-    this.trainManager = trainManager;
   }
 
   /** Load all persisted world content without synthesising construction data. */
@@ -32,25 +34,8 @@ export class WorldContentLoader {
     for (const def of world.tracks)   { this.restoreTrack(def); }
     for (const def of world.stations) { this.restoreStation(def); }
 
-    for (const def of world.trains) {
-      this.restoreVehicle(def);
-    }
-  }
-
-  private restoreVehicle(def: TrainDef): void {
-    const track = this.trackManager.getTrack(def.trackUUID);
-    if (!track) return;
-    const vehicleType = def.type;
-    const vehicle = vehicleType === 'passenger-carriage'
-      ? this.trainManager.createCarriage(def.id)
-      : this.trainManager.createInitialTrain(def.id);
-    const pt = track.getCurvePath().getPoint(def.trackT);
-    vehicle.getMatterBody().setPosition(pt.x, pt.y);
-    vehicle.currentTrack = track;
-    vehicle.getMatterBody().setAngle(track.getTrackAngle(vehicle.getMatterBody()));
-    if (def.passengers > 0) {
-      vehicle.boardPassengers(def.passengers);
-    }
+    // Schema-7 trains remain persisted but deliberately have no legacy
+    // passenger-vehicle materialisation. Task 4 installs the freight adapter.
   }
 
   private restoreTrack(def: TrackDef): void {

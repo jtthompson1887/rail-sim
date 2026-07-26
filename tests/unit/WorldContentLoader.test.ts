@@ -4,6 +4,7 @@ import { TrackSerializer } from '../../src/utils/TrackSerializer';
 import RailTrack from '../../src/entities/RailTrack';
 import Phaser from 'phaser';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -111,7 +112,7 @@ describe('WorldContentLoader exact track restoration', () => {
     expect(TrackSerializer.toTrackDef(restoredTracks[0]).paidBuildCost).toBe(0);
   });
 
-  it('does not generate starter content for an empty schema-2 world', () => {
+  it('does not generate starter content for an empty schema-7 world', () => {
     WorldManager.createNew('Empty world', 'real-terrain-alpha');
     const trackManager = { addTrack: jest.fn(), getTrack: jest.fn() };
     const trainManager = {
@@ -128,5 +129,34 @@ describe('WorldContentLoader exact track restoration', () => {
 
     expect(trackManager.addTrack).not.toHaveBeenCalled();
     expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
+  });
+
+  it('leaves schema-7 freight trains persisted without legacy materialisation', () => {
+    const world = WorldManager.createNew('Freight restore gap', 'freight-gap');
+    const freightTrain = makeFreightTrainDef({
+      trackUUID: 'persisted-track',
+      trackT: 0.25,
+    });
+    world.trains = [freightTrain];
+    const trainManager = {
+      createInitialTrain: jest.fn(),
+      createCarriage: jest.fn(),
+    };
+    const loader = new WorldContentLoader(
+      makeScene(),
+      {
+        addTrack: jest.fn(),
+        getTrack: jest.fn().mockReturnValue({
+          getCurvePath: jest.fn(),
+        }),
+      } as any,
+      trainManager as any,
+    );
+
+    loader.load();
+
+    expect(world.trains).toEqual([freightTrain]);
+    expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
+    expect(trainManager.createCarriage).not.toHaveBeenCalled();
   });
 });

@@ -369,7 +369,7 @@ describe('WorldScene persisted opportunity view', () => {
     scene.activeTool = 'place-track';
     scene.trainManager = { trains: [] };
     scene.cameraController = { stopFollow: jest.fn() };
-    scene.syncTrainsSaveAndReport = jest.fn();
+    scene.saveWorldAndReport = jest.fn();
     const emit = jest.spyOn(EventBus, 'emit');
 
     scene.activateCreateMode();

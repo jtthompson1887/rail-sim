@@ -10,6 +10,7 @@ import { EventBus } from '../../src/services/EventBus';
 import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
+import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
 
 function makeTrackDef(
   uuid: string,
@@ -77,12 +78,16 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 6 with a generated economy and conserved opening balance', () => {
+    it('creates schema 7 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(6);
+      expect(w.schemaVersion).toBe(7);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
-      expect(w.economyRevision).toBe(0);
+      expect(w.operationsRevision).toBe(0);
+      expect(w.firstRouteProgress).toEqual({
+        objectiveVersion: 1,
+        profitableDeliveryCompleted: false,
+      });
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
@@ -257,7 +262,7 @@ describe('WorldManager', () => {
       )).toBe(true);
       expect(world.revision).toBe(1);
       expect(world.constructionRevision).toBe(1);
-      expect(world.economyRevision).toBe(0);
+      expect(world.operationsRevision).toBe(0);
     });
 
     it('advances only economy and root revisions for an economy batch', () => {
@@ -267,7 +272,7 @@ describe('WorldManager', () => {
       );
 
       expect((WorldManager as any).applyEconomyBatch(
-        world.economyRevision,
+        world.operationsRevision,
         (draft: any) => {
           draft.tick += 1;
           return true;
@@ -275,7 +280,7 @@ describe('WorldManager', () => {
       )).toBe(true);
       expect(world.revision).toBe(1);
       expect(world.constructionRevision).toBe(0);
-      expect(world.economyRevision).toBe(1);
+      expect(world.operationsRevision).toBe(1);
       expect(world.economy.tick).toBe(1);
     });
 
@@ -287,7 +292,7 @@ describe('WorldManager', () => {
       const constructionCursor = world.constructionRevision;
 
       expect((WorldManager as any).applyEconomyBatch(
-        world.economyRevision,
+        world.operationsRevision,
         (draft: any) => {
           draft.tick += 1;
           return true;
@@ -299,7 +304,7 @@ describe('WorldManager', () => {
       )).toBe(true);
       expect(world.revision).toBe(2);
       expect(world.constructionRevision).toBe(1);
-      expect(world.economyRevision).toBe(1);
+      expect(world.operationsRevision).toBe(1);
       expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['after-economy']);
     });
 
@@ -328,12 +333,12 @@ describe('WorldManager', () => {
 
     it.each([
       ['negative root revision', (world: any) => { world.revision = -1; }],
-      ['negative economy revision', (world: any) => {
-        world.economyRevision = -1;
+      ['negative operations revision', (world: any) => {
+        world.operationsRevision = -1;
       }],
-      ['maximum economy revision', (world: any) => {
+      ['maximum operations revision', (world: any) => {
         world.revision = Number.MAX_SAFE_INTEGER;
-        world.economyRevision = Number.MAX_SAFE_INTEGER;
+        world.operationsRevision = Number.MAX_SAFE_INTEGER;
       }],
     ])('rejects economy when the world has %s', (_label, corrupt) => {
       const world: any = WorldManager.createNew(
@@ -343,7 +348,7 @@ describe('WorldManager', () => {
       corrupt(world);
       const before = JSON.stringify(world);
       expect(WorldManager.applyEconomyBatch(
-        world.economyRevision,
+        world.operationsRevision,
         (economy) => {
           economy.tick += 1;
           return true;
@@ -369,7 +374,7 @@ describe('WorldManager', () => {
             (nestedDraft) => nestedDraft.addTrack(makeTrackDef('nested-track')),
           );
           nestedEconomy = WorldManager.applyEconomyBatch(
-            world.economyRevision,
+            world.operationsRevision,
             (economy) => {
               economy.tick += 1;
               return true;
@@ -426,7 +431,7 @@ describe('WorldManager', () => {
       const before = clonePlainData(world);
 
       expect(WorldManager.applyEconomyBatch(
-        world.economyRevision,
+        world.operationsRevision,
         (economy) => {
           economy.tick += 1;
           world.name = 'mutated behind the draft';
@@ -534,6 +539,10 @@ describe('WorldManager', () => {
       WorldManager.createNew('S', 'real-terrain-alpha');
       WorldManager.addStationDef({ id: 'st-1', name: 'Central', trackUUID: 'abc', trackT: 0.5, passengerSpawnRate: 0.5 });
       expect(WorldManager.world!.stations).toHaveLength(1);
+      expect(WorldManager.world!.revision).toBe(
+        WorldManager.world!.constructionRevision
+          + WorldManager.world!.operationsRevision,
+      );
     });
 
     it('removes a station definition', () => {
@@ -547,30 +556,35 @@ describe('WorldManager', () => {
   describe('addTrainDef() / removeTrainDef() / updateTrainDef()', () => {
     it('adds a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'train-1', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeFreightTrainDef());
       expect(WorldManager.world!.trains).toHaveLength(1);
+      expect(WorldManager.world!.operationsRevision).toBe(1);
+      expect(WorldManager.world!.revision).toBe(
+        WorldManager.world!.constructionRevision
+          + WorldManager.world!.operationsRevision,
+      );
     });
 
     it('removes a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'rm-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'rm-train' }));
       WorldManager.removeTrainDef('rm-train');
       expect(WorldManager.world!.trains).toHaveLength(0);
     });
 
     it('updates a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'upd-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
-      WorldManager.updateTrainDef({ id: 'upd-train', passengers: 42 });
-      expect(WorldManager.world!.trains[0].passengers).toBe(42);
+      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'upd-train' }));
+      WorldManager.updateTrainDef({ id: 'upd-train', trackT: 0.42 });
+      expect(WorldManager.world!.trains[0].trackT).toBe(0.42);
     });
 
     it('replaces all train definitions via setTrainDefs', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'old', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeFreightTrainDef({ id: 'old' }));
       WorldManager.setTrainDefs([
-        { id: 'new1', trackUUID: 'x', trackT: 0.5, passengers: 5, type: 'locomotive' },
-        { id: 'new2', trackUUID: 'y', trackT: 0.8, passengers: 3, type: 'locomotive' },
+        makeFreightTrainDef({ id: 'new1', trackT: 0.5 }),
+        makeFreightTrainDef({ id: 'new2', trackT: 0.8 }),
       ]);
       expect(WorldManager.world!.trains).toHaveLength(2);
       expect(WorldManager.world!.trains[0].id).toBe('new1');
@@ -579,12 +593,14 @@ describe('WorldManager', () => {
 
     it('setTrainDefs does nothing when no world is loaded', () => {
       WorldManager.reset();
-      expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' }])).not.toThrow();
+      expect(() => WorldManager.setTrainDefs([
+        makeFreightTrainDef({ id: 'x' }),
+      ])).not.toThrow();
     });
 
     it('does not advance revision when setTrainDefs receives identical data', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      const defs = [{ id: 'same', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' as const }];
+      const defs = [makeFreightTrainDef({ id: 'same' })];
       expect(WorldManager.setTrainDefs(defs)).toBe(true);
       const revision = WorldManager.world!.revision;
       expect(WorldManager.setTrainDefs(defs.map((train) => ({ ...train })))).toBe(false);

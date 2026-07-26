@@ -780,7 +780,7 @@ describe('DeleteTracksCommand', () => {
     expect(WorldManager.world!.tracks.map((def) => def.uuid)).toEqual([intervening.uuid]);
   });
 
-  it('keeps undo and redo current across unrelated root-only revisions', () => {
+  it('rejects undo and redo after intervening scenery construction revisions', () => {
     const track = makeTrack(scene);
     trackManager.addTrack(track);
     WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
@@ -795,7 +795,8 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(command.undo()).toBe(true);
+    expect(command.undo()).toBe(false);
+    expect(trackManager.getTrack(track.getUUID())).toBeUndefined();
 
     WorldManager.reset();
     WorldManager.createNew('Redo stale', 'real-terrain-alpha');
@@ -815,7 +816,8 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(redo.execute()).toBe(true);
+    expect(redo.execute()).toBe(false);
+    expect(trackManager.getTrack(redoTrack.getUUID())).toBeDefined();
     expect(WorldManager.world!.company.cash).toBe(ledgerCash());
   });
 });
@@ -882,7 +884,7 @@ describe('ReshapeTrackCommand', () => {
     expect(cmd.execute()).toBe(false);
   });
 
-  it('keeps reshape undo and redo current across root-only revisions', () => {
+  it('rejects reshape undo and redo after scenery construction revisions', () => {
     const track = makeTrack(scene, 0, 0, 100, 0);
     trackManager.addTrack(track);
     const uuid = track.getUUID();
@@ -906,7 +908,7 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleUndo.undo()).toBe(true);
+    expect(staleUndo.undo()).toBe(false);
 
     WorldManager.reset();
     WorldManager.createNew('Reshape redo stale', 'real-terrain-alpha');
@@ -927,6 +929,6 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleRedo.execute()).toBe(true);
+    expect(staleRedo.execute()).toBe(false);
   });
 });

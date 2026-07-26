@@ -263,7 +263,7 @@ describe('PlaceTrackCommand', () => {
       'after-economy',
     )!;
     expect(WorldManager.applyEconomyBatch(
-      world.economyRevision,
+      world.operationsRevision,
       (economy) => {
         economy.tick += 1;
         return true;
@@ -275,7 +275,7 @@ describe('PlaceTrackCommand', () => {
     expect(world.tracks.map(({ uuid }) => uuid)).toEqual(['after-economy']);
     expect(world.company.cash).toBe(ledgerCash());
     expect(world.constructionRevision).toBe(1);
-    expect(world.economyRevision).toBe(1);
+    expect(world.operationsRevision).toBe(1);
   });
 
   it('rejects stale and unaffordable quotes with zero mutation', () => {
@@ -297,7 +297,7 @@ describe('PlaceTrackCommand', () => {
     expect(manager.getTrack('stale')).toBeUndefined();
   });
 
-  it('does not stale redo after an unrelated root-only revision', () => {
+  it('stales redo after an intervening construction-authority revision', () => {
     const world = WorldManager.world!;
     const quote = service.createQuote({ x: 0, y: 0 }, { x: 300, y: 0 }, 'redo-stale')!;
     const command = new PlaceTrackCommand(
@@ -317,8 +317,8 @@ describe('PlaceTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(command.execute()).toBe(true);
-    expect(manager.getTrack('redo-stale')).toBeDefined();
+    expect(command.execute()).toBe(false);
+    expect(manager.getTrack('redo-stale')).toBeUndefined();
     expect(world.scenery.map(({ id }) => id)).toEqual(['intervening']);
     expect(world.company.cash).toBe(ledgerCash());
   });

@@ -17,7 +17,6 @@ import { ConstructionAnalyzer } from '../systems/ConstructionAnalyzer';
 import { ConstructionService } from '../systems/ConstructionService';
 import { SnapSystem } from '../systems/SnapSystem';
 import { CommandStack } from '../systems/CommandStack';
-import { TrainSerializer } from '../utils/TrainSerializer';
 import { SelectionManager } from '../systems/SelectionManager';
 import { EventBus } from '../services/EventBus';
 import { WorldContentLoader } from '../services/WorldContentLoader';
@@ -721,7 +720,7 @@ export default class WorldScene extends Phaser.Scene {
         && !this.scene.isPaused(),
     );
     if (economyResult.ticksAdvanced > 0) {
-      this.syncTrainsSaveAndReport(false);
+      this.saveWorldAndReport(false);
       this.refreshFacilityPresentation(true);
     }
 
@@ -776,26 +775,11 @@ export default class WorldScene extends Phaser.Scene {
     if (this.activeTool === 'place-track') this.clearFacilitySelection();
     this.updateFacilitySelectionAvailability();
     EventBus.emit('ui:toolbar-visible', { visible: true });
-    this.syncTrainsSaveAndReport();
-  }
-
-  private syncTrainsAndSave(): boolean {
-    const trainDefs = this.trainManager.trains
-      .map((t) => TrainSerializer.toTrainDef(t))
-      .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
-    const carriageDefs = this.trainManager.carriages
-      .map((c) => TrainSerializer.toTrainDef(c))
-      .filter((d): d is import('../config/WorldData').TrainDef => d !== null);
-    WorldManager.setTrainDefs([...trainDefs, ...carriageDefs]);
-    return WorldManager.save();
+    this.saveWorldAndReport();
   }
 
   private saveWorldAndReport(showFailureToast = true): boolean {
     return this.saveAndReport(() => WorldManager.save(), showFailureToast);
-  }
-
-  private syncTrainsSaveAndReport(showFailureToast = true): boolean {
-    return this.saveAndReport(() => this.syncTrainsAndSave(), showFailureToast);
   }
 
   private saveAndReport(
@@ -820,7 +804,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private runPeriodicSafetySave(): void {
     if (this.lastReportedSaveState === 'saved') return;
-    this.syncTrainsSaveAndReport(false);
+    this.saveWorldAndReport(false);
   }
 
   private reportSaveState(state: SaveState): void {

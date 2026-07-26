@@ -27,7 +27,7 @@ export interface EconomyUpdateResult {
 export interface EconomyWorldPort {
   readonly world: WorldData | null;
   applyEconomyBatch(
-    expectedEconomyRevision: number,
+    expectedOperationsRevision: number,
     mutate: (draft: EconomyStateDef) => boolean,
   ): boolean;
 }
@@ -78,12 +78,12 @@ export class EconomySystem {
       const world = this.worldPort.world;
       if (world === null) break;
 
-      const expectedEconomyRevision = world.economyRevision;
+      const expectedOperationsRevision = world.operationsRevision;
       const seed = world.generationConfig.seed;
       let tickChangedFacilityIds: FacilityId[] = [];
       let tickBlockers: EconomyBlockerResult[] = [];
       const committed = this.worldPort.applyEconomyBatch(
-        expectedEconomyRevision,
+        expectedOperationsRevision,
         (draft) => {
           if (draft.tick >= Number.MAX_SAFE_INTEGER) return false;
 

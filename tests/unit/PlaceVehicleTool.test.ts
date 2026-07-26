@@ -56,22 +56,20 @@ describe('PlaceVehicleTool', () => {
   });
 
   describe('setVehicleType', () => {
-    it('defaults to locomotive', () => {
-      // By default the tool should place locomotives
-      // We verify by checking that createInitialTrain is called on click
+    it('does not freely place a locomotive', () => {
       const track = makeTrack(scene);
       trackManager.getClosestTrack.mockReturnValue(track);
       tool.onPointerDown(250, 0, { button: 0 } as any);
-      expect(trainManager.createInitialTrain).toHaveBeenCalled();
+      expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
       expect(trainManager.createCarriage).not.toHaveBeenCalled();
     });
 
-    it('can switch to passenger-carriage', () => {
+    it('does not freely place a passenger carriage', () => {
       tool.setVehicleType('passenger-carriage');
       const track = makeTrack(scene);
       trackManager.getClosestTrack.mockReturnValue(track);
       tool.onPointerDown(250, 0, { button: 0 } as any);
-      expect(trainManager.createCarriage).toHaveBeenCalled();
+      expect(trainManager.createCarriage).not.toHaveBeenCalled();
       expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
     });
   });
@@ -101,42 +99,9 @@ describe('PlaceVehicleTool', () => {
       EventBus.off('ui:toast', toastCb);
     });
 
-    it('places a locomotive on a track when clicked nearby', () => {
-      const toastCb = jest.fn();
-      EventBus.on('ui:toast', toastCb);
-      const track = makeTrack(scene);
-      trackManager.getClosestTrack.mockReturnValue(track);
-
-      tool.onPointerDown(250, 0, { button: 0 } as any);
-
-      expect(trainManager.createInitialTrain).toHaveBeenCalled();
-      expect(toastCb).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'success' }),
-      );
-      EventBus.off('ui:toast', toastCb);
-    });
-
-    it('sets currentTrack on the placed vehicle', () => {
-      const vehicle = {
-        getMatterBody: () => ({ setPosition: jest.fn(), setAngle: jest.fn() }),
-        currentTrack: null,
-        getUUID: () => 'v1',
-        getPassengerCount: () => 0,
-        boardPassengers: jest.fn(),
-        unloadPassengers: jest.fn(),
-      };
-      trainManager.createInitialTrain.mockReturnValue(vehicle);
-      const track = makeTrack(scene);
-      trackManager.getClosestTrack.mockReturnValue(track);
-
-      tool.onPointerDown(250, 0, { button: 0 } as any);
-
-      expect(vehicle.currentTrack).toBe(track);
-    });
-
-    it('invalidates construction history after a successful out-of-stack world mutation', () => {
+    it('does not create, persist, or report success for a track click', () => {
       const clear = jest.fn();
-      const addTrainDef = jest.spyOn(WorldManager, 'addTrainDef').mockReturnValue(true);
+      const addTrainDef = jest.spyOn(WorldManager, 'addTrainDef');
       const emit = jest.spyOn(EventBus, 'emit');
       const historyAwareTool = new PlaceVehicleTool(
         scene,
@@ -149,7 +114,14 @@ describe('PlaceVehicleTool', () => {
 
       historyAwareTool.onPointerDown(250, 0, { button: 0 } as any);
 
-      expect(clear).toHaveBeenCalledTimes(1);
+      expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
+      expect(trainManager.createCarriage).not.toHaveBeenCalled();
+      expect(addTrainDef).not.toHaveBeenCalled();
+      expect(clear).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalledWith(
+        'ui:toast',
+        expect.objectContaining({ type: 'success' }),
+      );
       expect(emit).not.toHaveBeenCalledWith(
         'ui:toolbar-save-state',
         { state: 'unsaved' },

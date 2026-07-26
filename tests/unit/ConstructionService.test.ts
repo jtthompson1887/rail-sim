@@ -430,7 +430,7 @@ describe('ConstructionService', () => {
     const world = WorldManager.world!;
 
     expect(WorldManager.applyEconomyBatch(
-      world.economyRevision,
+      world.operationsRevision,
       (economy) => {
         economy.tick += 1;
         return true;

@@ -199,42 +199,51 @@ describe('LevelData', () => {
 });
 
 describe('WorldData current-schema validation', () => {
-  it('rejects a vehicle without a type instead of backfilling it', () => {
+  it('rejects legacy passenger keys instead of backfilling freight authority', () => {
     const world = createEmptyWorld(
       'Current world',
       'current-seed',
       'temperate',
       makeStarterOpportunity('current-seed'),
     );
-    (world.trains as any) = [{
-        id: 'legacy-train',
-        trackUUID: 'track-1',
-        trackT: 0.5,
-        passengers: 4,
-    }];
+    const legacy = {
+      id: 'legacy-train',
+      trackUUID: 'track-1',
+      trackT: 0.5,
+      passengers: 4,
+      type: 'locomotive',
+    };
+    (world.trains as any) = [legacy];
     const result = validateWorldData(world);
 
     expect(result.compatible).toBe(false);
-    expect(world.trains[0].type).toBeUndefined();
+    expect(world.trains[0]).toBe(legacy);
+    expect((world.trains[0] as any).freightSetId).toBeUndefined();
   });
 
-  it('preserves an explicit passenger carriage type', () => {
-    const world = createEmptyWorld(
-      'Current world',
-      'current-seed',
-      'temperate',
-      makeStarterOpportunity('current-seed'),
-    );
-    world.trains = [{
-        id: 'carriage-1',
-        trackUUID: 'track-1',
-        trackT: 0.5,
-        passengers: 8,
-        type: 'passenger-carriage',
-    }];
+  it('rejects schema 6 without converting it', () => {
+    const world = {
+      ...createEmptyWorld(
+        'Old world',
+        'old-seed',
+        'temperate',
+        makeStarterOpportunity('old-seed'),
+      ),
+      schemaVersion: 6,
+      economyRevision: 0,
+    } as any;
+    delete world.operationsRevision;
+    delete world.firstRouteProgress;
     const result = validateWorldData(world);
 
-    expect(result.compatible).toBe(true);
-    expect(world.trains[0].type).toBe('passenger-carriage');
+    expect(result).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+    expect(world).toEqual(expect.objectContaining({
+      schemaVersion: 6,
+      economyRevision: 0,
+    }));
+    expect(world.operationsRevision).toBeUndefined();
   });
 });
