@@ -79,3 +79,16 @@ export function getTerrainColourRgb(
     b: (color & 0xff) / 255,
   };
 }
+
+/** Return a named biome band colour as normalised RGB components in [0, 1]. */
+export function getBandColourRgb(
+  biome: BiomeType,
+  band: BandName,
+): { r: number; g: number; b: number } {
+  const color = BIOME_PALETTES[biome][band];
+  return {
+    r: ((color >> 16) & 0xff) / 255,
+    g: ((color >> 8) & 0xff) / 255,
+    b: (color & 0xff) / 255,
+  };
+}

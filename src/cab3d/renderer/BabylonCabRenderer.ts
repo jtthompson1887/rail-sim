@@ -2,10 +2,17 @@ import {
   Engine,
   Scene,
   UniversalCamera,
+  DirectionalLight,
   HemisphericLight,
+  PointLight,
+  MeshBuilder,
+  Mesh,
   Vector3,
   Color3,
+  ReflectionProbe,
+  ImageProcessingConfiguration,
 } from '@babylonjs/core';
+import { SkyMaterial } from '@babylonjs/materials';
 import { CabCanvasMount } from './CabCanvasMount';
 import { TrackMeshBuilder } from './TrackMeshBuilder';
 import { TerrainMeshBuilder } from './TerrainMeshBuilder';
@@ -13,6 +20,8 @@ import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
 import { CabConfig } from '../CabConfig';
+import { getSimHours, getSunVector } from '../atmosphere/CabTimeOfDay';
+import { getBandColourRgb } from '../world/TerrainColour';
 
 declare global {
   interface Window {
@@ -36,8 +45,15 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private cameraRig: CabCameraRig | null = null;
   private trackMeshBuilder: TrackMeshBuilder | null = null;
   private terrainMeshBuilder: TerrainMeshBuilder | null = null;
+  private skyBox: Mesh | null = null;
+  private skyMaterial: SkyMaterial | null = null;
+  private sunLight: DirectionalLight | null = null;
+  private fillLight: HemisphericLight | null = null;
+  private interiorLight: PointLight | null = null;
+  private reflectionProbe: ReflectionProbe | null = null;
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
+  private lastSunAltitudeDeg: number | null = null;
 
   constructor() {
     this.mount = new CabCanvasMount();
@@ -71,6 +87,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
     }
 
+    this.updateAtmosphere(snapshot);
+
     this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
@@ -79,6 +97,18 @@ export default class BabylonCabRenderer implements ICabRenderer {
   }
 
   destroy(): void {
+    this.reflectionProbe?.dispose();
+    this.reflectionProbe = null;
+    this.interiorLight?.dispose();
+    this.interiorLight = null;
+    this.fillLight?.dispose();
+    this.fillLight = null;
+    this.sunLight?.dispose();
+    this.sunLight = null;
+    this.skyBox?.dispose();
+    this.skyBox = null;
+    this.skyMaterial?.dispose();
+    this.skyMaterial = null;
     this.trackMeshBuilder?.dispose();
     this.trackMeshBuilder = null;
     this.terrainMeshBuilder?.dispose();
@@ -89,6 +119,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.scene = null;
     this.camera = null;
     this.cameraRig = null;
+    this.lastSunAltitudeDeg = null;
   }
 
   private snapshot() {
@@ -114,15 +145,117 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.camera.maxZ = CabConfig.MAX_Z;
     this.camera.attachControl(this.mount.canvas, true);
 
-    new HemisphericLight(
-      'cabAmbient',
-      new Vector3(0, 1, 0),
-      this.scene,
-    );
+    this.createAtmosphere();
 
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
     this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
+  }
+
+  private createAtmosphere(): void {
+    if (!this.scene || !this.camera) return;
+
+    this.skyMaterial = new SkyMaterial('skyMat', this.scene);
+    this.skyMaterial.luminance = CabConfig.SKY_LUMINANCE;
+    this.skyMaterial.turbidity = CabConfig.SKY_TURBIDITY;
+    this.skyMaterial.rayleigh = CabConfig.SKY_RAYLEIGH;
+    this.skyMaterial.mieCoefficient = CabConfig.SKY_MIE_COEFFICIENT;
+    this.skyMaterial.mieDirectionalG = CabConfig.SKY_MIE_G;
+    this.skyMaterial.useSunPosition = true;
+    this.skyMaterial.backFaceCulling = false;
+
+    this.skyBox = MeshBuilder.CreateBox(
+      'skyBox',
+      {
+        size: CabConfig.SKY_BOX_SIZE_M,
+        sideOrientation: Mesh.BACKSIDE,
+      },
+      this.scene,
+    );
+    this.skyBox.infiniteDistance = true;
+    this.skyBox.isPickable = false;
+    this.skyBox.applyFog = false;
+    this.skyBox.material = this.skyMaterial;
+
+    this.sunLight = new DirectionalLight('cabSun', Vector3.Down(), this.scene);
+    this.sunLight.intensity = CabConfig.SUN_INTENSITY;
+
+    this.fillLight = new HemisphericLight('cabFill', Vector3.Up(), this.scene);
+    this.fillLight.intensity = CabConfig.FILL_LIGHT_INTENSITY;
+
+    this.interiorLight = new PointLight('cabInterior', Vector3.Zero(), this.scene);
+    this.interiorLight.intensity = CabConfig.CAB_INTERIOR_LIGHT_INTENSITY;
+    this.interiorLight.range = CabConfig.CAB_INTERIOR_LIGHT_RANGE_M;
+    this.interiorLight.parent = this.camera;
+    this.interiorLight.position = new Vector3(
+      CabConfig.CAB_INTERIOR_LIGHT_LOCAL_X_M,
+      CabConfig.CAB_INTERIOR_LIGHT_LOCAL_Y_M - CabConfig.EYE_HEIGHT_M,
+      CabConfig.CAB_INTERIOR_LIGHT_LOCAL_Z_M,
+    );
+
+    this.reflectionProbe = new ReflectionProbe(
+      'skyProbe',
+      CabConfig.SKY_IBL_RESOLUTION,
+      this.scene,
+      true,
+      false,
+      false,
+    );
+    this.reflectionProbe.renderList = [this.skyBox];
+    this.reflectionProbe.cubeTexture.refreshRate = 0;
+    this.scene.environmentTexture = this.reflectionProbe.cubeTexture;
+
+    const ipc = this.scene.imageProcessingConfiguration;
+    ipc.toneMappingEnabled = true;
+    ipc.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    ipc.exposure = CabConfig.TONEMAPPING_EXPOSURE;
+    ipc.contrast = CabConfig.TONEMAPPING_CONTRAST;
+
+    this.scene.fogMode = Scene.FOGMODE_EXP2;
+    this.scene.fogDensity = CabConfig.FOG_DENSITY;
+    this.scene.fogColor = new Color3(
+      CabConfig.FOG_COLOR.r,
+      CabConfig.FOG_COLOR.g,
+      CabConfig.FOG_COLOR.b,
+    );
+  }
+
+  private updateAtmosphere(snapshot: CabWorldSnapshot): void {
+    if (
+      !this.scene
+      || !this.camera
+      || !this.skyMaterial
+      || !this.sunLight
+      || !this.fillLight
+    ) {
+      return;
+    }
+
+    const simHours = getSimHours(snapshot.elapsedSecs);
+    const sun = getSunVector(simHours);
+
+    this.skyMaterial.sunPosition = new Vector3(sun.x, sun.y, sun.z);
+    this.skyMaterial.cameraOffset.y = this.camera.position.y;
+
+    this.sunLight.direction = new Vector3(-sun.x, -sun.y, -sun.z);
+
+    const ground = getBandColourRgb(snapshot.biome, 'LOWLAND');
+    this.fillLight.groundColor = new Color3(
+      ground.r * 0.5,
+      ground.g * 0.5,
+      ground.b * 0.5,
+    );
+
+    if (this.reflectionProbe) {
+      const altitude = sun.altitudeDeg;
+      if (
+        this.lastSunAltitudeDeg === null
+        || Math.abs(altitude - this.lastSunAltitudeDeg) > CabConfig.SKY_IBL_ALTITUDE_THRESHOLD_DEG
+      ) {
+        this.reflectionProbe.cubeTexture.resetRefreshCounter();
+        this.lastSunAltitudeDeg = altitude;
+      }
+    }
   }
 }

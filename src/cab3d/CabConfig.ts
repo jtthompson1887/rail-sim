@@ -142,4 +142,48 @@ export const CabConfig = Object.freeze({
   /** Scrolling speed of the water normal map (UV offset per second). */
   TERRAIN_WATER_SCROLL_U: 0.02,
   TERRAIN_WATER_SCROLL_V: 0.03,
+
+  /** Side length of the sky box, in metres. */
+  SKY_BOX_SIZE_M: 10000,
+  /** Overall luminance of the sky material in ]0, 1[. */
+  SKY_LUMINANCE: 0.6,
+  /** Amount of haze as opposed to molecules in the atmosphere. */
+  SKY_TURBIDITY: 4.5,
+  /** Sky appearance / light intensity. */
+  SKY_RAYLEIGH: 2.0,
+  /** Mie scattering coefficient in [0, 0.1]. */
+  SKY_MIE_COEFFICIENT: 0.005,
+  /** Amount of haze particles following the Mie scattering theory. */
+  SKY_MIE_G: 0.82,
+
+  /** Directional (sun) light intensity. */
+  SUN_INTENSITY: 3.0,
+  /** Hemispheric fill light intensity. */
+  FILL_LIGHT_INTENSITY: 0.35,
+
+  /** Cab-local X position of the interior point light, in metres. */
+  CAB_INTERIOR_LIGHT_LOCAL_X_M: 0,
+  /** Cab-local Y position of the interior point light, in metres. */
+  CAB_INTERIOR_LIGHT_LOCAL_Y_M: 3.10,
+  /** Cab-local Z position of the interior point light, in metres. */
+  CAB_INTERIOR_LIGHT_LOCAL_Z_M: 0.20,
+  /** Cab interior point light intensity. */
+  CAB_INTERIOR_LIGHT_INTENSITY: 0.20,
+  /** Cab interior point light range, in metres. */
+  CAB_INTERIOR_LIGHT_RANGE_M: 4.0,
+
+  /** Reflection probe resolution for image-based lighting. */
+  SKY_IBL_RESOLUTION: 256,
+  /** Re-render the IBL probe when the sun altitude changes by more than this many degrees. */
+  SKY_IBL_ALTITUDE_THRESHOLD_DEG: 2,
+
+  /** ACES tonemapping exposure. */
+  TONEMAPPING_EXPOSURE: 1.1,
+  /** ACES tonemapping contrast. */
+  TONEMAPPING_CONTRAST: 1.25,
+
+  /** Exponential-squared fog density. */
+  FOG_DENSITY: 0.00022,
+  /** Horizon colour used for scene fog (matches the sky horizon). */
+  FOG_COLOR: Object.freeze({ r: 0.65, g: 0.75, b: 0.85 }),
 } as const);

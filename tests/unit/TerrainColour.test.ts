@@ -6,6 +6,7 @@ import type { BiomeType } from '../../src/config/WorldData';
 import {
   getTerrainColour,
   getTerrainColourRgb,
+  getBandColourRgb,
 } from '../../src/cab3d/world/TerrainColour';
 
 const TC = GameConfig.TERRAIN;
@@ -57,5 +58,17 @@ describe('TerrainColour', () => {
     expect(c.b).toBeCloseTo(0.18, 2);
     expect(c.r).toBeGreaterThanOrEqual(0);
     expect(c.r).toBeLessThanOrEqual(1);
+  });
+
+  it('returns the LOWLAND band colour for each biome', () => {
+    const temperate = getBandColourRgb('temperate', 'LOWLAND');
+    expect(temperate.r).toBeCloseTo(0.227, 2);
+    expect(temperate.g).toBeCloseTo(0.431, 2);
+    expect(temperate.b).toBeCloseTo(0.18, 2);
+
+    const arid = getBandColourRgb('arid', 'LOWLAND');
+    expect(arid.r).toBeCloseTo(0.769, 2);
+    expect(arid.g).toBeCloseTo(0.663, 2);
+    expect(arid.b).toBeCloseTo(0.416, 2);
   });
 });

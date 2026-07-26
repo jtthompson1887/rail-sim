@@ -26,4 +26,24 @@ describe('CabConfig', () => {
     expect(CabConfig.TERRAIN_WATER_ALPHA).toBe(0.72);
     expect(CabConfig.TERRAIN_WATER_ROUGHNESS).toBe(0.08);
   });
+
+  it('exposes Phase 5 atmosphere tunables', () => {
+    expect(CabConfig.SKY_BOX_SIZE_M).toBe(10000);
+    expect(CabConfig.SKY_LUMINANCE).toBe(0.6);
+    expect(CabConfig.SKY_TURBIDITY).toBe(4.5);
+    expect(CabConfig.SKY_RAYLEIGH).toBe(2.0);
+    expect(CabConfig.SKY_MIE_COEFFICIENT).toBe(0.005);
+    expect(CabConfig.SKY_MIE_G).toBe(0.82);
+    expect(CabConfig.SUN_INTENSITY).toBe(3.0);
+    expect(CabConfig.FILL_LIGHT_INTENSITY).toBe(0.35);
+    expect(CabConfig.CAB_INTERIOR_LIGHT_LOCAL_Y_M).toBe(3.10);
+    expect(CabConfig.CAB_INTERIOR_LIGHT_INTENSITY).toBe(0.20);
+    expect(CabConfig.CAB_INTERIOR_LIGHT_RANGE_M).toBe(4.0);
+    expect(CabConfig.SKY_IBL_RESOLUTION).toBe(256);
+    expect(CabConfig.SKY_IBL_ALTITUDE_THRESHOLD_DEG).toBe(2);
+    expect(CabConfig.TONEMAPPING_EXPOSURE).toBe(1.1);
+    expect(CabConfig.TONEMAPPING_CONTRAST).toBe(1.25);
+    expect(CabConfig.FOG_DENSITY).toBe(0.00022);
+    expect(CabConfig.FOG_COLOR.r).toBeCloseTo(0.65, 10);
+  });
 });
