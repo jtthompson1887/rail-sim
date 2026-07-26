@@ -17,6 +17,7 @@ import { SceneryGenerator } from '../../systems/SceneryGenerator';
 import { computeSpeedMps } from '../model/CabSpeed';
 import { CabPathSampler } from '../model/CabPathSampler';
 import { buildCabTrackSpans } from './CabTrackGraphAdapter';
+import { computeWeatherState } from '../atmosphere/CabWeatherModel';
 import RailTrack from '../../entities/RailTrack';
 
 export interface CabFacilityPlacement {
@@ -93,6 +94,8 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
     }
 
     const scenery = this.ensureScenery(vehicle);
+    const elapsedSecs = time / 1000;
+    const weather = computeWeatherState(this.seed, elapsedSecs, this.biome);
 
     return Object.freeze({
       valid: true,
@@ -103,7 +106,8 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       scenery,
       nearestFacilityDistanceM: this.computeNearestFacilityDistance(vehicle),
       deterministic: GameConfig.CAB3D.DETERMINISTIC,
-      elapsedSecs: time / 1000,
+      elapsedSecs,
+      weather,
       terrain: {
         getHeightAt: (worldX: number, worldY: number) =>
           this.terrainGenerator.getHeightAt(worldX, worldY),

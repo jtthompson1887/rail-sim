@@ -10,6 +10,7 @@ describe('CabWorldSnapshot', () => {
     expect(INVALID_SNAPSHOT.path).toEqual([]);
     expect(INVALID_SNAPSHOT.scenery).toEqual([]);
     expect(INVALID_SNAPSHOT.biome).toBe('temperate');
+    expect(INVALID_SNAPSHOT.weather).toBeNull();
     expect(INVALID_SNAPSHOT.deterministic).toBe(false);
   });
 
@@ -21,6 +22,7 @@ describe('CabWorldSnapshot', () => {
       vehicle: null,
       path: [],
       elapsedSecs: 12.5,
+      weather: null,
     };
     const frozen = Object.freeze(snapshot);
     expect(Object.isFrozen(frozen)).toBe(true);
@@ -36,6 +38,7 @@ describe('CabWorldSnapshot', () => {
       path: [],
       deterministic: true,
       elapsedSecs: 0,
+      weather: null,
     };
     expect(snapshot.deterministic).toBe(true);
   });
@@ -47,6 +50,7 @@ describe('CabWorldSnapshot', () => {
       biome: 'temperate',
       vehicle: null,
       path: [],
+      weather: null,
       scenery: Object.freeze([
         {
           id: 's1',

@@ -22,6 +22,7 @@ function makeSnapshot(vehicle: CabVehicleSnapshot | null, nearestFacilityDistanc
     path: [],
     nearestFacilityDistanceM: nearestFacilityDistanceM ?? null,
     elapsedSecs: 0,
+    weather: null,
   };
 }
 

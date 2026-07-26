@@ -22,6 +22,7 @@ import { CabInteriorBuilder } from './CabInteriorBuilder';
 import { CabInstrumentBuilder } from './CabInstrumentBuilder';
 import { CabShadowManager } from './CabShadowManager';
 import { CabPostFxManager } from './CabPostFxManager';
+import { CabWeatherRenderer } from './CabWeatherRenderer';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -63,6 +64,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private reflectionProbe: ReflectionProbe | null = null;
   private shadowManager: CabShadowManager | null = null;
   private postFxManager: CabPostFxManager | null = null;
+  private weatherRenderer: CabWeatherRenderer | null = null;
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
   private lastSunAltitudeDeg: number | null = null;
@@ -105,6 +107,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     }
 
     this.updateAtmosphere(snapshot);
+    this.weatherRenderer?.apply(snapshot, this.camera!, snapshot.elapsedSecs);
 
     this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
@@ -136,6 +139,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.skyMaterial = null;
     this.postFxManager?.dispose();
     this.postFxManager = null;
+    this.weatherRenderer?.dispose();
+    this.weatherRenderer = null;
     this.shadowManager?.dispose();
     this.shadowManager = null;
     this.trackMeshBuilder?.dispose();
@@ -197,6 +202,12 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.shadowManager.attach(this.sunLight!);
     this.postFxManager = new CabPostFxManager(this.scene, this.camera);
     this.postFxManager.attach();
+    this.weatherRenderer = new CabWeatherRenderer(
+      this.scene,
+      this.sunLight!,
+      this.fillLight!,
+      this.cabInteriorBuilder!,
+    );
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

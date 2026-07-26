@@ -228,4 +228,17 @@ export const CabConfig = Object.freeze({
   POSTFX_MOTION_BLUR_STRENGTH: 0.6,
   /** Motion blur sample count. */
   POSTFX_MOTION_BLUR_SAMPLES: 12,
+
+  /** Weather state transition duration in seconds. */
+  WEATHER_TRANSITION_S: 20,
+  /** Windscreen droplet alpha ramp time in seconds. */
+  WINDSCREEN_DROPLET_RAMP_S: 1.8,
+  /** Interval between windscreen wiper passes in seconds. */
+  WINDSCREEN_WIPER_INTERVAL_S: 2.0,
+  /** Precipitation particle capacity and target emit count. */
+  PRECIPITATION_PARTICLE_COUNT: 2500,
+  /** Precipitation emitter box half-extents in metres (x, y, z). */
+  PRECIPITATION_BOX_HALF_M: Object.freeze({ x: 15, y: 10, z: 15 }),
+  /** Droplet plane dimensions in metres. */
+  WINDSCREEN_DROPLET_SIZE_M: Object.freeze({ width: 1.05, height: 1.2 }),
 } as const);

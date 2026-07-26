@@ -75,6 +75,7 @@ describe('CabViewHost', () => {
       vehicle: null,
       path: [],
       elapsedSecs: 0,
+      weather: null,
     };
     const renderer = createRenderer();
     const source = createSource(snapshot);

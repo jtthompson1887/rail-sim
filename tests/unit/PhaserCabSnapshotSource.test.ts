@@ -240,4 +240,26 @@ describe('PhaserCabSnapshotSource', () => {
     expect(result.scenery).toEqual([]);
     generate.mockRestore();
   });
+
+  it('computes deterministic weather from seed, elapsed time and biome', () => {
+    const train = createTrain();
+    const source = createSource(train, 'seed1', 'temperate');
+    const result = source.capture(120000, 1000);
+
+    expect(result.weather).toBeDefined();
+    expect(result.weather).not.toBeNull();
+    expect(['clear', 'overcast', 'rain', 'snow', 'fog']).toContain(result.weather!.state);
+    expect(result.weather!.fogDensity).toBeGreaterThanOrEqual(0);
+    expect(result.weather!.sunIntensity).toBeGreaterThanOrEqual(0);
+    expect(result.weather!.envIntensity).toBeGreaterThanOrEqual(0);
+    expect(result.weather!.particles).toBeGreaterThanOrEqual(0);
+
+    const repeat = source.capture(120000, 1000);
+    expect(repeat.weather).toEqual(result.weather);
+  });
+
+  it('returns null weather in the invalid snapshot', () => {
+    const source = createSource(null);
+    expect(source.capture(0, 1000).weather).toBeNull();
+  });
 });

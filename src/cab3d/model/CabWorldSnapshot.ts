@@ -1,5 +1,6 @@
 import type { BiomeType, StructureType, SceneryObjectDef } from '../../config/WorldData';
 import type { ITerrainSampler } from '../contracts/ITerrainSampler';
+import type { CabWeatherState } from '../atmosphere/CabWeatherModel';
 
 export type { BiomeType, StructureType, SceneryObjectDef };
 
@@ -67,6 +68,9 @@ export interface CabWorldSnapshot {
 
   /** When true, all random/animated rendering effects are disabled for determinism. */
   readonly deterministic?: boolean;
+
+  /** Deterministic weather state for the cab view, or `null` when invalid. */
+  readonly weather: CabWeatherState | null;
 }
 
 /** Sentinel returned when a snapshot cannot be produced. */
@@ -80,4 +84,5 @@ export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
   scenery: Object.freeze([]),
   deterministic: false,
   elapsedSecs: 0,
+  weather: null,
 });

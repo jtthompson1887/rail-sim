@@ -39,6 +39,7 @@ describe('CabCameraRig', () => {
       },
       path: samples,
       elapsedSecs: 0,
+      weather: null,
     };
   }
 

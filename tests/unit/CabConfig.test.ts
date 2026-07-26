@@ -47,6 +47,15 @@ describe('CabConfig', () => {
     expect(CabConfig.FOG_COLOR.r).toBeCloseTo(0.65, 10);
   });
 
+  it('exposes Phase 10 weather tunables', () => {
+    expect(CabConfig.WEATHER_TRANSITION_S).toBe(20);
+    expect(CabConfig.WINDSCREEN_DROPLET_RAMP_S).toBe(1.8);
+    expect(CabConfig.WINDSCREEN_WIPER_INTERVAL_S).toBe(2.0);
+    expect(CabConfig.PRECIPITATION_PARTICLE_COUNT).toBe(2500);
+    expect(CabConfig.PRECIPITATION_BOX_HALF_M).toEqual({ x: 15, y: 10, z: 15 });
+    expect(CabConfig.WINDSCREEN_DROPLET_SIZE_M).toEqual({ width: 1.05, height: 1.2 });
+  });
+
   it('exposes Phase 9 shadow and post-FX tunables', () => {
     expect(CabConfig.SHADOW_MAP_SIZE).toBe(2048);
     expect(CabConfig.SHADOW_CASCADES).toBe(3);

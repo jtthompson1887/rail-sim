@@ -1,9 +1,8 @@
 /**
  * Minimal hand-rolled mock of `@babylonjs/core` for unit tests.
  *
- * Real Babylon cannot run in jsdom, so the two manager tests use this mock to
- * verify construction, configuration wiring, and lifecycle without a WebGL
- * context.
+ * Real Babylon cannot run in jsdom, so tests use this mock to verify
+ * construction, configuration wiring, and lifecycle without a WebGL context.
  */
 
 export class Camera {
@@ -13,22 +12,59 @@ export class Camera {
 export class AbstractMesh {
   name = 'AbstractMesh';
   receiveShadows = false;
+  isPickable = false;
+  isVisible = true;
+  parent: any = null;
+  material: any = null;
+  position: any;
+  rotation: any;
+  scaling: any;
+
   isEnabled(): boolean {
     return true;
   }
+
+  dispose = jest.fn();
 }
 
 export class Mesh extends AbstractMesh {
   name = 'Mesh';
+  static readonly DOUBLESIDE = 1;
+  static readonly FRONTSIDE = 0;
 }
 
 export class Scene {
   name = 'Scene';
   cameras: Camera[] = [];
+  fogMode = 0;
+  fogDensity = 1;
+  fogColor: any;
+  environmentIntensity = 1;
+
+  static readonly FOGMODE_NONE = 0;
+  static readonly FOGMODE_EXP = 1;
+  static readonly FOGMODE_EXP2 = 2;
+  static readonly FOGMODE_LINEAR = 3;
 }
 
 export class DirectionalLight {
   name = 'DirectionalLight';
+  direction: any;
+  intensity = 0;
+}
+
+export class HemisphericLight {
+  name = 'HemisphericLight';
+  groundColor: any;
+  intensity = 1;
+}
+
+export class PointLight {
+  name = 'PointLight';
+  intensity = 0;
+  range = 0;
+  parent: any = null;
+  position: any;
 }
 
 export class ShadowGenerator {
@@ -60,6 +96,31 @@ export class MotionBlurPostProcess extends PostProcess {
   motionStrength = 0;
   motionBlurSamples = 0;
   isObjectBased = true;
+}
+
+export class ParticleSystem {
+  name = 'ParticleSystem';
+  emitter: any = null;
+  minEmitBox: any = null;
+  maxEmitBox: any = null;
+  emitRate = 0;
+  updateSpeed = 1 / 60;
+  gravity: any = null;
+  direction1: any = null;
+  direction2: any = null;
+  color1: any = null;
+  color2: any = null;
+  colorDead: any = null;
+  minSize = 0.1;
+  maxSize = 0.1;
+  minLifeTime = 1;
+  maxLifeTime = 1;
+  particleTexture: any = null;
+  targetStopDuration = 0;
+
+  start = jest.fn();
+  stop = jest.fn();
+  dispose = jest.fn();
 }
 
 export class FxaaPostProcess {}
@@ -119,9 +180,13 @@ export class Engine {
 }
 
 export class UniversalCamera extends Camera {}
-export class HemisphericLight {}
-export class PointLight {}
-export class TransformNode {}
+export class TransformNode {
+  parent: any = null;
+  position: any;
+  rotation: any;
+  scaling: any;
+}
+
 export class Vector3 {
   static Up() {
     return new Vector3(0, 1, 0);
@@ -206,9 +271,27 @@ export class RawTexture {
 
 export class Texture {
   static readonly TRILINEAR_SAMPLINGMODE = 0;
+  constructor(public url?: string, public scene?: any) {}
+  hasAlpha = false;
 }
 
-export class PBRMaterial {}
+export class PBRMaterial {
+  static readonly PBRMATERIAL_OPAQUE = 0;
+  static readonly PBRMATERIAL_ALPHATEST = 1;
+  static readonly PBRMATERIAL_ALPHABLEND = 2;
+  static readonly PBRMATERIAL_ALPHATESTANDBLEND = 3;
+
+  albedoColor: any;
+  alpha = 1;
+  metallic = 0;
+  roughness = 1;
+  emissiveColor: any;
+  emissiveIntensity = 1;
+  transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+  backFaceCulling = true;
+
+  dispose = jest.fn();
+}
 
 export class DynamicTexture {
   getContext = jest.fn().mockReturnValue({
