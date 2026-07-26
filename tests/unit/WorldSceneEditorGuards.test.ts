@@ -5,10 +5,27 @@ import { WorldManager } from '../../src/managers/WorldManager';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
 import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
+import type { FreightPurchaseQuote } from '../../src/freight/FreightPurchaseService';
+import { TrainManager } from '../../src/managers/TrainManager';
+import { clonePlainData } from '../../src/utils/PlainData';
+import {
+  makeFirstFreightRouteWorld,
+  makeFreightTrainDef,
+} from '../fixtures/FirstFreightRouteFixture';
+import Phaser from 'phaser';
+import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
+import TrackManager from '../../src/managers/TrackManager';
+import { EconomySystem } from '../../src/economy/EconomySystem';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import { ConstructionService } from '../../src/systems/ConstructionService';
+
+const { makeScene } = require('../../__mocks__/phaser');
 
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
+  const liveTrackManagers: TrackManager[] = [];
 
   function prepareWorldLoop(scene: any): void {
     scene.scene = { isPaused: jest.fn().mockReturnValue(false) };
@@ -26,6 +43,47 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     scene.contentLoader = { stations: [] };
     scene.publishHUDState = jest.fn();
+  }
+
+  function installFirstRouteWorld(): ReturnType<
+    typeof WorldManager.createNew
+  > {
+    const world = WorldManager.createNew(
+      'Scene freight operations',
+      'scene-freight-operations',
+    );
+    const fixture = makeFirstFreightRouteWorld();
+    world.tracks = clonePlainData(fixture.tracks);
+    world.economy = clonePlainData(fixture.economy);
+    world.trains = clonePlainData(fixture.trains);
+    world.firstRouteProgress = clonePlainData(fixture.firstRouteProgress);
+    return world;
+  }
+
+  function makeLiveFreightTrain(
+    trainId: string,
+    enginePower = 0,
+  ): any {
+    const body = {
+      x: 0,
+      y: 0,
+      rotation: 0,
+      body: { velocity: { x: 0, y: 0 } },
+    };
+    return {
+      currentTrack: {
+        getUUID: () => 'forest-sawmill-track',
+        getTrackPosition: () => 0.5,
+        getCurvePath: () => ({
+          getTangent: () => ({ x: 1, y: 0 }),
+        }),
+      },
+      derailed: false,
+      enginePower,
+      body,
+      getUUID: () => trainId,
+      getMatterBody: jest.fn(() => body),
+    };
   }
 
   function createStartupScene(
@@ -58,6 +116,11 @@ describe('WorldScene disabled construction bypass guards', () => {
   }
 
   afterEach(() => {
+    for (const manager of liveTrackManagers.splice(0)) {
+      [...manager.getAllTracks()].forEach((track) => {
+        manager.removeTrack(track.getUUID());
+      });
+    }
     for (const scene of startupScenes.splice(0)) {
       for (const [, callback] of scene.events.once.mock.calls) callback();
     }
@@ -65,6 +128,37 @@ describe('WorldScene disabled construction bypass guards', () => {
     WorldManager.reset();
     localStorage.clear();
     GameStateManager.enterCreate('test-world');
+    delete (globalThis as any).__RAIL_SIM_TEST_CONTROLS__;
+  });
+
+  it('does not expose privileged browser controls in production mode', () => {
+    createStartupScene('create', true);
+
+    expect((window as any).__railSimTrainManager).toBeUndefined();
+    expect((window as any).__railSimTrackManager).toBeUndefined();
+    expect((window as any).__railSimConstructionSnapshot).toBeUndefined();
+    expect((window as any).__railSimFirstRouteHarness).toBeUndefined();
+  });
+
+  it('retains privileged browser controls in an explicit test build', () => {
+    (globalThis as any).__RAIL_SIM_TEST_CONTROLS__ = true;
+
+    createStartupScene('create', true);
+
+    expect((window as any).__railSimTrainManager).toBeDefined();
+    expect((window as any).__railSimTrackManager).toBeDefined();
+    expect((window as any).__railSimConstructionSnapshot).toEqual(
+      expect.any(Function),
+    );
+    expect((window as any).__railSimFirstRouteHarness).toEqual(
+      expect.objectContaining({
+        snapshot: expect.any(Function),
+        setMode: expect.any(Function),
+        advanceFixedTicks: expect.any(Function),
+        setTrainRuntime: expect.any(Function),
+        retrySave: expect.any(Function),
+      }),
+    );
   });
 
   it.each(['generator', 'completer', 'junction', 'eraser'] as const)(
@@ -288,6 +382,32 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(onKeyDown).not.toHaveBeenCalled();
   });
 
+  it('uses the shared focus gate for shortcuts inside every freight panel', () => {
+    const scene = new WorldScene();
+    const onKeyDown = jest.fn();
+    (scene as any).activeEditorTool = { onKeyDown };
+    GameStateManager.enterCreate('test-world');
+
+    for (const testId of [
+      'vehicle-purchase-panel',
+      'train-inspector',
+      'first-route-objective',
+    ]) {
+      const panel = document.createElement('section');
+      panel.dataset.testid = testId;
+      const child = document.createElement('span');
+      panel.append(child);
+      (scene as any).handleKeyDown({
+        code: 'KeyP',
+        ctrlKey: false,
+        altKey: false,
+        target: child,
+      });
+    }
+
+    expect(onKeyDown).not.toHaveBeenCalled();
+  });
+
   it('cancels pending construction before undo changes the authority revision', () => {
     const scene = new WorldScene();
     const cancel = jest.fn();
@@ -414,7 +534,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).commandStack = commandStack;
     (scene as any).selectionManager = { selectedUUIDs: [] };
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
     (scene as any).bindCommandStackReporting();
 
@@ -423,7 +542,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(commandStack.redo()).toBe(true);
 
     expect(save).toHaveBeenCalledTimes(3);
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(emit.mock.calls.filter(
       ([event]) => event === 'ui:toolbar-save-state',
     )).toEqual([
@@ -440,6 +558,15 @@ describe('WorldScene disabled construction bypass guards', () => {
       economyTick: WorldManager.world!.economy.tick,
       constructionIndexBps:
         WorldManager.world!.economy.market.constructionIndexBps,
+      operatingSummary: {
+        fromTick: 0,
+        throughTick: 0,
+        deliveryRevenue: 0,
+        runningExpenses: 0,
+        operatingProfit: 0,
+        capitalExpenditure: 0,
+        cashFlow: WorldManager.world!.company.cash,
+      },
     });
     expect(emit).toHaveBeenCalledWith('ui:company-state', {
       cash: WorldManager.world!.company.cash,
@@ -447,10 +574,18 @@ describe('WorldScene disabled construction bypass guards', () => {
       economyTick: WorldManager.world!.economy.tick,
       constructionIndexBps:
         WorldManager.world!.economy.market.constructionIndexBps,
+      operatingSummary: {
+        fromTick: 0,
+        throughTick: 0,
+        deliveryRevenue: 0,
+        runningExpenses: 0,
+        operatingProfit: 0,
+        capitalExpenditure: 0,
+        cashFlow: WorldManager.world!.company.cash,
+      },
     });
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -517,7 +652,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     const revision = world.revision;
     const cash = world.company.cash;
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
     GameStateManager.enterCreate(world.id);
 
@@ -530,7 +664,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
 
     expect(save).toHaveBeenCalledTimes(2);
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(world.revision).toBe(revision);
     expect(world.company.cash).toBe(cash);
     expect(emit.mock.calls.filter(
@@ -543,7 +676,6 @@ describe('WorldScene disabled construction bypass guards', () => {
     ]);
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -553,22 +685,18 @@ describe('WorldScene disabled construction bypass guards', () => {
     WorldManager.createNew('Periodic save', 'periodic-seed');
     (scene as any).trainManager = { trains: [], carriages: [] };
     const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
-    const setTrainDefs = jest.spyOn(WorldManager, 'setTrainDefs');
     const emit = jest.spyOn(EventBus, 'emit');
 
     (scene as any).lastReportedSaveState = 'saved';
     (scene as any).runPeriodicSafetySave();
     expect(save).not.toHaveBeenCalled();
-    expect(setTrainDefs).not.toHaveBeenCalled();
     expect(emit.mock.calls.some(([event]) => event === 'ui:toast')).toBe(false);
 
     (scene as any).lastReportedSaveState = 'unsaved';
     (scene as any).runPeriodicSafetySave();
     expect(save).toHaveBeenCalledTimes(1);
-    expect(setTrainDefs).toHaveBeenCalledWith([]);
 
     emit.mockRestore();
-    setTrainDefs.mockRestore();
     save.mockRestore();
     WorldManager.reset();
   });
@@ -606,61 +734,689 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('syncs live train positions into the same successful Operate tick save', () => {
+  it('applies fresh powered input before freight transfer and running costs', () => {
     const scene = new WorldScene() as any;
-    const world = WorldManager.createNew(
-      'Truthful economy save',
-      'truthful-economy-save',
-    );
-    world.trains = [{
-      id: 'live-train',
-      trackUUID: 'track-live',
-      trackT: 0.1,
-      passengers: 3,
-      type: 'locomotive',
-    }];
-    const liveTrack = {
-      getUUID: jest.fn().mockReturnValue('track-live'),
-      getTrackPosition: jest.fn().mockReturnValue(0.75),
-    };
-    const liveTrain = {
-      currentTrack: liveTrack,
-      getUUID: jest.fn().mockReturnValue('live-train'),
-      getMatterBody: jest.fn().mockReturnValue({ x: 750, y: 20 }),
-      getPassengerCount: jest.fn().mockReturnValue(7),
-      vehicleType: 'locomotive',
-    };
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId);
+    liveTrain.body.x = -500;
+    liveTrain.currentTrack.getTrackPosition = () => 0.1;
+    const handleTrainMovement = jest.fn(() => {
+      liveTrain.enginePower = 1;
+    });
     prepareWorldLoop(scene);
     scene.trainManager = {
       selectedTrain: liveTrain,
       trains: [liveTrain],
       carriages: [],
+      stopFreightTrains: jest.fn(),
       update: jest.fn(),
     };
-    let trainAtSave: typeof world.trains[number] | undefined;
-    const save = jest.spyOn(WorldManager, 'save').mockImplementation(() => {
-      trainAtSave = WorldManager.world?.trains[0];
-      return true;
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(liveTrain.getMatterBody.mock.invocationCallOrder[0]);
+    expect(world.trains[0].cargo).toBeNull();
+    expect(world.trains[0].operations.currentTripRunningCost).toBe(20);
+    expect(world.trains[0].operations.lifetimeRunningCost).toBe(20);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toHaveLength(1);
+  });
+
+  it('applies fresh neutral input before transfer without one extra running cost', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId, 1);
+    liveTrain.body.x = -500;
+    liveTrain.currentTrack.getTrackPosition = () => 0.1;
+    const handleTrainMovement = jest.fn(() => {
+      liveTrain.enginePower = 0;
     });
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(world.trains[0].cargo).toEqual({
+      productId: 'logs',
+      units: 10,
+      originFacilityId: 'managed-forest',
+    });
+    expect(world.trains[0].operations.currentTripRunningCost).toBe(0);
+    expect(world.trains[0].operations.lifetimeRunningCost).toBe(0);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toHaveLength(0);
+  });
+
+  it('publishes the post-movement runtime instead of the operations snapshot', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const liveTrain = makeLiveFreightTrain(world.trains[0].id);
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(() => {
+        liveTrain.body.body.velocity = { x: 1, y: 0 };
+      }),
+    };
+    scene.publishFreightPresentation = jest.fn();
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(scene.publishFreightPresentation).toHaveBeenCalledWith([
+      expect.objectContaining({
+        trainId: world.trains[0].id,
+        speedWorldUnitsPerSecond: 60,
+      }),
+    ]);
+  });
+
+  it('locks an insolvent train before same-frame input and unlocks the complete set only after an affordable committed tick', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    world.company = createCompanyState(10);
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId, 1);
+    const stopFreightTrains = jest.fn((trainIds: readonly string[]) => {
+      if (trainIds.indexOf(trainId) !== -1) liveTrain.enginePower = 0;
+    });
+    const inputLockStates: string[][] = [];
+    const handleTrainMovement = jest.fn((
+      selectedTrain: typeof liveTrain,
+      lockedTrainIds: ReadonlySet<string>,
+    ) => {
+      inputLockStates.push(Array.from(lockedTrainIds).sort());
+      selectedTrain.enginePower = lockedTrainIds.has(trainId) ? 0 : 1;
+    });
+    const updateTrains = jest.fn();
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains,
+      update: updateTrains,
+    };
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(liveTrain.enginePower).toBe(0);
+    expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
+    expect(stopFreightTrains).toHaveBeenCalledWith([trainId]);
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(stopFreightTrains.mock.invocationCallOrder[0]);
+    expect(stopFreightTrains.mock.invocationCallOrder[0])
+      .toBeLessThan(updateTrains.mock.invocationCallOrder[0]);
+    expect(inputLockStates[0]).toEqual([]);
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('Insufficient cash for running costs');
+
+    scene.update(1_000, 1_000);
+
+    expect(liveTrain.enginePower).toBe(0);
+    expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
+    expect(inputLockStates[1]).toEqual([trainId]);
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('Insufficient cash for running costs');
+
+    world.company = createCompanyState(100);
+    scene.update(2_000, 1_000);
+
+    expect(scene.operationsLockedTrainIds.size).toBe(0);
+    expect(inputLockStates[2]).toEqual([trainId]);
+    expect(liveTrain.enginePower).toBe(0);
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .not.toBe('Insufficient cash for running costs');
+
+    scene.update(3_000, 0);
+
+    expect(inputLockStates[3]).toEqual([]);
+    expect(liveTrain.enginePower).toBe(1);
+  });
+
+  it('refreshes once after catch-up, clears construction history once, and emits every delivery presentation event', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    world.trains[0].cargo = {
+      productId: 'logs',
+      units: 10,
+      originFacilityId: 'managed-forest',
+    };
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId);
+    liveTrain.currentTrack.getTrackPosition = () => 0.9;
+    liveTrain.body.x = 500;
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.commandStack = {
+      onChange: jest.fn(),
+      clear: jest.fn(),
+    };
+    scene.refreshFacilityPresentation = jest.fn();
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 4_000);
+
+    expect(world.economy.tick).toBe(4);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(scene.refreshFacilityPresentation).toHaveBeenCalledTimes(1);
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-undo-state', {
+      canUndo: false,
+      canRedo: false,
+    });
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toast',
+      expect.objectContaining({ type: 'success' }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'ui:cash-pulse',
+      expect.objectContaining({ amount: expect.any(Number) }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'ui:freight-delivery-completed',
+      expect.objectContaining({
+        trainId,
+        destinationFacilityId: 'sawmill',
+      }),
+    );
+
+    scene.update(4_000, 1_000);
+
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates stale construction history after operations and accepts a fresh public build', () => {
+    const scene = makeScene() as Phaser.Scene;
+    const manager = new TrackManager(scene);
+    liveTrackManagers.push(manager);
+    WorldManager.createNew('History recovery', 'history-recovery');
+    const construction = new ConstructionService(
+      manager,
+      new ConstructionAnalyzer({ getHeightAt: () => 0 }),
+    );
+    const stack = new CommandStack();
+    const oldQuote = construction.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'old-history-track',
+    );
+    if (!oldQuote) throw new Error('Missing old history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      oldQuote,
+    ))).toBe(true);
+
+    expect(new EconomySystem(WorldManager).update(
+      1_000,
+      true,
+      [],
+    ).authoritativeChanged).toBe(true);
+    expect(stack.undo()).toBe(false);
+    expect(manager.getTrack('old-history-track')).toBeDefined();
+
+    const freshQuote = construction.createQuote(
+      { x: 0, y: 500 },
+      { x: 300, y: 500 },
+      'fresh-history-track',
+    );
+    if (!freshQuote) throw new Error('Missing fresh history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      freshQuote,
+    ))).toBe(true);
+    expect(manager.getTrack('fresh-history-track')).toBeDefined();
+    expect(stack.undo()).toBe(true);
+    expect(stack.undo()).toBe(false);
+    const beforeStaleRedo = JSON.stringify(WorldManager.world);
+    const liveBeforeStaleRedo = manager.getAllTracks()
+      .map((track) => track.getUUID())
+      .sort();
+    expect(new EconomySystem(WorldManager).update(
+      1_000,
+      true,
+      [],
+    ).authoritativeChanged).toBe(true);
+    const afterOperations = JSON.stringify(WorldManager.world);
+    expect(afterOperations).not.toBe(beforeStaleRedo);
+
+    expect(stack.redo()).toBe(false);
+    expect(JSON.stringify(WorldManager.world)).toBe(afterOperations);
+    expect(manager.getAllTracks().map(
+      (track) => track.getUUID(),
+    ).sort()).toEqual(liveBeforeStaleRedo);
+    expect(manager.getTrack('fresh-history-track')).toBeUndefined();
+
+    const newestQuote = construction.createQuote(
+      { x: 0, y: 1_000 },
+      { x: 300, y: 1_000 },
+      'newest-history-track',
+    );
+    if (!newestQuote) throw new Error('Missing newest history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      newestQuote,
+    ))).toBe(true);
+    expect(manager.getTrack('newest-history-track')).toBeDefined();
+    expect(stack.canRedo).toBe(false);
+  });
+
+  it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
+    const world = installFirstRouteWorld();
+    world.firstRouteProgress.profitableDeliveryCompleted = true;
+    const topology = [{
+      kind: 'track' as const,
+      uuid: 'forest-sawmill-track',
+      previous: null,
+      next: null,
+    }];
+    const firstScene = new WorldScene() as any;
+    const reloadedScene = new WorldScene() as any;
+    firstScene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue(topology),
+    };
+    reloadedScene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue(topology),
+    };
+    firstScene.trainManager = { selectedTrain: null };
+    reloadedScene.trainManager = { selectedTrain: null };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    firstScene.publishFreightPresentation([]);
+    reloadedScene.publishFreightPresentation([]);
+
+    expect(emit.mock.calls.filter(
+      ([event]) => event === 'ui:first-route-objective',
+    )).toHaveLength(2);
+    expect(emit.mock.calls.filter(
+      ([event, payload]) => event === 'ui:toast'
+        && (payload as any).message === 'First freight route complete',
+    )).toHaveLength(1);
+  });
+
+  it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const liveTrain = makeLiveFreightTrain(world.trains[0].id);
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    const saveWorld = jest.spyOn(SaveService, 'saveWorld');
+    const write = jest.spyOn(Storage.prototype, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new Error('quota');
+      });
+    const warning = jest.spyOn(console, 'warn').mockImplementation();
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 5_000);
+
+    const committed = clonePlainData(world);
+    const committedLedgerLength = world.company.ledger.length;
+    const committedOperationsRevision = world.operationsRevision;
+    expect(world.economy.tick).toBe(4);
+    expect(scene.lastReportedSaveState).toBe('unsaved');
+    expect(saveWorld).toHaveBeenCalledTimes(1);
+
+    scene.runPeriodicSafetySave();
+
+    expect(saveWorld).toHaveBeenCalledTimes(2);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(2);
+    expect(world.economy.tick).toBe(committed.economy.tick);
+    expect(world.economy.facilities).toEqual(committed.economy.facilities);
+    expect(world.trains).toEqual(committed.trains);
+    expect(world.company.cash).toBe(committed.company.cash);
+    expect(world.company.ledger).toEqual(committed.company.ledger);
+    expect(world.firstRouteProgress).toEqual(committed.firstRouteProgress);
+    expect(world.revision).toBe(committed.revision);
+    expect(world.operationsRevision).toBe(committedOperationsRevision);
+    expect(world.company.ledger).toHaveLength(committedLedgerLength);
+    expect(SaveService.loadWorld(world.id)).toMatchObject({
+      revision: committed.revision,
+      operationsRevision: committed.operationsRevision,
+      company: committed.company,
+      economy: committed.economy,
+      trains: committed.trains,
+      firstRouteProgress: committed.firstRouteProgress,
+    });
+
+    warning.mockRestore();
+    write.mockRestore();
+  });
+
+  it('does not save or expose rejected operation proposals and requests a retry', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    prepareWorldLoop(scene);
+    scene.economySystem = {
+      update: jest.fn().mockReturnValue({
+        ticksAdvanced: 0,
+        changedFacilityIds: [],
+        cargoStatuses: [],
+        completedDeliveries: [],
+        runningCostBlockerByTrainId: {},
+        stopTrainIds: [],
+        commitRejected: true,
+        authoritativeChanged: false,
+      }),
+    };
+    scene.refreshFacilityPresentation = jest.fn();
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
     const emit = jest.spyOn(EventBus, 'emit');
     GameStateManager.enterPlay(world.id);
 
     scene.update(0, 1_000);
 
-    expect(world.economy.tick).toBe(1);
-    expect(world.trains).toEqual([{
-      id: 'live-train',
-      trackUUID: 'track-live',
-      trackT: 0.75,
-      passengers: 7,
-      type: 'locomotive',
-    }]);
-    expect(trainAtSave).toEqual(world.trains[0]);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledWith(
-      'ui:toolbar-save-state',
-      { state: 'saved' },
+    expect(save).not.toHaveBeenCalled();
+    expect(scene.refreshFacilityPresentation).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Freight state changed · retry operation',
+      type: 'info',
+    });
+  });
+
+  it('reconciles rejected live runtime from newer authority before input and preserves it on retry', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    world.tracks.push({
+      ...clonePlainData(world.tracks[0]),
+      uuid: 'newer-track',
+    });
+    const liveTrain = makeLiveFreightTrain(trainId, 1);
+    const placeFreightTrain = jest.fn((
+      train: typeof liveTrain,
+      trackUUID: string,
+      trackT: number,
+      facing: 1 | -1,
+    ) => {
+      train.currentTrack = {
+        getUUID: () => trackUUID,
+        getTrackPosition: () => trackT,
+        getCurvePath: () => ({
+          getTangent: () => ({ x: 1, y: 0 }),
+        }),
+      };
+      train.body.rotation = facing === -1 ? Math.PI : 0;
+      train.enginePower = 0;
+      train.body.body.velocity = { x: 0, y: 0 };
+      return true;
+    });
+    const inputStates: Array<{
+      trackUUID: string | undefined;
+      trackT: number | null;
+      enginePower: number;
+    }> = [];
+    const handleTrainMovement = jest.fn(() => {
+      inputStates.push({
+        trackUUID: liveTrain.currentTrack?.getUUID(),
+        trackT: liveTrain.currentTrack?.getTrackPosition(),
+        enginePower: liveTrain.enginePower,
+      });
+    });
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      placeFreightTrain,
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.inputManager = { handleTrainMovement };
+    const applyAuthoritativeBatch =
+      WorldManager.applyOperationsBatch.bind(WorldManager);
+    jest.spyOn(WorldManager, 'applyOperationsBatch')
+      .mockImplementationOnce(() => applyAuthoritativeBatch(
+        world.revision,
+        (draft) => {
+          draft.trains[0].trackUUID = 'newer-track';
+          draft.trains[0].trackT = 0.8;
+          draft.trains[0].facing = -1;
+          return true;
+        },
+      ) && false);
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(world.economy.tick).toBe(0);
+    expect(world.trains[0]).toMatchObject({
+      trackUUID: 'newer-track',
+      trackT: 0.8,
+      facing: -1,
+    });
+    expect(placeFreightTrain).toHaveBeenCalledWith(
+      liveTrain,
+      'newer-track',
+      0.8,
+      -1,
     );
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(placeFreightTrain.mock.invocationCallOrder[0]);
+    expect(inputStates[0]).toEqual({
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.5,
+      enginePower: 1,
+    });
+    expect(save).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Freight state changed · retry operation',
+      type: 'info',
+    });
+    expect(emit.mock.calls.some(([
+      event,
+      data,
+    ]) => event === 'ui:cash-pulse'
+      || (event === 'ui:toast'
+        && (data as { type?: string }).type === 'success'))).toBe(false);
+
+    scene.update(1_000, 0);
+
+    expect(world.economy.tick).toBe(1);
+    expect(world.trains[0]).toMatchObject({
+      trackUUID: 'newer-track',
+      trackT: 0.8,
+      facing: -1,
+    });
+    expect(world.operationsRevision).toBe(2);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(inputStates[1]).toEqual({
+      trackUUID: 'newer-track',
+      trackT: 0.8,
+      enginePower: 0,
+    });
+  });
+
+  it('merges moved runtime while retaining detached derailed authority before save', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew(
+      'Truthful economy save',
+      'truthful-economy-save',
+    );
+    world.tracks = makeFirstFreightRouteWorld().tracks;
+    const authoritativeTrain = makeFreightTrainDef({
+      id: 'moving-train',
+      trackT: 0.1,
+      cargo: {
+        productId: 'logs',
+        units: 11,
+        originFacilityId: 'managed-forest',
+      },
+      operations: {
+        currentTripRevenue: 1,
+        currentTripRunningCost: 2,
+        lastTripRevenue: 3,
+        lastTripRunningCost: 4,
+        lifetimeDeliveredUnits: 5,
+        lifetimeRevenue: 6,
+        lifetimeRunningCost: 7,
+      },
+    });
+    const derailedAuthoritative = makeFreightTrainDef({
+      id: 'derailed-train',
+      trackT: 0.4,
+      cargo: {
+        productId: 'logs',
+        units: 8,
+        originFacilityId: 'managed-forest',
+      },
+    });
+    world.trains = [authoritativeTrain, derailedAuthoritative];
+    const liveTrack = {
+      getUUID: jest.fn().mockReturnValue('forest-sawmill-track'),
+      getTrackPosition: jest.fn().mockReturnValue(0.75),
+      getCurvePath: jest.fn().mockReturnValue({
+        getTangent: jest.fn().mockReturnValue({ x: 1, y: 0 }),
+      }),
+    };
+    const liveTrain = {
+      currentTrack: liveTrack,
+      derailed: false,
+      enginePower: -1,
+      getUUID: jest.fn().mockReturnValue('moving-train'),
+      getMatterBody: jest.fn().mockReturnValue({
+        x: 750,
+        y: 20,
+        rotation: Math.PI,
+        body: { velocity: { x: 0, y: 0 } },
+      }),
+    };
+    const derailedTrain = {
+      currentTrack: liveTrack,
+      derailed: true,
+      enginePower: 1,
+      getUUID: jest.fn().mockReturnValue('derailed-train'),
+      getMatterBody: jest.fn().mockReturnValue({
+        x: 900,
+        y: 40,
+        rotation: 0,
+        body: { velocity: { x: 2, y: 0 } },
+      }),
+    };
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain, derailedTrain],
+      carriages: [],
+      update: jest.fn(),
+    };
+    const applyBatch = jest.spyOn(WorldManager, 'applyOperationsBatch');
+    let trainsAtSave: typeof world.trains | undefined;
+    const save = jest.spyOn(WorldManager, 'save').mockImplementation(() => {
+      trainsAtSave = WorldManager.world?.trains;
+      return true;
+    });
+
+    expect(scene.syncTrainLocationsAndSave()).toBe(true);
+
+    expect(applyBatch).toHaveBeenCalledTimes(1);
+    expect(world.trains).toEqual([
+      {
+        ...authoritativeTrain,
+        trackUUID: 'forest-sawmill-track',
+        trackT: 0.75,
+        facing: -1,
+      },
+      derailedAuthoritative,
+    ]);
+    expect(world.trains[0]).not.toBe(authoritativeTrain);
+    expect(world.trains[0].cargo).toEqual(authoritativeTrain.cargo);
+    expect(world.trains[0].cargo).not.toBe(authoritativeTrain.cargo);
+    expect(world.trains[0].operations).toEqual(authoritativeTrain.operations);
+    expect(world.trains[0].operations).not.toBe(authoritativeTrain.operations);
+    expect(world.trains[1]).not.toBe(derailedAuthoritative);
+    expect(world.trains.every((train) => train !== null)).toBe(true);
+    expect(trainsAtSave).toBe(world.trains);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves directly without committing when runtime locations are unchanged', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew('No-op train save', 'no-op-save');
+    world.tracks = makeFirstFreightRouteWorld().tracks;
+    const authoritative = makeFreightTrainDef({
+      id: 'stationary-train',
+      trackT: 0.1,
+      facing: 1,
+    });
+    world.trains = [authoritative];
+    const revision = world.revision;
+    scene.trainManager = {
+      trains: [{
+        currentTrack: {
+          getUUID: () => authoritative.trackUUID,
+          getTrackPosition: () => authoritative.trackT,
+          getCurvePath: () => ({
+            getTangent: () => ({ x: 1, y: 0 }),
+          }),
+        },
+        derailed: false,
+        enginePower: 0,
+        getUUID: () => authoritative.id,
+        getMatterBody: () => ({
+          x: 0,
+          y: 0,
+          rotation: 0,
+          body: { velocity: { x: 0, y: 0 } },
+        }),
+      }],
+    };
+    const applyBatch = jest.spyOn(WorldManager, 'applyOperationsBatch');
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+
+    expect(scene.syncTrainLocationsAndSave()).toBe(true);
+
+    expect(applyBatch).toHaveBeenCalledTimes(1);
+    expect(world.revision).toBe(revision);
+    expect(world.trains).toEqual([authoritative]);
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it('reports a failed economy save and retries through the next changed batch', () => {
@@ -810,8 +1566,8 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     world.tracks.push(paidTrack);
     const constructionCursor = world.constructionRevision;
-    expect(WorldManager.applyEconomyBatch(world.economyRevision, (economy) => {
-      economy.tick += 1;
+    expect(WorldManager.applyOperationsBatch(world.revision, (draft) => {
+      draft.economy.tick += 1;
       return true;
     })).toBe(true);
     const push = jest.fn().mockReturnValue(true);
@@ -957,6 +1713,15 @@ describe('WorldScene disabled construction bypass guards', () => {
         saveState: 'unsaved',
         economyTick: expect.any(Number),
         constructionIndexBps: expect.any(Number),
+        operatingSummary: {
+          fromTick: 0,
+          throughTick: 0,
+          deliveryRevenue: 0,
+          runningExpenses: 0,
+          operatingProfit: 0,
+          capitalExpenditure: 0,
+          cashFlow: 0,
+        },
       },
     );
     expect(emitSpy).toHaveBeenCalledWith(
@@ -1036,5 +1801,212 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(launchData?.companyCash).toBe(WorldManager.world?.company.cash);
     expect(launchData?.saveState).toBe('saved');
     expect(launchData?.saveErrorMessage).toBeUndefined();
+  });
+
+  it('routes the timber purchase-mode request to the authoritative placement tool', () => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn();
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({
+      freightSetId: 'timber-freight-set',
+    });
+
+    expect(setFreightSetId).toHaveBeenCalledWith('timber-freight-set');
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it('clears stale construction UI/history and selects the committed train without a second save', () => {
+    const scene = new WorldScene() as any;
+    WorldManager.createNew('Committed purchase', 'committed-purchase');
+    const quote: FreightPurchaseQuote = Object.freeze({
+      expectedRevision: 0,
+      freightSetId: 'timber-freight-set',
+      trackUUID: 'forest-route',
+      trackT: 0.1,
+      facing: -1,
+      purchasePrice: 90_000,
+      cashAfter: 910_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    const purchasedTrain = { getUUID: () => 'purchased-train' };
+    const purchase = jest.fn().mockReturnValue(Object.freeze({
+      ok: true,
+      trainId: 'purchased-train',
+      saved: true,
+      saveState: 'saved',
+    }));
+    scene.freightPurchaseService = { purchase };
+    scene.commandStack = { clear: jest.fn() };
+    scene.selectionManager = {
+      clearSelection: jest.fn(),
+      selectedUUIDs: ['stale-track'],
+    };
+    scene.trainManager = {
+      trains: [purchasedTrain],
+      selectTrain: jest.fn(),
+    };
+    scene.selectedFacilityId = 'sawmill';
+    scene.facilityViews = [{
+      facilityId: 'sawmill',
+      setSelected: jest.fn(),
+    }];
+    const save = jest.spyOn(WorldManager, 'save');
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('committed-purchase');
+
+    scene.freightPurchaseConfirmedHandler({ quote });
+
+    expect(purchase).toHaveBeenCalledTimes(1);
+    const confirmedQuote = purchase.mock.calls[0][0];
+    expect(confirmedQuote).toBe(quote);
+    expect(Object.isFrozen(confirmedQuote)).toBe(true);
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+    expect(scene.selectionManager.clearSelection).toHaveBeenCalledTimes(1);
+    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(
+      purchasedTrain,
+    );
+    expect(scene.facilityViews[0].setSelected).toHaveBeenCalledWith(false);
+    expect(scene.selectedFacilityId).toBeNull();
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-undo-state', {
+      canUndo: false,
+      canRedo: false,
+    });
+    expect(emit).toHaveBeenCalledWith('facility:deselected', {
+      facilityId: 'sawmill',
+    });
+    const resultCall = emit.mock.calls.find(
+      ([event]) => event === 'freight:purchase-result',
+    );
+    expect(resultCall?.[1]).toEqual({
+      ok: true,
+      trainId: 'purchased-train',
+      saved: true,
+      saveState: 'saved',
+    });
+    expect(Object.isFrozen(resultCall?.[1])).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does not clear history or selection when purchase precommit fails', () => {
+    const scene = new WorldScene() as any;
+    const quote = Object.freeze({
+      expectedRevision: 0,
+      freightSetId: 'timber-freight-set' as const,
+      trackUUID: 'forest-route',
+      trackT: 0.1,
+      facing: 1 as const,
+      purchasePrice: 90_000 as const,
+      cashAfter: 910_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    scene.freightPurchaseService = {
+      purchase: jest.fn().mockReturnValue({
+        ok: false,
+        blocker: 'live-placement-failed',
+      }),
+    };
+    scene.commandStack = { clear: jest.fn() };
+    scene.selectionManager = { clearSelection: jest.fn() };
+    scene.trainManager = { trains: [], selectTrain: jest.fn() };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.freightPurchaseConfirmedHandler({ quote });
+
+    expect(scene.commandStack.clear).not.toHaveBeenCalled();
+    expect(scene.selectionManager.clearSelection).not.toHaveBeenCalled();
+    expect(scene.trainManager.selectTrain).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(
+      'freight:purchase-result',
+      Object.freeze({
+        ok: false,
+        blocker: 'live-placement-failed',
+      }),
+    );
+  });
+
+  it('adapts TrainManager spawn/place/remove while preserving quote facing', () => {
+    const scene = new WorldScene() as any;
+    const train = { getUUID: () => 'runtime-train' };
+    scene.trainManager = {
+      createFreightTrain: jest.fn().mockReturnValue(train),
+      placeFreightTrain: jest.fn().mockReturnValue(true),
+      removeFreightTrain: jest.fn().mockReturnValue(true),
+    };
+
+    const runtime = scene.createFreightPurchaseRuntimePort();
+
+    expect(runtime.spawn(
+      'runtime-train',
+      'timber-freight-set',
+    )).toBe(train);
+    expect(runtime.place(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    )).toBe(true);
+    runtime.remove('runtime-train');
+    expect(scene.trainManager.placeFreightTrain).toHaveBeenCalledWith(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    );
+    expect(scene.trainManager.removeFreightTrain)
+      .toHaveBeenCalledWith('runtime-train');
+  });
+
+  it('places a provisional freight train on the selected track with exact facing', () => {
+    const { makeScene } = require('../../__mocks__/phaser');
+    const liveTrack = {
+      getCurvePath: jest.fn().mockReturnValue({
+        getPoint: jest.fn().mockReturnValue({ x: 125, y: 250 }),
+      }),
+      getTrackAngle: jest.fn().mockReturnValue(35),
+    };
+    const trackManager = {
+      getTrack: jest.fn().mockReturnValue(liveTrack),
+    };
+    const manager = new TrainManager(
+      makeScene(),
+      trackManager as any,
+      {} as any,
+    );
+    const train = manager.createFreightTrain(
+      'placed-train',
+      'timber-freight-set',
+    );
+    const body = train.getMatterBody();
+    const setPosition = jest.spyOn(body, 'setPosition');
+    const setAngle = jest.spyOn(body, 'setAngle');
+    const setVelocity = jest.spyOn(body, 'setVelocity');
+    const setAngularVelocity = jest.spyOn(body, 'setAngularVelocity');
+
+    expect(manager.placeFreightTrain(
+      train,
+      'forest-route',
+      0.125,
+      -1,
+    )).toBe(true);
+
+    expect(trackManager.getTrack).toHaveBeenCalledWith('forest-route');
+    expect(setPosition).toHaveBeenCalledWith(125, 250);
+    expect(setAngle).toHaveBeenCalledWith(215);
+    expect(setVelocity).toHaveBeenCalledWith(0, 0);
+    expect(setAngularVelocity).toHaveBeenCalledWith(0);
+    expect(train.currentTrack).toBe(liveTrack);
+    expect(train.enginePower).toBe(0);
   });
 });

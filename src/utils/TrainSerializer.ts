@@ -1,24 +1,29 @@
-import type { IVehicle } from '../config/VehicleTypes';
 import type { TrainDef } from '../config/WorldData';
+import type { TrainRuntimeSnapshot } from '../freight/TrainRuntime';
+import { clonePlainData } from './PlainData';
 
-/**
- * TrainSerializer – single source of truth for converting a live vehicle
- * (Train or Carriage) to its serialised TrainDef representation.
- */
 export class TrainSerializer {
-  /** Convert a live vehicle to a serialisable TrainDef. Returns null if the vehicle is not on a track. */
-  static toTrainDef(vehicle: IVehicle): TrainDef | null {
-    const track = vehicle.currentTrack;
-    if (!track) {
+  static mergeRuntime(
+    authoritative: TrainDef,
+    runtime: TrainRuntimeSnapshot,
+  ): TrainDef | null {
+    if (runtime.trainId !== authoritative.id
+      || runtime.derailed
+      || runtime.trackUUID === null
+      || runtime.trackT === null
+      || !Number.isFinite(runtime.trackT)
+      || runtime.trackT < 0
+      || runtime.trackT > 1) {
       return null;
     }
-    const trackT = track.getTrackPosition(vehicle.getMatterBody());
+
     return {
-      id: vehicle.getUUID(),
-      trackUUID: track.getUUID(),
-      trackT,
-      passengers: vehicle.getPassengerCount(),
-      type: vehicle.vehicleType,
+      ...authoritative,
+      trackUUID: runtime.trackUUID,
+      trackT: runtime.trackT,
+      facing: runtime.facing,
+      cargo: clonePlainData(authoritative.cargo),
+      operations: clonePlainData(authoritative.operations),
     };
   }
 }

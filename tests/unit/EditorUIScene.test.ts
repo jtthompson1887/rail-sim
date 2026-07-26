@@ -54,6 +54,15 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).companyHud = {
       containsScreenPoint: jest.fn((x: number, y: number) => x < 400 && y < 80),
     };
+    (scene as any).vehiclePurchasePanel = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x > 1300 && y > 700),
+    };
+    (scene as any).trainInspector = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x > 1250 && y > 500),
+    };
+    (scene as any).firstRouteObjectiveCard = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x < 500 && y < 300),
+    };
     (scene as any).minimapRenderer = {
       containsScreenPoint: jest.fn((x: number, y: number) => x >= 1084 && y >= 584),
     };
@@ -64,6 +73,9 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(scene.containsScreenPoint(900, 800)).toBe(true);
     expect(scene.containsScreenPoint(1500, 300)).toBe(true);
     expect(scene.containsScreenPoint(200, 30)).toBe(true);
+    expect(scene.containsScreenPoint(1400, 800)).toBe(true);
+    expect(scene.containsScreenPoint(1300, 600)).toBe(true);
+    expect(scene.containsScreenPoint(450, 250)).toBe(true);
     expect(scene.containsScreenPoint(1174, 644)).toBe(true);
     expect(scene.containsScreenPoint(900, 400)).toBe(false);
   });
@@ -97,6 +109,9 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).constructionInspector = hidden();
     (scene as any).companyHud = hidden();
     (scene as any).facilityInspector = hidden();
+    (scene as any).vehiclePurchasePanel = hidden();
+    (scene as any).trainInspector = hidden();
+    (scene as any).firstRouteObjectiveCard = hidden();
     (scene as any).validationHint = hidden();
 
     (scene as any).visibleHandler({ visible: false });
@@ -112,8 +127,34 @@ describe('EditorUIScene construction UI boundary', () => {
     expect((scene as any).companyHud.setVisible).toHaveBeenCalledWith(true);
     expect((scene as any).facilityInspector.setVisible)
       .toHaveBeenCalledWith(true);
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenCalledWith(false);
+    expect((scene as any).trainInspector.setVisible)
+      .toHaveBeenCalledWith(true);
+    expect((scene as any).firstRouteObjectiveCard.setVisible)
+      .toHaveBeenCalledWith(true);
     expect((scene as any).constructionInspector.clear).toHaveBeenCalled();
     expect((scene as any).validationHint.clear).toHaveBeenCalled();
+  });
+
+  it('yields the vehicle purchase panel during a construction decision and restores it afterward', () => {
+    const scene = new EditorUIScene();
+    (scene as any).vehiclePurchasePanel = { setVisible: jest.fn() };
+    (scene as any).editorControlsVisible = true;
+
+    (scene as any).constructionPreviewHandler({
+      phase: 'review',
+      preview: {},
+    });
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenLastCalledWith(false);
+
+    (scene as any).constructionPreviewHandler({
+      phase: 'committed',
+      preview: null,
+    });
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenLastCalledWith(true);
   });
 
   it('hydrates a failed startup save into the HUD and Retry Save action', () => {
@@ -180,6 +221,56 @@ describe('EditorUIScene construction UI boundary', () => {
       ?.getAttribute('aria-hidden')).toBe('false');
     expect(showToast).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['desktop', 1280, 720],
+    ['mobile', 375, 667],
+  ])(
+    'keeps facility inspection readable and restores the Build purchase panel at %s',
+    (_layout, width, height) => {
+      Object.defineProperty(window, 'innerWidth', {
+        value: width,
+        configurable: true,
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: height,
+        configurable: true,
+      });
+      startEditorUI({
+        visible: true,
+        companyCash: 1_000_000,
+        saveState: 'saved',
+      });
+      window.dispatchEvent(new Event('resize'));
+      const facility = document.querySelector(
+        '[data-testid="facility-inspector"]',
+      ) as HTMLElement;
+      const purchase = document.querySelector(
+        '[data-testid="vehicle-purchase-panel"]',
+      ) as HTMLElement;
+
+      EventBus.emit('facility:inspection', {
+        id: 'sawmill',
+        name: 'Sawmill',
+        status: { code: 'working', label: 'Working' },
+        produces: ['structural-timber'],
+        needs: ['logs'],
+        inventories: [],
+        quotes: [],
+        railConnected: true,
+      });
+
+      expect(facility.dataset.layout).toBe(_layout);
+      expect(purchase.dataset.layout).toBe(_layout);
+      expect(facility.getAttribute('aria-hidden')).toBe('false');
+      expect(purchase.getAttribute('aria-hidden')).toBe('true');
+
+      EventBus.emit('facility:deselected', { facilityId: 'sawmill' });
+
+      expect(facility.getAttribute('aria-hidden')).toBe('true');
+      expect(purchase.getAttribute('aria-hidden')).toBe('false');
+    },
+  );
 
   it('draws the minimap in the fixed UI layer only while editor controls are visible', () => {
     const scene = startEditorUI({

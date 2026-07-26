@@ -1,85 +1,99 @@
 import { TrainSerializer } from '../../src/utils/TrainSerializer';
-import type { IVehicle } from '../../src/config/VehicleTypes';
-import Train from '../../src/entities/Train';
-
-const { makeScene } = require('../../__mocks__/phaser');
+import type { TrainRuntimeSnapshot } from '../../src/freight/TrainRuntime';
+import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
 
 describe('TrainSerializer', () => {
-  describe('toTrainDef', () => {
-    it('returns null when train has no currentTrack', () => {
-      const train = {
-        vehicleType: 'locomotive',
-        getUUID: () => 'train-1',
-        currentTrack: null,
-        getMatterBody: () => ({ x: 0, y: 0 }),
-        getPassengerCount: () => 0,
-      } as unknown as IVehicle;
+  it('does not expose a legacy live-vehicle to authoritative-train serializer', () => {
+    expect((TrainSerializer as any).toTrainDef).toBeUndefined();
+  });
 
-      expect(TrainSerializer.toTrainDef(train)).toBeNull();
-    });
-
-    it('serialises a train on a track with correct fields', () => {
-      const train = {
-        vehicleType: 'locomotive',
-        getUUID: () => 'train-abc',
-        currentTrack: {
-          getUUID: () => 'track-xyz',
-          getTrackPosition: () => 0.75,
+  it.each([1, -1] as const)(
+    'merges runtime facing %s without losing authoritative cargo or operations',
+    (facing) => {
+      const authoritative = makeFreightTrainDef({
+        id: 'freight-train',
+        cargo: {
+          productId: 'logs',
+          units: 17,
+          originFacilityId: 'managed-forest',
         },
-        getMatterBody: () => ({ x: 100, y: 200 }),
-        getPassengerCount: () => 12,
-      } as unknown as IVehicle;
-
-      const def = TrainSerializer.toTrainDef(train);
-      expect(def).not.toBeNull();
-      expect(def!.id).toBe('train-abc');
-      expect(def!.trackUUID).toBe('track-xyz');
-      expect(def!.trackT).toBe(0.75);
-      expect(def!.passengers).toBe(12);
-      expect(def!.type).toBe('locomotive');
-    });
-
-    it('computes trackT from the track position method', () => {
-      const trackPosition = jest.fn().mockReturnValue(0.33);
-      const train = {
-        vehicleType: 'locomotive',
-        getUUID: () => 't1',
-        currentTrack: {
-          getUUID: () => 'trk1',
-          getTrackPosition: trackPosition,
+        operations: {
+          currentTripRevenue: 101,
+          currentTripRunningCost: 102,
+          lastTripRevenue: 103,
+          lastTripRunningCost: 104,
+          lifetimeDeliveredUnits: 105,
+          lifetimeRevenue: 106,
+          lifetimeRunningCost: 107,
         },
-        getMatterBody: () => ({ x: 50, y: 50 }),
-        getPassengerCount: () => 0,
-      } as unknown as IVehicle;
+      });
+      const runtime: TrainRuntimeSnapshot = {
+        trainId: 'freight-train',
+        trackUUID: 'track-b',
+        trackT: 0.75,
+        facing,
+        x: 75,
+        y: 0,
+        speedWorldUnitsPerSecond: 0,
+        throttle: 0,
+        derailed: false,
+      };
 
-      TrainSerializer.toTrainDef(train);
-      expect(trackPosition).toHaveBeenCalledWith({ x: 50, y: 50 });
-    });
+      const merged = TrainSerializer.mergeRuntime(authoritative, runtime)!;
 
-    it('serialises the declared vehicle type without constructor-name inspection', () => {
-      const carriage = {
-        vehicleType: 'passenger-carriage',
-        getUUID: () => 'carriage-1',
-        currentTrack: {
-          getUUID: () => 'track-1',
-          getTrackPosition: () => 0.4,
-        },
-        getMatterBody: () => ({ x: 40, y: 50 }),
-        getPassengerCount: () => 8,
-      } as unknown as IVehicle;
+      expect(merged).toEqual({
+        ...authoritative,
+        trackUUID: 'track-b',
+        trackT: 0.75,
+        facing,
+      });
+      expect(merged.cargo).toEqual(authoritative.cargo);
+      expect(merged.cargo).not.toBe(authoritative.cargo);
+      expect(merged.operations).toEqual(authoritative.operations);
+      expect(merged.operations).not.toBe(authoritative.operations);
+    },
+  );
 
-      expect(TrainSerializer.toTrainDef(carriage)?.type).toBe('passenger-carriage');
-    });
+  it.each([
+    {
+      label: 'mismatched train ID',
+      patch: { trainId: 'different-train' },
+    },
+    {
+      label: 'missing track UUID',
+      patch: { trackUUID: null },
+    },
+    {
+      label: 'missing track position',
+      patch: { trackT: null },
+    },
+    {
+      label: 'track position below zero',
+      patch: { trackT: -0.01 },
+    },
+    {
+      label: 'track position above one',
+      patch: { trackT: 1.01 },
+    },
+    {
+      label: 'derailed runtime',
+      patch: { derailed: true },
+    },
+  ])('rejects $label', ({ patch }) => {
+    const authoritative = makeFreightTrainDef({ id: 'freight-train' });
+    const runtime: TrainRuntimeSnapshot = {
+      trainId: 'freight-train',
+      trackUUID: 'track-a',
+      trackT: 0.5,
+      facing: 1,
+      x: 50,
+      y: 0,
+      speedWorldUnitsPerSecond: 0,
+      throttle: 0,
+      derailed: false,
+      ...patch,
+    } as TrainRuntimeSnapshot;
 
-    it('serialises a concrete Train instance as a locomotive', () => {
-      const train = new Train(makeScene(), 10, 20, 'concrete-train');
-      train.currentTrack = {
-        getUUID: () => 'track-1',
-        getTrackPosition: () => 0.5,
-      } as any;
-
-      expect(train.vehicleType).toBe('locomotive');
-      expect(TrainSerializer.toTrainDef(train)?.type).toBe('locomotive');
-    });
+    expect(TrainSerializer.mergeRuntime(authoritative, runtime)).toBeNull();
   });
 });

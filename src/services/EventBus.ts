@@ -6,6 +6,16 @@ import type {
   DeletionReviewDTO,
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
+import type {
+  FreightPurchaseQuote,
+  FreightPurchaseResult,
+} from '../freight/FreightPurchaseService';
+import type {
+  OperatingSummaryDto,
+  TrainInspectionDto,
+} from '../freight/FreightPresentation';
+import type { FirstRouteObjectiveDto } from '../freight/FirstRouteObjective';
+import type { FreightDeliveryEvent } from '../freight/CargoSystem';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -72,7 +82,26 @@ interface EventMap {
     saveState: 'saved' | 'unsaved' | 'saving';
     economyTick: number;
     constructionIndexBps: number;
+    operatingSummary: OperatingSummaryDto;
   };
+  'ui:cash-pulse': { amount: number };
+  'freight:purchase-mode-requested': {
+    freightSetId: 'timber-freight-set';
+  };
+  'ui:freight-purchase-state': {
+    quote: FreightPurchaseQuote | null;
+    cash: number;
+    message: string;
+  };
+  'freight:purchase-confirmed': {
+    quote: FreightPurchaseQuote;
+  };
+  'freight:purchase-result': FreightPurchaseResult;
+  'ui:train-inspection': {
+    inspection: TrainInspectionDto | null;
+  };
+  'ui:first-route-objective': FirstRouteObjectiveDto;
+  'ui:freight-delivery-completed': FreightDeliveryEvent;
 }
 
 class EventBusClass {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 375, height: 667 };
@@ -132,31 +133,75 @@ async function toScreen(
 ): Promise<Point> {
   const canvas = await page.locator('canvas').boundingBox();
   if (!canvas) throw new Error('Canvas is unavailable');
-  const x = state.camera.width / 2
-    + (
-      point.x
-      - state.camera.scrollX
-      - state.camera.width / 2
-    ) * state.camera.zoom;
-  const y = state.camera.height / 2
-    + (
-      point.y
-      - state.camera.scrollY
-      - state.camera.height / 2
-    ) * state.camera.zoom;
+  const internal = worldToCameraPoint(point, state.camera);
   return {
-    x: canvas.x + x * canvas.width / state.camera.width,
-    y: canvas.y + y * canvas.height / state.camera.height,
+    x: canvas.x + internal.x * canvas.width / state.camera.width,
+    y: canvas.y + internal.y * canvas.height / state.camera.height,
   };
 }
 
 async function inspectSawmill(page: Page): Promise<void> {
-  const state = await snapshot(page);
+  let state = await snapshot(page);
   const sawmill = state.world.economy.facilities.find(
     ({ id }) => id === 'sawmill',
   );
   if (!sawmill) throw new Error('Sawmill was not generated');
-  const screen = await toScreen(page, sawmill, state);
+  let screen = await toScreen(page, sawmill, state);
+  const isCanvasHitTestable = async (point: Point): Promise<boolean> =>
+    page.evaluate(({ x, y }) => (
+      document.elementsFromPoint(x, y)[0] instanceof HTMLCanvasElement
+    ), point);
+  if (!(await isCanvasHitTestable(screen))) {
+    const destination = await page.evaluate(({ x, y }) => {
+      const isCanvas = (candidateY: number): boolean =>
+        document.elementsFromPoint(x, candidateY)[0]
+          instanceof HTMLCanvasElement;
+      const candidates: number[] = [];
+      for (let candidateY = 24; candidateY < window.innerHeight - 24; candidateY += 8) {
+        if (
+          isCanvas(candidateY)
+          && isCanvas(candidateY - 16)
+          && isCanvas(candidateY + 16)
+        ) {
+          candidates.push(candidateY);
+        }
+      }
+      if (candidates.length === 0) {
+        throw new Error('No unobstructed canvas destination is available');
+      }
+      return candidates.reduce((closest, candidate) => (
+        Math.abs(candidate - y) < Math.abs(closest - y)
+          ? candidate
+          : closest
+      ));
+    }, screen);
+    const deltaY = destination - screen.y;
+    const gesture = await page.evaluate((movementY) => {
+      const isCanvas = (x: number, y: number): boolean =>
+        document.elementsFromPoint(x, y)[0] instanceof HTMLCanvasElement;
+      for (let x = 48; x < window.innerWidth - 24; x += 8) {
+        for (let startY = 24; startY < window.innerHeight - 24; startY += 8) {
+          const endY = startY + movementY;
+          if (
+            endY >= 24
+            && endY < window.innerHeight - 24
+            && isCanvas(x, startY)
+            && isCanvas(x, endY)
+          ) {
+            return { start: { x, y: startY }, end: { x, y: endY } };
+          }
+        }
+      }
+      throw new Error('No unobstructed canvas pan gesture is available');
+    }, deltaY);
+    await page.mouse.move(gesture.start.x, gesture.start.y);
+    await page.mouse.down({ button: 'left' });
+    await page.mouse.move(gesture.end.x, gesture.end.y, { steps: 8 });
+    await page.mouse.up({ button: 'left' });
+    state = await snapshot(page);
+    screen = await toScreen(page, sawmill, state);
+    expect(await isCanvasHitTestable(screen)).toBe(true);
+  }
   await page.mouse.click(screen.x, screen.y);
   const inspector = page.locator('[data-testid="facility-inspector"]');
   await expect(inspector).toBeVisible();
@@ -409,8 +454,19 @@ for (const { seed, viewport } of playtestCases) {
       });
       await page.reload();
       await openOnlySavedWorld(page, viewport);
-      await page.locator('canvas').click({
-        position: { x: viewport.width - 28, y: 30 },
+      await page.evaluate(() => {
+        const harness = (
+          window as unknown as {
+            __railSimFirstRouteHarness?: {
+              setMode(mode: 'create' | 'play'): void;
+              advanceFixedTicks(count: number): void;
+            };
+          }
+        ).__railSimFirstRouteHarness;
+        if (!harness) throw new Error('First-route harness is unavailable');
+        harness.setMode('play');
+        harness.advanceFixedTicks(4);
+        harness.setMode('create');
       });
       await expect.poll(async () => {
         const current = await snapshot(page);
@@ -428,9 +484,6 @@ for (const { seed, viewport } of playtestCases) {
       }, { timeout: 8_000 }).toEqual({
         forestLogs: 240,
         quarryAggregate: 300,
-      });
-      await page.locator('canvas').click({
-        position: { x: viewport.width - 28, y: 30 },
       });
       const saturated = await snapshot(page);
       const saturatedForest = saturated.world.economy.facilities.find(

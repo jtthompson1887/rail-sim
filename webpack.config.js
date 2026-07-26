@@ -1,8 +1,9 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 
-module.exports = {
+module.exports = (env = {}) => ({
     entry: './src/main.ts',
     output: {
         filename: 'main.js',
@@ -44,6 +45,11 @@ module.exports = {
         ],
     },
     plugins: [
+        new webpack.DefinePlugin({
+            __RAIL_SIM_TEST_CONTROLS__: JSON.stringify(
+                env.testControls === true || env.testControls === 'true',
+            ),
+        }),
         new HtmlWebpackPlugin({
             template: './src/index.html',
         }),
@@ -55,4 +61,4 @@ module.exports = {
             ],
         })
     ],
-};
+});

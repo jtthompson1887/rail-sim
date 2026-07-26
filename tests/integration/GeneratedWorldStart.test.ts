@@ -25,6 +25,10 @@ import {
   type EconomyGenerationResult,
   WorldEconomyGenerator,
 } from '../../src/economy/WorldEconomyGenerator';
+import {
+  STARTER_ROUTE_RESERVE,
+  TIMBER_TRAIN_PURCHASE_PRICE,
+} from '../../src/freight/FreightSetCatalog';
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -157,7 +161,7 @@ describe('generated blank-world start', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists a schema-6 opportunity before installing an otherwise blank world', () => {
+  it('persists a schema-7 opportunity before installing an otherwise blank world', () => {
     const generator = successfulPort();
     const economyGenerator = successfulEconomyPort();
     const saveSpy = jest.spyOn(SaveService, 'saveWorld');
@@ -186,7 +190,7 @@ describe('generated blank-world start', () => {
       },
       successfulResult('atomic-seed').opportunity,
     );
-    expect(result.world.schemaVersion).toBe(6);
+    expect(result.world.schemaVersion).toBe(7);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(
@@ -760,7 +764,11 @@ describe('generated blank-world start', () => {
       expectSurveyFitsRecommendedCamera(result.opportunity);
       expect(Math.min(...result.opportunity.corridors.map(
         (corridor) => corridor.estimatedCost,
-      ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);
+      ))).toBeLessThanOrEqual(
+        STANDARD_STARTING_CASH
+        - TIMBER_TRAIN_PURCHASE_PRICE
+        - STARTER_ROUTE_RESERVE,
+      );
     },
   );
 });

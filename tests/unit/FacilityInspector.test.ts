@@ -86,6 +86,26 @@ describe('Facility presentation', () => {
     )?.status).toEqual({ code: 'idle', label: 'Idle' });
     expect(buildFacilityInspection(created.world, 'missing', false)).toBeNull();
   });
+
+  it('changes the Sawmill from Needs logs to Working when its recipe can advance', () => {
+    const created = WorldManager.tryCreateNew(
+      'Working status',
+      'facility-working-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const sawmill = created.world.economy.facilities.find(
+      ({ id }) => id === 'sawmill',
+    );
+    if (!sawmill) throw new Error('sawmill missing');
+
+    expect(buildFacilityInspection(created.world, 'sawmill', true)?.status)
+      .toEqual({ code: 'waiting-input', label: 'Needs logs' });
+    sawmill.inventories.logs.quantity = 10;
+    expect(buildFacilityInspection(created.world, 'sawmill', true)?.status)
+      .toEqual({ code: 'working', label: 'Working' });
+  });
 });
 
 describe('FacilityInspector', () => {

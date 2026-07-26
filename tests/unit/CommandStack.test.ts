@@ -74,6 +74,48 @@ function makeCommand(label = 'cmd'): Command & { execCount: number; undoCount: n
   };
 }
 
+function makeRevisionCommand(
+  authority: object,
+  rootRevision: number,
+  constructionRevision: number,
+  executeResult = true,
+) {
+  let context = { authority, rootRevision, constructionRevision };
+  return {
+    description: 'revision command',
+    execute: jest.fn(() => {
+      if (!executeResult) return false;
+      context = {
+        ...context,
+        rootRevision: context.rootRevision + 1,
+        constructionRevision: context.constructionRevision + 1,
+      };
+      return true;
+    }),
+    undo: jest.fn(() => {
+      context = {
+        ...context,
+        rootRevision: context.rootRevision + 1,
+        constructionRevision: context.constructionRevision + 1,
+      };
+      return true;
+    }),
+    getRevisionContext: () => context,
+    rebaseRevisionContext: (next: typeof context) => {
+      if (next.authority !== authority) return false;
+      context = { ...next };
+      return true;
+    },
+    setRevisionContext: (nextRoot: number, nextConstruction: number) => {
+      context = {
+        authority,
+        rootRevision: nextRoot,
+        constructionRevision: nextConstruction,
+      };
+    },
+  };
+}
+
 function topologyOf(manager: TrackManager): unknown {
   const nodes = [...manager.tracks, ...manager.junctions];
   return nodes
@@ -336,15 +378,13 @@ describe('CommandStack revision-aware history', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('does not let a current-revision push launder an external mutation into old history', () => {
+  it('starts fresh history from a monotonic current-revision push', () => {
     expect(stack.push(new ReshapeTrackCommand(trackManager, uuid, first, second))).toBe(true);
     expect(WorldManager.addTrackDef({
       ...clonePlainData(first),
       uuid: 'external-before-push',
     })).toBe(true);
     const revisionAfterExternalMutation = WorldManager.world!.revision;
-    const onChange = jest.fn();
-    stack.onChange = onChange;
     const currentRevisionCommand = new ReshapeTrackCommand(
       trackManager,
       uuid,
@@ -352,12 +392,95 @@ describe('CommandStack revision-aware history', () => {
       third,
     );
 
-    expect(stack.push(currentRevisionCommand)).toBe(false);
+    expect(stack.push(currentRevisionCommand)).toBe(true);
     expect(stack.canUndo).toBe(true);
     expect(stack.canRedo).toBe(false);
-    expect(WorldManager.world!.revision).toBe(revisionAfterExternalMutation);
+    expect(WorldManager.world!.revision).toBe(revisionAfterExternalMutation + 1);
+    expect(WorldManager.world!.tracks[0]).toEqual(third);
+    expect(stack.undo()).toBe(true);
     expect(WorldManager.world!.tracks[0]).toEqual(second);
-    expect(onChange).not.toHaveBeenCalled();
+    expect(stack.undo()).toBe(false);
+  });
+
+  it('clears stale history and adopts a monotonic dual cursor for a fresh push only', () => {
+    const authority = {};
+    const firstCommand = makeRevisionCommand(authority, 0, 0);
+    expect(stack.push(firstCommand)).toBe(true);
+
+    const fresh = makeRevisionCommand(authority, 2, 1);
+    expect(stack.push(fresh)).toBe(true);
+    expect(stack.undo()).toBe(true);
+    expect(stack.undo()).toBe(false);
+    expect(firstCommand.undo).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid old history cleared when a fresh recovery command fails', () => {
+    const authority = {};
+    expect(stack.push(makeRevisionCommand(authority, 0, 0))).toBe(true);
+    const failedFresh = makeRevisionCommand(authority, 2, 1, false);
+
+    expect(stack.push(failedFresh)).toBe(false);
+    expect(failedFresh.execute).toHaveBeenCalledTimes(1);
+    expect(stack.canUndo).toBe(false);
+    expect(stack.canRedo).toBe(false);
+  });
+
+  it.each([
+    ['regressing root', 0, 2],
+    ['regressing construction', 2, 0],
+  ])('does not recover a %s cursor', (_label, root, construction) => {
+    const authority = {};
+    const existing = makeRevisionCommand(authority, 0, 0);
+    expect(stack.push(existing)).toBe(true);
+    const incoming = makeRevisionCommand(
+      authority,
+      root,
+      construction,
+    );
+
+    expect(stack.push(incoming)).toBe(false);
+    expect(incoming.execute).not.toHaveBeenCalled();
+    expect(stack.canUndo).toBe(true);
+  });
+
+  it('does not recover a different authority cursor', () => {
+    expect(stack.push(makeRevisionCommand({}, 0, 0))).toBe(true);
+    const incoming = makeRevisionCommand({}, 2, 1);
+    expect(stack.push(incoming)).toBe(false);
+    expect(incoming.execute).not.toHaveBeenCalled();
+    expect(stack.canUndo).toBe(true);
+  });
+
+  it('never applies fresh-push recovery to undo, redo, or record', () => {
+    const authority = {};
+    const command = makeRevisionCommand(authority, 0, 0);
+    expect(stack.push(command)).toBe(true);
+    command.setRevisionContext(2, 1);
+    expect(stack.undo()).toBe(false);
+    expect(command.undo).not.toHaveBeenCalled();
+    expect(stack.canUndo).toBe(true);
+
+    stack.clear();
+    const redoCommand = makeRevisionCommand(authority, 0, 0);
+    expect(stack.push(redoCommand)).toBe(true);
+    expect(stack.undo()).toBe(true);
+    redoCommand.setRevisionContext(3, 2);
+    expect(stack.redo()).toBe(false);
+    expect(redoCommand.execute).toHaveBeenCalledTimes(1);
+    expect(stack.canRedo).toBe(true);
+
+    stack.clear();
+    expect(stack.push(makeRevisionCommand(authority, 0, 0))).toBe(true);
+    const alreadyExecuted = makeRevisionCommand(authority, 2, 1);
+    expect(stack.record(alreadyExecuted)).toBe(false);
+    expect(stack.canUndo).toBe(true);
+  });
+
+  it('records only a result that advances both cursors exactly once', () => {
+    const authority = {};
+    expect(stack.push(makeRevisionCommand(authority, 0, 0))).toBe(true);
+    expect(stack.record(makeRevisionCommand(authority, 2, 1))).toBe(false);
+    expect(stack.record(makeRevisionCommand(authority, 2, 2))).toBe(true);
   });
 });
 
@@ -780,7 +903,7 @@ describe('DeleteTracksCommand', () => {
     expect(WorldManager.world!.tracks.map((def) => def.uuid)).toEqual([intervening.uuid]);
   });
 
-  it('keeps undo and redo current across unrelated root-only revisions', () => {
+  it('rejects undo and redo after intervening scenery construction revisions', () => {
     const track = makeTrack(scene);
     trackManager.addTrack(track);
     WorldManager.addTrackDef(TrackSerializer.toTrackDef(track));
@@ -795,7 +918,8 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(command.undo()).toBe(true);
+    expect(command.undo()).toBe(false);
+    expect(trackManager.getTrack(track.getUUID())).toBeUndefined();
 
     WorldManager.reset();
     WorldManager.createNew('Redo stale', 'real-terrain-alpha');
@@ -815,7 +939,8 @@ describe('DeleteTracksCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(redo.execute()).toBe(true);
+    expect(redo.execute()).toBe(false);
+    expect(trackManager.getTrack(redoTrack.getUUID())).toBeDefined();
     expect(WorldManager.world!.company.cash).toBe(ledgerCash());
   });
 });
@@ -882,7 +1007,7 @@ describe('ReshapeTrackCommand', () => {
     expect(cmd.execute()).toBe(false);
   });
 
-  it('keeps reshape undo and redo current across root-only revisions', () => {
+  it('rejects reshape undo and redo after scenery construction revisions', () => {
     const track = makeTrack(scene, 0, 0, 100, 0);
     trackManager.addTrack(track);
     const uuid = track.getUUID();
@@ -906,7 +1031,7 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleUndo.undo()).toBe(true);
+    expect(staleUndo.undo()).toBe(false);
 
     WorldManager.reset();
     WorldManager.createNew('Reshape redo stale', 'real-terrain-alpha');
@@ -927,6 +1052,6 @@ describe('ReshapeTrackCommand', () => {
       scale: 1,
       variant: 0,
     });
-    expect(staleRedo.execute()).toBe(true);
+    expect(staleRedo.execute()).toBe(false);
   });
 });

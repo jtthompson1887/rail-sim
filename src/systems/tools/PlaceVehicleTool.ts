@@ -1,44 +1,61 @@
 import Phaser from 'phaser';
-import type { IEditorTool } from './IEditorTool';
+import type RailTrack from '../../entities/RailTrack';
+import type {
+  FreightPurchaseBlocker,
+  FreightPurchaseQuote,
+  FreightPurchaseQuoteInput,
+  FreightPurchaseResult,
+  FreightPurchaseService,
+} from '../../freight/FreightPurchaseService';
 import type TrackManager from '../../managers/TrackManager';
 import type { TrainManager } from '../../managers/TrainManager';
-import type RailTrack from '../../entities/RailTrack';
-import { EventBus } from '../../services/EventBus';
-import { VehicleType, getVehicleTypeInfo } from '../../config/VehicleTypes';
-import { TrainSerializer } from '../../utils/TrainSerializer';
 import { WorldManager } from '../../managers/WorldManager';
+import { EventBus } from '../../services/EventBus';
 import type { CommandStack } from '../CommandStack';
+import type { IEditorTool } from './IEditorTool';
+import type { VehicleType } from '../../config/VehicleTypes';
+
+const PURCHASE_REMEDIES: Partial<Record<FreightPurchaseBlocker, string>> = {
+  'no-track': 'Click on player track to place the Timber Freight Set',
+  'outside-forest-access': 'Place inside Managed Forest rail access',
+  'disconnected-route': 'Connect Managed Forest and Sawmill first',
+  'insufficient-cash': 'Insufficient cash for Timber Freight Set',
+  'duplicate-gesture': 'Purchase already in progress',
+};
+
+const freezeQuote = (
+  quote: FreightPurchaseQuote,
+): FreightPurchaseQuote => Object.freeze(quote);
 
 /**
- * PlaceVehicleTool – click on an existing track to place a locomotive or carriage.
- *
- * Hovering near a track shows a ghost preview snapped to the track curve.
- * Clicking commits the vehicle at the snapped position and angle.
+ * Quotes one timber freight-set purchase gesture from a snapped player track.
+ * Live creation is owned by FreightPurchaseService after typed confirmation.
  */
 export class PlaceVehicleTool implements IEditorTool {
-  private scene: Phaser.Scene;
-  private trackManager: TrackManager;
-  private trainManager: TrainManager;
-  private ghostGraphics: Phaser.GameObjects.Graphics;
-  private activeVehicleType: VehicleType = 'locomotive';
-
-  /** How close the cursor must be to a track for snapping (world units). */
+  private readonly ghostGraphics: Phaser.GameObjects.Graphics;
   private readonly SNAP_THRESHOLD = 80;
+  private freightSetId: 'timber-freight-set' = 'timber-freight-set';
+  private purchaseInFlight = false;
+  private lastPlacement: Omit<FreightPurchaseQuoteInput, 'topology'> | null =
+    null;
 
   constructor(
-    scene: Phaser.Scene,
-    trackManager: TrackManager,
-    trainManager: TrainManager,
-    private readonly commandStack?: CommandStack,
+    private readonly scene: Phaser.Scene,
+    private readonly trackManager: TrackManager,
+    _trainManager: TrainManager,
+    _commandStack?: CommandStack,
+    private readonly quoteService?: Pick<FreightPurchaseService, 'quote'>,
   ) {
-    this.scene = scene;
-    this.trackManager = trackManager;
-    this.trainManager = trainManager;
     this.ghostGraphics = scene.add.graphics().setDepth(598);
+    EventBus.on('freight:purchase-result', this.purchaseResultHandler);
   }
 
   setVehicleType(type: VehicleType): void {
-    this.activeVehicleType = type;
+    void type;
+  }
+
+  setFreightSetId(freightSetId: 'timber-freight-set'): void {
+    this.freightSetId = freightSetId;
   }
 
   activate(): void {
@@ -57,132 +74,198 @@ export class PlaceVehicleTool implements IEditorTool {
     return button === 0;
   }
 
-  onPointerDown(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void {
+  onPointerDown(
+    worldX: number,
+    worldY: number,
+    pointer: Phaser.Input.Pointer,
+  ): void {
     if (!this.wantsPointerButton(pointer.button)) return;
 
+    if (this.purchaseInFlight) {
+      this.publishState(null, PURCHASE_REMEDIES['duplicate-gesture']!);
+      return;
+    }
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
-      EventBus.emit('ui:toast', { message: 'Click on a track to place a vehicle', type: 'error' });
+      this.lastPlacement = null;
+      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
       return;
     }
 
-    const info = getVehicleTypeInfo(this.activeVehicleType);
-    const t = this.getTrackTAtPoint(track, worldX, worldY);
-    const point = track.getCurvePath().getPoint(t);
-    const angle = track.getTrackAngle({ x: point.x, y: point.y });
-
-    let vehicle;
-    if (this.activeVehicleType === 'locomotive') {
-      vehicle = this.trainManager.createInitialTrain();
-    } else {
-      vehicle = this.trainManager.createCarriage();
+    const input = this.buildQuoteInput(track, worldX, worldY);
+    this.lastPlacement = {
+      freightSetId: input.freightSetId,
+      trackUUID: input.trackUUID,
+      trackT: input.trackT,
+      x: input.x,
+      y: input.y,
+    };
+    const quote = this.quoteService?.quote(input);
+    if (!quote) {
+      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
+      return;
     }
-
-    vehicle.getMatterBody().setPosition(point.x, point.y);
-    vehicle.getMatterBody().setAngle(angle);
-    vehicle.currentTrack = track;
-
-    const def = TrainSerializer.toTrainDef(vehicle);
-    let persistenceDelegated = false;
-    if (def && WorldManager.addTrainDef(def)) {
-      // Vehicle placement is not yet a command. Explicitly invalidate prior
-      // revision-aware history so a later construction push is not stale.
-      // WorldScene owns immediate persistence through this stack notification.
-      if (this.commandStack) {
-        persistenceDelegated = true;
-        this.commandStack.clear();
-      }
-    }
-
-    EventBus.emit('ui:toast', {
-      message: `${info?.displayName ?? 'Vehicle'} placed`,
-      type: 'success',
-    });
-    if (!persistenceDelegated) {
-      EventBus.emit('ui:toolbar-save-state', { state: 'unsaved' });
-    }
+    const detached = freezeQuote(quote);
+    const message = detached.blocker
+      ? this.remedyFor(detached.blocker)
+      : '';
+    if (detached.valid) this.purchaseInFlight = true;
+    this.publishState(detached, message);
   }
 
-  onPointerMove(worldX: number, worldY: number, _pointer: Phaser.Input.Pointer): void {
+  onPointerMove(
+    worldX: number,
+    worldY: number,
+    _pointer: Phaser.Input.Pointer,
+  ): void {
     const track = this.findNearestTrack(worldX, worldY);
     this.ghostGraphics.clear();
-
     if (!track) {
-      // Draw a small X to indicate no valid placement
-      this.ghostGraphics.lineStyle(2, 0xff4444, 0.8);
-      this.ghostGraphics.beginPath();
-      this.ghostGraphics.moveTo(worldX - 8, worldY - 8);
-      this.ghostGraphics.lineTo(worldX + 8, worldY + 8);
-      this.ghostGraphics.moveTo(worldX + 8, worldY - 8);
-      this.ghostGraphics.lineTo(worldX - 8, worldY + 8);
-      this.ghostGraphics.strokePath();
+      this.drawInvalid(worldX, worldY);
       return;
     }
 
-    const t = this.getTrackTAtPoint(track, worldX, worldY);
-    const point = track.getCurvePath().getPoint(t);
-    const angle = track.getTrackAngle({ x: point.x, y: point.y });
-
-    // Ghost rectangle
+    const input = this.buildQuoteInput(track, worldX, worldY);
+    const quote = this.quoteService?.quote(input);
+    const point = { x: input.x, y: input.y };
+    if (!quote?.valid) {
+      this.drawInvalid(point.x, point.y);
+      return;
+    }
+    const angle = track.getTrackAngle(point);
     const length = 60;
     const width = 30;
-    const hw = length / 2;
-    const hh = width / 2;
-    const rad = Phaser.Math.DegToRad(angle);
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-
+    const halfWidth = length / 2;
+    const halfHeight = width / 2;
+    const radians = Phaser.Math.DegToRad(
+      angle + (quote.facing === -1 ? 180 : 0),
+    );
+    const cosine = Math.cos(radians);
+    const sine = Math.sin(radians);
     const corners = [
-      { x: point.x + (-hw * cos - hh * sin), y: point.y + (-hw * sin + hh * cos) },
-      { x: point.x + (hw * cos - hh * sin), y: point.y + (hw * sin + hh * cos) },
-      { x: point.x + (hw * cos + hh * sin), y: point.y + (hw * sin - hh * cos) },
-      { x: point.x + (-hw * cos + hh * sin), y: point.y + (-hw * sin - hh * cos) },
+      {
+        x: point.x + (-halfWidth * cosine - halfHeight * sine),
+        y: point.y + (-halfWidth * sine + halfHeight * cosine),
+      },
+      {
+        x: point.x + (halfWidth * cosine - halfHeight * sine),
+        y: point.y + (halfWidth * sine + halfHeight * cosine),
+      },
+      {
+        x: point.x + (halfWidth * cosine + halfHeight * sine),
+        y: point.y + (halfWidth * sine - halfHeight * cosine),
+      },
+      {
+        x: point.x + (-halfWidth * cosine + halfHeight * sine),
+        y: point.y + (-halfWidth * sine - halfHeight * cosine),
+      },
     ];
 
     this.ghostGraphics.lineStyle(2, 0x00ff88, 0.6);
     this.ghostGraphics.beginPath();
     this.ghostGraphics.moveTo(corners[0].x, corners[0].y);
-    for (let i = 1; i < corners.length; i++) {
-      this.ghostGraphics.lineTo(corners[i].x, corners[i].y);
+    for (let index = 1; index < corners.length; index += 1) {
+      this.ghostGraphics.lineTo(corners[index].x, corners[index].y);
     }
     this.ghostGraphics.closePath();
     this.ghostGraphics.strokePath();
 
-    // Facing arrow
-    const arrowLen = 20;
-    const ax = point.x + cos * arrowLen;
-    const ay = point.y + sin * arrowLen;
+    const arrowLength = 20;
     this.ghostGraphics.lineStyle(2, 0x4ad5ff, 0.8);
     this.ghostGraphics.beginPath();
     this.ghostGraphics.moveTo(point.x, point.y);
-    this.ghostGraphics.lineTo(ax, ay);
+    this.ghostGraphics.lineTo(
+      point.x + cosine * arrowLength,
+      point.y + sine * arrowLength,
+    );
     this.ghostGraphics.strokePath();
   }
 
-  onPointerUp(_worldX: number, _worldY: number, _pointer: Phaser.Input.Pointer): void {
-    // No-op
-  }
+  onPointerUp(
+    _worldX: number,
+    _worldY: number,
+    _pointer: Phaser.Input.Pointer,
+  ): void {}
 
-  onKeyDown(_event: KeyboardEvent): void {
-    // No-op
-  }
+  onKeyDown(_event: KeyboardEvent): void {}
 
-  update(_delta: number): void {
-    // No-op
-  }
+  update(_delta: number): void {}
 
   destroy(): void {
+    EventBus.off('freight:purchase-result', this.purchaseResultHandler);
     this.ghostGraphics.destroy();
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
   private findNearestTrack(wx: number, wy: number): RailTrack | null {
-    return this.trackManager.getClosestTrack({ x: wx, y: wy }, this.SNAP_THRESHOLD);
+    return this.trackManager.getClosestTrack(
+      { x: wx, y: wy },
+      this.SNAP_THRESHOLD,
+    );
   }
 
-  /** Compute the t-value on the track closest to the given world point. */
-  private getTrackTAtPoint(track: RailTrack, wx: number, wy: number): number {
-    return track.getTrackPosition({ x: wx, y: wy });
+  private buildQuoteInput(
+    track: RailTrack,
+    wx: number,
+    wy: number,
+  ): FreightPurchaseQuoteInput {
+    const trackT = track.getTrackPosition({ x: wx, y: wy });
+    const point = track.getCurvePath().getPoint(trackT);
+    return {
+      freightSetId: this.freightSetId,
+      trackUUID: track.getUUID(),
+      trackT,
+      x: point.x,
+      y: point.y,
+      topology: this.trackManager.captureTopology(),
+    };
   }
+
+  private publishState(
+    quote: FreightPurchaseQuote | null,
+    message: string,
+  ): void {
+    EventBus.emit('ui:freight-purchase-state', Object.freeze({
+      quote,
+      cash: WorldManager.world?.company.cash ?? 0,
+      message,
+    }));
+  }
+
+  private remedyFor(blocker: FreightPurchaseBlocker): string {
+    return PURCHASE_REMEDIES[blocker]
+      ?? 'Timber Freight Set purchase could not be completed';
+  }
+
+  private drawInvalid(x: number, y: number): void {
+    this.ghostGraphics.lineStyle(2, 0xff4444, 0.8);
+    this.ghostGraphics.beginPath();
+    this.ghostGraphics.moveTo(x - 8, y - 8);
+    this.ghostGraphics.lineTo(x + 8, y + 8);
+    this.ghostGraphics.moveTo(x + 8, y - 8);
+    this.ghostGraphics.lineTo(x - 8, y + 8);
+    this.ghostGraphics.strokePath();
+  }
+
+  private readonly purchaseResultHandler = (
+    result: FreightPurchaseResult,
+  ): void => {
+    this.purchaseInFlight = false;
+    if (result.ok === false && result.blocker === 'stale-revision') {
+      if (!this.lastPlacement || !this.quoteService) {
+        this.publishState(
+          null,
+          'Freight state changed · review and retry purchase',
+        );
+        return;
+      }
+      const freshQuote = freezeQuote(this.quoteService.quote({
+        ...this.lastPlacement,
+        topology: this.trackManager.captureTopology(),
+      }));
+      this.publishState(
+        freshQuote,
+        'Freight state changed · review and retry purchase',
+      );
+    }
+  };
 }

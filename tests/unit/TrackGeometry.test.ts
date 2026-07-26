@@ -3,6 +3,7 @@ import RailTrack from '../../src/entities/RailTrack';
 import {
   createTrackGeometry,
   deriveAutomaticCubic,
+  deriveTrackEndpointOutward,
 } from '../../src/systems/TrackGeometry';
 
 const { makeScene } = require('../../__mocks__/phaser');
@@ -24,6 +25,89 @@ function makeTrack() {
 }
 
 describe('canonical track geometry', () => {
+  it.each([
+    [
+      'start',
+      {
+        geometryVersion: 1 as const,
+        p0: { x: 0, y: 0 },
+        p1: { x: 0, y: 0 },
+        p2: { x: 0, y: 5 },
+        p3: { x: 10, y: 5 },
+      },
+      { x: 0, y: -1 },
+    ],
+    [
+      'end',
+      {
+        geometryVersion: 1 as const,
+        p0: { x: 0, y: 0 },
+        p1: { x: 6, y: 4 },
+        p2: { x: 9, y: 8 },
+        p3: { x: 9, y: 8 },
+      },
+      { x: 0.6, y: 0.8 },
+    ],
+  ] as const)(
+    'uses the limiting %s direction when the endpoint control is collapsed',
+    (endpoint, geometry, expected) => {
+      expect(deriveTrackEndpointOutward(geometry, endpoint)).toEqual(expected);
+    },
+  );
+
+  it('derives normalized start and end outward directions from endpoint controls', () => {
+    const geometry = {
+      geometryVersion: 1 as const,
+      p0: { x: 10, y: 20 },
+      p1: { x: 13, y: 24 },
+      p2: { x: 41, y: 35 },
+      p3: { x: 36, y: 47 },
+    };
+
+    expect(deriveTrackEndpointOutward(geometry, 'start')).toEqual({
+      x: -0.6,
+      y: -0.8,
+    });
+    expect(deriveTrackEndpointOutward(geometry, 'end')).toEqual({
+      x: -5 / 13,
+      y: 12 / 13,
+    });
+  });
+
+  it('canonicalizes negative zero and preserves the endpoint fallback', () => {
+    const vertical = {
+      geometryVersion: 1 as const,
+      p0: { x: 0, y: 0 },
+      p1: { x: 0, y: 5 },
+      p2: { x: 10, y: 5 },
+      p3: { x: 10, y: 0 },
+    };
+    expect(deriveTrackEndpointOutward(vertical, 'start')).toEqual({
+      x: 0,
+      y: -1,
+    });
+    expect(deriveTrackEndpointOutward(vertical, 'end')).toEqual({
+      x: 0,
+      y: -1,
+    });
+
+    const degenerate = {
+      geometryVersion: 1 as const,
+      p0: { x: 4, y: 7 },
+      p1: { x: 4, y: 7 },
+      p2: { x: 4, y: 7 },
+      p3: { x: 4, y: 7 },
+    };
+    expect(deriveTrackEndpointOutward(degenerate, 'start')).toEqual({
+      x: -1,
+      y: 0,
+    });
+    expect(deriveTrackEndpointOutward(degenerate, 'end')).toEqual({
+      x: 1,
+      y: 0,
+    });
+  });
+
   it('matches Phaser cubic Bézier points and tangents at representative parameters', () => {
     const { track, controls } = makeTrack();
     const reference = new PhaserCubicBezier(

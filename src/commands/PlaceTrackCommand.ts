@@ -59,6 +59,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
   private readonly worldIdentity: WorldData | null;
   private forwardEntryId: number | null = null;
   private applied = false;
+  private expectedRootRevision: number;
   private expectedConstructionRevision: number;
 
   constructor(
@@ -70,6 +71,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
   ) {
     this.def = trackDefFromQuote(quote);
     this.worldIdentity = WorldManager.world;
+    this.expectedRootRevision = quote.rootRevision;
     this.expectedConstructionRevision = quote.constructionRevision;
   }
 
@@ -77,16 +79,20 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     return this.worldIdentity
       ? {
         authority: this.worldIdentity,
-        revision: this.expectedConstructionRevision,
+        rootRevision: this.expectedRootRevision,
+        constructionRevision: this.expectedConstructionRevision,
       }
       : null;
   }
 
   rebaseRevisionContext(context: CommandRevisionContext): boolean {
     if (context.authority !== this.worldIdentity
-      || !Number.isSafeInteger(context.revision)
-      || context.revision < 0) return false;
-    this.expectedConstructionRevision = context.revision;
+      || !Number.isSafeInteger(context.rootRevision)
+      || context.rootRevision < 0
+      || !Number.isSafeInteger(context.constructionRevision)
+      || context.constructionRevision < 0) return false;
+    this.expectedRootRevision = context.rootRevision;
+    this.expectedConstructionRevision = context.constructionRevision;
     return true;
   }
 
@@ -94,6 +100,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     if (this.applied) return false;
     if (!WorldManager.world
       || WorldManager.world !== this.worldIdentity
+      || WorldManager.world.revision !== this.expectedRootRevision
       || WorldManager.world.constructionRevision
         !== this.expectedConstructionRevision) return false;
     const isRedo = this.forwardEntryId !== null;
@@ -101,6 +108,8 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
       ? this.constructionService.revalidateQuoteForRedo(
         this.quote,
         this.quote.expectedCash,
+        this.expectedRootRevision,
+        this.expectedConstructionRevision,
       )
       : this.constructionService.revalidateQuote(this.quote);
     if (!valid) return false;
@@ -113,6 +122,12 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
       this.trackManager.addTrack(createdTrack);
       liveAdded = true;
       this.injectFailure?.('after-live-track');
+      if (WorldManager.world !== this.worldIdentity
+        || WorldManager.world.revision !== this.expectedRootRevision
+        || WorldManager.world.constructionRevision
+          !== this.expectedConstructionRevision) {
+        throw new Error('construction cursor changed before commit');
+      }
 
       const committed = WorldManager.applyConstructionBatch(
         this.expectedConstructionRevision,
@@ -137,6 +152,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
         },
       );
       if (!committed) throw new Error('persisted track transaction failed');
+      this.expectedRootRevision += 1;
       this.expectedConstructionRevision += 1;
       this.forwardEntryId = postedEntryId;
       this.applied = true;
@@ -162,6 +178,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
     }
     if (!this.applied || forwardEntryId === null || !world
       || world !== this.worldIdentity || !live
+      || world.revision !== this.expectedRootRevision
       || world.constructionRevision !== this.expectedConstructionRevision
       || !equalPlainData(persisted, this.def)
       || !liveMatches
@@ -172,6 +189,12 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
       if (!this.trackManager.removeTrack(this.def.uuid)) return false;
       liveRemoved = true;
       this.injectFailure?.('undo-after-live-track');
+      if (WorldManager.world !== this.worldIdentity
+        || WorldManager.world.revision !== this.expectedRootRevision
+        || WorldManager.world.constructionRevision
+          !== this.expectedConstructionRevision) {
+        throw new Error('construction cursor changed before undo commit');
+      }
 
       const committed = WorldManager.applyConstructionBatch(
         this.expectedConstructionRevision,
@@ -196,6 +219,7 @@ export class PlaceTrackCommand implements RevisionAwareCommand {
         },
       );
       if (!committed) throw new Error('persisted track transaction failed');
+      this.expectedRootRevision += 1;
       this.expectedConstructionRevision += 1;
       this.applied = false;
       return true;

@@ -3,6 +3,7 @@ import Train from '../../src/entities/Train';
 import RailTrack from '../../src/entities/RailTrack';
 import TrackFlowSolver from '../../src/systems/TrackFlowSolver';
 import { GameConfig } from '../../src/config/GameConfig';
+import { GameStateManager } from '../../src/managers/GameStateManager';
 
 describe('TrainManager.getBounds()', () => {
   let manager: TrainManager;
@@ -95,6 +96,157 @@ describe('TrainManager.createInitialTrain()', () => {
     const manager = new TrainManager(scene, {} as any, {} as any);
     const train = manager.createInitialTrain('my-train-id');
     expect(train.getUUID()).toBe('my-train-id');
+  });
+});
+
+describe('TrainManager aggregate freight trains', () => {
+  const { makeScene } = require('../../__mocks__/phaser');
+
+  beforeEach(() => {
+    GameStateManager.setActiveTrains(0);
+  });
+
+  it('creates one train, one solver, one body mapping, and no carriage', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+
+    const train = manager.createFreightTrain(
+      'freight-train',
+      'timber-freight-set',
+    );
+
+    expect(manager.trains).toEqual([train]);
+    expect(manager.carriages).toEqual([]);
+    expect(train.freightSetId).toBe('timber-freight-set');
+    expect((manager as any).trackSolvers.size).toBe(1);
+    expect(TrainManager.bodyToTrain.get(train.getMatterBody())).toBe(train);
+    expect(GameStateManager.activeTrains).toBe(1);
+  });
+
+  it('fully removes a selected freight train and updates active count', () => {
+    const scene = makeScene();
+    const cameraController = {
+      startFollow: jest.fn(),
+      stopFollow: jest.fn(),
+    };
+    const manager = new TrainManager(
+      scene,
+      {} as any,
+      cameraController as any,
+    );
+    const train = manager.createFreightTrain(
+      'freight-train',
+      'timber-freight-set',
+    );
+    const body = train.getMatterBody();
+    const bodyDestroy = jest.spyOn(body, 'destroy');
+    const containerDestroy = jest.spyOn(train, 'destroy');
+    manager.selectTrain(train);
+
+    expect(manager.removeFreightTrain('freight-train')).toBe(true);
+
+    expect(manager.trains).toEqual([]);
+    expect((manager as any).trackSolvers.size).toBe(0);
+    expect(TrainManager.bodyToTrain.has(body)).toBe(false);
+    expect(manager.selectedTrain).toBeNull();
+    expect(bodyDestroy).toHaveBeenCalledTimes(1);
+    expect(containerDestroy).toHaveBeenCalledTimes(1);
+    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
+    expect(GameStateManager.activeTrains).toBe(0);
+    expect(manager.removeFreightTrain('freight-train')).toBe(false);
+  });
+
+  it('stops only the requested freight trains', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+    const first = manager.createFreightTrain('first', 'timber-freight-set');
+    const second = manager.createFreightTrain('second', 'timber-freight-set');
+    first.enginePower = 1;
+    second.enginePower = -1;
+
+    manager.stopFreightTrains(['second']);
+
+    expect(first.enginePower).toBe(1);
+    expect(second.enginePower).toBe(0);
+  });
+
+  it('keeps operations-locked trains stopped throughout their update', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+    const locked = manager.createFreightTrain(
+      'locked',
+      'timber-freight-set',
+    );
+    const free = manager.createFreightTrain(
+      'free',
+      'timber-freight-set',
+    );
+    jest.spyOn(locked, 'update').mockImplementation();
+    jest.spyOn(free, 'update').mockImplementation();
+    for (const solver of (manager as any).trackSolvers.values()) {
+      jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
+    }
+    locked.enginePower = 1;
+    free.enginePower = -1;
+
+    manager.update(0, 16, new Set(['locked']));
+
+    expect(locked.enginePower).toBe(0);
+    expect(free.enginePower).toBe(-1);
+  });
+
+  it('rejects non-freight trains from freight placement and removal APIs', () => {
+    const trackManager = { getTrack: jest.fn() };
+    const manager = new TrainManager(
+      makeScene(),
+      trackManager as any,
+      {} as any,
+    );
+    const bootstrap = manager.createInitialTrain('bootstrap-train');
+    const body = bootstrap.getMatterBody();
+    const bodyDestroy = jest.spyOn(body, 'destroy');
+    const trainDestroy = jest.spyOn(bootstrap, 'destroy');
+
+    expect(manager.placeFreightTrain(
+      bootstrap,
+      'track-1',
+      0.5,
+      1,
+    )).toBe(false);
+    expect(trackManager.getTrack).not.toHaveBeenCalled();
+    expect(manager.removeFreightTrain('bootstrap-train')).toBe(false);
+    expect(manager.trains).toEqual([bootstrap]);
+    expect(bodyDestroy).not.toHaveBeenCalled();
+    expect(trainDestroy).not.toHaveBeenCalled();
+  });
+
+  it('does not stop or operation-lock non-freight trains by ID', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+    const bootstrap = manager.createInitialTrain('bootstrap-train');
+    jest.spyOn(bootstrap, 'update').mockImplementation();
+    const solver = (manager as any).trackSolvers.get(bootstrap);
+    jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
+    bootstrap.enginePower = 1;
+
+    manager.stopFreightTrains(['bootstrap-train']);
+    expect(bootstrap.enginePower).toBe(1);
+
+    manager.update(0, 16, new Set(['bootstrap-train']));
+    expect(bootstrap.enginePower).toBe(1);
+    expect(bootstrap.update).toHaveBeenCalledTimes(1);
   });
 });
 

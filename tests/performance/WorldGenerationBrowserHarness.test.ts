@@ -10,6 +10,11 @@ describe('world generation browser harness', () => {
   it('measures opportunity and bounded economy generation together', () => {
     const measurement = window.__runWorldGenerationBenchmark!();
 
+    expect(measurement.opportunityAudit.seedsEvaluated).toBe(284);
+    expect(measurement.seed)
+      .toBe(measurement.opportunityAudit.firstWorstSeed);
+    expect(measurement.opportunityResult.opportunity.resolvedAttempt)
+      .toBe(measurement.opportunityAudit.maxResolvedAttempt);
     expect(measurement.economyCandidatesCap)
       .toBe(MAX_ECONOMY_SITE_CANDIDATES);
     expect(measurement.opportunityResult.ok).toBe(true);

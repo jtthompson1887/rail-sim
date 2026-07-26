@@ -3,7 +3,7 @@ import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
 import { scalePx, responsiveFontSize } from '../utils/responsive';
 import type { SelectionManager } from '../systems/SelectionManager';
-import { VehicleType, VEHICLE_TYPE_REGISTRY } from '../config/VehicleTypes';
+import type { VehicleType } from '../config/VehicleTypes';
 import {
   GENERATOR_LOCK_REASON,
   RESHAPE_LOCK_REASON,
@@ -290,57 +290,9 @@ export class PropertiesPanel {
   private showVehicleParams(): void {
     this.clearLines();
     this.clearVehicleObjects();
-    this.slideIn();
     this.deleteBtn.setVisible(false);
     this.deleteBtnText.setVisible(false);
-
-    const px = this.getOnscreenX();
-    const { width, height } = this.scene.scale;
-    const pw = this.panelWidth;
-    const fs = responsiveFontSize(11, width, height, 9, 11);
-    const btnH = scalePx(28, width, height, 24);
-    const btnW = pw - 16;
-
-    // Title
-    const title = this.scene.add.text(px, 14, '🚂 VEHICLE', {
-      fontFamily: 'Verdana', fontSize: fs, color: '#4ad5ff',
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
-    this.lines.push(title);
-
-    const hint = this.scene.add.text(px, 34, 'Click on a track to place', {
-      fontFamily: 'Verdana', fontSize: fs, color: '#6a8aa0', align: 'center',
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(600);
-    this.lines.push(hint);
-
-    let rowY = 66;
-    for (const info of VEHICLE_TYPE_REGISTRY) {
-      const isActive = this.activeVehicleType === info.id;
-      const bg = this.scene.add.rectangle(px, rowY, btnW, btnH, isActive ? 0x1e4a7c : 0x1a3a5c, 0.9)
-        .setStrokeStyle(1, isActive ? 0x4ad5ff : 0x2a8cff, isActive ? 0.8 : 0.3)
-        .setScrollFactor(0).setDepth(599)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerover', () => {
-          if (this.activeVehicleType !== info.id) bg.setFillStyle(0x1e4a6e, 0.95);
-        })
-        .on('pointerout', () => {
-          if (this.activeVehicleType !== info.id) bg.setFillStyle(0x1a3a5c, 0.9);
-        })
-        .on('pointerdown', () => {
-          this.activeVehicleType = info.id;
-          EventBus.emit('vehicle:type-changed', { type: info.id });
-          // Refresh UI to show active state
-          this.showVehicleParams();
-        });
-      this.vehicleTypeObjects.push(bg);
-
-      const text = this.scene.add.text(px, rowY, info.displayName, {
-        fontFamily: 'Verdana', fontSize: fs, color: isActive ? '#4ad5ff' : '#8ab4d0',
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(600);
-      this.vehicleTypeObjects.push(text);
-
-      rowY += btnH + 8;
-    }
-    this.container.add([...this.lines, ...this.vehicleTypeObjects]);
+    this.slideOut();
   }
 
   // ── Selection properties UI ────────────────────────────────────────────────

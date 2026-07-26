@@ -30,6 +30,7 @@ function element<K extends keyof HTMLElementTagNameMap>(
 /** Accessible, compact decision panel driven only by immutable preview DTOs. */
 export class ConstructionInspector {
   private readonly root = element('section', 'construction-inspector');
+  private readonly objective = element('div', 'construction-objective');
   private readonly primary = element('div', 'construction-primary');
   private readonly subtotal = element('div', 'construction-engineering-subtotal');
   private readonly detail = element('div', 'construction-detail');
@@ -71,6 +72,10 @@ export class ConstructionInspector {
       'font:12px/1.35 Verdana,sans-serif',
       'pointer-events:auto',
     ].join(';');
+    this.objective.textContent =
+      'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.';
+    this.objective.style.cssText =
+      'color:#9feaff;font-weight:700;margin-bottom:8px';
     this.primary.style.cssText = 'font-size:15px;font-weight:700;color:#fff;margin-bottom:4px';
     this.subtotal.style.cssText = 'color:#8ab4d0;margin-bottom:8px';
     this.detail.style.cssText = 'white-space:pre-line;color:#bad3e2;font-size:11px';
@@ -104,6 +109,7 @@ export class ConstructionInspector {
     this.bindAction(this.cancelButton, 'cancel');
     actions.append(this.confirmButton, this.backButton, this.cancelButton);
     this.root.append(
+      this.objective,
       this.primary,
       this.subtotal,
       this.detail,
@@ -172,8 +178,16 @@ export class ConstructionInspector {
       `Track ${money(costs.track)} · Earthworks ${money(costs.earthworks)}`,
       `Bridge ${money(costs.bridge)} · Tunnel ${money(costs.tunnel)} · Topology ${money(model.topologyCost)}`,
     ].join('\n');
-    this.remedy.textContent = model.message;
-    this.remedy.style.display = model.message ? 'block' : 'none';
+    const reserveWarning = model.canConfirm
+      && model.affordable
+      && model.breachesStarterReserve;
+    const message = reserveWarning
+      ? 'Build leaves less than the £110,000 train and operating reserve'
+      : model.message;
+    this.remedy.textContent = message;
+    this.remedy.dataset.tone = reserveWarning ? 'amber' : 'default';
+    this.remedy.style.background = reserveWarning ? '#5c430f' : '#102c42';
+    this.remedy.style.display = message ? 'block' : 'none';
     this.confirmButton.disabled = !this.enabled
       || !model.canConfirm
       || model.actions.indexOf('confirm') === -1;
