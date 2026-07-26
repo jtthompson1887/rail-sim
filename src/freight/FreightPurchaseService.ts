@@ -287,13 +287,17 @@ export class FreightPurchaseService {
         train = this.runtimePort.spawn(trainId, quote.freightSetId);
       } catch {
         return failure(
-          this.removeProvisional(trainId) === 'threw'
-            ? 'live-rollback-failed'
-            : 'live-spawn-failed',
+          this.removeProvisional(trainId) === 'removed'
+            ? 'live-spawn-failed'
+            : 'live-rollback-failed',
         );
       }
       if (!train) {
-        return failure('live-spawn-failed');
+        return failure(
+          this.removeProvisional(trainId) === 'removed'
+            ? 'live-spawn-failed'
+            : 'live-rollback-failed',
+        );
       }
 
       let placed = false;

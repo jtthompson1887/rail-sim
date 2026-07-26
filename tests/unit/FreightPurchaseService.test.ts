@@ -384,6 +384,7 @@ describe('FreightPurchaseService', () => {
     const before = authoritativeSnapshot(world);
     const runtime = makeRuntime({
       spawn: jest.fn().mockReturnValue(null),
+      remove: jest.fn().mockReturnValue(true),
     });
     const idFactory = jest.fn().mockReturnValue('single-use-train');
     const service = new FreightPurchaseService(
@@ -415,6 +416,7 @@ describe('FreightPurchaseService', () => {
         duplicateResult = service.purchase(quote);
         return null;
       }),
+      remove: jest.fn().mockReturnValue(true),
     });
     service = new FreightPurchaseService(
       WorldManager,
@@ -442,6 +444,7 @@ describe('FreightPurchaseService', () => {
     const before = authoritativeSnapshot(world);
     const runtime = makeRuntime({
       spawn: jest.fn().mockReturnValue(null),
+      remove: jest.fn().mockReturnValue(true),
     });
     const service = new FreightPurchaseService(
       WorldManager,
@@ -452,8 +455,69 @@ describe('FreightPurchaseService', () => {
     const result = service.purchase(service.quote(connectedInput()));
 
     expect(result).toEqual({ ok: false, blocker: 'live-spawn-failed' });
+    expect(runtime.port.remove).toHaveBeenCalledWith('spawn-failure');
     expect(authoritativeSnapshot(world)).toBe(before);
     expect(runtime.live.size).toBe(0);
+  });
+
+  it.each([
+    ['rejected', () => false],
+    ['threw', () => {
+      throw new Error('physics destroy failed');
+    }],
+  ])(
+    'reports a null live spawn whose cleanup %s as live-rollback-failed',
+    (_cleanupOutcome, cleanup) => {
+      const world = setupWorld();
+      const before = authoritativeSnapshot(world);
+      const remove = jest.fn(cleanup);
+      const runtime = makeRuntime({
+        spawn: jest.fn().mockReturnValue(null),
+        remove,
+      });
+      const service = new FreightPurchaseService(
+        WorldManager,
+        runtime.port,
+        () => 'null-spawn-residue',
+      );
+
+      const result = service.purchase(service.quote(connectedInput()));
+
+      expect(result).toEqual({
+        ok: false,
+        blocker: 'live-rollback-failed',
+      });
+      expect(remove).toHaveBeenCalledWith('null-spawn-residue');
+      expect(authoritativeSnapshot(world)).toBe(before);
+    },
+  );
+
+  it('reports rejected cleanup after a throwing partial live spawn', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime();
+    runtime.port.spawn = jest.fn((trainId: string) => {
+      runtime.live.set(trainId, { getUUID: () => trainId } as Train);
+      throw new Error('spawn failed after registration');
+    });
+    runtime.port.remove = jest.fn().mockReturnValue(false);
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'partial-spawn-rejected-cleanup',
+    );
+
+    const result = service.purchase(service.quote(connectedInput()));
+
+    expect(result).toEqual({
+      ok: false,
+      blocker: 'live-rollback-failed',
+    });
+    expect(runtime.port.remove).toHaveBeenCalledWith(
+      'partial-spawn-rejected-cleanup',
+    );
+    expect(runtime.live.has('partial-spawn-rejected-cleanup')).toBe(true);
+    expect(authoritativeSnapshot(world)).toBe(before);
   });
 
   it('reports exceptional cleanup after a throwing partial live spawn', () => {
