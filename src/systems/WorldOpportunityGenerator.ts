@@ -1,6 +1,5 @@
 import {
   ENDPOINT_CONNECTION_COST,
-  STANDARD_STARTING_CASH,
 } from '../config/ConstructionConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
@@ -26,7 +25,10 @@ import {
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
 import { deriveAutomaticCubic } from './TrackGeometry';
-import { WorldOpportunityValidator } from './WorldOpportunityValidator';
+import {
+  MAX_STARTER_CORRIDOR_COST,
+  WorldOpportunityValidator,
+} from './WorldOpportunityValidator';
 
 export interface OpportunityGenerationDiagnostics {
   attemptsEvaluated: number;
@@ -301,7 +303,7 @@ export class WorldOpportunityGenerator {
         corridor('detour', [start, waypoint, end], [firstLeg, secondLeg], 'long-flat'),
       ];
       if (Math.min(...corridors.map((value) => value.estimatedCost))
-        > STANDARD_STARTING_CASH) {
+        > MAX_STARTER_CORRIDOR_COST) {
         continue;
       }
       const surveyPoints = [start, waypoint, end];

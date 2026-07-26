@@ -63,7 +63,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(setZoom).toHaveBeenCalledWith(GameConfig.CAMERA.MIN_ZOOM);
   });
 
-  it('renders both persisted corridor guides without duplicate facility labels', () => {
+  it('renders both persisted corridor guides and one exact starter prompt', () => {
     const created = WorldManager.tryCreateNew(
       'Survey',
       'real-terrain-beta',
@@ -95,7 +95,11 @@ describe('WorldScene persisted opportunity view', () => {
     expect(graphics.beginPath).toHaveBeenCalledTimes(2);
     expect(graphics.strokePath).toHaveBeenCalledTimes(2);
     expect(graphics.fillCircle).not.toHaveBeenCalled();
-    expect(scene.add.text).toHaveBeenCalledTimes(2);
+    expect(scene.add.text).toHaveBeenCalledTimes(3);
+    expect(scene.add.text.mock.calls.map((call: unknown[]) => call[2]))
+      .toContain(
+        'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.',
+      );
     const direct = created.world.starterOpportunity.corridors[0];
     expect(scene.add.text.mock.calls[0][0]).toBeCloseTo(
       (direct.waypoints[0].x + direct.waypoints[1].x) / 2,
@@ -126,7 +130,7 @@ describe('WorldScene persisted opportunity view', () => {
       fillStyle: jest.fn().mockReturnThis(),
       fillCircle: jest.fn().mockReturnThis(),
     };
-    const labels = Array.from({ length: 2 }, () => ({
+    const labels = Array.from({ length: 3 }, () => ({
       setOrigin: jest.fn().mockReturnThis(),
       setDepth: jest.fn().mockReturnThis(),
       setScale: jest.fn().mockReturnThis(),
@@ -140,7 +144,7 @@ describe('WorldScene persisted opportunity view', () => {
     const renderedLabels = scene.starterOpportunityLabels;
     scene.updateStarterOpportunityLabelScale();
 
-    expect(renderedLabels).toHaveLength(2);
+    expect(renderedLabels).toHaveLength(3);
     for (const label of renderedLabels) {
       expect(label.setScale).toHaveBeenCalledWith(4);
     }

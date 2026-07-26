@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PlaceTrackCommand } from '../../commands/PlaceTrackCommand';
+import { STARTER_ROUTE_RESERVE } from '../../freight/FreightSetCatalog';
 import type TrackManager from '../../managers/TrackManager';
 import { WorldManager } from '../../managers/WorldManager';
 import { EventBus } from '../../services/EventBus';
@@ -349,6 +350,8 @@ export class PlaceTrackTool implements IEditorTool {
       stale,
       message,
       actions,
+      breachesStarterReserve:
+        affordable && preview.cashAfter < STARTER_ROUTE_RESERVE,
     });
     this.overlay.render(this.currentModel);
     this.dispatchPreview();

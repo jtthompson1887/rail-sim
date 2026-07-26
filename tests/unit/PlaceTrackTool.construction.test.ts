@@ -107,6 +107,7 @@ function pointer(button = 0): any {
 function makeHarness(options: {
   analyzed?: ConstructionPreview;
   affordable?: boolean;
+  cash?: number;
   pushResult?: boolean;
 } = {}) {
   const scene = makeScene();
@@ -125,7 +126,7 @@ function makeHarness(options: {
     revision: 0,
     constructionRevision: 0,
     company: {
-      cash: options.affordable === false ? 0 : 10_000,
+      cash: options.cash ?? (options.affordable === false ? 0 : 10_000),
     },
   };
   const commandStack = {
@@ -183,6 +184,64 @@ describe('PlaceTrackTool live construction workflow', () => {
     }));
     expect(Object.isFrozen(harness.tool.previewModel)).toBe(true);
     expect(Object.isFrozen(harness.tool.previewModel!.structureLengths)).toBe(true);
+  });
+
+  it('warns only below the affordable £110,000 starter reserve boundary', () => {
+    const exactReserve = preview() as any;
+    exactReserve.totalCost = 890_000;
+    exactReserve.quote.totalCost = 890_000;
+    exactReserve.cashBefore = 1_000_000;
+    exactReserve.cashAfter = 110_000;
+    const exactHarness = makeHarness({
+      analyzed: exactReserve,
+      cash: 1_000_000,
+    });
+    exactHarness.tool.onPointerDown(0, 0, pointer());
+    exactHarness.tool.onPointerMove(300, 0, pointer());
+    exactHarness.tool.onPointerUp(300, 0, pointer());
+    expect(exactHarness.tool.previewModel).toEqual(expect.objectContaining({
+      affordable: true,
+      canConfirm: true,
+      cashAfter: 110_000,
+      breachesStarterReserve: false,
+    }));
+
+    const belowReserve = preview() as any;
+    belowReserve.totalCost = 890_001;
+    belowReserve.quote.totalCost = 890_001;
+    belowReserve.cashBefore = 1_000_000;
+    belowReserve.cashAfter = 109_999;
+    const warningHarness = makeHarness({
+      analyzed: belowReserve,
+      cash: 1_000_000,
+    });
+    warningHarness.tool.onPointerDown(0, 0, pointer());
+    warningHarness.tool.onPointerMove(300, 0, pointer());
+    warningHarness.tool.onPointerUp(300, 0, pointer());
+    expect(warningHarness.tool.previewModel).toEqual(expect.objectContaining({
+      affordable: true,
+      canConfirm: true,
+      cashAfter: 109_999,
+      breachesStarterReserve: true,
+    }));
+
+    const unaffordable = preview() as any;
+    unaffordable.totalCost = 890_001;
+    unaffordable.quote.totalCost = 890_001;
+    unaffordable.cashBefore = 890_000;
+    unaffordable.cashAfter = -1;
+    const blockedHarness = makeHarness({
+      analyzed: unaffordable,
+      cash: 890_000,
+    });
+    blockedHarness.tool.onPointerDown(0, 0, pointer());
+    blockedHarness.tool.onPointerMove(300, 0, pointer());
+    blockedHarness.tool.onPointerUp(300, 0, pointer());
+    expect(blockedHarness.tool.previewModel).toEqual(expect.objectContaining({
+      affordable: false,
+      canConfirm: false,
+      breachesStarterReserve: false,
+    }));
   });
 
   it('moves idle → dragging → review and caches unchanged geometry/config input', () => {

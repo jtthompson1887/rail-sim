@@ -601,6 +601,21 @@ export default class WorldScene extends Phaser.Scene {
       ).setOrigin(0.5, 0).setDepth(-19);
       this.starterOpportunityLabels.push(label);
     });
+    const prompt = this.add.text(
+      opportunity.recommendedCamera.x,
+      Math.min(...opportunity.sites.map(
+        (site) => site.y - site.footprintRadius,
+      )) - OPPORTUNITY_CORRIDOR_LABEL_SEPARATION_PX * worldUnitsPerScreenPixel,
+      'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.',
+      {
+        fontFamily: 'Verdana',
+        fontSize: '16px',
+        color: '#ffe39a',
+        backgroundColor: '#06131fcc',
+        padding: { x: 8, y: 4 },
+      },
+    ).setOrigin(0.5, 1).setDepth(-19);
+    this.starterOpportunityLabels.push(prompt);
   }
 
   private updateStarterOpportunityLabelScale(): void {

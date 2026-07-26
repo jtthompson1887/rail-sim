@@ -94,6 +94,7 @@ function model(): ConstructionPreviewModel {
     stale: false,
     message: '',
     actions: ['confirm', 'backstep', 'cancel'],
+    breachesStarterReserve: false,
   };
 }
 

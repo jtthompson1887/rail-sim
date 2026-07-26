@@ -9,7 +9,6 @@ import {
 import {
   ConstructionConfig,
   ENDPOINT_CONNECTION_COST,
-  STANDARD_STARTING_CASH,
 } from '../../src/config/ConstructionConfig';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
@@ -34,6 +33,84 @@ const variedTerrain = {
       + Math.cos(y / 510) * 24;
   },
 };
+
+function generatorWithCheapestCorridorCost(
+  cheapestCorridorCost: number,
+): WorldOpportunityGenerator {
+  const generator = new WorldOpportunityGenerator(variedTerrain);
+  let analysisIndex = 0;
+  (generator as any).analyzer = {
+    analyzeDetailed: jest.fn((geometry: any) => {
+      const direct = analysisIndex++ % 3 === 0;
+      const length = direct ? 2_000 : 1_200;
+      const detourEngineeringTotal = cheapestCorridorCost + 10_000
+        - ENDPOINT_CONNECTION_COST;
+      const total = direct
+        ? cheapestCorridorCost
+        : analysisIndex % 3 === 2
+          ? Math.floor(detourEngineeringTotal / 2)
+          : Math.ceil(detourEngineeringTotal / 2);
+      return {
+        proposal: {
+          geometry,
+          verticalProfile: {
+            profileVersion: 1,
+            knots: direct
+              ? [{ t: 0, elevation: 0 }, { t: 1, elevation: 100 }]
+              : [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+          },
+          length,
+          minimumRadius: Infinity,
+          maximumGradePercent: direct ? 5 : 0,
+          maximumGradeT: 1,
+          maximumGradeDistance: length,
+          structures: [{
+            type: 'surface',
+            startT: 0,
+            endT: 1,
+            startElevation: 0,
+            endElevation: direct ? 100 : 0,
+          }],
+          structureLengths: {
+            surface: length,
+            cut: 0,
+            fill: 0,
+            bridge: 0,
+            tunnel: 0,
+          },
+          costs: {
+            track: total,
+            earthworks: 0,
+            bridge: 0,
+            tunnel: 0,
+            total,
+          },
+          valid: true,
+          reasonCode: 'ok',
+          remedy: '',
+        },
+        curveSamples: [
+          {
+            t: 0,
+            point: geometry.p0,
+            distance: 0,
+            segmentLength: 0,
+          },
+          {
+            t: 1,
+            point: geometry.p3,
+            distance: length,
+            segmentLength: length,
+          },
+        ],
+      };
+    }),
+  };
+  (generator as any).validator = {
+    validate: jest.fn().mockReturnValue({ valid: true }),
+  };
+  return generator;
+}
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -150,7 +227,7 @@ describe('WorldOpportunityGenerator', () => {
     ))).toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
   });
 
-  it('keeps estimates quote-equivalent, chain-priced, and affordable', () => {
+  it('keeps estimates quote-equivalent, chain-priced, and within the starter reserve', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -172,7 +249,31 @@ describe('WorldOpportunityGenerator', () => {
     )).toEqual([0, ENDPOINT_CONNECTION_COST]);
     expect(Math.min(...result.opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
-    ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);
+    ))).toBeLessThanOrEqual(890_000);
+  });
+
+  it('accepts an exact £890,000 cheapest corridor', () => {
+    const result = generatorWithCheapestCorridorCost(890_000).generate(config);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Math.min(...result.opportunity.corridors.map(
+      (corridor) => corridor.estimatedCost,
+    ))).toBe(890_000);
+  });
+
+  it('rejects a £890,001 cheapest corridor within the fixed attempt bound', () => {
+    const result = generatorWithCheapestCorridorCost(890_001).generate(config);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'opportunity-exhausted',
+        seed: config.seed,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
+      },
+    });
   });
 
   it('chains the two-leg detour exactly with a continuous through tangent', () => {
