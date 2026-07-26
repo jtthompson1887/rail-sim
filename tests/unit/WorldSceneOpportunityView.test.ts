@@ -5,6 +5,7 @@ import { WorldManager } from '../../src/managers/WorldManager';
 import { GameStateManager } from '../../src/managers/GameStateManager';
 import WorldScene from '../../src/scenes/WorldScene';
 import { GameConfig } from '../../src/config/GameConfig';
+import { EventBus } from '../../src/services/EventBus';
 
 describe('WorldScene persisted opportunity view', () => {
   beforeEach(() => {
@@ -62,7 +63,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(setZoom).toHaveBeenCalledWith(GameConfig.CAMERA.MIN_ZOOM);
   });
 
-  it('renders two survey sites and both persisted corridor guides', () => {
+  it('renders both persisted corridor guides without duplicate facility labels', () => {
     const created = WorldManager.tryCreateNew(
       'Survey',
       'real-terrain-beta',
@@ -93,8 +94,8 @@ describe('WorldScene persisted opportunity view', () => {
 
     expect(graphics.beginPath).toHaveBeenCalledTimes(2);
     expect(graphics.strokePath).toHaveBeenCalledTimes(2);
-    expect(graphics.fillCircle).toHaveBeenCalledTimes(2);
-    expect(scene.add.text).toHaveBeenCalledTimes(4);
+    expect(graphics.fillCircle).not.toHaveBeenCalled();
+    expect(scene.add.text).toHaveBeenCalledTimes(2);
     const direct = created.world.starterOpportunity.corridors[0];
     expect(scene.add.text.mock.calls[0][0]).toBeCloseTo(
       (direct.waypoints[0].x + direct.waypoints[1].x) / 2,
@@ -125,7 +126,7 @@ describe('WorldScene persisted opportunity view', () => {
       fillStyle: jest.fn().mockReturnThis(),
       fillCircle: jest.fn().mockReturnThis(),
     };
-    const labels = Array.from({ length: 4 }, () => ({
+    const labels = Array.from({ length: 2 }, () => ({
       setOrigin: jest.fn().mockReturnThis(),
       setDepth: jest.fn().mockReturnThis(),
       setScale: jest.fn().mockReturnThis(),
@@ -139,7 +140,7 @@ describe('WorldScene persisted opportunity view', () => {
     const renderedLabels = scene.starterOpportunityLabels;
     scene.updateStarterOpportunityLabelScale();
 
-    expect(renderedLabels).toHaveLength(4);
+    expect(renderedLabels).toHaveLength(2);
     for (const label of renderedLabels) {
       expect(label.setScale).toHaveBeenCalledWith(4);
     }
@@ -177,8 +178,7 @@ describe('WorldScene persisted opportunity view', () => {
 
     expect(graphics.lineStyle.mock.calls.map((call: unknown[]) => call[0]))
       .toEqual([240, 240]);
-    expect(graphics.fillCircle.mock.calls.map((call: unknown[]) => call[2]))
-      .toEqual([180, 180]);
+    expect(graphics.fillCircle).not.toHaveBeenCalled();
 
     const direct = created.world.starterOpportunity.corridors[0];
     const directMidY = (
@@ -189,7 +189,198 @@ describe('WorldScene persisted opportunity view', () => {
       10,
     );
 
-    const firstSite = created.world.starterOpportunity.sites[0];
-    expect(scene.add.text.mock.calls[2][1]).toBe(firstSite.y - 320);
+  });
+
+  it('renders all seven generated facilities by their economy names', () => {
+    const created = WorldManager.tryCreateNew(
+      'Facilities',
+      'facility-view-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const scene = new WorldScene() as any;
+    const createdViews: any[] = [];
+    scene.trackManager = {
+      getTracksInRadius: jest.fn().mockReturnValue([]),
+    };
+    scene.createFacilityView = jest.fn((
+      placement: unknown,
+      inspection: { name: string },
+    ) => {
+      const view = {
+        placement,
+        inspection,
+        update: jest.fn(),
+        setSelected: jest.fn(),
+        setSelectionEnabled: jest.fn(),
+        destroy: jest.fn(),
+      };
+      createdViews.push(view);
+      return view;
+    });
+
+    scene.renderFacilities();
+
+    expect(createdViews.map((view) => view.inspection.name)).toEqual([
+      'Managed Forest',
+      'Sawmill',
+      'Quarry',
+      'Cement Works',
+      'Port Interchange',
+      'Prefabrication Plant',
+      'Town Construction Market',
+    ]);
+    expect(scene.facilityViews).toHaveLength(7);
+  });
+
+  it('uses the exact endpoint-in-access-radius test without creating railway objects', () => {
+    const created = WorldManager.tryCreateNew(
+      'Rail access',
+      'facility-rail-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const facility = created.world.economy.facilities[0];
+    const addTrack = jest.fn();
+    const createStation = jest.fn();
+    const candidate = {
+      getControlPoints: () => ({
+        p0: {
+          x: facility.railAccess.x + facility.railAccess.radius - 1,
+          y: facility.railAccess.y,
+        },
+        p1: { x: 0, y: 0 },
+        p2: { x: 0, y: 0 },
+        p3: {
+          x: facility.railAccess.x + facility.railAccess.radius + 1,
+          y: facility.railAccess.y,
+        },
+      }),
+    };
+    const scene = new WorldScene() as any;
+    scene.trackManager = {
+      getTracksInRadius: jest.fn().mockReturnValue([candidate]),
+      addTrack,
+      createStation,
+    };
+
+    expect(scene.isFacilityRailConnected(facility)).toBe(true);
+    expect(scene.trackManager.getTracksInRadius).toHaveBeenCalledWith(
+      facility.railAccess,
+      facility.railAccess.radius,
+    );
+    expect(addTrack).not.toHaveBeenCalled();
+    expect(createStation).not.toHaveBeenCalled();
+    expect(created.world.tracks).toHaveLength(0);
+    expect(created.world.stations).toHaveLength(0);
+  });
+
+  it('selects one facility, publishes its inspection, and clears stale selection', () => {
+    const created = WorldManager.tryCreateNew(
+      'Selection',
+      'facility-select-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const scene = new WorldScene() as any;
+    const views = created.world.economy.facilities.map((facility) => ({
+      facilityId: facility.id,
+      setSelected: jest.fn(),
+      update: jest.fn(),
+      destroy: jest.fn(),
+    }));
+    scene.facilityViews = views;
+    scene.selectionManager = { clearSelection: jest.fn() };
+    scene.trainManager = {
+      selectedTrain: { id: 'already-selected-train' },
+      deselectTrain: jest.fn(),
+    };
+    scene.trackManager = {
+      getTracksInRadius: jest.fn().mockReturnValue([]),
+    };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.facilitySelectedHandler({ facilityId: 'sawmill' });
+
+    expect(views.find((view) => view.facilityId === 'sawmill')?.setSelected)
+      .toHaveBeenCalledWith(true);
+    expect(views.filter((view) => view.facilityId !== 'sawmill')
+      .every((view) => view.setSelected.mock.calls.at(-1)?.[0] === false))
+      .toBe(true);
+    expect(scene.selectionManager.clearSelection).toHaveBeenCalled();
+    expect(scene.trainManager.deselectTrain).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith(
+      'facility:inspection',
+      expect.objectContaining({
+        id: 'sawmill',
+        status: { code: 'waiting-input', label: 'Needs logs' },
+      }),
+    );
+
+    scene.clearFacilitySelection();
+    expect(emit).toHaveBeenCalledWith('facility:deselected', {
+      facilityId: 'sawmill',
+    });
+  });
+
+  it('clears an existing facility before auto-selecting a live train in Operate mode', () => {
+    const scene = new WorldScene() as any;
+    const facility = {
+      facilityId: 'sawmill',
+      setSelected: jest.fn(),
+      setSelectionEnabled: jest.fn(),
+    };
+    const train = { id: 'live-train' };
+    scene.activeEditorTool = { cancel: jest.fn() };
+    scene.selectionManager = { clearSelection: jest.fn() };
+    scene.facilityViews = [facility];
+    scene.selectedFacilityId = 'sawmill';
+    scene.inputManager = { setupClickHandling: jest.fn() };
+    scene.trainManager = {
+      trains: [train],
+      selectTrain: jest.fn(),
+    };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.activatePlayMode();
+
+    expect(scene.selectedFacilityId).toBeNull();
+    expect(facility.setSelected).toHaveBeenCalledWith(false);
+    expect(emit).toHaveBeenCalledWith('facility:deselected', {
+      facilityId: 'sawmill',
+    });
+    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(train);
+    expect(facility.setSelected.mock.invocationCallOrder[0])
+      .toBeLessThan(scene.trainManager.selectTrain.mock.invocationCallOrder[0]);
+  });
+
+  it('clears a facility when returning to Build with the track tool armed', () => {
+    const scene = new WorldScene() as any;
+    const facility = {
+      facilityId: 'sawmill',
+      setSelected: jest.fn(),
+      setSelectionEnabled: jest.fn(),
+    };
+    scene.facilityViews = [facility];
+    scene.selectedFacilityId = 'sawmill';
+    scene.activeTool = 'place-track';
+    scene.trainManager = { trains: [] };
+    scene.cameraController = { stopFollow: jest.fn() };
+    scene.syncTrainsSaveAndReport = jest.fn();
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.activateCreateMode();
+
+    expect(scene.selectedFacilityId).toBeNull();
+    expect(facility.setSelected).toHaveBeenCalledWith(false);
+    expect(facility.setSelectionEnabled).toHaveBeenCalledWith(false);
+    expect(emit).toHaveBeenCalledWith('facility:deselected', {
+      facilityId: 'sawmill',
+    });
+
+    emit.mockRestore();
   });
 });

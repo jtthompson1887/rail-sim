@@ -56,6 +56,7 @@ export class PropertiesPanel {
   private isVisible: boolean = false;
   private editorEnabled: boolean = true;
   private currentActiveTool: string = 'none';
+  private facilitySelected = false;
 
   /** Currently selected vehicle type for the place-vehicle tool. */
   private activeVehicleType: VehicleType = 'locomotive';
@@ -69,7 +70,7 @@ export class PropertiesPanel {
 
   private readonly selectionChangedHandler = (data: { uuids: string[] }) => {
     this.disarmDelete();
-    if (!this.editorEnabled) return;
+    if (!this.editorEnabled || this.facilitySelected) return;
     if (this.currentActiveTool !== 'generator' && this.currentActiveTool !== 'place-vehicle') {
       this.refresh(data.uuids);
     }
@@ -79,6 +80,10 @@ export class PropertiesPanel {
     this.disarmDelete();
     this.currentActiveTool = data.tool;
     if (!this.editorEnabled) return;
+    if (this.facilitySelected) {
+      this.slideOut();
+      return;
+    }
     if (data.tool === 'generator') {
       this.showGeneratorUnavailable();
     } else if (data.tool === 'place-vehicle') {
@@ -99,6 +104,7 @@ export class PropertiesPanel {
       uuids: Object.freeze([...review.uuids]),
     });
     if (!this.editorEnabled
+      || this.facilitySelected
       || this.currentActiveTool === 'generator'
       || this.currentActiveTool === 'place-vehicle'
       || this.currentActiveTool === 'place-track') return;
@@ -107,6 +113,26 @@ export class PropertiesPanel {
 
   private readonly deletionRequestHandler = ({ uuids }: DeleteReviewRequest) => {
     this.requestDelete(uuids);
+  };
+
+  private readonly facilitySelectedHandler = () => {
+    this.disarmDelete();
+    this.facilitySelected = true;
+    this.slideOut();
+  };
+
+  private readonly facilityDeselectedHandler = () => {
+    this.facilitySelected = false;
+    if (!this.editorEnabled) return;
+    if (this.currentActiveTool === 'generator') {
+      this.showGeneratorUnavailable();
+    } else if (this.currentActiveTool === 'place-vehicle') {
+      this.showVehicleParams();
+    } else if (this.currentActiveTool === 'place-track') {
+      this.slideOut();
+    } else {
+      this.refresh(this.selectionManager.selectedUUIDs);
+    }
   };
 
   constructor(
@@ -126,11 +152,15 @@ export class PropertiesPanel {
     EventBus.on('tool:changed', this.toolChangedHandler);
     EventBus.on('ui:deletion-review', this.deletionReviewHandler);
     EventBus.on('ui:delete-request', this.deletionRequestHandler);
+    EventBus.on('facility:selected', this.facilitySelectedHandler);
+    EventBus.on('facility:deselected', this.facilityDeselectedHandler);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('selection:changed', this.selectionChangedHandler);
       EventBus.off('tool:changed', this.toolChangedHandler);
       EventBus.off('ui:deletion-review', this.deletionReviewHandler);
       EventBus.off('ui:delete-request', this.deletionRequestHandler);
+      EventBus.off('facility:selected', this.facilitySelectedHandler);
+      EventBus.off('facility:deselected', this.facilityDeselectedHandler);
     });
   }
 
@@ -153,6 +183,10 @@ export class PropertiesPanel {
     this.container.setVisible(visible).setActive(visible);
     if (!visible) {
       this.setInteractionsEnabled(false);
+      return;
+    }
+    if (this.facilitySelected) {
+      this.slideOut();
       return;
     }
 
@@ -512,6 +546,8 @@ export class PropertiesPanel {
     EventBus.off('tool:changed', this.toolChangedHandler);
     EventBus.off('ui:deletion-review', this.deletionReviewHandler);
     EventBus.off('ui:delete-request', this.deletionRequestHandler);
+    EventBus.off('facility:selected', this.facilitySelectedHandler);
+    EventBus.off('facility:deselected', this.facilityDeselectedHandler);
     this.clearLines();
     this.clearVehicleObjects();
     this.panel.destroy();

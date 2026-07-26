@@ -395,4 +395,53 @@ describe('PropertiesPanel', () => {
 
     expect((panel as any).isVisible).toBe(false);
   });
+
+  it('yields the right edge to a facility and restores the active tool after deselection', () => {
+    EventBus.emit('tool:changed', { tool: 'place-vehicle' });
+    expect((panel as any).isVisible).toBe(true);
+
+    EventBus.emit('facility:selected', { facilityId: 'sawmill' });
+    expect((panel as any).isVisible).toBe(false);
+
+    EventBus.emit('facility:deselected', { facilityId: 'sawmill' });
+    expect((panel as any).isVisible).toBe(true);
+    expect((panel as any).vehicleTypeObjects.length).toBeGreaterThan(0);
+  });
+
+  it('does not reopen track properties from a late deletion review while a facility owns the inspector', () => {
+    trackManager.getTrack.mockReturnValue({
+      getUUID: () => 'a',
+      getControlPoints: () => ({
+        p0: { x: 0, y: 0 },
+        p1: { x: 33, y: 0 },
+        p2: { x: 66, y: 0 },
+        p3: { x: 100, y: 0 },
+      }),
+      getCurvePath: () => ({ getLength: () => 100 }),
+      structures: [],
+      paidBuildCost: 100,
+    });
+    selectionManager.selectedUUIDs = ['a'];
+    EventBus.emit('selection:changed', { uuids: ['a'] });
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedConstructionRevision: 2,
+      available: true,
+      blockingReason: '',
+    });
+    expect((panel as any).isVisible).toBe(true);
+    EventBus.emit('facility:selected', { facilityId: 'sawmill' });
+    expect((panel as any).isVisible).toBe(false);
+
+    EventBus.emit('ui:deletion-review', {
+      uuids: ['a'],
+      expectedRefund: 50,
+      expectedConstructionRevision: 3,
+      available: true,
+      blockingReason: '',
+    });
+
+    expect((panel as any).isVisible).toBe(false);
+  });
 });

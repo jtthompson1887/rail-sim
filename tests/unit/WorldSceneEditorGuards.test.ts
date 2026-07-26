@@ -21,6 +21,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.trainManager = {
       selectedTrain: null,
       trains: [],
+      carriages: [],
       update: jest.fn(),
     };
     scene.contentLoader = { stations: [] };
@@ -114,6 +115,13 @@ describe('WorldScene disabled construction bypass guards', () => {
       setInputLockOwner: jest.fn(),
       setCursor: jest.fn(),
     };
+    const facility = {
+      facilityId: 'sawmill',
+      setSelected: jest.fn(),
+      setSelectionEnabled: jest.fn(),
+    };
+    (scene as any).facilityViews = [facility];
+    (scene as any).selectedFacilityId = 'sawmill';
     GameStateManager.enterCreate('test-world');
 
     (scene as any).toolChangedHandler({ tool: 'place-track' });
@@ -122,6 +130,9 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect((scene as any).activeEditorTool).toBe(place);
     expect((scene as any).cameraController.setInputLockOwner)
       .toHaveBeenCalledWith('editor-tool');
+    expect(facility.setSelected).toHaveBeenCalledWith(false);
+    expect(facility.setSelectionEnabled).toHaveBeenCalledWith(false);
+    expect((scene as any).selectedFacilityId).toBeNull();
   });
 
   it.each([
@@ -255,6 +266,26 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
 
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('ignores gameplay shortcuts originating inside the facility inspector', () => {
+    const scene = new WorldScene();
+    const onKeyDown = jest.fn();
+    (scene as any).activeEditorTool = { onKeyDown };
+    GameStateManager.enterCreate('test-world');
+    const inspector = document.createElement('section');
+    inspector.dataset.testid = 'facility-inspector';
+    const child = document.createElement('span');
+    inspector.append(child);
+
+    (scene as any).handleKeyDown({
+      code: 'KeyP',
+      ctrlKey: false,
+      altKey: false,
+      target: child,
+    });
+
+    expect(onKeyDown).not.toHaveBeenCalled();
   });
 
   it('cancels pending construction before undo changes the authority revision', () => {
@@ -406,10 +437,16 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(emit).toHaveBeenCalledWith('ui:company-state', {
       cash: WorldManager.world!.company.cash,
       saveState: 'saving',
+      economyTick: WorldManager.world!.economy.tick,
+      constructionIndexBps:
+        WorldManager.world!.economy.market.constructionIndexBps,
     });
     expect(emit).toHaveBeenCalledWith('ui:company-state', {
       cash: WorldManager.world!.company.cash,
       saveState: 'saved',
+      economyTick: WorldManager.world!.economy.tick,
+      constructionIndexBps:
+        WorldManager.world!.economy.market.constructionIndexBps,
     });
 
     emit.mockRestore();
@@ -567,6 +604,63 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(9_000, 4_000);
     expect(world.economy.tick).toBe(1);
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('syncs live train positions into the same successful Operate tick save', () => {
+    const scene = new WorldScene() as any;
+    const world = WorldManager.createNew(
+      'Truthful economy save',
+      'truthful-economy-save',
+    );
+    world.trains = [{
+      id: 'live-train',
+      trackUUID: 'track-live',
+      trackT: 0.1,
+      passengers: 3,
+      type: 'locomotive',
+    }];
+    const liveTrack = {
+      getUUID: jest.fn().mockReturnValue('track-live'),
+      getTrackPosition: jest.fn().mockReturnValue(0.75),
+    };
+    const liveTrain = {
+      currentTrack: liveTrack,
+      getUUID: jest.fn().mockReturnValue('live-train'),
+      getMatterBody: jest.fn().mockReturnValue({ x: 750, y: 20 }),
+      getPassengerCount: jest.fn().mockReturnValue(7),
+      vehicleType: 'locomotive',
+    };
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      update: jest.fn(),
+    };
+    let trainAtSave: typeof world.trains[number] | undefined;
+    const save = jest.spyOn(WorldManager, 'save').mockImplementation(() => {
+      trainAtSave = WorldManager.world?.trains[0];
+      return true;
+    });
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(world.economy.tick).toBe(1);
+    expect(world.trains).toEqual([{
+      id: 'live-train',
+      trackUUID: 'track-live',
+      trackT: 0.75,
+      passengers: 7,
+      type: 'locomotive',
+    }]);
+    expect(trainAtSave).toEqual(world.trains[0]);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toolbar-save-state',
+      { state: 'saved' },
+    );
   });
 
   it('reports a failed economy save and retries through the next changed batch', () => {
@@ -858,7 +952,12 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:company-state',
-      { cash: expect.any(Number), saveState: 'unsaved' },
+      {
+        cash: expect.any(Number),
+        saveState: 'unsaved',
+        economyTick: expect.any(Number),
+        constructionIndexBps: expect.any(Number),
+      },
     );
     expect(emitSpy).toHaveBeenCalledWith(
       'ui:toast',

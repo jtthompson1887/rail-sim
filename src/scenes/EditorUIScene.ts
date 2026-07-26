@@ -13,6 +13,7 @@ import type { VehicleType } from '../config/VehicleTypes';
 import { ConstructionInspector } from '../ui/ConstructionInspector';
 import { CompanyHud } from '../ui/CompanyHud';
 import { MinimapRenderer } from '../ui/MinimapRenderer';
+import { FacilityInspector } from '../ui/FacilityInspector';
 
 /**
  * EditorUIScene
@@ -39,12 +40,15 @@ export default class EditorUIScene extends Phaser.Scene {
   private validationHint!: ValidationHint;
   private constructionInspector!: ConstructionInspector;
   private companyHud!: CompanyHud;
+  private facilityInspector!: FacilityInspector;
   private minimapRenderer!: MinimapRenderer;
   private minimapVisible = true;
   private initialVisible = true;
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
   private initialSaveErrorMessage: string | null = null;
+  private initialEconomyTick = 0;
+  private initialConstructionIndexBps = 10_000;
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -64,7 +68,8 @@ export default class EditorUIScene extends Phaser.Scene {
     this.toolbar.setVisible(visible);
     this.propertiesPanel.setVisible(visible);
     this.constructionInspector.setVisible(visible);
-    this.companyHud.setVisible(visible);
+    this.companyHud.setVisible(true);
+    this.facilityInspector.setVisible(true);
     this.validationHint.setVisible(visible);
     this.minimapVisible = visible;
     if (!visible) {
@@ -89,6 +94,8 @@ export default class EditorUIScene extends Phaser.Scene {
     companyCash?: number;
     saveState?: 'saved' | 'unsaved' | 'saving';
     saveErrorMessage?: string;
+    economyTick?: number;
+    constructionIndexBps?: number;
   }): void {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
@@ -96,6 +103,9 @@ export default class EditorUIScene extends Phaser.Scene {
     this.initialCash = data.companyCash ?? 0;
     this.initialSaveState = data.saveState ?? 'saved';
     this.initialSaveErrorMessage = data.saveErrorMessage ?? null;
+    this.initialEconomyTick = data.economyTick ?? 0;
+    this.initialConstructionIndexBps =
+      data.constructionIndexBps ?? 10_000;
   }
 
   create(): void {
@@ -111,6 +121,7 @@ export default class EditorUIScene extends Phaser.Scene {
     this.validationHint = new ValidationHint(this);
     this.constructionInspector = new ConstructionInspector();
     this.companyHud = new CompanyHud();
+    this.facilityInspector = new FacilityInspector();
     this.minimapRenderer = new MinimapRenderer(
       this,
       this.trackManager,
@@ -119,6 +130,8 @@ export default class EditorUIScene extends Phaser.Scene {
     this.companyHud.setState({
       cash: this.initialCash,
       saveState: this.initialSaveState,
+      economyTick: this.initialEconomyTick,
+      constructionIndexBps: this.initialConstructionIndexBps,
     });
     this.visibleHandler({ visible: this.initialVisible });
 
@@ -148,6 +161,7 @@ export default class EditorUIScene extends Phaser.Scene {
       this.validationHint.destroy();
       this.constructionInspector.destroy();
       this.companyHud.destroy();
+      this.facilityInspector.destroy();
       this.minimapRenderer.destroy();
     });
   }
@@ -179,6 +193,7 @@ export default class EditorUIScene extends Phaser.Scene {
     )
       || this.propertiesPanel.containsScreenPoint(x, y)
       || this.constructionInspector.containsScreenPoint(x, y)
+      || this.facilityInspector.containsScreenPoint(x, y)
       || this.companyHud.containsScreenPoint(x, y)
       || (this.minimapVisible && this.minimapRenderer.containsScreenPoint(x, y));
   }

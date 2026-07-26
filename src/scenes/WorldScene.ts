@@ -48,6 +48,15 @@ import type {
   ConstructionToolPhase,
 } from '../ui/ConstructionPreviewOverlay';
 import { EconomySystem } from '../economy/EconomySystem';
+import {
+  buildFacilityInspection,
+  type FacilityInspectionDto,
+} from '../economy/FacilityPresentation';
+import type { FacilityEconomyDef } from '../economy/EconomyData';
+import {
+  FacilityView,
+  type FacilityViewPlacement,
+} from '../entities/FacilityView';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -79,10 +88,8 @@ const EDITOR_UI_SCENE_KEY = 'EditorUIScene';
 const TOOLBAR_PADDING = 2;
 const SAVE_FAILURE_MESSAGE = 'Could not save the world. Retry Save is available.';
 const OPPORTUNITY_CORRIDOR_WIDTH_PX = 24;
-const OPPORTUNITY_SITE_RADIUS_PX = 18;
 const OPPORTUNITY_CORRIDOR_LABEL_OFFSET_PX = 34;
 const OPPORTUNITY_CORRIDOR_LABEL_SEPARATION_PX = 24;
-const OPPORTUNITY_SITE_LABEL_OFFSET_PX = 32;
 type SaveState = 'saved' | 'unsaved' | 'saving';
 
 function deletionBlockingReason(
@@ -151,6 +158,9 @@ export default class WorldScene extends Phaser.Scene {
   /** Semi-transparent terrain overlay drawn when terrain-view tool is active. */
   private terrainOverlay!: Phaser.GameObjects.Graphics;
   private readonly starterOpportunityLabels: Phaser.GameObjects.Text[] = [];
+  private facilityViews: FacilityView[] = [];
+  private readonly facilityInspections = new Map<string, FacilityInspectionDto>();
+  private selectedFacilityId: string | null = null;
   private contentLoader!: WorldContentLoader;
   private autoSaveTimer: number = 0;
   private lastReportedSaveState: SaveState = 'saved';
@@ -177,6 +187,7 @@ export default class WorldScene extends Phaser.Scene {
       this.activeEditorTool?.deactivate();
       this.activeTool = 'none';
       this.activeEditorTool = null;
+      this.updateFacilitySelectionAvailability();
       this.updateToolCursor('none');
       this.cameraController.setInputLockOwner('camera');
       EventBus.emit('ui:toast', { message: disabledReason, type: 'info' });
@@ -187,6 +198,8 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.deactivate();
     this.activeTool = tool;
     this.activeEditorTool = this.toolRegistry.get(tool) ?? null;
+    if (tool === 'place-track') this.clearFacilitySelection();
+    this.updateFacilitySelectionAvailability();
     this.activeEditorTool?.activate();
     this.updateToolCursor(tool);
     // Set input lock owner: camera owns for free-pan tools, editor-tool owns for editing tools
@@ -288,6 +301,28 @@ export default class WorldScene extends Phaser.Scene {
 
   private readonly selectionChangedHandler = ({ uuids }: { uuids: string[] }) => {
     this.publishDeletionReview(uuids);
+    if (uuids.length > 0) this.clearFacilitySelection();
+  };
+
+  private readonly trainSelectedHandler = () => {
+    this.clearFacilitySelection();
+  };
+
+  private readonly facilitySelectedHandler = ({
+    facilityId,
+  }: {
+    facilityId: string;
+  }) => {
+    if (!this.facilityViews.some(
+      (view) => view.facilityId === facilityId,
+    )) return;
+    this.selectionManager.clearSelection();
+    this.trainManager.deselectTrain();
+    this.selectedFacilityId = facilityId;
+    for (const view of this.facilityViews) {
+      view.setSelected(view.facilityId === facilityId);
+    }
+    this.refreshFacilityPresentation(true);
   };
 
   private readonly vehicleTypeChangedHandler = ({ type }: { type: import('../config/VehicleTypes').VehicleType }) => {
@@ -392,6 +427,8 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.on('editor:delete-tracks', this.editorDeleteHandler);
     EventBus.on('construction:intent', this.constructionIntentHandler);
     EventBus.on('selection:changed', this.selectionChangedHandler);
+    EventBus.on('train:selected', this.trainSelectedHandler);
+    EventBus.on('facility:selected', this.facilitySelectedHandler);
     EventBus.on('vehicle:type-changed', this.vehicleTypeChangedHandler);
 
     // Expose managers for E2E tests after everything is constructed
@@ -426,12 +463,18 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('editor:delete-tracks', this.editorDeleteHandler);
       EventBus.off('construction:intent', this.constructionIntentHandler);
       EventBus.off('selection:changed', this.selectionChangedHandler);
+      EventBus.off('train:selected', this.trainSelectedHandler);
+      EventBus.off('facility:selected', this.facilitySelectedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
       this.terrainChunkManager.destroyAll();
       this.sceneryManager.destroyAll();
+      for (const view of this.facilityViews) view.destroy();
+      this.facilityViews = [];
+      this.facilityInspections.clear();
+      this.selectedFacilityId = null;
       window.__railSimTrainManager = undefined;
       window.__railSimTrackManager = undefined;
       window.__railSimConstructionSnapshot = undefined;
@@ -471,6 +514,9 @@ export default class WorldScene extends Phaser.Scene {
       selectionManager: this.selectionManager,
       visible: GameStateManager.worldMode === 'create',
       companyCash: world?.company.cash ?? 0,
+      economyTick: world?.economy.tick ?? 0,
+      constructionIndexBps:
+        world?.economy.market.constructionIndexBps ?? 10_000,
       saveState: this.lastReportedSaveState,
       saveErrorMessage: this.pendingStartupSaveError ?? undefined,
     });
@@ -478,6 +524,7 @@ export default class WorldScene extends Phaser.Scene {
 
     this.applyStarterOpportunityCamera();
     this.renderStarterOpportunitySurvey();
+    this.renderFacilities();
   }
 
   /** Frame the persisted planning opportunity without regenerating it. */
@@ -549,27 +596,6 @@ export default class WorldScene extends Phaser.Scene {
       ).setOrigin(0.5, 0).setDepth(-19);
       this.starterOpportunityLabels.push(label);
     });
-    graphics.fillStyle(0xffffff, 0.9);
-    for (const site of opportunity.sites) {
-      graphics.fillCircle(
-        site.x,
-        site.y,
-        OPPORTUNITY_SITE_RADIUS_PX * worldUnitsPerScreenPixel,
-      );
-      const label = this.add.text(
-        site.x,
-        site.y - OPPORTUNITY_SITE_LABEL_OFFSET_PX * worldUnitsPerScreenPixel,
-        site.label,
-        {
-        fontFamily: 'Verdana',
-        fontSize: '18px',
-        color: '#ffffff',
-        backgroundColor: '#06131fcc',
-        padding: { x: 6, y: 3 },
-        },
-      ).setOrigin(0.5, 1).setDepth(-19);
-      this.starterOpportunityLabels.push(label);
-    }
   }
 
   private updateStarterOpportunityLabelScale(): void {
@@ -577,6 +603,111 @@ export default class WorldScene extends Phaser.Scene {
     if (!Number.isFinite(zoom) || zoom <= 0) return;
     const scale = 1 / zoom;
     for (const label of this.starterOpportunityLabels) label.setScale(scale);
+  }
+
+  private createFacilityView(
+    placement: FacilityViewPlacement,
+    inspection: FacilityInspectionDto,
+  ): FacilityView {
+    return new FacilityView(this, placement, inspection);
+  }
+
+  private renderFacilities(): void {
+    for (const view of this.facilityViews) view.destroy();
+    this.facilityViews = [];
+    this.facilityInspections.clear();
+    const world = WorldManager.world;
+    if (!world) return;
+    for (const facility of world.economy.facilities) {
+      const railConnected = this.isFacilityRailConnected(facility);
+      const inspection = buildFacilityInspection(
+        world,
+        facility.id,
+        railConnected,
+      );
+      if (!inspection) continue;
+      this.facilityInspections.set(facility.id, inspection);
+      const view = this.createFacilityView({
+        id: facility.id,
+        x: facility.x,
+        y: facility.y,
+        railAccessX: facility.railAccess.x,
+        railAccessY: facility.railAccess.y,
+        railAccessRadius: facility.railAccess.radius,
+      }, inspection);
+      view.setSelectionEnabled(this.activeTool !== 'place-track');
+      this.facilityViews.push(view);
+    }
+  }
+
+  private updateFacilitySelectionAvailability(): void {
+    const enabled = this.activeTool !== 'place-track';
+    for (const view of this.facilityViews) {
+      view.setSelectionEnabled(enabled);
+    }
+  }
+
+  private isFacilityRailConnected(facility: FacilityEconomyDef): boolean {
+    return this.trackManager
+      .getTracksInRadius(facility.railAccess, facility.railAccess.radius)
+      .some((track) => {
+        const { p0, p3 } = track.getControlPoints();
+        return Math.hypot(
+          p0.x - facility.railAccess.x,
+          p0.y - facility.railAccess.y,
+        ) <= facility.railAccess.radius
+          || Math.hypot(
+            p3.x - facility.railAccess.x,
+            p3.y - facility.railAccess.y,
+          ) <= facility.railAccess.radius;
+      });
+  }
+
+  private refreshFacilityPresentation(publishSelected: boolean): void {
+    const world = WorldManager.world;
+    if (!world) return;
+    const byId = new Map(
+      world.economy.facilities.map((facility) => [facility.id, facility]),
+    );
+    for (const view of this.facilityViews) {
+      const facility = byId.get(view.facilityId);
+      if (!facility) continue;
+      const inspection = buildFacilityInspection(
+        world,
+        facility.id,
+        this.isFacilityRailConnected(facility),
+      );
+      if (!inspection) continue;
+      this.facilityInspections.set(facility.id, inspection);
+      view.update(
+        inspection,
+        this.cameras.main.zoom,
+        facility.id === this.selectedFacilityId,
+      );
+    }
+    if (publishSelected && this.selectedFacilityId) {
+      const inspection = this.facilityInspections.get(this.selectedFacilityId);
+      if (inspection) EventBus.emit('facility:inspection', inspection);
+    }
+  }
+
+  private updateFacilityViewScale(): void {
+    for (const view of this.facilityViews) {
+      const inspection = this.facilityInspections.get(view.facilityId);
+      if (inspection) view.update(
+        inspection,
+        this.cameras.main.zoom,
+        view.facilityId === this.selectedFacilityId,
+      );
+    }
+  }
+
+  private clearFacilitySelection(): void {
+    const facilityId = this.selectedFacilityId;
+    if (!facilityId) return;
+    this.selectedFacilityId = null;
+    for (const view of this.facilityViews) view.setSelected(false);
+    EventBus.emit('facility:deselected', { facilityId });
   }
 
   update(time: number, delta: number): void {
@@ -590,7 +721,8 @@ export default class WorldScene extends Phaser.Scene {
         && !this.scene.isPaused(),
     );
     if (economyResult.ticksAdvanced > 0) {
-      this.saveWorldAndReport(false);
+      this.syncTrainsSaveAndReport(false);
+      this.refreshFacilityPresentation(true);
     }
 
     // Stream terrain chunks and scenery around the camera
@@ -598,6 +730,7 @@ export default class WorldScene extends Phaser.Scene {
     const camCX = cam.scrollX + cam.width / (2 * cam.zoom);
     const camCY = cam.scrollY + cam.height / (2 * cam.zoom);
     this.updateStarterOpportunityLabelScale();
+    this.updateFacilityViewScale();
     this.terrainChunkManager.update(camCX, camCY, cam.zoom);
     this.sceneryManager.update(camCX, camCY, cam.zoom);
 
@@ -640,6 +773,8 @@ export default class WorldScene extends Phaser.Scene {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
+    if (this.activeTool === 'place-track') this.clearFacilitySelection();
+    this.updateFacilitySelectionAvailability();
     EventBus.emit('ui:toolbar-visible', { visible: true });
     this.syncTrainsSaveAndReport();
   }
@@ -697,11 +832,13 @@ export default class WorldScene extends Phaser.Scene {
   private activatePlayMode(): void {
     this.activeEditorTool?.cancel();
     this.selectionManager.clearSelection();
+    for (const view of this.facilityViews) view.setSelectionEnabled(true);
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });
     // Auto-follow the first available train
     const trains = this.trainManager.trains;
     if (trains.length > 0) {
+      this.clearFacilitySelection();
       this.trainManager.selectTrain(trains[0]);
     }
   }
@@ -722,6 +859,7 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.emit('ui:toolbar-undo-state', { canUndo, canRedo });
       this.saveWorldAndReport();
       this.publishDeletionReview(this.selectionManager.selectedUUIDs);
+      this.refreshFacilityPresentation(true);
     };
   }
 
@@ -759,12 +897,16 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:company-state', {
       cash: WorldManager.world?.company.cash ?? 0,
       saveState,
+      economyTick: WorldManager.world?.economy.tick ?? 0,
+      constructionIndexBps:
+        WorldManager.world?.economy.market.constructionIndexBps ?? 10_000,
     });
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
-    if (GameStateManager.worldMode !== 'create') return;
     if (this.isPointerOverUI(pointer)) return;
+    this.clearFacilitySelection();
+    if (GameStateManager.worldMode !== 'create') return;
 
     // Right-click: check if active tool wants it first, otherwise show context menu
     if (pointer.rightButtonDown()) {
@@ -808,6 +950,7 @@ export default class WorldScene extends Phaser.Scene {
       target.isContentEditable
       || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].indexOf(target.tagName) !== -1
       || target.closest('[data-testid="construction-inspector"]') !== null
+      || target.closest('[data-testid="facility-inspector"]') !== null
     )) return;
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
@@ -853,6 +996,7 @@ export default class WorldScene extends Phaser.Scene {
       }
 
       if (event.code === 'Escape') {
+        this.clearFacilitySelection();
         if (this.activeTool === 'place-track') {
           this.activeEditorTool?.cancel();
           return;

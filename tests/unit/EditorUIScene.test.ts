@@ -10,6 +10,8 @@ describe('EditorUIScene construction UI boundary', () => {
     companyCash: number;
     saveState: 'saved' | 'unsaved' | 'saving';
     saveErrorMessage?: string;
+    economyTick?: number;
+    constructionIndexBps?: number;
   }): EditorUIScene {
     const scene = new EditorUIScene();
     (scene.input as any).off = jest.fn();
@@ -17,6 +19,8 @@ describe('EditorUIScene construction UI boundary', () => {
     scene.init({
       trackManager: { getTrack: jest.fn(), tracks: [] } as any,
       selectionManager: { selectedUUIDs: [] } as any,
+      economyTick: data.economyTick ?? 0,
+      constructionIndexBps: data.constructionIndexBps ?? 10_000,
       ...data,
     });
     scene.create();
@@ -44,6 +48,9 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).constructionInspector = {
       containsScreenPoint: jest.fn((_x: number, y: number) => y >= 700),
     };
+    (scene as any).facilityInspector = {
+      containsScreenPoint: jest.fn((x: number, y: number) => x > 1400 && y < 700),
+    };
     (scene as any).companyHud = {
       containsScreenPoint: jest.fn((x: number, y: number) => x < 400 && y < 80),
     };
@@ -55,6 +62,7 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(scene.containsScreenPoint(40, 500)).toBe(true);
     expect(scene.containsScreenPoint(1800, 500)).toBe(true);
     expect(scene.containsScreenPoint(900, 800)).toBe(true);
+    expect(scene.containsScreenPoint(1500, 300)).toBe(true);
     expect(scene.containsScreenPoint(200, 30)).toBe(true);
     expect(scene.containsScreenPoint(1174, 644)).toBe(true);
     expect(scene.containsScreenPoint(900, 400)).toBe(false);
@@ -88,6 +96,7 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).propertiesPanel = hidden();
     (scene as any).constructionInspector = hidden();
     (scene as any).companyHud = hidden();
+    (scene as any).facilityInspector = hidden();
     (scene as any).validationHint = hidden();
 
     (scene as any).visibleHandler({ visible: false });
@@ -96,11 +105,13 @@ describe('EditorUIScene construction UI boundary', () => {
       'toolbar',
       'propertiesPanel',
       'constructionInspector',
-      'companyHud',
       'validationHint',
     ]) {
       expect((scene as any)[key].setVisible).toHaveBeenCalledWith(false);
     }
+    expect((scene as any).companyHud.setVisible).toHaveBeenCalledWith(true);
+    expect((scene as any).facilityInspector.setVisible)
+      .toHaveBeenCalledWith(true);
     expect((scene as any).constructionInspector.clear).toHaveBeenCalled();
     expect((scene as any).validationHint.clear).toHaveBeenCalled();
   });
@@ -122,6 +133,8 @@ describe('EditorUIScene construction UI boundary', () => {
       .toBe('£875,000');
     expect(document.querySelector('[data-testid="company-save-state"]')?.textContent)
       .toBe('Unsaved');
+    expect(document.querySelector('[data-testid="company-economy-time"]')?.textContent)
+      .toBe('Day 1 · Tick 0');
   });
 
   it('consumes the startup save error once after toolbar creation and removes its listener on shutdown', () => {
@@ -164,7 +177,7 @@ describe('EditorUIScene construction UI boundary', () => {
     ) as HTMLButtonElement | null;
     expect(retry?.style.display).toBe('none');
     expect(document.querySelector('[data-testid="company-hud"]')
-      ?.getAttribute('aria-hidden')).toBe('true');
+      ?.getAttribute('aria-hidden')).toBe('false');
     expect(showToast).not.toHaveBeenCalled();
   });
 

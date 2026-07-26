@@ -438,8 +438,15 @@ export default class TrackManager {
   }
 
   getTracksInRadius(position: Vector2Like, radius: number): RailTrack[] {
-    const posVec = new Phaser.Math.Vector2(position.x, position.y);
-    return this.getVisibleTracks().filter((track) => posVec.distance(track.getCurvePath().getPoint(0.5)) <= radius);
+    if (!Number.isFinite(radius) || radius < 0) return [];
+    return Array.from(this.trackMap.values()).filter((track) => {
+      const { p0, p3 } = track.getControlPoints();
+      const midpoint = track.getCurvePath().getPoint(0.5);
+      return [p0, midpoint, p3].some((point) => Math.hypot(
+        point.x - position.x,
+        point.y - position.y,
+      ) <= radius);
+    });
   }
 
   /**

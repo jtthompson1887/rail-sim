@@ -361,6 +361,7 @@ class Graphics extends GameObject {
   strokePath() { return this; }
   fillPath() { return this; }
   fillCircle() { return this; }
+  strokeCircle() { return this; }
   fillRect() { return this; }
   strokeRect() { return this; }
   clear() { return this; }
@@ -389,6 +390,21 @@ class Rectangle {
   }
 }
 
+class Circle {
+  constructor(x, y, radius) {
+    this.setTo(x, y, radius);
+  }
+  setTo(x, y, radius) {
+    this.x = x;
+    this.y = y;
+    this.radius = radius;
+    return this;
+  }
+  static Contains(circle, x, y) {
+    return Math.hypot(x - circle.x, y - circle.y) <= circle.radius;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scene factory – creates a fully cross-referenced scene mock
 // ---------------------------------------------------------------------------
@@ -406,6 +422,7 @@ function makeFluentStub() {
     setActive: jest.fn().mockReturnThis(),
     setPosition: jest.fn().mockReturnThis(),
     setAlpha: jest.fn().mockReturnThis(),
+    setScale: jest.fn().mockReturnThis(),
     setFillStyle: jest.fn().mockReturnThis(),
     setOrigin: jest.fn().mockReturnThis(),
     setText: jest.fn().mockReturnThis(),
@@ -422,7 +439,15 @@ function makeFluentStub() {
 function makeScene(overrides = {}) {
   const scene = {};
 
-  const arc = { setInteractive: jest.fn().mockReturnThis(), on: jest.fn().mockReturnThis(), setStrokeStyle: jest.fn().mockReturnThis(), _alpha: 0.5 };
+  const arc = {
+    setInteractive: jest.fn().mockReturnThis(),
+    on: jest.fn().mockReturnThis(),
+    setStrokeStyle: jest.fn().mockReturnThis(),
+    setRadius: jest.fn().mockReturnThis(),
+    setDepth: jest.fn().mockReturnThis(),
+    destroy: jest.fn(),
+    _alpha: 0.5,
+  };
   const text = { setOrigin: jest.fn().mockReturnThis(), setText: jest.fn().mockReturnThis() };
   const image = { setOrigin: jest.fn().mockReturnThis(), setScale: jest.fn().mockReturnThis(), setDepth: jest.fn().mockReturnThis(), rotation: 0 };
   const graphics = new Graphics(scene);
@@ -554,6 +579,7 @@ const Phaser = {
   },
   Geom: {
     Rectangle,
+    Circle,
   },
   Input: {
     Keyboard: {

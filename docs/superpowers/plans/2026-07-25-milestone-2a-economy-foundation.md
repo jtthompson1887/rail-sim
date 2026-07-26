@@ -1093,7 +1093,7 @@ export interface FacilityInspectionDto {
 }
 ```
 
-- [ ] **Step 1: Write presentation lifecycle tests**
+- [x] **Step 1: Write presentation lifecycle tests**
 
 Prove:
 
@@ -1109,7 +1109,7 @@ Prove:
 - clearing selection destroys stale panel content and input bounds;
 - desktop and 375×667 layouts keep the primary status readable.
 
-- [ ] **Step 2: Run focused UI tests and verify failure**
+- [x] **Step 2: Run focused UI tests and verify failure**
 
 ```powershell
 npx jest tests/unit/FacilityView.test.ts tests/unit/FacilityInspector.test.ts tests/unit/WorldSceneOpportunityView.test.ts --runInBand --coverage=false
@@ -1117,7 +1117,7 @@ npx jest tests/unit/FacilityView.test.ts tests/unit/FacilityInspector.test.ts te
 
 Expected: fail because the new presentation classes do not exist.
 
-- [ ] **Step 3: Implement `FacilityView` as presentation only**
+- [x] **Step 3: Implement `FacilityView` as presentation only**
 
 Use a map marker, label, compact inventory bar, status text, and rail-access
 ring. Scale label offsets and ring widths from desired screen pixels using the
@@ -1142,7 +1142,7 @@ trackManager
 This is read-only presentation state; do not create a station, snap track
 automatically, or alter the track graph.
 
-- [ ] **Step 4: Implement a compact right inspector**
+- [x] **Step 4: Implement a compact right inspector**
 
 Primary hierarchy:
 
@@ -1158,13 +1158,13 @@ Rail access: connected / not connected
 Keep the world visible. Reuse existing dark panel colours, typography, and
 responsive helpers. Do not add a report screen.
 
-- [ ] **Step 5: Keep the company top bar visible in both modes**
+- [x] **Step 5: Keep the company top bar visible in both modes**
 
 `CompanyHud` continues showing cash/save state and adds only the persisted
 economy day/tick and current construction-sector index. Detailed P&L remains
 for Milestone 2B when freight creates operating transactions.
 
-- [ ] **Step 6: Add the browser acceptance flow**
+- [x] **Step 6: Add the browser acceptance flow**
 
 At desktop and mobile:
 
@@ -1176,7 +1176,7 @@ At desktop and mobile:
 6. observe raw producers advance while the sawmill remains blocked;
 7. reload and verify identical tick/inventory/status.
 
-- [ ] **Step 7: Run focused and browser tests**
+- [x] **Step 7: Run focused and browser tests**
 
 ```powershell
 npx jest tests/unit/FacilityView.test.ts tests/unit/FacilityInspector.test.ts tests/unit/WorldSceneOpportunityView.test.ts tests/unit/CompanyHud.test.ts --runInBand --coverage=false
@@ -1185,7 +1185,7 @@ npx playwright test tests/e2e/generated-economy-presentation.test.ts --retries=0
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add src/entities/FacilityView.ts src/economy/FacilityPresentation.ts src/ui/FacilityInspector.ts src/scenes src/ui src/services/EventBus.ts tests

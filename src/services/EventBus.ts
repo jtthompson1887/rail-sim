@@ -1,5 +1,6 @@
 type EventCallback<T = unknown> = (data: T) => void;
 import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
+import type { FacilityInspectionDto } from '../economy/FacilityPresentation';
 import type {
   DeleteReviewRequest,
   DeletionReviewDTO,
@@ -44,6 +45,9 @@ interface EventMap {
   'editor:save': Record<string, never>;
   'editor:mode-toggle': Record<string, never>;
   'selection:changed': { uuids: string[] };
+  'facility:selected': { facilityId: string };
+  'facility:inspection': FacilityInspectionDto;
+  'facility:deselected': { facilityId: string };
   'snap:toggled': { gridEnabled: boolean; endpointEnabled: boolean };
   'grid:toggled': { enabled: boolean };
   'generator:run': Record<string, never>;
@@ -62,6 +66,8 @@ interface EventMap {
   'ui:company-state': {
     cash: number;
     saveState: 'saved' | 'unsaved' | 'saving';
+    economyTick: number;
+    constructionIndexBps: number;
   };
 }
 
