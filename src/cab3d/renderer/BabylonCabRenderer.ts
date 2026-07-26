@@ -5,6 +5,7 @@ import {
   DirectionalLight,
   HemisphericLight,
   PointLight,
+  TransformNode,
   MeshBuilder,
   Mesh,
   Vector3,
@@ -16,6 +17,7 @@ import { SkyMaterial } from '@babylonjs/materials';
 import { CabCanvasMount } from './CabCanvasMount';
 import { TrackMeshBuilder } from './TrackMeshBuilder';
 import { TerrainMeshBuilder } from './TerrainMeshBuilder';
+import { CabInteriorBuilder } from './CabInteriorBuilder';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -45,6 +47,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private cameraRig: CabCameraRig | null = null;
   private trackMeshBuilder: TrackMeshBuilder | null = null;
   private terrainMeshBuilder: TerrainMeshBuilder | null = null;
+  private cabInteriorBuilder: CabInteriorBuilder | null = null;
+  private cabBody: TransformNode | null = null;
   private skyBox: Mesh | null = null;
   private skyMaterial: SkyMaterial | null = null;
   private sunLight: DirectionalLight | null = null;
@@ -85,6 +89,11 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.lastEye = this.cameraRig.update(deltaMs, snapshot);
       this.camera?.position.set(this.lastEye.position.x, this.lastEye.position.y, this.lastEye.position.z);
       this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
+
+      if (this.cabBody && this.lastEye.body) {
+        this.cabBody.position.set(this.lastEye.body.position.x, this.lastEye.body.position.y, this.lastEye.body.position.z);
+        this.cabBody.rotation.set(this.lastEye.body.rotation.x, this.lastEye.body.rotation.y, this.lastEye.body.rotation.z);
+      }
     }
 
     this.updateAtmosphere(snapshot);
@@ -113,6 +122,10 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.trackMeshBuilder = null;
     this.terrainMeshBuilder?.dispose();
     this.terrainMeshBuilder = null;
+    this.cabInteriorBuilder?.dispose();
+    this.cabInteriorBuilder = null;
+    this.cabBody?.dispose();
+    this.cabBody = null;
     this.engine?.dispose();
     this.mount.destroy();
     this.engine = null;
@@ -146,6 +159,10 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.camera.attachControl(this.mount.canvas, true);
 
     this.createAtmosphere();
+
+    this.cabBody = new TransformNode('cabBody', this.scene);
+    this.cabInteriorBuilder = new CabInteriorBuilder(this.scene);
+    this.cabInteriorBuilder.build(this.cabBody);
 
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
     this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);

@@ -54,10 +54,16 @@ describe('CabCameraRig', () => {
     const transform = rig.update(16, makeSnapshot());
 
     // Vehicle at (100,200); eye 8.5 m forward along heading 0 -> x=108.5.
-    // Babylon Z = -worldY, so z = -200.  Eye height = 2.40.
+    // Driver sits -0.58 m left, so worldY = 199.42 -> Babylon Z = -199.42.
+    // Eye height = 2.40.
     expect(transform.position.x).toBeCloseTo(108.5, 1);
     expect(transform.position.y).toBeCloseTo(2.4, 2);
-    expect(transform.position.z).toBeCloseTo(-200, 1);
+    expect(transform.position.z).toBeCloseTo(-199.4, 1);
+
+    // Body node stays at rail head (track centreline).
+    expect(transform.body.position.x).toBeCloseTo(108.5, 1);
+    expect(transform.body.position.y).toBeCloseTo(0, 2);
+    expect(transform.body.position.z).toBeCloseTo(-200, 1);
   });
 
   it('pitches the camera up for an uphill grade', () => {

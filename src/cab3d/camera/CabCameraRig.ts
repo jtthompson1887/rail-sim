@@ -1,10 +1,11 @@
 import { worldToBabylon, worldHeadingToBabylonYaw } from '../model/CabCoordinate';
 import { CabConfig } from '../CabConfig';
+import { CAB_DRIVER_EYE } from '../cab/CabPartLibrary';
 import { CabRideModel } from './CabRideModel';
 import { CabLookController } from './CabLookController';
 import type { CabWorldSnapshot, CabTrackSample, CabVehicleSnapshot } from '../model/CabWorldSnapshot';
 
-export interface CabEyeTransform {
+export interface CabTransform {
   position: {
     x: number;
     y: number;
@@ -15,6 +16,11 @@ export interface CabEyeTransform {
     y: number;
     z: number;
   };
+}
+
+export interface CabEyeTransform extends CabTransform {
+  /** Body transform (train motion without head look). */
+  body: CabTransform;
 }
 
 /**
@@ -60,27 +66,54 @@ export class CabCameraRig {
     const sinH = Math.sin(heading);
 
     // Cab-local frame: +X right, +Y up, +Z forward.
-    const localX = rideState.position.x;
-    const localY = rideState.position.y + CabConfig.EYE_HEIGHT_M;
-    const localZ = rideState.position.z;
+    const rideX = rideState.position.x;
+    const rideY = rideState.position.y;
+    const rideZ = rideState.position.z;
 
-    // Convert cab-local offset to world (game) XY.
-    const worldX = eyeSample.x + (-localX * sinH) + (localZ * cosH);
-    const worldY = eyeSample.y + (localX * cosH) + (localZ * sinH);
-    const elevation = eyeSample.elevation + localY;
+    // Body node sits at the cab origin: rail head, track centreline, eye station.
+    const bodyLocalX = rideX;
+    const bodyLocalY = rideY;
+    const bodyLocalZ = rideZ;
 
-    const position = worldToBabylon(worldX, worldY, elevation);
+    // Eye node is offset to the driver's eye within the cab.
+    const eyeLocalX = rideX + CAB_DRIVER_EYE.x;
+    const eyeLocalY = rideY + CAB_DRIVER_EYE.y;
+    const eyeLocalZ = rideZ + CAB_DRIVER_EYE.z;
+
+    // Convert cab-local offsets to world (game) XY.
+    const bodyWorldX = eyeSample.x + (-bodyLocalX * sinH) + (bodyLocalZ * cosH);
+    const bodyWorldY = eyeSample.y + (bodyLocalX * cosH) + (bodyLocalZ * sinH);
+    const bodyElevation = eyeSample.elevation + bodyLocalY;
+
+    const eyeWorldX = eyeSample.x + (-eyeLocalX * sinH) + (eyeLocalZ * cosH);
+    const eyeWorldY = eyeSample.y + (eyeLocalX * cosH) + (eyeLocalZ * sinH);
+    const eyeElevation = eyeSample.elevation + eyeLocalY;
 
     const baseYaw = worldHeadingToBabylonYaw(cosH, sinH);
-    const rotation = {
-      // Positive physical pitch (nose up) is a negative camera pitch in Babylon.
-      x: -rideState.rotation.pitch - lookState.pitch,
-      // Positive look yaw (right) subtracts from the base yaw.
-      y: baseYaw - lookState.yaw,
+
+    const bodyRotation = {
+      // Positive physical pitch (nose up) is a negative pitch in Babylon.
+      x: -rideState.rotation.pitch,
+      y: baseYaw,
       z: rideState.rotation.roll,
     };
 
-    return { position, rotation };
+    const rotation = {
+      // Eye carries ride pitch plus look pitch.
+      x: bodyRotation.x - lookState.pitch,
+      // Positive look yaw (right) subtracts from the base yaw.
+      y: bodyRotation.y - lookState.yaw,
+      z: bodyRotation.z,
+    };
+
+    return {
+      position: worldToBabylon(eyeWorldX, eyeWorldY, eyeElevation),
+      rotation,
+      body: {
+        position: worldToBabylon(bodyWorldX, bodyWorldY, bodyElevation),
+        rotation: bodyRotation,
+      },
+    };
   }
 
   private computeGrade(
@@ -137,9 +170,14 @@ export class CabCameraRig {
   }
 
   private zeroTransform(): CabEyeTransform {
+    const zero = { x: 0, y: 0, z: 0 };
     return {
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
+      position: zero,
+      rotation: zero,
+      body: {
+        position: zero,
+        rotation: zero,
+      },
     };
   }
 }

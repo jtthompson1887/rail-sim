@@ -1,1 +1,13 @@
-// Placeholder for the cab interior geometry spec, materials, and instruments.
+export {
+  CAB_PARTS,
+  CAB_MATERIALS,
+  CAB_DRIVER_EYE,
+  CAB_SHELL_IDS,
+  getCabPartBuildOrder,
+} from './CabPartLibrary';
+
+export type {
+  CabPart,
+  CabPartKind,
+  CabMaterialDef,
+} from './CabPartLibrary';
