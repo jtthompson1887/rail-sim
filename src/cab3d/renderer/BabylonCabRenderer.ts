@@ -18,6 +18,7 @@ import { CabCanvasMount } from './CabCanvasMount';
 import { TrackMeshBuilder } from './TrackMeshBuilder';
 import { TerrainMeshBuilder } from './TerrainMeshBuilder';
 import { CabInteriorBuilder } from './CabInteriorBuilder';
+import { CabInstrumentBuilder } from './CabInstrumentBuilder';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -48,6 +49,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private trackMeshBuilder: TrackMeshBuilder | null = null;
   private terrainMeshBuilder: TerrainMeshBuilder | null = null;
   private cabInteriorBuilder: CabInteriorBuilder | null = null;
+  private cabInstrumentBuilder: CabInstrumentBuilder | null = null;
   private cabBody: TransformNode | null = null;
   private skyBox: Mesh | null = null;
   private skyMaterial: SkyMaterial | null = null;
@@ -101,6 +103,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
     this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
+    this.cabInstrumentBuilder?.update(snapshot);
 
     this.scene?.render();
   }
@@ -122,6 +125,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.trackMeshBuilder = null;
     this.terrainMeshBuilder?.dispose();
     this.terrainMeshBuilder = null;
+    this.cabInstrumentBuilder = null;
     this.cabInteriorBuilder?.dispose();
     this.cabInteriorBuilder = null;
     this.cabBody?.dispose();
@@ -163,6 +167,8 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.cabBody = new TransformNode('cabBody', this.scene);
     this.cabInteriorBuilder = new CabInteriorBuilder(this.scene);
     this.cabInteriorBuilder.build(this.cabBody);
+    this.cabInstrumentBuilder = new CabInstrumentBuilder(this.scene, this.cabInteriorBuilder);
+    this.cabInstrumentBuilder.build();
 
     this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
     this.terrainMeshBuilder = new TerrainMeshBuilder(this.scene);

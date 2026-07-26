@@ -50,6 +50,16 @@ export class CabInteriorBuilder {
     }
   }
 
+  /** Look up a created node by its cab part id. */
+  getNode(id: string): TransformNode | Mesh | undefined {
+    return this.createdNodes.get(id);
+  }
+
+  /** Look up a created material by its cab material id. */
+  getMaterial(id: string): PBRMaterial | undefined {
+    return this.materialCache.get(id);
+  }
+
   /** Release all meshes, nodes and materials owned by this builder. */
   dispose(): void {
     this.root?.dispose();
@@ -80,7 +90,7 @@ export class CabInteriorBuilder {
     }
 
     if (part.material) {
-      mesh.material = this.getMaterial(part.material);
+      mesh.material = this.getOrCreateMaterial(part.material);
     }
 
     mesh.isPickable = false;
@@ -130,7 +140,7 @@ export class CabInteriorBuilder {
     }
   }
 
-  private getMaterial(materialId: string): PBRMaterial {
+  private getOrCreateMaterial(materialId: string): PBRMaterial {
     if (this.materialCache.has(materialId)) {
       return this.materialCache.get(materialId)!;
     }

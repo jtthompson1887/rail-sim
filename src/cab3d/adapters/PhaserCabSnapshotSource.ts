@@ -17,6 +17,15 @@ import { CabPathSampler } from '../model/CabPathSampler';
 import { buildCabTrackSpans } from './CabTrackGraphAdapter';
 import RailTrack from '../../entities/RailTrack';
 
+export interface CabFacilityPlacement {
+  readonly x: number;
+  readonly y: number;
+  readonly railAccessX?: number;
+  readonly railAccessY?: number;
+}
+
+export type CabFacilityProvider = () => ReadonlyArray<CabFacilityPlacement>;
+
 /**
  * Phaser-side adapter that reads the live world and produces a frozen
  * {@link CabWorldSnapshot} once per frame.
@@ -34,6 +43,7 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
     private readonly terrainGenerator: TerrainGenerator,
     private readonly seed: string = '',
     private readonly biome: BiomeType = 'temperate',
+    private readonly facilityProvider: CabFacilityProvider = () => [],
   ) {}
 
   capture(time: number, delta: number): Readonly<CabWorldSnapshot> {
@@ -80,11 +90,28 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       biome: this.biome,
       vehicle,
       path,
+      nearestFacilityDistanceM: this.computeNearestFacilityDistance(vehicle),
       elapsedSecs: time / 1000,
       terrain: {
         getHeightAt: (worldX: number, worldY: number) =>
           this.terrainGenerator.getHeightAt(worldX, worldY),
       },
     });
+  }
+
+  private computeNearestFacilityDistance(vehicle: CabVehicleSnapshot): number | null {
+    const facilities = this.facilityProvider();
+    if (facilities.length === 0) return null;
+
+    let nearest: number | null = null;
+    for (const facility of facilities) {
+      const targetX = facility.railAccessX ?? facility.x;
+      const targetY = facility.railAccessY ?? facility.y;
+      const distance = Math.hypot(targetX - vehicle.x, targetY - vehicle.y);
+      if (nearest === null || distance < nearest) {
+        nearest = distance;
+      }
+    }
+    return nearest;
   }
 }

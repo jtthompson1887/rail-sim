@@ -53,6 +53,12 @@ export interface CabWorldSnapshot {
   /** Elapsed simulation time in seconds. */
   readonly elapsedSecs: number;
 
+  /**
+   * Straight-line distance in metres to the nearest facility, or `null` when no
+   * facility is present.
+   */
+  readonly nearestFacilityDistanceM?: number | null;
+
   /** Optional height sampler used by the terrain mesh builder. */
   readonly terrain?: ITerrainSampler;
 }
@@ -64,5 +70,6 @@ export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
   biome: 'temperate',
   vehicle: null,
   path: Object.freeze([]),
+  nearestFacilityDistanceM: null,
   elapsedSecs: 0,
 });

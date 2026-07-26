@@ -2,6 +2,7 @@ const { makeScene } = require('../../__mocks__/phaser');
 const Phaser = require('phaser');
 
 import { PhaserCabSnapshotSource } from '../../src/cab3d/adapters/PhaserCabSnapshotSource';
+import type { CabFacilityProvider } from '../../src/cab3d/adapters/PhaserCabSnapshotSource';
 import { GameConfig } from '../../src/config/GameConfig';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import type TrackManager from '../../src/managers/TrackManager';
@@ -49,6 +50,7 @@ describe('PhaserCabSnapshotSource', () => {
     selectedTrain: unknown,
     seed = 's1',
     biome: BiomeType = 'arid',
+    facilityProvider: CabFacilityProvider = () => [],
   ): PhaserCabSnapshotSource {
     return new PhaserCabSnapshotSource(
       {} as any,
@@ -57,6 +59,7 @@ describe('PhaserCabSnapshotSource', () => {
       {} as TerrainGenerator,
       seed,
       biome,
+      facilityProvider,
     );
   }
 
@@ -154,5 +157,34 @@ describe('PhaserCabSnapshotSource', () => {
     expect(atEye!.x).toBeCloseTo(250, 1);
     expect(atEye!.elevation).toBeCloseTo(5, 1);
     expect(result.vehicle!.onTrack).toBe(true);
+  });
+
+  it('reports null nearest facility distance when no facilities are present', () => {
+    const train = createTrain({ x: 100, y: 100 });
+    const source = createSource(train);
+    const result = source.capture(0, 1000);
+
+    expect(result.nearestFacilityDistanceM).toBeNull();
+  });
+
+  it('computes the nearest facility distance using rail access points', () => {
+    const train = createTrain({ x: 0, y: 0 });
+    const source = createSource(train, 's1', 'arid', () => [
+      { x: 0, y: 0, railAccessX: 30, railAccessY: 40 },
+      { x: 0, y: 0, railAccessX: 10, railAccessY: 10 },
+    ]);
+    const result = source.capture(0, 1000);
+
+    expect(result.nearestFacilityDistanceM).toBe(Math.hypot(10, 10));
+  });
+
+  it('falls back to facility x/y when rail access is absent', () => {
+    const train = createTrain({ x: 0, y: 0 });
+    const source = createSource(train, 's1', 'arid', () => [
+      { x: 60, y: 80 },
+    ]);
+    const result = source.capture(0, 1000);
+
+    expect(result.nearestFacilityDistanceM).toBe(Math.hypot(60, 80));
   });
 });

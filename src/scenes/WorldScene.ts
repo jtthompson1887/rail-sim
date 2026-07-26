@@ -397,6 +397,7 @@ export default class WorldScene extends Phaser.Scene {
           this.terrainGenerator,
           terrainSeed,
           biome,
+          () => this.facilityViews.map((view) => view.placement),
         ),
       );
     }
