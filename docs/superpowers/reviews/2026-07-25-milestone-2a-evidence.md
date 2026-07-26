@@ -1,6 +1,6 @@
 # Milestone 2A economy-foundation evidence
 
-**Candidate implementation head:** `b8b6d9b`
+**Candidate implementation head:** `c51c521`
 
 **Independent review:** Pending controller Step 4
 
@@ -76,6 +76,15 @@ Browser benchmarks used Chromium 148.0.7778.96 on an AMD Ryzen 9 7900X
 256 site candidates, 256 economy candidates, and 96 construction-analysis
 samples.
 
+Candidate `c51c521` adds load-bearing inspector inventory and local-quote
+assertions to every fixed-seed presentation case. At that candidate,
+`npx playwright test tests/e2e/generated-economy-presentation.test.ts
+--retries=0` passed 4/4 with one worker and zero retries,
+`npx jest tests/unit/FacilityInspector.test.ts --runInBand --coverage=false`
+passed 1/1 suite and 5/5 tests, and `npm run build` passed. This updates
+candidate attribution only; the exact final reviewed source and independent
+review disposition remain pending controller re-review.
+
 ## Fixed-seed generated-economy playtest
 
 The durable browser playtest uses these fixed seeds:
@@ -127,8 +136,14 @@ economy and is not written directly.
   served a temporary review build. The two exact stale rail-sim server
   processes were stopped before the clean-server gate. This was environmental
   and required no source change.
+- Review fix candidate `c51c521` strengthened the generated-economy browser
+  helper to assert two Sawmill inventory rows, quantity/capacity text and
+  progress values, two local quote cards, numeric GBP unit quotes, and all
+  three quote explanations. Its focused build, 4/4 zero-retry browser cases,
+  and 5/5 FacilityInspector unit tests passed.
 
-No production implementation file required tuning.
+No production implementation file required tuning during the Task 9
+generated-economy playtest.
 
 ## Known warnings
 

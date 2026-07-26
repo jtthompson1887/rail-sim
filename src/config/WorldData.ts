@@ -367,8 +367,7 @@ function isTrack(value: unknown): value is TrackDef {
     && isVerticalProfile(value.verticalProfile)
     && isStructureSequence(value.structures)
     && structureElevationsMatchProfile(value.structures, value.verticalProfile)
-    && isFiniteNumber(value.paidBuildCost)
-    && Number.isInteger(value.paidBuildCost)
+    && Number.isSafeInteger(value.paidBuildCost)
     && value.paidBuildCost >= 0
     && !('isTunnel' in value)
     && !('elevation' in value);
@@ -679,9 +678,12 @@ function isEconomyState(value: unknown): value is EconomyStateDef {
     return false;
   }
   const facilityIds = new Set<string>();
+  const facilityDefinitionIds = new Set<string>();
   for (const facility of value.facilities as FacilityEconomyDef[]) {
-    if (facilityIds.has(facility.id)) return false;
+    if (facilityIds.has(facility.id)
+      || facilityDefinitionIds.has(facility.definitionId)) return false;
     facilityIds.add(facility.id);
+    facilityDefinitionIds.add(facility.definitionId);
   }
   return true;
 }

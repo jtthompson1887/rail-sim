@@ -345,6 +345,12 @@ describe('world schema validation', () => {
     ['duplicate facility IDs', (world: any) => {
       world.economy.facilities = [makeFacility(), makeFacility()];
     }],
+    ['duplicate facility definition IDs', (world: any) => {
+      const first = makeFacility();
+      const second = makeFacility();
+      second.id = 'forest-b';
+      world.economy.facilities = [first, second];
+    }],
     ['unknown facility definition', (world: any) => {
       const facility = makeFacility();
       facility.definitionId = 'unknown-definition';
@@ -571,6 +577,10 @@ describe('world schema validation', () => {
 
   it.each([
     ['fractional paid cost', (track: any) => { track.paidBuildCost = 100.5; }],
+    ['negative paid cost', (track: any) => { track.paidBuildCost = -1; }],
+    ['unsafe paid cost', (track: any) => {
+      track.paidBuildCost = Number.MAX_SAFE_INTEGER + 1;
+    }],
     ['profile-inconsistent structure elevation', (track: any) => {
       track.structures[0].endElevation = 5;
     }],
@@ -600,6 +610,32 @@ describe('world schema validation', () => {
     raw.tracks.push(track);
 
     expect(validateWorldData(raw).compatible).toBe(false);
+  });
+
+  it('accepts the maximum safe integer as a paid build cost', () => {
+    const raw = currentWorld() as any;
+    raw.tracks.push({
+      geometryVersion: 1,
+      uuid: 'track-1',
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
   });
 
   it('rejects unsupported generation configuration versions', () => {
