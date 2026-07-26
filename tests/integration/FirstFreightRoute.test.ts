@@ -22,6 +22,10 @@ import {
   ECONOMY_TICK_MS,
   EconomySystem,
 } from '../../src/economy/EconomySystem';
+import {
+  getFacilityDefinition,
+  getRecipe,
+} from '../../src/economy/ProductCatalog';
 import { clonePlainData } from '../../src/utils/PlainData';
 
 const facility = (
@@ -262,6 +266,28 @@ describe('Integration: first profitable timber freight route', () => {
     const openingCash = opening.company.cash;
     const initialLogs = facility(harness, 'managed-forest')
       .inventories.logs.quantity;
+    const initialSawmill = facility(harness, 'sawmill');
+    const sawmillDefinition = getFacilityDefinition(
+      initialSawmill.definitionId,
+    );
+    if (!sawmillDefinition) throw new Error('Missing Sawmill definition');
+    const activeRecipeId = initialSawmill.activeRecipeId;
+    if (!activeRecipeId) throw new Error('Missing active Sawmill recipe');
+    const activeRecipe = getRecipe(activeRecipeId);
+    if (!activeRecipe) throw new Error('Missing active recipe definition');
+
+    expect(sawmillDefinition).toEqual(expect.objectContaining({
+      id: 'sawmill',
+      recipeIds: ['sawmill-cut'],
+    }));
+    expect(activeRecipeId).toBe('sawmill-cut');
+    expect(activeRecipe).toEqual({
+      id: 'sawmill-cut',
+      kind: 'processing',
+      cycleTicks: 3,
+      inputs: [{ productId: 'logs', quantity: 10 }],
+      outputs: [{ productId: 'structural-timber', quantity: 8 }],
+    });
 
     expect(opening.schemaVersion).toBe(7);
     expect(opening.tracks).toEqual([]);
@@ -311,7 +337,29 @@ describe('Integration: first profitable timber freight route', () => {
     harness.setRuntime(trainId, {
       ...accessRuntime(harness, 'sawmill'),
     });
-    harness.advanceTicks(6);
+    const beforeProcessing = clonePlainData(
+      facility(harness, 'sawmill'),
+    );
+    const deliveryStartTick = harness.world.economy.tick;
+    const processingEvidence: Array<{
+      tick: number;
+      deliveredUnits: number;
+      progressBefore: number;
+      progressAfter: number;
+    }> = [];
+    for (let deliveryTick = 0; deliveryTick < 6; deliveryTick += 1) {
+      const cargoBefore = train(harness, trainId).cargo?.units ?? 0;
+      const progressBefore = facility(harness, 'sawmill')
+        .recipeProgressTicks;
+      harness.advanceTicks(1);
+      const cargoAfter = train(harness, trainId).cargo?.units ?? 0;
+      processingEvidence.push({
+        tick: harness.world.economy.tick,
+        deliveredUnits: cargoBefore - cargoAfter,
+        progressBefore,
+        progressAfter: facility(harness, 'sawmill').recipeProgressTicks,
+      });
+    }
 
     const completed = harness.world;
     const completedTrain = train(harness, trainId);
@@ -322,28 +370,67 @@ describe('Integration: first profitable timber freight route', () => {
     const vehicleCapex = categoryTotal(harness, 'vehicle-capex');
     const forestProduction = completedForest.inventories.logs.recentInflow;
     const consumedLogs = completedSawmill.inventories.logs.recentOutflow;
+    const deliveredLogs = processingEvidence.reduce(
+      (total, evidence) => total + evidence.deliveredUnits,
+      0,
+    );
+    const completedRecipeCycles = processingEvidence.filter(
+      (evidence) => evidence.deliveredUnits > 0
+        && evidence.progressBefore === activeRecipe.cycleTicks - 1
+        && evidence.progressAfter === 0,
+    ).length;
+    const recipeInput = activeRecipe.inputs[0];
+    const recipeOutput = activeRecipe.outputs[0];
+    if (!recipeInput || !recipeOutput) {
+      throw new Error('Incomplete active Sawmill recipe');
+    }
 
     expect(completedTrain.cargo).toBeNull();
     expect(completedTrain.operations.lastTripRevenue)
       .toBeGreaterThan(completedTrain.operations.lastTripRunningCost);
     expect(completed.firstRouteProgress.profitableDeliveryCompleted)
       .toBe(true);
+    expect(processingEvidence.map(
+      ({ tick }) => tick - deliveryStartTick,
+    )).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(processingEvidence.map(
+      ({ deliveredUnits }) => deliveredUnits,
+    )).toEqual([10, 10, 10, 10, 10, 10]);
+    expect(processingEvidence.map(
+      ({ progressBefore, progressAfter }) => [
+        progressBefore,
+        progressAfter,
+      ],
+    )).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 0],
+      [0, 1],
+      [1, 2],
+      [2, 0],
+    ]);
+    expect(deliveredLogs).toBe(60);
+    expect(completedRecipeCycles).toBe(2);
     expect(completedSawmill.inventories.logs).toEqual(expect.objectContaining({
-      quantity: 40,
-      recentInflow: 60,
-      recentOutflow: 20,
+      quantity: beforeProcessing.inventories.logs.quantity
+        + deliveredLogs
+        - recipeInput.quantity * completedRecipeCycles,
+      recentInflow: beforeProcessing.inventories.logs.recentInflow
+        + deliveredLogs,
+      recentOutflow: beforeProcessing.inventories.logs.recentOutflow
+        + recipeInput.quantity * completedRecipeCycles,
     }));
     expect(completedSawmill.inventories['structural-timber'])
       .toEqual(expect.objectContaining({
-        quantity: 16,
-        recentInflow: 16,
-        recentOutflow: 0,
+        quantity: beforeProcessing.inventories['structural-timber'].quantity
+          + recipeOutput.quantity * completedRecipeCycles,
+        recentInflow: beforeProcessing
+          .inventories['structural-timber'].recentInflow
+          + recipeOutput.quantity * completedRecipeCycles,
+        recentOutflow: beforeProcessing
+          .inventories['structural-timber'].recentOutflow,
       }));
     expect(completedSawmill.recipeProgressTicks).toBe(0);
-    expect(consumedLogs / 10).toBe(2);
-    expect(
-      completedSawmill.inventories['structural-timber'].quantity / 8,
-    ).toBe(consumedLogs / 10);
     expect(
       initialLogs + forestProduction,
     ).toBe(
@@ -548,9 +635,10 @@ describe('Integration: first profitable timber freight route', () => {
     expect(serviceProbe.removeCalls).toEqual([]);
     expect([...serviceProbe.liveIds]).toEqual([first.trainId]);
 
+    const duplicateProbe = purchaseRuntime();
     const duplicateService = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime().port,
+      duplicateProbe.port,
       () => first.trainId,
     );
     before = JSON.stringify(harness.world);
@@ -560,6 +648,10 @@ describe('Integration: first profitable timber freight route', () => {
       ok: false,
       blocker: 'duplicate-train-id',
     });
+    expect(duplicateProbe.spawnCalls).toEqual([]);
+    expect(duplicateProbe.placeCalls).toEqual([]);
+    expect(duplicateProbe.removeCalls).toEqual([]);
+    expect([...duplicateProbe.liveIds]).toEqual([]);
     expect(JSON.stringify(harness.world)).toBe(before);
 
     const liveFailures: Array<{
@@ -636,9 +728,10 @@ describe('Integration: first profitable timber freight route', () => {
   it('keeps a committed purchase on save failure, retries exactly, and rejects unaffordable purchase', () => {
     harness.buildConnectedRoute();
     let nextId = 1;
+    const successfulProbe = purchaseRuntime();
     const service = new FreightPurchaseService(
       WorldManager,
-      purchaseRuntime().port,
+      successfulProbe.port,
       () => `affordability-${nextId++}`,
     );
     const save = jest.spyOn(WorldManager, 'save').mockReturnValueOnce(false);
@@ -668,17 +761,29 @@ describe('Integration: first profitable timber freight route', () => {
       const result = service.purchase(service.quote(purchaseInput(harness)));
       expect(result.ok).toBe(true);
     }
-    const unaffordableQuote = service.quote(purchaseInput(harness));
+    const unaffordableProbe = purchaseRuntime();
+    const unaffordableService = new FreightPurchaseService(
+      WorldManager,
+      unaffordableProbe.port,
+      () => 'unaffordable-preflight',
+    );
+    const unaffordableQuote = unaffordableService.quote(
+      purchaseInput(harness),
+    );
     expect(unaffordableQuote).toEqual(expect.objectContaining({
       affordable: false,
       valid: false,
       blocker: 'insufficient-cash',
     }));
     const before = JSON.stringify(harness.world);
-    expect(service.purchase(unaffordableQuote)).toEqual({
+    expect(unaffordableService.purchase(unaffordableQuote)).toEqual({
       ok: false,
       blocker: 'insufficient-cash',
     });
+    expect(unaffordableProbe.spawnCalls).toEqual([]);
+    expect(unaffordableProbe.placeCalls).toEqual([]);
+    expect(unaffordableProbe.removeCalls).toEqual([]);
+    expect([...unaffordableProbe.liveIds]).toEqual([]);
     expect(JSON.stringify(harness.world)).toBe(before);
   });
 
