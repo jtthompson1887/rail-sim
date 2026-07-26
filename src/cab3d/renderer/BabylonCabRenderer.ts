@@ -5,10 +5,9 @@ import {
   HemisphericLight,
   Vector3,
   Color3,
-  MeshBuilder,
-  PBRMaterial,
 } from '@babylonjs/core';
 import { CabCanvasMount } from './CabCanvasMount';
+import { TrackMeshBuilder } from './TrackMeshBuilder';
 import type { ICabRenderer } from '../contracts/ICabRenderer';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
@@ -34,6 +33,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private scene: Scene | null = null;
   private camera: UniversalCamera | null = null;
   private cameraRig: CabCameraRig | null = null;
+  private trackMeshBuilder: TrackMeshBuilder | null = null;
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
 
@@ -69,10 +69,14 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
     }
 
+    this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
+
     this.scene?.render();
   }
 
   destroy(): void {
+    this.trackMeshBuilder?.dispose();
+    this.trackMeshBuilder = null;
     this.engine?.dispose();
     this.mount.destroy();
     this.engine = null;
@@ -110,16 +114,7 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.scene,
     );
 
-    // Minimal placeholder mesh so the first frame has something to draw.
-    const ground = MeshBuilder.CreateGround(
-      'placeholderGround',
-      { width: 1000, height: 1000 },
-      this.scene,
-    );
-    const material = new PBRMaterial('placeholderMaterial', this.scene);
-    material.albedoColor = new Color3(0.3, 0.35, 0.25);
-    material.roughness = 0.8;
-    ground.material = material;
+    this.trackMeshBuilder = new TrackMeshBuilder(this.scene);
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

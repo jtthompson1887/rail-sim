@@ -44,6 +44,45 @@ export const CabConfig = Object.freeze({
   /** Distance the eye must travel before the track mesh is rebuilt. */
   PATH_REBUILD_DISTANCE_M: 64,
 
+  /** Rail gauge: distance between inner faces of the rails, in metres. */
+  RAIL_GAUGE_M: 1.435,
+  /** Half-width of the rail head, in metres. */
+  RAIL_HEAD_HALF_WIDTH_M: 0.0335,
+  /** Lateral distance from track centreline to each rail centre, in metres. */
+  RAIL_CENTRE_OFFSET_M: 0.7515,
+  /** Width of the separate rail head cap, in metres. */
+  RAIL_HEAD_CAP_WIDTH_M: 0.067,
+  /** Height of the separate rail head cap, in metres. */
+  RAIL_HEAD_CAP_HEIGHT_M: 0.004,
+  /** Vertical centre of the rail head cap, in metres above the rail foot. */
+  RAIL_HEAD_CAP_Y_M: 0.157,
+
+  /** Sleeper length (across the track), in metres. */
+  SLEEPER_LENGTH_M: 2.5,
+  /** Sleeper height, in metres. */
+  SLEEPER_HEIGHT_M: 0.2,
+  /** Sleeper width (along the track), in metres. */
+  SLEEPER_WIDTH_M: 0.25,
+  /** Sleeper spacing, in metres. */
+  SLEEPER_SPACING_M: 0.65,
+
+  /** Ballast top width, in metres. */
+  BALLAST_TOP_WIDTH_M: 3.6,
+  /** Ballast bottom width, in metres. */
+  BALLAST_BOTTOM_WIDTH_M: 5.6,
+  /** Ballast depth, in metres. */
+  BALLAST_DEPTH_M: 0.35,
+
+  /** Bridge deck width, in metres. */
+  BRIDGE_DECK_WIDTH_M: 5.0,
+  /** Bridge deck depth, in metres. */
+  BRIDGE_DECK_DEPTH_M: 0.6,
+  /** Pier spacing along a bridge, in metres. */
+  PIER_SPACING_M: 25.0,
+
+  /** Tunnel bore radius, in metres. */
+  TUNNEL_BORE_RADIUS_M: 3.2,
+
   /** Sleeper / rail joint spacing, in metres. */
   RAIL_JOINT_SPACING_M: 18.29,
   /** Vertical impulse magnitude when a wheel crosses a rail joint. */
