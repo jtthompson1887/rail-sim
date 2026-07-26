@@ -164,6 +164,38 @@ async function inspectSawmill(page: Page): Promise<void> {
     .toHaveText('Sawmill');
   await expect(page.locator('[data-testid="facility-status"]'))
     .toHaveText('Needs logs');
+  const expectedSlots = [
+    { productId: 'logs', displayName: 'Logs' },
+    {
+      productId: 'structural-timber',
+      displayName: 'Structural Timber',
+    },
+  ] as const;
+  const inventories = page.locator('[data-testid="facility-inventories"]');
+  const inventoryRows = inventories.locator(':scope > div');
+  await expect(inventoryRows).toHaveCount(expectedSlots.length);
+  const quotes = page.locator('[data-testid="facility-quotes"]');
+  const quoteRows = quotes.locator(':scope > div');
+  await expect(quoteRows).toHaveCount(expectedSlots.length);
+  for (const { productId, displayName } of expectedSlots) {
+    const slot = sawmill.inventories[productId];
+    expect(slot).toBeDefined();
+    await expect(inventories).toContainText(
+      `${displayName} ${slot.quantity.toLocaleString('en-GB')} / `
+        + slot.capacity.toLocaleString('en-GB'),
+    );
+    const progress = page.getByRole('progressbar', {
+      name: `${displayName} inventory`,
+    });
+    await expect(progress).toHaveAttribute('max', String(slot.capacity));
+    await expect(progress).toHaveJSProperty('value', slot.quantity);
+    await expect(quotes).toContainText(
+      new RegExp(`${displayName} · £[\\d,]+ / unit`),
+    );
+  }
+  await expect(quotes).toContainText('Global construction');
+  await expect(quotes).toContainText('Regional demand');
+  await expect(quotes).toContainText('Inventory pressure');
   // Proves the global scene pointerdown did not immediately clear the marker.
   await page.waitForTimeout(100);
   await expect(inspector).toBeVisible();
