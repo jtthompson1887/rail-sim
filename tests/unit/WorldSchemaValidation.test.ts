@@ -263,6 +263,16 @@ describe('world schema validation', () => {
     }));
   });
 
+  it('rejects an own deprecated economyRevision authority', () => {
+    const raw = currentWorld();
+    raw.economyRevision = 0;
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: INCOMPATIBLE_WORLD_ACTION,
+    }));
+  });
+
   it.each([
     ['missing opportunity', (world: any) => { delete world.starterOpportunity; }],
     ['wrong opportunity version', (world: any) => {

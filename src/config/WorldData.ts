@@ -821,7 +821,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
   }
   if ('seed' in raw || 'terrainSeed' in raw || 'biome' in raw
-    || 'scenarios' in raw) {
+    || 'scenarios' in raw || hasOwn(raw, 'economyRevision')) {
     return incompatible(raw, 'legacy generation fields are not supported.');
   }
 
