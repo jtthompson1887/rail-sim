@@ -74,6 +74,22 @@ export interface CabWorldSnapshot {
 
   /** Deterministic weather state for the cab view, or `null` when invalid. */
   readonly weather: CabWeatherState | null;
+
+  // Quality-tier settings (populated by {@link applyTier} in the renderer)
+  readonly tier?: 'low' | 'medium' | 'high' | 'ultra';
+  readonly hardwareScale?: number;
+  readonly sceneryRadiusM?: number;
+  readonly shadowCascades?: number;
+  readonly shadowMapSize?: number;
+  readonly farTerrainRing?: boolean;
+  readonly sleeperSpacingM?: number;
+  readonly bloomEnabled?: boolean;
+  readonly fxaaEnabled?: boolean;
+  readonly dofEnabled?: boolean;
+  readonly chromaticEnabled?: boolean;
+  readonly grainEnabled?: boolean;
+  readonly motionBlurEnabled?: boolean;
+  readonly weatherParticleCap?: number;
 }
 
 /** Sentinel returned when a snapshot cannot be produced. */

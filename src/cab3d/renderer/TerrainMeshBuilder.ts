@@ -34,6 +34,7 @@ export class TerrainMeshBuilder {
   private waterBumpTexture: RawTexture | null = null;
   private lastOriginX: number | null = null;
   private lastOriginY: number | null = null;
+  private lastFarTerrainRing: boolean | null = null;
 
   constructor(private readonly scene: Scene) {}
 
@@ -55,11 +56,13 @@ export class TerrainMeshBuilder {
 
     const originX = snapToGrid(worldX, CabConfig.TERRAIN_REBUILD_DISTANCE_M);
     const originY = snapToGrid(worldY, CabConfig.TERRAIN_REBUILD_DISTANCE_M);
+    const farTerrainRing = snapshot.farTerrainRing ?? true;
 
     if (
       this.root &&
       this.lastOriginX === originX &&
-      this.lastOriginY === originY
+      this.lastOriginY === originY &&
+      this.lastFarTerrainRing === farTerrainRing
     ) {
       return;
     }
@@ -70,10 +73,14 @@ export class TerrainMeshBuilder {
     const rootPos = worldToBabylon(originX, originY, 0);
     this.root.position = new Vector3(rootPos.x, rootPos.y, rootPos.z);
 
+    const activeRings = farTerrainRing
+      ? CabConfig.TERRAIN_RINGS
+      : CabConfig.TERRAIN_RINGS.slice(0, -1);
+
     const vertexData = buildTerrainVertexData({
       originX,
       originY,
-      rings: CabConfig.TERRAIN_RINGS,
+      rings: activeRings,
       getHeightAt: snapshot.terrain.getHeightAt,
       biome: snapshot.biome,
       skirtDepth: CabConfig.TERRAIN_SKIRT_DEPTH_M,
@@ -91,8 +98,7 @@ export class TerrainMeshBuilder {
     terrain.parent = this.root;
     terrain.receiveShadows = true;
 
-    const farRing =
-      CabConfig.TERRAIN_RINGS[CabConfig.TERRAIN_RINGS.length - 1];
+    const farRing = activeRings[activeRings.length - 1];
     const water = MeshBuilder.CreateGround(
       'water',
       {
@@ -107,6 +113,7 @@ export class TerrainMeshBuilder {
 
     this.lastOriginX = originX;
     this.lastOriginY = originY;
+    this.lastFarTerrainRing = farTerrainRing;
   }
 
   /** Scroll the water normal map placeholder. */
@@ -126,6 +133,7 @@ export class TerrainMeshBuilder {
     this.waterBumpTexture = null;
     this.lastOriginX = null;
     this.lastOriginY = null;
+    this.lastFarTerrainRing = null;
   }
 
   private createTerrainMaterial(): PBRMaterial {

@@ -81,4 +81,34 @@ describe('CabWorldSnapshot', () => {
     expect(snapshot.scenery).toHaveLength(1);
     expect(snapshot.scenery![0].type).toBe('tree_oak');
   });
+
+  it('supports optional quality tier settings', () => {
+    const snapshot: CabWorldSnapshot = {
+      valid: true,
+      seed: 's1',
+      biome: 'temperate',
+      vehicle: null,
+      path: [],
+      elapsedSecs: 0,
+      weather: null,
+      tier: 'high',
+      hardwareScale: 1.0,
+      sceneryRadiusM: 800,
+      shadowCascades: 3,
+      shadowMapSize: 2048,
+      farTerrainRing: true,
+      sleeperSpacingM: 0.65,
+      bloomEnabled: true,
+      fxaaEnabled: true,
+      dofEnabled: true,
+      chromaticEnabled: true,
+      grainEnabled: true,
+      motionBlurEnabled: false,
+      weatherParticleCap: 2500,
+    };
+    expect(snapshot.tier).toBe('high');
+    expect(snapshot.hardwareScale).toBe(1.0);
+    expect(snapshot.sceneryRadiusM).toBe(800);
+    expect(snapshot.weatherParticleCap).toBe(2500);
+  });
 });

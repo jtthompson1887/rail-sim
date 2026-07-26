@@ -3,9 +3,9 @@ import { buildInstrumentValues } from '../cab/CabInstrumentModel';
 import { getSimHours } from '../atmosphere/CabTimeOfDay';
 import type { CabWorldSnapshot } from '../model/CabWorldSnapshot';
 import {
-  type CabQualityTier,
-  CAB_QUALITY_TIERS,
-  DEFAULT_QUALITY_TIER,
+  type CabQualitySetting,
+  CAB_QUALITY_SETTINGS,
+  DEFAULT_QUALITY_SETTING,
   getQualityTierLabel,
 } from '../quality';
 
@@ -27,7 +27,7 @@ export class CabHudOverlay {
   private readonly qualityLabel: HTMLElement;
   private readonly exit: HTMLButtonElement;
 
-  private currentTier: CabQualityTier = DEFAULT_QUALITY_TIER;
+  private currentTier: CabQualitySetting = DEFAULT_QUALITY_SETTING;
 
   constructor() {
     this.root = document.createElement('section');
@@ -112,7 +112,7 @@ export class CabHudOverlay {
       'padding:2px 6px',
       'font:inherit',
     ].join(';');
-    for (const tier of CAB_QUALITY_TIERS) {
+    for (const tier of CAB_QUALITY_SETTINGS) {
       const option = document.createElement('option');
       option.value = tier;
       option.textContent = getQualityTierLabel(tier);
@@ -232,9 +232,10 @@ export class CabHudOverlay {
   }
 
   private readonly handleQualityChange = (): void => {
-    const value = this.qualitySelect.value as CabQualityTier;
+    const value = this.qualitySelect.value as CabQualitySetting;
     this.currentTier = value;
     this.renderQualityLabel();
+    EventBus.emit('cab:quality', { tier: value });
   };
 
   private readonly handleExit = (): void => {

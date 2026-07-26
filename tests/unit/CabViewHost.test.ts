@@ -11,6 +11,7 @@ describe('CabViewHost', () => {
     hide: jest.fn(),
     render: jest.fn(),
     destroy: jest.fn(),
+    setQualityTier: jest.fn(),
   } as unknown as jest.Mocked<ICabRenderer>);
 
   const createSource = (snapshot: CabWorldSnapshot = INVALID_SNAPSHOT): jest.Mocked<ICabSnapshotSource> => ({
@@ -118,5 +119,40 @@ describe('CabViewHost', () => {
     EventBus.emit('cab:toggle', {});
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(stateEvents.length).toBe(before);
+  });
+
+  it('forwards cab:quality to the renderer', async () => {
+    const renderer = createRenderer();
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    EventBus.emit('cab:quality', { tier: 'high' });
+    expect(renderer.setQualityTier).toHaveBeenCalledWith('high');
+
+    host.destroy();
+  });
+
+  it('queues a quality change before the renderer is loaded', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+
+    const host = createHost(createSource(), loader);
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    EventBus.emit('cab:quality', { tier: 'ultra' });
+    expect(renderer.setQualityTier).not.toHaveBeenCalled();
+
+    resolveLoader(renderer);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(renderer.setQualityTier).toHaveBeenCalledWith('ultra');
+    host.destroy();
   });
 });

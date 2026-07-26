@@ -37,6 +37,7 @@ export class SceneryInstanceBuilder {
   private materials: Map<SceneryType, PBRMaterial> = new Map();
   private lastEyeChunkKey: string | null = null;
   private lastScenery: ReadonlyArray<SceneryObjectDef> | null = null;
+  private lastSceneryRadius: number | null = null;
 
   constructor(private readonly scene: Scene) {}
 
@@ -53,17 +54,29 @@ export class SceneryInstanceBuilder {
     }
 
     const chunkKey = this.eyeChunkKey(eyePosition);
-    if (this.lastEyeChunkKey !== chunkKey) {
+    const radiusM = snapshot.sceneryRadiusM ?? CabConfig.SCENERY_DRAW_RADIUS_M;
+
+    if (
+      this.lastEyeChunkKey !== chunkKey ||
+      this.lastSceneryRadius !== radiusM
+    ) {
       this.disposeRoot();
       this.lastEyeChunkKey = chunkKey;
+      this.lastSceneryRadius = radiusM;
     }
 
     if (this.lastScenery === snapshot.scenery && this.root) {
       return;
     }
 
+    const eyeWorldX = eyePosition.x;
+    const eyeWorldY = -eyePosition.z;
+    const filtered = snapshot.scenery.filter(
+      (def) => Math.hypot(def.x - eyeWorldX, def.y - eyeWorldY) <= radiusM,
+    );
+
     const buffers = buildSceneryMatrixBuffers(
-      snapshot.scenery,
+      filtered,
       snapshot.terrain.getHeightAt,
     );
 
@@ -107,6 +120,7 @@ export class SceneryInstanceBuilder {
     this.materials.clear();
     this.lastEyeChunkKey = null;
     this.lastScenery = null;
+    this.lastSceneryRadius = null;
   }
 
   private eyeChunkKey(eyePosition: Position3): string {

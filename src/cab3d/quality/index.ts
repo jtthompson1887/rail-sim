@@ -1,13 +1,27 @@
 /**
- * Quality tier model for the 3-D cab view.
+ * Public API for the cab-view quality system.
  *
- * This module is intentionally small: automatic tier selection is not yet
- * implemented, so callers display and persist the currently selected tier.
+ * - `CabQualityTier` and the concrete tier helpers are defined in
+ *   {@link ./CabQualityTier.ts}.
+ * - `CabQualitySetting` adds the "auto" option used by the HUD.
  */
 
-export type CabQualityTier = 'auto' | 'low' | 'medium' | 'high' | 'ultra';
+import type { CabQualityTier, CabTierSettings } from './CabQualityTier';
+export {
+  CAB_QUALITY_TIERS,
+  DEFAULT_QUALITY_TIER,
+  TIER_SETTINGS,
+  applyTier,
+  getTierForFps,
+  isCabQualityTier,
+} from './CabQualityTier';
 
-export const CAB_QUALITY_TIERS: readonly CabQualityTier[] = Object.freeze([
+export type { CabQualityTier, CabTierSettings } from './CabQualityTier';
+
+/** UI-visible setting, including the automatic tier selector. */
+export type CabQualitySetting = 'auto' | CabQualityTier;
+
+export const CAB_QUALITY_SETTINGS: readonly CabQualitySetting[] = Object.freeze([
   'auto',
   'low',
   'medium',
@@ -15,12 +29,11 @@ export const CAB_QUALITY_TIERS: readonly CabQualityTier[] = Object.freeze([
   'ultra',
 ]);
 
-export const DEFAULT_QUALITY_TIER: CabQualityTier = 'medium';
+/** Default UI setting: let the renderer auto-select the tier. */
+export const DEFAULT_QUALITY_SETTING: CabQualitySetting = 'auto';
 
-export const AUTO_QUALITY_TIER: CabQualityTier = 'auto';
-
-/** Human-readable label for a tier. */
-export function getQualityTierLabel(tier: CabQualityTier): string {
+/** Human-readable label for a setting. */
+export function getQualityTierLabel(tier: CabQualitySetting): string {
   switch (tier) {
     case 'auto':
       return 'Auto';

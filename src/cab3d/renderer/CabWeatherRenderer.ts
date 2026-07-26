@@ -26,6 +26,7 @@ import type { CabInteriorBuilder } from './CabInteriorBuilder';
  */
 export class CabWeatherRenderer {
   private particleSystem: ParticleSystem | null = null;
+  private particleCapacity = 1;
   private emitterMesh: Mesh | null = null;
   private dropletL: Mesh | null = null;
   private dropletR: Mesh | null = null;
@@ -46,7 +47,7 @@ export class CabWeatherRenderer {
     private readonly interiorBuilder: CabInteriorBuilder,
   ) {
     this.createEmitter();
-    this.createParticleSystem();
+    this.ensureParticleSystem(CabConfig.PRECIPITATION_PARTICLE_COUNT);
     this.createDroplets();
   }
 
@@ -72,16 +73,19 @@ export class CabWeatherRenderer {
 
     this.parentEmitter(eyeNode);
     this.applyAtmosphere(this.currentWeather, elapsedSecs);
-    this.applyParticles(this.currentWeather, this.targetWeather, this.previousTarget);
+    this.applyParticles(
+      this.currentWeather,
+      this.targetWeather,
+      this.previousTarget,
+      snapshot.weatherParticleCap,
+    );
     this.applyDroplets(this.currentWeather, elapsedSecs);
   }
 
   /** Release all Babylon resources owned by this renderer. */
   dispose(): void {
     this.disposed = true;
-    this.particleSystem?.stop();
-    this.particleSystem?.dispose();
-    this.particleSystem = null;
+    this.disposeParticleSystem();
 
     this.emitterMesh?.dispose();
     this.emitterMesh = null;
@@ -113,12 +117,24 @@ export class CabWeatherRenderer {
     this.emitterMesh.rotation = (eyeNode as any).rotation ?? Vector3.Zero();
   }
 
-  private createParticleSystem(): void {
+  private ensureParticleSystem(capacity: number): void {
+    if (capacity <= 1) {
+      this.disposeParticleSystem();
+      return;
+    }
+
+    if (this.particleSystem && this.particleCapacity === capacity) {
+      return;
+    }
+
+    this.disposeParticleSystem();
+
     this.particleSystem = new ParticleSystem(
       'cabPrecipitation',
-      CabConfig.PRECIPITATION_PARTICLE_COUNT,
+      capacity,
       this.scene,
     );
+    this.particleCapacity = capacity;
 
     const half = CabConfig.PRECIPITATION_BOX_HALF_M;
     this.particleSystem.minEmitBox = new Vector3(-half.x, -half.y, -half.z);
@@ -135,6 +151,17 @@ export class CabWeatherRenderer {
     this.particleSystem.updateSpeed = 0.01;
     this.particleSystem.emitRate = 0;
     this.particleSystem.stop();
+    this.particlesStarted = false;
+  }
+
+  private disposeParticleSystem(): void {
+    if (this.particleSystem) {
+      this.particleSystem.stop();
+      this.particleSystem.dispose();
+      this.particleSystem = null;
+      this.particleCapacity = 1;
+      this.particlesStarted = false;
+    }
   }
 
   private createDroplets(): void {
@@ -213,13 +240,22 @@ export class CabWeatherRenderer {
     weather: Readonly<CabWeatherState>,
     target: Readonly<CabWeatherState> | null,
     previous: Readonly<CabWeatherState>,
+    weatherParticleCap?: number,
   ): void {
+    const cap =
+      typeof weatherParticleCap === 'number'
+        ? weatherParticleCap
+        : CabConfig.PRECIPITATION_PARTICLE_COUNT;
+
+    this.ensureParticleSystem(cap);
     if (!this.particleSystem) return;
 
-    const count = Math.round(weather.particles);
     const precipType = this.resolvePrecipitationType(weather, target, previous);
+    const count = precipType
+      ? Math.round(Math.min(weather.particles, cap))
+      : 0;
 
-    if (count > 0 && precipType) {
+    if (count > 0) {
       this.configureParticlesForType(precipType);
       this.particleSystem.emitRate = count;
       if (!this.particlesStarted) {

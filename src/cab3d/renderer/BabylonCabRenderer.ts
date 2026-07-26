@@ -29,6 +29,13 @@ import { CabCameraRig, type CabEyeTransform } from '../camera/CabCameraRig';
 import { CabConfig } from '../CabConfig';
 import { getSimHours, getSunVector } from '../atmosphere/CabTimeOfDay';
 import { getBandColourRgb } from '../world/TerrainColour';
+import {
+  applyTier,
+  isCabQualityTier,
+  type CabQualityTier,
+  DEFAULT_QUALITY_TIER,
+} from '../quality/CabQualityTier';
+import { CabPerformanceMonitor } from '../quality/CabPerformanceMonitor';
 
 declare global {
   interface Window {
@@ -72,6 +79,10 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private reducedMotionMediaQuery: MediaQueryList | null = null;
   private readonly reducedMotionListeners = new Set<(reduced: boolean) => void>();
 
+  private activeTier: CabQualityTier | null = null;
+  private performanceMonitor: CabPerformanceMonitor | null = null;
+  private qualityProbeStarted = false;
+
   constructor() {
     this.mount = new CabCanvasMount();
   }
@@ -84,6 +95,15 @@ export default class BabylonCabRenderer implements ICabRenderer {
     if (!this.engine) {
       this.createEngine();
     }
+
+    const stored = this.loadStoredTier();
+    if (stored) {
+      this.activeTier = stored;
+    } else {
+      this.activeTier = null;
+      this.startPerformanceProbe();
+    }
+
     this.mount.show();
   }
 
@@ -91,19 +111,53 @@ export default class BabylonCabRenderer implements ICabRenderer {
     this.mount.hide();
   }
 
+  /**
+   * Apply a manual quality-tier override, or select "auto" to re-run the
+   * performance probe. Invalid values are ignored.
+   */
+  setQualityTier(tier: string): void {
+    if (tier === 'auto') {
+      this.activeTier = null;
+      this.performanceMonitor?.cancel();
+      this.qualityProbeStarted = false;
+      this.clearStoredTier();
+      this.startPerformanceProbe();
+      return;
+    }
+
+    if (!isCabQualityTier(tier)) return;
+
+    this.activeTier = tier;
+    this.saveTier(tier);
+    this.performanceMonitor?.cancel();
+    this.qualityProbeStarted = true;
+  }
+
   render(snapshot: CabWorldSnapshot, deltaMs: number): void {
     if (!this.isReady()) return;
-    this.lastSnapshot = snapshot;
 
-    const reduced = snapshot.reducedMotion ?? this.prefersReducedMotion();
+    this.performanceMonitor?.update();
+    const tier = this.resolveActiveTier();
+    const renderSnapshot = applyTier(snapshot, tier);
+    this.lastSnapshot = renderSnapshot;
+
+    this.engine!.setHardwareScalingLevel(renderSnapshot.hardwareScale!);
+    this.shadowManager?.configure(this.sunLight!, {
+      size: renderSnapshot.shadowMapSize!,
+      cascades: renderSnapshot.shadowCascades!,
+      maxZ: CabConfig.SHADOW_MAX_Z_M,
+      lambda: CabConfig.SHADOW_LAMBDA,
+    });
+
+    const reduced = renderSnapshot.reducedMotion ?? this.prefersReducedMotion();
     this.setReducedMotion(reduced);
     const motionScale = reduced ? CabConfig.REDUCED_MOTION_SCALE : 1;
 
-    if (snapshot.vehicle) {
+    if (renderSnapshot.vehicle) {
       if (!this.cameraRig) {
         this.cameraRig = new CabCameraRig();
       }
-      this.lastEye = this.cameraRig.update(deltaMs, snapshot, motionScale);
+      this.lastEye = this.cameraRig.update(deltaMs, renderSnapshot, motionScale);
       this.camera?.position.set(this.lastEye.position.x, this.lastEye.position.y, this.lastEye.position.z);
       this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
 
@@ -113,20 +167,20 @@ export default class BabylonCabRenderer implements ICabRenderer {
       }
     }
 
-    this.updateAtmosphere(snapshot);
-    this.weatherRenderer?.apply(snapshot, this.camera!, snapshot.elapsedSecs);
+    this.updateAtmosphere(renderSnapshot);
+    this.weatherRenderer?.apply(renderSnapshot, this.camera!, renderSnapshot.elapsedSecs);
 
-    this.trackMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
-    this.terrainMeshBuilder?.build(snapshot, this.lastEye?.position ?? null);
-    this.sceneryInstanceBuilder?.build(snapshot, this.lastEye?.position ?? null);
-    this.terrainMeshBuilder?.update(snapshot.elapsedSecs);
-    this.cabInstrumentBuilder?.update(snapshot);
+    this.trackMeshBuilder?.build(renderSnapshot, this.lastEye?.position ?? null);
+    this.terrainMeshBuilder?.build(renderSnapshot, this.lastEye?.position ?? null);
+    this.sceneryInstanceBuilder?.build(renderSnapshot, this.lastEye?.position ?? null);
+    this.terrainMeshBuilder?.update(renderSnapshot.elapsedSecs);
+    this.cabInstrumentBuilder?.update(renderSnapshot);
 
     this.shadowManager?.sync(
       this.trackMeshBuilder?.getShadowCasters() ?? [],
       this.sceneryInstanceBuilder?.getShadowCasters() ?? [],
     );
-    this.postFxManager?.update(snapshot);
+    this.postFxManager?.update(renderSnapshot);
 
     this.scene?.render();
   }
@@ -137,6 +191,10 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.reducedMotionMediaQuery = null;
     }
     this.reducedMotionListeners.clear();
+
+    this.performanceMonitor = null;
+    this.activeTier = null;
+    this.qualityProbeStarted = false;
 
     this.reflectionProbe?.dispose();
     this.reflectionProbe = null;
@@ -368,6 +426,70 @@ export default class BabylonCabRenderer implements ICabRenderer {
         this.reflectionProbe.cubeTexture.resetRefreshCounter();
         this.lastSunAltitudeDeg = altitude;
       }
+    }
+  }
+
+  /** Resolve the active concrete tier, preferring the manual/auto probe result. */
+  private resolveActiveTier(): CabQualityTier {
+    if (this.activeTier) return this.activeTier;
+
+    const stored = this.loadStoredTier();
+    if (stored) {
+      this.activeTier = stored;
+      return stored;
+    }
+
+    return DEFAULT_QUALITY_TIER;
+  }
+
+  private startPerformanceProbe(): void {
+    if (!this.engine || this.qualityProbeStarted) return;
+
+    this.qualityProbeStarted = true;
+    if (!this.performanceMonitor) {
+      this.performanceMonitor = new CabPerformanceMonitor(
+        () => this.engine?.getFps() ?? 0,
+        () => Date.now(),
+      );
+    }
+    this.performanceMonitor.start((tier) => {
+      this.activeTier = tier;
+      this.saveTier(tier);
+    });
+  }
+
+  private loadStoredTier(): CabQualityTier | null {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    try {
+      const raw = window.localStorage.getItem('rail-sim-cab3d-prefs');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const tier = parsed?.qualityTier;
+      if (isCabQualityTier(tier)) return tier;
+    } catch {
+      // ignore malformed or missing localStorage
+    }
+    return null;
+  }
+
+  private saveTier(tier: CabQualityTier): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(
+        'rail-sim-cab3d-prefs',
+        JSON.stringify({ qualityTier: tier }),
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private clearStoredTier(): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.removeItem('rail-sim-cab3d-prefs');
+    } catch {
+      // ignore storage errors
     }
   }
 }

@@ -26,6 +26,7 @@ export class CabViewHost {
   private active = false;
   private renderer: ICabRenderer | null = null;
   private rendererPromise: Promise<ICabRenderer> | null = null;
+  private pendingQualityTier: string | null = null;
   private readonly toggleButton: CabViewToggleButton;
   private readonly hudOverlay: CabHudOverlay;
 
@@ -36,15 +37,18 @@ export class CabViewHost {
     this.toggleButton = new CabViewToggleButton();
     this.hudOverlay = new CabHudOverlay();
     EventBus.on('cab:toggle', this.handleToggle);
+    EventBus.on('cab:quality', this.handleQualityChange);
   }
 
   /** Destroy the host and release the renderer and UI. */
   destroy(): void {
     EventBus.off('cab:toggle', this.handleToggle);
+    EventBus.off('cab:quality', this.handleQualityChange);
     this.renderer?.hide();
     this.renderer?.destroy();
     this.renderer = null;
     this.rendererPromise = null;
+    this.pendingQualityTier = null;
     this.active = false;
     this.toggleButton.destroy();
     this.hudOverlay.destroy();
@@ -96,6 +100,11 @@ export class CabViewHost {
         }
       }
 
+      if (this.pendingQualityTier && this.renderer?.setQualityTier) {
+        this.renderer.setQualityTier(this.pendingQualityTier);
+        this.pendingQualityTier = null;
+      }
+
       this.renderer?.show();
     } else {
       this.hudOverlay.hide();
@@ -105,4 +114,12 @@ export class CabViewHost {
     this.active = active;
     EventBus.emit('cab:state', { active });
   }
+
+  private readonly handleQualityChange = ({ tier }: { tier: string }): void => {
+    if (this.renderer?.setQualityTier) {
+      this.renderer.setQualityTier(tier);
+    } else {
+      this.pendingQualityTier = tier;
+    }
+  };
 }

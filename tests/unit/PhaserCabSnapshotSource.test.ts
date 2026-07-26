@@ -202,7 +202,7 @@ describe('PhaserCabSnapshotSource', () => {
     const generate = jest.spyOn(SceneryGenerator.prototype, 'generateForChunk')
       .mockReturnValue([
         { id: 'a', type: 'tree_oak', x: 100, y: 200, rotation: 1, scale: 1, variant: 0 },
-        { id: 'b', type: 'tree_pine', x: 950, y: 200, rotation: 0, scale: 1, variant: 0 },
+        { id: 'b', type: 'tree_pine', x: 1400, y: 200, rotation: 0, scale: 1, variant: 0 },
       ]);
 
     const train = createTrain({ x: 100, y: 200, rotation: 1 });

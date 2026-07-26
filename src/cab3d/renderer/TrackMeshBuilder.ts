@@ -35,6 +35,7 @@ import { worldToBabylon } from '../model/CabCoordinate';
 export class TrackMeshBuilder {
   private root: TransformNode | null = null;
   private lastRebuildPosition: { x: number; y: number; z: number } | null = null;
+  private lastSleeperSpacing: number | null = null;
   private leftRail: Mesh | null = null;
   private rightRail: Mesh | null = null;
   private leftCap: Mesh | null = null;
@@ -56,11 +57,16 @@ export class TrackMeshBuilder {
       return;
     }
 
+    const spacing = snapshot.sleeperSpacingM ?? CabConfig.SLEEPER_SPACING_M;
+
     if (eyePosition && this.lastRebuildPosition && this.root) {
       const dx = eyePosition.x - this.lastRebuildPosition.x;
       const dz = eyePosition.z - this.lastRebuildPosition.z;
       const moved = Math.hypot(dx, dz);
-      if (moved < CabConfig.PATH_REBUILD_DISTANCE_M) {
+      if (
+        moved < CabConfig.PATH_REBUILD_DISTANCE_M &&
+        this.lastSleeperSpacing === spacing
+      ) {
         return;
       }
     }
@@ -70,9 +76,10 @@ export class TrackMeshBuilder {
     this.lastRebuildPosition = eyePosition
       ? { ...eyePosition }
       : null;
+    this.lastSleeperSpacing = spacing;
 
     this.buildRails(snapshot.path);
-    this.buildTrackBed(snapshot.path);
+    this.buildTrackBed(snapshot.path, spacing);
   }
 
   /** Return the rail and sleeper meshes that should cast shadows. */
@@ -96,6 +103,7 @@ export class TrackMeshBuilder {
     this.rightCap = null;
     this.sleeperMesh = null;
     this.lastRebuildPosition = null;
+    this.lastSleeperSpacing = null;
   }
 
   private buildRails(path: ReadonlyArray<CabTrackSample>): void {
@@ -176,7 +184,10 @@ export class TrackMeshBuilder {
     }
   }
 
-  private buildTrackBed(path: ReadonlyArray<CabTrackSample>): void {
+  private buildTrackBed(
+    path: ReadonlyArray<CabTrackSample>,
+    spacing: number,
+  ): void {
     const segments = getStructureSegments(path);
     const sleeperTransforms: CabTrackTransform[] = [];
 
@@ -192,7 +203,7 @@ export class TrackMeshBuilder {
           sleeperTransforms.push(
             ...getSleeperTransforms(
               path,
-              CabConfig.SLEEPER_SPACING_M,
+              spacing,
               segment.startDistance,
               segment.endDistance,
             ),
@@ -203,7 +214,7 @@ export class TrackMeshBuilder {
           sleeperTransforms.push(
             ...getSleeperTransforms(
               path,
-              CabConfig.SLEEPER_SPACING_M,
+              spacing,
               segment.startDistance,
               segment.endDistance,
             ),

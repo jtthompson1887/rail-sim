@@ -70,18 +70,29 @@ export class CabPostFxManager {
     const reduced = snapshot.reducedMotion === true;
     const deterministic = snapshot.deterministic === true;
 
+    const bloomEnabled = snapshot.bloomEnabled ?? true;
+    const fxaaEnabled = snapshot.fxaaEnabled ?? true;
+    const dofEnabled = snapshot.dofEnabled ?? true;
+    const chromaticEnabled = snapshot.chromaticEnabled ?? true;
+    const grainEnabled = snapshot.grainEnabled ?? true;
+    const motionBlurEnabled = snapshot.motionBlurEnabled ?? false;
+
+    this.pipeline.bloomEnabled = bloomEnabled;
+    this.pipeline.fxaaEnabled = fxaaEnabled;
+
     if (reduced) {
       this.pipeline.grainEnabled = false;
       this.pipeline.depthOfFieldEnabled = false;
+      this.pipeline.chromaticAberrationEnabled = false;
       this.setMotionBlurEnabled(false);
     } else {
-      this.pipeline.grainEnabled = true;
+      this.pipeline.grainEnabled = grainEnabled;
       this.pipeline.grain.animated = !deterministic;
-      this.pipeline.depthOfFieldEnabled = true;
+      this.pipeline.depthOfFieldEnabled = dofEnabled;
+      this.pipeline.chromaticAberrationEnabled = chromaticEnabled;
 
-      if (deterministic) {
-        this.setMotionBlurEnabled(false);
-      }
+      const enableMotionBlur = deterministic ? false : motionBlurEnabled;
+      this.setMotionBlurEnabled(enableMotionBlur);
     }
   }
 

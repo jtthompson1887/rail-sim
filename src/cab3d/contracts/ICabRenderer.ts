@@ -24,4 +24,7 @@ export interface ICabRenderer {
 
   /** Optional reduced-motion observable. Implementations may expose this so the HUD can mirror the state. */
   onReducedMotionChange?(callback: (reduced: boolean) => void): () => void;
+
+  /** Optional manual quality-tier override from the HUD. */
+  setQualityTier?(tier: string): void;
 }

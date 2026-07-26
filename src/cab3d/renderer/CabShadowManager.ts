@@ -8,6 +8,37 @@ import {
 } from '@babylonjs/core';
 import { CabConfig } from '../CabConfig';
 
+/** Settings used to configure (or reconfigure) the shadow generator. */
+export interface CabShadowSettings {
+  /** Shadow map resolution in pixels. */
+  readonly size: number;
+  /** Number of cascades. A value of 0 disables shadow generation. */
+  readonly cascades: number;
+  /** Maximum shadow-casting distance in metres. */
+  readonly maxZ: number;
+  /** Cascade split lambda. */
+  readonly lambda: number;
+}
+
+const DEFAULT_SETTINGS: CabShadowSettings = Object.freeze({
+  size: CabConfig.SHADOW_MAP_SIZE,
+  cascades: CabConfig.SHADOW_CASCADES,
+  maxZ: CabConfig.SHADOW_MAX_Z_M,
+  lambda: CabConfig.SHADOW_LAMBDA,
+});
+
+function settingsEqual(
+  a: CabShadowSettings,
+  b: CabShadowSettings,
+): boolean {
+  return (
+    a.size === b.size &&
+    a.cascades === b.cascades &&
+    a.maxZ === b.maxZ &&
+    a.lambda === b.lambda
+  );
+}
+
 /**
  * Owns the cascaded shadow generator for the 3-D cab view.
  *
@@ -17,6 +48,7 @@ import { CabConfig } from '../CabConfig';
  */
 export class CabShadowManager {
   private generator: CascadedShadowGenerator | null = null;
+  private currentSettings: CabShadowSettings | null = null;
   private casters = new Set<AbstractMesh>();
 
   constructor(
@@ -24,25 +56,41 @@ export class CabShadowManager {
     private readonly camera: Camera,
   ) {}
 
-  /** Create and configure a CascadedShadowGenerator on the directional sun light. */
-  attach(sunLight: DirectionalLight): void {
-    if (this.generator) return;
+  /** Create or reconfigure a CascadedShadowGenerator on the directional sun light. */
+  attach(sunLight: DirectionalLight, settings?: Partial<CabShadowSettings>): void {
+    const next: CabShadowSettings = { ...DEFAULT_SETTINGS, ...settings };
+
+    if (this.generator && this.currentSettings && settingsEqual(this.currentSettings, next)) {
+      return;
+    }
+
+    this.disposeGenerator();
+    this.currentSettings = next;
+
+    if (next.cascades <= 0) {
+      return;
+    }
 
     const generator = new CascadedShadowGenerator(
-      CabConfig.SHADOW_MAP_SIZE,
+      next.size,
       sunLight,
       false,
       this.camera,
       true,
     );
 
-    generator.numCascades = CabConfig.SHADOW_CASCADES;
-    generator.shadowMaxZ = CabConfig.SHADOW_MAX_Z_M;
-    generator.lambda = CabConfig.SHADOW_LAMBDA;
+    generator.numCascades = next.cascades;
+    generator.shadowMaxZ = next.maxZ;
+    generator.lambda = next.lambda;
     generator.usePercentageCloserFiltering = true;
     generator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
 
     this.generator = generator;
+  }
+
+  /** Reconfigure shadow settings without changing the light or camera. */
+  configure(sunLight: DirectionalLight, settings: Partial<CabShadowSettings>): void {
+    this.attach(sunLight, settings);
   }
 
   /**
@@ -75,6 +123,12 @@ export class CabShadowManager {
 
   /** Release the shadow generator and all tracked casters. */
   dispose(): void {
+    this.disposeGenerator();
+    this.casters.clear();
+    this.currentSettings = null;
+  }
+
+  private disposeGenerator(): void {
     if (this.generator) {
       for (const mesh of this.casters) {
         this.generator.removeShadowCaster(mesh);
@@ -82,6 +136,5 @@ export class CabShadowManager {
       this.generator.dispose();
       this.generator = null;
     }
-    this.casters.clear();
   }
 }

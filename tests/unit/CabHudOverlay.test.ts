@@ -7,6 +7,8 @@ describe('CabHudOverlay', () => {
   let overlay: CabHudOverlay;
   let toggleEvents: Array<Record<string, never>>;
   let toggleHandler: () => void;
+  let qualityEvents: Array<{ tier: string }>;
+  let qualityHandler: (data: { tier: string }) => void;
 
   function makeVehicle(overrides: Partial<CabVehicleSnapshot> = {}): CabVehicleSnapshot {
     return {
@@ -40,12 +42,16 @@ describe('CabHudOverlay', () => {
     document.body.innerHTML = '';
     toggleEvents = [];
     toggleHandler = () => toggleEvents.push({});
+    qualityEvents = [];
+    qualityHandler = (data) => qualityEvents.push(data);
     EventBus.on('cab:toggle', toggleHandler);
+    EventBus.on('cab:quality', qualityHandler);
     overlay = new CabHudOverlay();
   });
 
   afterEach(() => {
     EventBus.off('cab:toggle', toggleHandler);
+    EventBus.off('cab:quality', qualityHandler);
     overlay.destroy();
     document.body.innerHTML = '';
   });
@@ -125,16 +131,26 @@ describe('CabHudOverlay', () => {
     expect(toggleEvents).toHaveLength(1);
   });
 
-  it('exposes a quality tier selector', () => {
+  it('exposes a quality tier selector defaulting to auto', () => {
     overlay.show();
     const select = document.querySelector('[data-testid="cab-hud-quality"]') as HTMLSelectElement;
     expect(select).toBeInstanceOf(HTMLSelectElement);
-    expect(select.value).toBe('medium');
+    expect(select.value).toBe('auto');
 
     select.value = 'high';
     select.dispatchEvent(new Event('change', { bubbles: true }));
     expect(select.value).toBe('high');
     expect(document.querySelector('[data-testid="cab-hud-quality-label"]')?.textContent).toBe('Quality: High');
+  });
+
+  it('emits cab:quality when the quality selector changes', () => {
+    overlay.show();
+    const select = document.querySelector('[data-testid="cab-hud-quality"]') as HTMLSelectElement;
+
+    select.value = 'low';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(qualityEvents).toContainEqual({ tier: 'low' });
   });
 
   it('is removed from the DOM on destroy', () => {

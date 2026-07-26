@@ -183,7 +183,7 @@ export function sampleAtDistance(
  */
 export function getSleeperTransforms(
   path: ReadonlyArray<CabTrackSample>,
-  spacing = CabConfig.SLEEPER_SPACING_M,
+  spacing: number = CabConfig.SLEEPER_SPACING_M,
   startDistance?: number,
   endDistance?: number,
 ): CabTrackTransform[] {
