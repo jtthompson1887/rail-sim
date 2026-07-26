@@ -5,9 +5,11 @@ import { WorldManager } from '../../src/managers/WorldManager';
 import { CommandStack } from '../../src/systems/CommandStack';
 import { SaveService } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
 import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
 import type { FreightPurchaseQuote } from '../../src/freight/FreightPurchaseService';
 import { TrainManager } from '../../src/managers/TrainManager';
+import { clonePlainData } from '../../src/utils/PlainData';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -32,6 +34,47 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     scene.contentLoader = { stations: [] };
     scene.publishHUDState = jest.fn();
+  }
+
+  function installFirstRouteWorld(): ReturnType<
+    typeof WorldManager.createNew
+  > {
+    const world = WorldManager.createNew(
+      'Scene freight operations',
+      'scene-freight-operations',
+    );
+    const fixture = makeFirstFreightRouteWorld();
+    world.tracks = clonePlainData(fixture.tracks);
+    world.economy = clonePlainData(fixture.economy);
+    world.trains = clonePlainData(fixture.trains);
+    world.firstRouteProgress = clonePlainData(fixture.firstRouteProgress);
+    return world;
+  }
+
+  function makeLiveFreightTrain(
+    trainId: string,
+    enginePower = 0,
+  ): any {
+    const body = {
+      x: 0,
+      y: 0,
+      rotation: 0,
+      body: { velocity: { x: 0, y: 0 } },
+    };
+    return {
+      currentTrack: {
+        getUUID: () => 'forest-sawmill-track',
+        getTrackPosition: () => 0.5,
+        getCurvePath: () => ({
+          getTangent: () => ({ x: 1, y: 0 }),
+        }),
+      },
+      derailed: false,
+      enginePower,
+      body,
+      getUUID: () => trainId,
+      getMatterBody: jest.fn(() => body),
+    };
   }
 
   function createStartupScene(
@@ -600,6 +643,202 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(9_000, 4_000);
     expect(world.economy.tick).toBe(1);
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks an insolvent train before same-frame input and unlocks the complete set only after an affordable committed tick', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    world.company = createCompanyState(10);
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId, 1);
+    const stopFreightTrains = jest.fn((trainIds: readonly string[]) => {
+      if (trainIds.indexOf(trainId) !== -1) liveTrain.enginePower = 0;
+    });
+    const handleTrainMovement = jest.fn((
+      selectedTrain: typeof liveTrain,
+      lockedTrainIds: ReadonlySet<string>,
+    ) => {
+      selectedTrain.enginePower = lockedTrainIds.has(trainId) ? 0 : 1;
+    });
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains,
+      update: jest.fn(),
+    };
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(liveTrain.enginePower).toBe(0);
+    expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
+    expect(stopFreightTrains).toHaveBeenCalledWith([trainId]);
+    expect(stopFreightTrains.mock.invocationCallOrder[0])
+      .toBeLessThan(handleTrainMovement.mock.invocationCallOrder[0]);
+    expect(handleTrainMovement.mock.calls[0][1]).toEqual(new Set([trainId]));
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('Insufficient cash for running costs');
+
+    scene.update(1_000, 1_000);
+
+    expect(liveTrain.enginePower).toBe(0);
+    expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
+    expect(handleTrainMovement.mock.calls[1][1]).toEqual(new Set([trainId]));
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('Insufficient cash for running costs');
+
+    world.company = createCompanyState(100);
+    scene.update(2_000, 1_000);
+
+    expect(scene.operationsLockedTrainIds.size).toBe(0);
+    expect(handleTrainMovement.mock.calls[2][1]).toEqual(new Set());
+    expect(liveTrain.enginePower).toBe(1);
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .not.toBe('Insufficient cash for running costs');
+  });
+
+  it('refreshes once after catch-up, clears construction history once, and emits every delivery presentation event', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    world.trains[0].cargo = {
+      productId: 'logs',
+      units: 10,
+      originFacilityId: 'managed-forest',
+    };
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId);
+    liveTrain.currentTrack.getTrackPosition = () => 0.9;
+    liveTrain.body.x = 500;
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.commandStack = {
+      onChange: jest.fn(),
+      clear: jest.fn(),
+    };
+    scene.refreshFacilityPresentation = jest.fn();
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 4_000);
+
+    expect(world.economy.tick).toBe(4);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(scene.refreshFacilityPresentation).toHaveBeenCalledTimes(1);
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-undo-state', {
+      canUndo: false,
+      canRedo: false,
+    });
+    expect(emit).toHaveBeenCalledWith(
+      'ui:toast',
+      expect.objectContaining({ type: 'success' }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'ui:cash-pulse',
+      expect.objectContaining({ amount: expect.any(Number) }),
+    );
+
+    scene.update(4_000, 1_000);
+
+    expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const liveTrain = makeLiveFreightTrain(world.trains[0].id);
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    const saveWorld = jest.spyOn(SaveService, 'saveWorld');
+    const write = jest.spyOn(Storage.prototype, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new Error('quota');
+      });
+    const warning = jest.spyOn(console, 'warn').mockImplementation();
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 5_000);
+
+    const committed = clonePlainData(world);
+    const committedLedgerLength = world.company.ledger.length;
+    const committedOperationsRevision = world.operationsRevision;
+    expect(world.economy.tick).toBe(4);
+    expect(scene.lastReportedSaveState).toBe('unsaved');
+    expect(saveWorld).toHaveBeenCalledTimes(1);
+
+    scene.runPeriodicSafetySave();
+
+    expect(saveWorld).toHaveBeenCalledTimes(2);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(1);
+    expect(world.economy.tick).toBe(committed.economy.tick);
+    expect(world.economy.facilities).toEqual(committed.economy.facilities);
+    expect(world.trains).toEqual(committed.trains);
+    expect(world.company.cash).toBe(committed.company.cash);
+    expect(world.company.ledger).toEqual(committed.company.ledger);
+    expect(world.firstRouteProgress).toEqual(committed.firstRouteProgress);
+    expect(world.revision).toBe(committed.revision);
+    expect(world.operationsRevision).toBe(committedOperationsRevision);
+    expect(world.company.ledger).toHaveLength(committedLedgerLength);
+    expect(SaveService.loadWorld(world.id)).toMatchObject({
+      revision: committed.revision,
+      operationsRevision: committed.operationsRevision,
+      company: committed.company,
+      economy: committed.economy,
+      trains: committed.trains,
+      firstRouteProgress: committed.firstRouteProgress,
+    });
+
+    warning.mockRestore();
+    write.mockRestore();
+  });
+
+  it('does not save or expose rejected operation proposals and requests a retry', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    prepareWorldLoop(scene);
+    scene.economySystem = {
+      update: jest.fn().mockReturnValue({
+        ticksAdvanced: 0,
+        changedFacilityIds: [],
+        cargoStatuses: [],
+        completedDeliveries: [],
+        runningCostBlockerByTrainId: {},
+        stopTrainIds: [],
+        commitRejected: true,
+        authoritativeChanged: false,
+      }),
+    };
+    scene.refreshFacilityPresentation = jest.fn();
+    const save = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(save).not.toHaveBeenCalled();
+    expect(scene.refreshFacilityPresentation).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Freight state changed · retry operation',
+      type: 'info',
+    });
   });
 
   it('merges moved runtime while retaining detached derailed authority before save', () => {

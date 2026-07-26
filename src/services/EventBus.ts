@@ -73,6 +73,7 @@ interface EventMap {
     economyTick: number;
     constructionIndexBps: number;
   };
+  'ui:cash-pulse': { amount: number };
   'freight:purchase-mode-requested': {
     freightSetId: 'timber-freight-set';
   };

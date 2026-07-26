@@ -24,7 +24,7 @@ describe('Integration: persisted fixed-tick economy', () => {
     );
     const system = new EconomySystem();
 
-    expect(system.update(4_000, true).ticksAdvanced).toBe(4);
+    expect(system.update(4_000, true, []).ticksAdvanced).toBe(4);
     expect(world.economy.tick).toBe(4);
     expect(world.economy.facilities.find(
       ({ id }) => id === 'managed-forest',
@@ -54,16 +54,16 @@ describe('Integration: persisted fixed-tick economy', () => {
     );
     const firstRuntime = new EconomySystem();
 
-    expect(firstRuntime.update(750, true).ticksAdvanced).toBe(0);
+    expect(firstRuntime.update(750, true, []).ticksAdvanced).toBe(0);
     expect(WorldManager.save()).toBe(true);
     const worldId = world.id;
     WorldManager.reset();
     expect(WorldManager.load(worldId)?.economy.tick).toBe(0);
 
     const reloadedRuntime = new EconomySystem();
-    expect(reloadedRuntime.update(250, true).ticksAdvanced).toBe(0);
+    expect(reloadedRuntime.update(250, true, []).ticksAdvanced).toBe(0);
     expect(WorldManager.world?.economy.tick).toBe(0);
-    expect(reloadedRuntime.update(750, true).ticksAdvanced).toBe(1);
+    expect(reloadedRuntime.update(750, true, []).ticksAdvanced).toBe(1);
     expect(WorldManager.world?.economy.tick).toBe(1);
   });
 });

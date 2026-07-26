@@ -224,8 +224,15 @@ export class TrainManager {
     return { min: bounds.min, max: bounds.max, corners };
   }
 
-  update(time: number, delta: number): void {
+  update(
+    time: number,
+    delta: number,
+    operationsLockedTrainIds: ReadonlySet<string> = new Set(),
+  ): void {
     for (const train of this.trains) {
+      if (operationsLockedTrainIds.has(train.getUUID())) {
+        train.enginePower = 0;
+      }
       train.update(time, delta);
       const solver = this.trackSolvers.get(train);
       solver?.applyTrackFlowForces();

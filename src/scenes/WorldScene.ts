@@ -42,6 +42,12 @@ import type {
 } from '../ui/PropertiesPanel';
 import { clonePlainData } from '../utils/PlainData';
 import { captureTrainRuntime } from '../freight/TrainRuntime';
+import type {
+  CargoBlocker,
+  CargoTransferStatus,
+  FreightDeliveryEvent,
+} from '../freight/CargoSystem';
+import { getFreightSet } from '../freight/FreightSetCatalog';
 import {
   queryRailAccessConnectivity,
   type RailAccessConnectivityResult,
@@ -180,6 +186,10 @@ export default class WorldScene extends Phaser.Scene {
   private worldLoadFailed = false;
   private economySystem = new EconomySystem();
   private freightPurchaseService!: FreightPurchaseService;
+  private readonly operationsLockedTrainIds = new Set<string>();
+  private readonly cargoStatusByTrainId =
+    new Map<string, CargoTransferStatus>();
+  private constructionHistoryClearedForOperations = false;
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -406,6 +416,9 @@ export default class WorldScene extends Phaser.Scene {
     this.pendingStartupSaveError = null;
     this.capturingStartupSaveOutcome = false;
     this.economySystem = new EconomySystem();
+    this.operationsLockedTrainIds.clear();
+    this.cargoStatusByTrainId.clear();
+    this.constructionHistoryClearedForOperations = false;
     if (data.worldId && !WorldManager.load(data.worldId)) {
       this.worldLoadFailed = true;
       return;
@@ -561,6 +574,8 @@ export default class WorldScene extends Phaser.Scene {
       this.facilityViews = [];
       this.facilityInspections.clear();
       this.selectedFacilityId = null;
+      this.operationsLockedTrainIds.clear();
+      this.cargoStatusByTrainId.clear();
       window.__railSimTrainManager = undefined;
       window.__railSimTrackManager = undefined;
       window.__railSimConstructionSnapshot = undefined;
@@ -843,15 +858,56 @@ export default class WorldScene extends Phaser.Scene {
     this.cameraController.update(time, delta);
     this.publishDebugState();
 
+    const runtime = (this.trainManager?.trains ?? []).map(
+      (train) => captureTrainRuntime(train),
+    );
+    const operating = GameStateManager.worldMode === 'play'
+      && GameStateManager.state === 'playing'
+      && !this.scene.isPaused();
     const economyResult = this.economySystem.update(
       delta,
-      GameStateManager.worldMode === 'play'
-        && GameStateManager.state === 'playing'
-        && !this.scene.isPaused(),
+      operating,
+      runtime,
     );
-    if (economyResult.ticksAdvanced > 0) {
-      this.saveWorldAndReport(false);
+    if (economyResult.authoritativeChanged) {
+      this.clearConstructionHistoryForOperations();
+      const lockedBefore = new Set(this.operationsLockedTrainIds);
+      this.mergeOperationPresentation(economyResult.cargoStatuses);
+      economyResult.stopTrainIds.forEach((trainId) => {
+        this.operationsLockedTrainIds.add(trainId);
+      });
+      if (economyResult.stopTrainIds.length === 0
+        && lockedBefore.size > 0
+        && this.canUnlockOperationsTrains(
+          lockedBefore,
+          economyResult.runningCostBlockerByTrainId,
+        )) {
+        this.operationsLockedTrainIds.clear();
+      }
+      this.mergeRunningCostBlockers(
+        economyResult.runningCostBlockerByTrainId,
+      );
+      this.applyOperationsLockBlockers();
+      economyResult.completedDeliveries.forEach((event) => {
+        this.presentCompletedDelivery(event);
+      });
+    }
+    if (economyResult.authoritativeChanged
+      || economyResult.commitRejected) {
       this.refreshFacilityPresentation(true);
+    }
+    if (economyResult.commitRejected) {
+      EventBus.emit('ui:toast', {
+        message: 'Freight state changed · retry operation',
+        type: 'info',
+      });
+    } else if (economyResult.authoritativeChanged) {
+      this.saveWorldAndReport(false, false);
+    }
+    if (this.operationsLockedTrainIds.size > 0) {
+      this.trainManager.stopFreightTrains(
+        Array.from(this.operationsLockedTrainIds).sort(),
+      );
     }
 
     // Stream terrain chunks and scenery around the camera
@@ -875,12 +931,123 @@ export default class WorldScene extends Phaser.Scene {
       }
       GameStateManager.tick(delta / 1000);
     } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
-      this.inputManager.handleTrainMovement(this.trainManager.selectedTrain);
-      this.trainManager.update(time, delta);
+      this.inputManager.handleTrainMovement(
+        this.trainManager.selectedTrain,
+        this.operationsLockedTrainIds,
+      );
+      this.trainManager.update(
+        time,
+        delta,
+        this.operationsLockedTrainIds,
+      );
       this.contentLoader.stations.forEach((s) => s.update(delta));
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
+  }
+
+  private clearConstructionHistoryForOperations(): void {
+    if (this.constructionHistoryClearedForOperations) return;
+    const commandStack = this.commandStack;
+    if (commandStack) {
+      const report = commandStack.onChange;
+      commandStack.onChange = undefined;
+      try {
+        commandStack.clear();
+      } finally {
+        commandStack.onChange = report;
+      }
+    }
+    EventBus.emit('ui:toolbar-undo-state', {
+      canUndo: false,
+      canRedo: false,
+    });
+    this.constructionHistoryClearedForOperations = true;
+  }
+
+  private mergeOperationPresentation(
+    statuses: readonly CargoTransferStatus[],
+  ): void {
+    statuses.forEach((status) => {
+      this.cargoStatusByTrainId.set(
+        status.trainId,
+        clonePlainData(status),
+      );
+    });
+  }
+
+  private mergeRunningCostBlockers(
+    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+  ): void {
+    Object.keys(blockerByTrainId).forEach((trainId) => {
+      const blocker = blockerByTrainId[trainId];
+      if (blocker === null) return;
+      this.setTrainOperationBlocker(trainId, blocker);
+    });
+  }
+
+  private setTrainOperationBlocker(
+    trainId: string,
+    blocker: CargoBlocker,
+  ): void {
+    const existing = this.cargoStatusByTrainId.get(trainId);
+    const cargoUnits = WorldManager.world?.trains.find(
+      ({ id }) => id === trainId,
+    )?.cargo?.units ?? 0;
+    this.cargoStatusByTrainId.set(trainId, existing
+      ? {
+        ...existing,
+        kind: 'blocked',
+        blocker,
+      }
+      : {
+        trainId,
+        facilityId: null,
+        kind: 'blocked',
+        blocker,
+        batchUnits: 0,
+        cargoUnits,
+        capacityUnits: 0,
+        batchRevenue: 0,
+      });
+  }
+
+  private applyOperationsLockBlockers(): void {
+    this.operationsLockedTrainIds.forEach((trainId) => {
+      this.setTrainOperationBlocker(
+        trainId,
+        'Insufficient cash for running costs',
+      );
+    });
+  }
+
+  private canUnlockOperationsTrains(
+    lockedTrainIds: ReadonlySet<string>,
+    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+  ): boolean {
+    const world = WorldManager.world;
+    if (!world) return false;
+    let requiredCash = 0;
+    for (const trainId of lockedTrainIds) {
+      if (blockerByTrainId[trainId] !== null) return false;
+      const train = world.trains.find(({ id }) => id === trainId);
+      const freightSet = train
+        ? getFreightSet(train.freightSetId)
+        : undefined;
+      if (!freightSet) return false;
+      requiredCash += freightSet.runningCostPerActiveTick;
+      if (!Number.isSafeInteger(requiredCash)) return false;
+    }
+    return world.company.cash >= requiredCash;
+  }
+
+  private presentCompletedDelivery(event: FreightDeliveryEvent): void {
+    EventBus.emit('ui:toast', {
+      message:
+        `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
+      type: 'success',
+    });
+    EventBus.emit('ui:cash-pulse', { amount: event.revenue });
   }
 
   /** Draw a semi-transparent terrain-band overlay when the terrain-view tool is active. */
@@ -908,9 +1075,16 @@ export default class WorldScene extends Phaser.Scene {
     this.saveWorldAndReport();
   }
 
-  private saveWorldAndReport(showFailureToast = true): boolean {
+  private saveWorldAndReport(
+    showFailureToast = true,
+    syncRuntime = true,
+  ): boolean {
+    const shouldSyncRuntime = syncRuntime
+      && this.lastReportedSaveState !== 'unsaved';
     return this.saveAndReport(
-      () => this.syncTrainLocationsAndSave(),
+      () => shouldSyncRuntime
+        ? this.syncTrainLocationsAndSave()
+        : WorldManager.save(),
       showFailureToast,
     );
   }

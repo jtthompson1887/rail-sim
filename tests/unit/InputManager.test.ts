@@ -236,4 +236,26 @@ describe('InputManager drag recovery regression', () => {
     });
     expect(scene.cameras.main.getWorldPoint).toHaveBeenCalledWith(400, 200);
   });
+
+  it('does not let held keyboard or mobile throttle repower an operations-locked train', () => {
+    const train = trainManager.createInitialTrain('locked-train');
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = 0;
+
+    inputManager.handleTrainMovement(
+      train,
+      new Set(['locked-train']),
+    );
+
+    expect(train.enginePower).toBe(0);
+
+    (inputManager as any).wKey.isDown = false;
+    EventBus.emit('mobile:throttle', { value: 1 });
+    inputManager.handleTrainMovement(
+      train,
+      new Set(['locked-train']),
+    );
+
+    expect(train.enginePower).toBe(0);
+  });
 });

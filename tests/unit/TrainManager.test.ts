@@ -175,6 +175,34 @@ describe('TrainManager aggregate freight trains', () => {
     expect(first.enginePower).toBe(1);
     expect(second.enginePower).toBe(0);
   });
+
+  it('keeps operations-locked trains stopped throughout their update', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+    const locked = manager.createFreightTrain(
+      'locked',
+      'timber-freight-set',
+    );
+    const free = manager.createFreightTrain(
+      'free',
+      'timber-freight-set',
+    );
+    jest.spyOn(locked, 'update').mockImplementation();
+    jest.spyOn(free, 'update').mockImplementation();
+    for (const solver of (manager as any).trackSolvers.values()) {
+      jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
+    }
+    locked.enginePower = 1;
+    free.enginePower = -1;
+
+    manager.update(0, 16, new Set(['locked']));
+
+    expect(locked.enginePower).toBe(0);
+    expect(free.enginePower).toBe(-1);
+  });
 });
 
 describe('TrainManager.tryRecoverDerailedTrain()', () => {

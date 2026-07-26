@@ -109,8 +109,15 @@ export class InputManager {
     return this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
   }
 
-  handleTrainMovement(selectedTrain: Train | null): void {
+  handleTrainMovement(
+    selectedTrain: Train | null,
+    operationsLockedTrainIds: ReadonlySet<string> = new Set(),
+  ): void {
     if (!selectedTrain) return;
+    if (operationsLockedTrainIds.has(selectedTrain.getUUID())) {
+      selectedTrain.enginePower = 0;
+      return;
+    }
     // Keyboard input takes priority over mobile throttle buttons
     if (this.wKey.isDown) {
       selectedTrain.enginePower = GameConfig.TRAIN.ENGINE_POWER;
