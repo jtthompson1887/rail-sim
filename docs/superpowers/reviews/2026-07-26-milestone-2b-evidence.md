@@ -308,9 +308,25 @@ Every implementation task received independent specification and code review.
 The milestone range review and follow-up reviews produced fixes for schema
 authority, purchase cleanup, generated-route acceptance, sequential
 constructability, production-sized long-train handoff, and browser-fixture
-fidelity. The current exact range `e1fcb26..7dfb161` remains under review; this
-draft makes no clean-review claim. Final findings and disposition will be added
-before the evidence commit.
+fidelity.
+
+The first release review of `e1fcb26..9e59bee` returned three Important
+findings: browser gates could reuse stale build/server state, generated route
+estimates were not yet proven equal to authoritative pointer-built cost, and
+privileged test controls shipped in the production bundle. Commits `a410284`,
+`89c0cb6`, `6acd465`, and `7dfb161` made browser execution source-hermetic,
+compile-time excluded privileged globals from production, aligned near-pixel
+starter gestures to the persisted witness, strengthened exact cost/reserve
+proof, and updated the webpack contract test.
+
+The strict scoped re-review marked all three Important findings resolved with
+no Critical or Important remainder. A second independent reviewer approved the
+release-fix delta `9e59bee..7dfb161` with no Critical, Important, or Minor
+findings and independently passed 7/7 suites and 96/96 tests. The factual
+evidence audit reconciled both artifact hashes, all gate totals, all three seed
+records, batch sums, reserves, trip components, and classification of genuine
+first trips versus accelerated post-delivery coverage. There are no open
+Critical or Important findings on exact range `e1fcb26..7dfb161`.
 
 ## YAGNI boundary
 
