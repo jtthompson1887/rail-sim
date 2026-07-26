@@ -1,10 +1,13 @@
 import { EditorToolbar } from '../../src/ui/EditorToolbar';
 import { EventBus } from '../../src/services/EventBus';
+import { makeUiScene, simulatePointer } from '../helpers/PhaserUiHarness';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
 describe('EditorToolbar lifecycle', () => {
   afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
     jest.restoreAllMocks();
     document.body.innerHTML = '';
   });
@@ -127,5 +130,102 @@ describe('EditorToolbar lifecycle', () => {
     toolbar.destroy();
     EventBus.emit('ui:toast', startupError);
     expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects undo and redo availability in button alpha', () => {
+    const { scene } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const undoBg = (toolbar as any).undoBg;
+    const redoBg = (toolbar as any).redoBg;
+
+    toolbar.setUndoEnabled(true);
+    expect(undoBg.setAlpha).toHaveBeenLastCalledWith(1);
+    toolbar.setUndoEnabled(false);
+    expect(undoBg.setAlpha).toHaveBeenLastCalledWith(0.4);
+
+    toolbar.setRedoEnabled(true);
+    expect(redoBg.setAlpha).toHaveBeenLastCalledWith(1);
+    toolbar.setRedoEnabled(false);
+    expect(redoBg.setAlpha).toHaveBeenLastCalledWith(0.4);
+
+    toolbar.destroy();
+  });
+
+  it('highlights a tool button on hover and restores on leave while inactive', () => {
+    const { scene } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const first = (toolbar as any).toolButtons[0];
+
+    simulatePointer(first.bg, 'pointerover');
+    expect(first.bg.setFillStyle).toHaveBeenLastCalledWith(0x1e4a6e, 0.95);
+    simulatePointer(first.bg, 'pointerout');
+    expect(first.bg.setFillStyle).toHaveBeenLastCalledWith(0x1a3a5c, 0.85);
+
+    toolbar.destroy();
+  });
+
+  it('does not highlight an active tool button on hover', () => {
+    const { scene } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const first = (toolbar as any).toolButtons[0];
+
+    toolbar.selectTool(first.tool);
+    const callsBeforeHover = first.bg.setFillStyle.mock.calls.length;
+
+    simulatePointer(first.bg, 'pointerover');
+    expect(first.bg.setFillStyle).toHaveBeenCalledTimes(callsBeforeHover);
+
+    toolbar.destroy();
+  });
+
+  it('styles toast text by type and uses fade-out tweens', () => {
+    jest.useFakeTimers();
+    const { scene, tweensAdd } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const toastText = (toolbar as any).toastText;
+
+    for (const [type, color] of [
+      ['error', '#ff8080'],
+      ['success', '#4ade80'],
+      ['info', '#ffffff'],
+      ['warning', '#ffffff'],
+    ] as const) {
+      EventBus.emit('ui:toast', { message: `${type} toast`, type: type as any });
+      expect(toastText.setColor).toHaveBeenLastCalledWith(color);
+      expect(toastText.setText).toHaveBeenLastCalledWith(`${type} toast`);
+    }
+
+    jest.advanceTimersByTime(2500);
+    expect(tweensAdd).toHaveBeenLastCalledWith(expect.objectContaining({
+      targets: toastText,
+      alpha: 0,
+      duration: 400,
+    }));
+
+    toolbar.destroy();
+  });
+
+  it('removes the toast listener on scene shutdown', () => {
+    jest.useFakeTimers();
+    const showToast = jest.spyOn(
+      EditorToolbar.prototype as any,
+      'showToast',
+    );
+    const { scene } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const toast = { message: 'shutdown test', type: 'info' as const };
+
+    EventBus.emit('ui:toast', toast);
+    expect(showToast).toHaveBeenCalledTimes(1);
+
+    const shutdown = scene.events.once.mock.calls.find(
+      ([event]: [string]) => event === 'shutdown',
+    )[1];
+    shutdown();
+
+    EventBus.emit('ui:toast', toast);
+    expect(showToast).toHaveBeenCalledTimes(1);
+
+    toolbar.destroy();
   });
 });
