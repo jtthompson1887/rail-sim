@@ -1272,7 +1272,7 @@ Record exact test counts, coverage, benchmark values, fixed seeds, manual
 observations, review disposition, and YAGNI deferrals. Do not create an empty
 commit.
 
-- [ ] **Step 6: Publish exact reviewed source**
+- [x] **Step 6: Publish exact reviewed source**
 
 Build from clean reviewed HEAD, push that exact SHA to the existing Sites source
 repository, package with the Sites helper, save one private version, deploy it,

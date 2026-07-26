@@ -6,10 +6,10 @@
 
 **Reviewed source:** `4fe2839`
 
-**Private Sites version and URL:** Pending controller Step 6
+**Private Sites version and URL:** Version 4 — https://rail-sim-progress.jt-98.chatgpt.site
 
 This record assembles the Task 9 implementation, automated-gate, generated
-economy playtest, and independent-review evidence. Publication remains pending.
+economy playtest, independent-review, and private-publication evidence.
 
 ## Full-chain reconciliation
 
@@ -195,7 +195,9 @@ review findings.
 
 ## Publication
 
-No Sites source push, version save, deployment, or production-URL inspection
-was performed in Task 9 implementation. The controller must publish only the
-exact independently reviewed clean source, then record the private Sites
-version and production URL.
+Reviewed source `4fe2839` was pushed to the existing Sites source repository
+and built from an isolated archive of that exact commit. Sites saved private
+version 4, deployed it to terminal `succeeded` status, and opened the production
+URL in Codex:
+
+https://rail-sim-progress.jt-98.chatgpt.site
