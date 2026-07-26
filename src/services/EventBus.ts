@@ -25,6 +25,10 @@ interface EventMap {
   'audio:play-sfx': { key: string };
   'audio:play-bgm': { key: string };
   'mobile:throttle': { value: number };
+  // Cab 3-D view events
+  'cab:toggle': Record<string, never>;
+  'cab:state': { active: boolean };
+  'cab:quality': { tier: string };
   // World / mode events
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };

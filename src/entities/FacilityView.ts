@@ -34,7 +34,7 @@ export class FacilityView {
 
   constructor(
     private readonly scene: Phaser.Scene,
-    private readonly placement: FacilityViewPlacement,
+    readonly placement: FacilityViewPlacement,
     inspection: FacilityInspectionDto,
   ) {
     this.facilityId = placement.id;

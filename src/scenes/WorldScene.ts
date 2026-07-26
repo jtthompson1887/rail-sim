@@ -57,6 +57,7 @@ import {
   FacilityView,
   type FacilityViewPlacement,
 } from '../entities/FacilityView';
+import { CabViewHost, PhaserCabSnapshotSource } from '../cab3d';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -169,6 +170,7 @@ export default class WorldScene extends Phaser.Scene {
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
   private economySystem = new EconomySystem();
+  private cabViewHost: CabViewHost | null = null;
 
   // ── Tool system ──────────────────────────────────────────────────────────
   private toolRegistry!: Map<CreateTool, IEditorTool>;
@@ -177,6 +179,12 @@ export default class WorldScene extends Phaser.Scene {
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
+  };
+
+  private readonly cabStateHandler = ({ active }: { active: boolean }) => {
+    this.cameraController.setInputLockOwner(active ? 'ui' : 'camera');
+    this.scene.setVisible(!active);
+    this.scene.setVisible(!active, EDITOR_UI_SCENE_KEY);
   };
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
@@ -379,6 +387,22 @@ export default class WorldScene extends Phaser.Scene {
     this.inputManager    = new InputManager(this, this.cameraController);
     this.audioManager    = new AudioManager(this);
 
+    // ── 3-D cab view host ──────────────────────────────────────────────────
+    if (GameConfig.CAB3D.ENABLED) {
+      this.cabViewHost = new CabViewHost(
+        new PhaserCabSnapshotSource(
+          this,
+          this.trackManager,
+          this.trainManager,
+          this.terrainGenerator,
+          terrainSeed,
+          biome,
+          () => this.facilityViews.map((view) => view.placement),
+        ),
+      );
+    }
+    EventBus.on('cab:state', this.cabStateHandler);
+
     // ── Editor systems ─────────────────────────────────────────────────────
     this.snapSystem     = new SnapSystem(this.trackManager);
     this.commandStack   = new CommandStack(GameConfig.WORLD.MAX_UNDO_STEPS);
@@ -466,6 +490,9 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('train:selected', this.trainSelectedHandler);
       EventBus.off('facility:selected', this.facilitySelectedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
+      EventBus.off('cab:state', this.cabStateHandler);
+      this.cabViewHost?.destroy();
+      this.cabViewHost = null;
       this.scene.stop(EDITOR_UI_SCENE_KEY);
       for (const tool of this.toolRegistry.values()) tool.destroy();
       this.selectionManager.destroy();
@@ -752,6 +779,8 @@ export default class WorldScene extends Phaser.Scene {
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
+
+    this.cabViewHost?.update(time, delta);
   }
 
   /** Draw a semi-transparent terrain-band overlay when the terrain-view tool is active. */
@@ -952,6 +981,14 @@ export default class WorldScene extends Phaser.Scene {
       || target.closest('[data-testid="construction-inspector"]') !== null
       || target.closest('[data-testid="facility-inspector"]') !== null
     )) return;
+
+    if (GameStateManager.worldMode === 'play' && GameConfig.CAB3D.ENABLED) {
+      if (event.code === `Key${GameConfig.CAB3D.TOGGLE_KEY}` && !event.ctrlKey && !event.altKey) {
+        EventBus.emit('cab:toggle', {});
+        return;
+      }
+    }
+
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
       if (event.ctrlKey) {
