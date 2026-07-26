@@ -5,12 +5,17 @@ import { applyForceToGameObject, guideForceTowardsPoint, limitForceToLateralAppl
 import TrackManager from '../managers/TrackManager';
 import { GameConfig } from '../config/GameConfig';
 
+const HANDOFF_MAX_GUIDANCE_MOMENTUM_FRACTION = 0.01;
+const HANDOFF_GUIDANCE_WINDOW_MS = GameConfig.TRACK.SWITCH_COOLDOWN_MS * 4;
+
 export default class TrackFlowSolver {
   private trackProvider: TrackManager | RailTrack[];
   private train: ITrackFollower;
   private debugArrow: Phaser.GameObjects.Graphics;
   /** Timestamp (performance.now) of the last automatic track switch, used to enforce SWITCH_COOLDOWN_MS. */
   private _lastSwitchTime: number = -Infinity;
+  /** Guidance limiting is active only for a finite stabilization window after a switch. */
+  private _handoffGuidanceUntil: number = -Infinity;
 
   constructor(trackProvider: TrackManager | RailTrack[], train: ITrackFollower) {
     this.trackProvider = trackProvider;
@@ -51,6 +56,7 @@ export default class TrackFlowSolver {
     this.train.pidControllerRear.resetToError(rearError);
 
     this._lastSwitchTime = performance.now();
+    this._handoffGuidanceUntil = this._lastSwitchTime + HANDOFF_GUIDANCE_WINDOW_MS;
   }
 
   /**
@@ -67,6 +73,7 @@ export default class TrackFlowSolver {
   private syncTrackState(): boolean {
     if (this.train.derailed) {
       this.train.currentTrack = null;
+      this._handoffGuidanceUntil = -Infinity;
       return false;
     }
 
@@ -82,6 +89,7 @@ export default class TrackFlowSolver {
     if (!closestTrack) {
       this.train.derailed = true;
       this.train.currentTrack = null;
+      this._handoffGuidanceUntil = -Infinity;
       return false;
     }
 
@@ -268,8 +276,18 @@ export default class TrackFlowSolver {
     const trainBody = this.train.getMatterBody();
     const frontTrackPoint = track.getTrackPoint(frontPoint);
     const rearTrackPoint = track.getTrackPoint(rearPoint);
-    const frontForce = guideForceTowardsPoint(trainBody, frontTrackPoint, this.train.pidControllerFront);
-    const rearForce = guideForceTowardsPoint(trainBody, rearTrackPoint, this.train.pidControllerRear);
+    const frontForce = guideForceTowardsPoint(
+      trainBody,
+      frontTrackPoint,
+      this.train.pidControllerFront,
+      frontPoint,
+    );
+    const rearForce = guideForceTowardsPoint(
+      trainBody,
+      rearTrackPoint,
+      this.train.pidControllerRear,
+      rearPoint,
+    );
 
     if (scale === 1) {
       this.drawForceArrow(new Phaser.Math.Vector2(frontPoint.x, frontPoint.y), frontForce, 0x00ff00);
@@ -280,6 +298,35 @@ export default class TrackFlowSolver {
     }
 
     return new Phaser.Math.Vector2((frontForce.x + rearForce.x) * scale * 0.5, (frontForce.y + rearForce.y) * scale * 0.5);
+  }
+
+  private limitHandoffGuidanceForce(
+    force: Phaser.Math.Vector2,
+    dtSq: number,
+    mass: number,
+    velocity: Phaser.Math.Vector2,
+  ): Phaser.Math.Vector2 {
+    if (performance.now() >= this._handoffGuidanceUntil) {
+      this._handoffGuidanceUntil = -Infinity;
+      return force;
+    }
+
+    const forceMagnitude = force.length();
+    if (forceMagnitude === 0) {
+      return force;
+    }
+
+    // Matter integrates guidance as delta-v = force / mass * dt^2. During the
+    // finite handoff window, bound that delta to 1% of current momentum per
+    // frame. At zero momentum the safe guidance impulse is therefore zero;
+    // engine force remains independent and can still start the train.
+    const maxForce = dtSq > 0
+      ? mass * velocity.length() * HANDOFF_MAX_GUIDANCE_MOMENTUM_FRACTION / dtSq
+      : 0;
+    if (forceMagnitude > maxForce) {
+      return force.clone().scale(maxForce / forceMagnitude);
+    }
+    return force;
   }
 
   applyTrackFlowForces(): void {
@@ -368,8 +415,14 @@ export default class TrackFlowSolver {
     const dampingCoefficient = dtSq > 0 ? 0.08 / dtSq : 0;
     const dampingForce = lateralDir.clone().scale(-mass * lateralVelocity * dampingCoefficient);
 
-    this.drawForceArrow(new Phaser.Math.Vector2(trainBody.body?.position?.x ?? 0, trainBody.body?.position?.y ?? 0), lateralForce, 0x0000ff);
-    applyForceToGameObject(trainBody, lateralForce);
-    applyForceToGameObject(trainBody, dampingForce);
+    const guidanceForce = this.limitHandoffGuidanceForce(
+      lateralForce.clone().add(dampingForce),
+      dtSq,
+      mass,
+      velocity,
+    );
+
+    this.drawForceArrow(new Phaser.Math.Vector2(trainBody.body?.position?.x ?? 0, trainBody.body?.position?.y ?? 0), guidanceForce, 0x0000ff);
+    applyForceToGameObject(trainBody, guidanceForce);
   }
 }

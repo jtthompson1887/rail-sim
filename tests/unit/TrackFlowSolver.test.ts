@@ -1,7 +1,14 @@
 import TrackFlowSolver from '../../src/systems/TrackFlowSolver';
 import RailTrack from '../../src/entities/RailTrack';
+import Train from '../../src/entities/Train';
+import TrackManager from '../../src/managers/TrackManager';
+import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 
-const { makeScene } = require('../../__mocks__/phaser');
+const {
+  makeScene,
+  simulateMatterUpdate,
+} = require('../../__mocks__/phaser');
 
 function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 500, y2 = 0): RailTrack {
   const Phaser = require('phaser');
@@ -249,6 +256,10 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     scene = makeScene();
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('exits early when train is derailed', () => {
     const track = makeTrack(scene, 0, 0, 500, 0);
     const train = makeMockTrain(scene, 250, 5);
@@ -279,6 +290,146 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     const solver = new TrackFlowSolver([track], train as any);
     solver.applyTrackFlowForces();
     expect(train.derailed).toBe(true);
+  });
+
+  it('preserves coasting momentum across a connected production-curve handoff', () => {
+    const seed = 'task15-manual-ash-dry';
+    const generated = new WorldOpportunityGenerator(
+      new TerrainGenerator(seed),
+    ).generate({
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    });
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) return;
+    const detour = generated.opportunity.corridors.find(
+      ({ id }) => id === 'detour',
+    )!;
+    const [firstDef, secondDef] = detour.feasibilityWitness.segments;
+    const Phaser = require('phaser');
+    const fromDef = (def: typeof firstDef): RailTrack => new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(def.geometry.p0.x, def.geometry.p0.y),
+      new Phaser.Math.Vector2(def.geometry.p1.x, def.geometry.p1.y),
+      new Phaser.Math.Vector2(def.geometry.p2.x, def.geometry.p2.y),
+      new Phaser.Math.Vector2(def.geometry.p3.x, def.geometry.p3.y),
+    );
+    const first = fromDef(firstDef);
+    const second = fromDef(secondDef);
+    first.setUUID('handoff-first');
+    second.setUUID('handoff-second');
+    const manager = new TrackManager(scene);
+    manager.addTrack(first);
+    manager.addTrack(second);
+    expect(first.getNext()).toBe(second);
+
+    const start = first.getCurvePath().getPoint(1);
+    const tangent = first.getCurvePath().getTangent(1);
+    const train = new Train(scene, start.x, start.y);
+    const body = train.getMatterBody();
+    train.currentTrack = first;
+    train.enginePower = 0;
+    body.setAngle(Math.atan2(tangent.y, tangent.x) * 180 / Math.PI);
+    body.setVelocity(tangent.x * 0.75, tangent.y * 0.75);
+    let now = 10_000;
+    jest.spyOn(performance, 'now').mockImplementation(() => now);
+    const solver = new TrackFlowSolver(manager, train);
+
+    let speedBeforeHandoff: number | null = null;
+    const postHandoffSpeeds: number[] = [];
+    for (let frame = 0; frame < 240; frame++) {
+      train.update(frame * 16.667, 16.667);
+      const before = Math.hypot(
+        body.body.velocity.x,
+        body.body.velocity.y,
+      ) * 60;
+      solver.applyTrackFlowForces();
+      const switched = train.currentTrack === second;
+      simulateMatterUpdate(body.body, 16.667);
+      now += 16.667;
+      if (switched) {
+        speedBeforeHandoff ??= before;
+        postHandoffSpeeds.push(Math.hypot(
+          body.body.velocity.x,
+          body.body.velocity.y,
+        ) * 60);
+        if (postHandoffSpeeds.length === 72) break;
+      }
+    }
+
+    expect(speedBeforeHandoff).not.toBeNull();
+    expect(postHandoffSpeeds).toHaveLength(72);
+    expect(train.derailed).toBe(false);
+    expect(Math.max(...postHandoffSpeeds)).toBeLessThan(
+      speedBeforeHandoff! * 1.5,
+    );
+    expect(Math.min(...postHandoffSpeeds.slice(0, 24))).toBeGreaterThan(
+      speedBeforeHandoff! * 0.5,
+    );
+  });
+
+  it.each([0, 1e-12])(
+    'keeps %p-speed handoff guidance finite, then restores normal guidance',
+    (initialSpeed) => {
+      const currentTrack = makeTrack(scene, 0, 0, 500, 0);
+      const nextTrack = makeTrack(scene, 0, 50, 500, 50);
+      const train = makeMockTrain(scene, 250, 45);
+      train.currentTrack = currentTrack;
+      train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+      train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+
+      const manager = {
+        getClosestTrack: jest.fn().mockReturnValue(nextTrack),
+        getJunctionsForTrack: jest.fn().mockReturnValue([]),
+      };
+      let now = 10_000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const solver = new TrackFlowSolver(manager as any, train as any);
+      const body = train.getMatterBody().body;
+      body.velocity.x = initialSpeed;
+      body.force.x = 3;
+
+      solver.applyTrackFlowForces();
+
+      expect(train.currentTrack).toBe(nextTrack);
+      expect(body.force.x).toBe(3);
+      const guidanceMagnitude = Math.abs(body.force.y);
+      const maxGuidanceForce = body.mass * initialSpeed * 0.01
+        / (16.667 * 16.667);
+      expect(guidanceMagnitude).toBeLessThanOrEqual(
+        maxGuidanceForce + Number.EPSILON,
+      );
+      expect(Number.isFinite(body.force.x)).toBe(true);
+      expect(Number.isFinite(body.force.y)).toBe(true);
+
+      body.force.x = 0;
+      body.force.y = 0;
+      now += 10_000;
+      solver.applyTrackFlowForces();
+
+      expect(Math.hypot(body.force.x, body.force.y)).toBeGreaterThan(0);
+    },
+  );
+
+  it('does not cap ordinary off-track guidance when no handoff occurred', () => {
+    const track = makeTrack(scene, 0, 0, 500, 0);
+    const train = makeMockTrain(scene, 250, 20);
+    train.currentTrack = track;
+    train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+    train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+    const manager = {
+      getClosestTrack: jest.fn().mockReturnValue(track),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+    const solver = new TrackFlowSolver(manager as any, train as any);
+    const body = train.getMatterBody().body;
+
+    solver.applyTrackFlowForces();
+
+    expect(body.force.x).toBeCloseTo(0);
+    expect(body.force.y).toBeCloseTo(-40);
   });
 });
 
