@@ -166,33 +166,6 @@ async function frameSurfaceDetour(page: Page): Promise<ConstructionSnapshot> {
   return snapshot(page);
 }
 
-function extendLiveTangent(
-  track: ConstructionSnapshot['world']['tracks'][number],
-  forwardDistance: number,
-  normalDistance = 0,
-): Point {
-  const dx = track.p3.x - track.p2.x;
-  const dy = track.p3.y - track.p2.y;
-  const length = Math.hypot(dx, dy);
-  const tangentX = dx / length;
-  const tangentY = dy / length;
-  return {
-    x: track.p3.x + tangentX * forwardDistance - tangentY * normalDistance,
-    y: track.p3.y + tangentY * forwardDistance + tangentX * normalDistance,
-  };
-}
-
-function chainedCandidates(
-  track: ConstructionSnapshot['world']['tracks'][number],
-): Point[] {
-  return [
-    [1_200, -900],
-    [1_200, 900],
-  ].map(
-    ([forward, normal]) => extendLiveTangent(track, forward, normal),
-  );
-}
-
 function persistedConstruction(state: ConstructionSnapshot) {
   return {
     cash: state.world.company.cash,
@@ -221,8 +194,8 @@ test.describe('fixed-seed construction decision loop', () => {
 
     const framed = await frameSurfaceDetour(page);
     await page.keyboard.press('p');
-    const firstWitness =
-      blank.world.starterOpportunity.corridors[1].feasibilityWitness.segments[0];
+    const [firstWitness, secondWitness] =
+      blank.world.starterOpportunity.corridors[1].feasibilityWitness.segments;
     const start = await toScreen(page, firstWitness.geometry.p0, framed);
     const end = await toScreen(page, firstWitness.geometry.p3, framed);
     await dragRoute(
@@ -275,20 +248,13 @@ test.describe('fixed-seed construction decision loop', () => {
     expect(firstBuilt.world.company.cash).toBe(firstReview.preview?.cashAfter);
     await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Saved');
 
-    const chainStart = await toScreen(page, firstBuilt.world.tracks[0].p3, firstBuilt);
-    let secondReview: ConstructionSnapshot | null = null;
-    for (const candidate of chainedCandidates(firstBuilt.world.tracks[0])) {
-      await dragRoute(
-        page,
-        chainStart,
-        await toScreen(page, candidate, firstBuilt),
-      );
-      secondReview = await snapshot(page);
-      if (secondReview.preview?.canConfirm) break;
-      await page.locator('[data-testid="construction-back"]').click();
-    }
-    expect(secondReview).not.toBeNull();
-    if (!secondReview) throw new Error('No chained preview was produced');
+    expect(firstBuilt.world.tracks[0].p3).toEqual(secondWitness.geometry.p0);
+    await dragRoute(
+      page,
+      await toScreen(page, secondWitness.geometry.p0, firstBuilt),
+      await toScreen(page, secondWitness.geometry.p3, firstBuilt),
+    );
+    const secondReview = await snapshot(page);
     expect(secondReview.phase).toBe('review');
     expect(secondReview.preview?.proposal.valid).toBe(true);
     expect(secondReview.preview?.canConfirm).toBe(true);
