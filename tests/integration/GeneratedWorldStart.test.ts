@@ -25,6 +25,10 @@ import {
   type EconomyGenerationResult,
   WorldEconomyGenerator,
 } from '../../src/economy/WorldEconomyGenerator';
+import {
+  STARTER_ROUTE_RESERVE,
+  TIMBER_TRAIN_PURCHASE_PRICE,
+} from '../../src/freight/FreightSetCatalog';
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -760,7 +764,11 @@ describe('generated blank-world start', () => {
       expectSurveyFitsRecommendedCamera(result.opportunity);
       expect(Math.min(...result.opportunity.corridors.map(
         (corridor) => corridor.estimatedCost,
-      ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);
+      ))).toBeLessThanOrEqual(
+        STANDARD_STARTING_CASH
+        - TIMBER_TRAIN_PURCHASE_PRICE
+        - STARTER_ROUTE_RESERVE,
+      );
     },
   );
 });

@@ -14,9 +14,18 @@ import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
 } from '../fixtures/FirstFreightRouteFixture';
+import Phaser from 'phaser';
+import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
+import TrackManager from '../../src/managers/TrackManager';
+import { EconomySystem } from '../../src/economy/EconomySystem';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import { ConstructionService } from '../../src/systems/ConstructionService';
+
+const { makeScene } = require('../../__mocks__/phaser');
 
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
+  const liveTrackManagers: TrackManager[] = [];
 
   function prepareWorldLoop(scene: any): void {
     scene.scene = { isPaused: jest.fn().mockReturnValue(false) };
@@ -107,6 +116,11 @@ describe('WorldScene disabled construction bypass guards', () => {
   }
 
   afterEach(() => {
+    for (const manager of liveTrackManagers.splice(0)) {
+      [...manager.getAllTracks()].forEach((track) => {
+        manager.removeTrack(track.getUUID());
+      });
+    }
     for (const scene of startupScenes.splice(0)) {
       for (const [, callback] of scene.events.once.mock.calls) callback();
     }
@@ -804,6 +818,55 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(4_000, 1_000);
 
     expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates stale construction history after operations and accepts a fresh public build', () => {
+    const scene = makeScene() as Phaser.Scene;
+    const manager = new TrackManager(scene);
+    liveTrackManagers.push(manager);
+    WorldManager.createNew('History recovery', 'history-recovery');
+    const construction = new ConstructionService(
+      manager,
+      new ConstructionAnalyzer({ getHeightAt: () => 0 }),
+    );
+    const stack = new CommandStack();
+    const oldQuote = construction.createQuote(
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      'old-history-track',
+    );
+    if (!oldQuote) throw new Error('Missing old history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      oldQuote,
+    ))).toBe(true);
+
+    expect(new EconomySystem(WorldManager).update(
+      1_000,
+      true,
+      [],
+    ).authoritativeChanged).toBe(true);
+    expect(stack.undo()).toBe(false);
+    expect(manager.getTrack('old-history-track')).toBeDefined();
+
+    const freshQuote = construction.createQuote(
+      { x: 0, y: 500 },
+      { x: 300, y: 500 },
+      'fresh-history-track',
+    );
+    if (!freshQuote) throw new Error('Missing fresh history quote');
+    expect(stack.push(new PlaceTrackCommand(
+      scene,
+      manager,
+      construction,
+      freshQuote,
+    ))).toBe(true);
+    expect(manager.getTrack('fresh-history-track')).toBeDefined();
+    expect(stack.undo()).toBe(true);
+    expect(stack.undo()).toBe(false);
+    expect(stack.redo()).toBe(true);
   });
 
   it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
