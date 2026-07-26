@@ -1,7 +1,8 @@
-const webpackConfig = require('../../webpack.config.js');
+const webpackConfigFactory = require('../../webpack.config.js');
 
 describe('production web shell', () => {
   it('builds from the responsive authored HTML template', () => {
+    const webpackConfig = webpackConfigFactory({}, { mode: 'production' });
     const htmlPlugin = webpackConfig.plugins.find(
       (plugin: { constructor?: { name?: string } }) => (
         plugin.constructor?.name === 'HtmlWebpackPlugin'
