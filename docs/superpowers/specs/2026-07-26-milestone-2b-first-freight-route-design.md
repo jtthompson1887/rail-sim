@@ -35,9 +35,12 @@ A compact, non-scenario objective card guides the first organic freight route:
 5. **Run profitably** — complete a delivery whose revenue exceeds the running
    cost accumulated since the previous delivery.
 
-The card is derived from persisted railway/economy state. It is not a scenario,
-does not prebuild anything, gives no cash reward, and never blocks sandbox play.
-Completion produces a celebration and remains visible as achieved.
+The card derives intermediate steps from persisted railway/economy state. A
+root `FirstRouteProgressDef` owns the world-level
+`profitableDeliveryCompleted` latch so completion survives later demolition or
+train deletion. It is not a scenario, does not prebuild anything, gives no cash
+reward, and never blocks sandbox play. Completion produces one celebration per
+runtime session and remains visible as achieved.
 
 ### Build phase
 
@@ -59,7 +62,8 @@ connected route.
 
 ### Train purchase
 
-Milestone 2B sells exactly one set:
+Milestone 2B exposes exactly one freight-set SKU. The player may buy multiple
+instances when cash and valid placement allow it:
 
 | Field | Value |
 | --- | --- |
@@ -112,22 +116,30 @@ on the existing one-second fixed economy tick when the train:
 - is in Operate mode;
 - is on track and not derailed;
 - has zero throttle;
-- is below the named stopped-speed threshold;
+- is moving at no more than 2 world units per second;
 - has its centre inside a facility's persisted rail-access radius.
 
-If access areas overlap, the nearest facility wins; facility ID breaks an exact
-distance tie. Transfer order and product selection are deterministic.
+The stopped-speed boundary is inclusive: exactly 2 counts as stopped and any
+higher speed does not. The system first finds physical access rings containing
+the train, then filters for facilities eligible for the requested load or
+unload. The nearest eligible facility wins; facility ID breaks a distance tie.
+If no contained facility is eligible, the nearest contained physical facility
+supplies the exact cargo blocker. If no ring contains the train, the nearest
+relevant source or destination supplies the “move inside” remedy.
 
-At Managed Forest an empty compatible train loads up to 10 available,
-unreserved log units per tick. At Sawmill a train carrying logs unloads up to
-10 units per tick or the available destination capacity, whichever is smaller.
-Movement interrupts future batches without reverting completed ones.
+At Managed Forest a train that is empty or already carrying logs, and remains
+below capacity, loads up to 10 available, unreserved log units per tick. At
+Sawmill a train carrying logs unloads up to 10 units per tick or the available
+destination capacity, whichever is smaller. Movement interrupts future batches
+without reverting completed ones.
 
 Loading conserves goods from forest inventory to train cargo. Unloading
 conserves goods from train cargo to sawmill inventory and posts revenue for only
-the accepted quantity. The destination's pre-transfer local log quote determines
-the unit delivery payment. There is no commodity purchase charge at the forest:
-the company is paid for haulage by the receiving industry.
+the accepted quantity. The destination's pre-batch local log quote determines
+each batch's unit delivery payment, so a six-batch unload responds to rising
+Sawmill inventory pressure instead of locking one quote for the whole delivery.
+There is no commodity purchase charge at the forest: the company is paid for
+haulage by the receiving industry.
 
 The Sawmill visibly transitions from `Needs logs` to working once its recipe
 can run.
@@ -138,16 +150,19 @@ Each purchased set has a £20 running cost for a fixed tick in which it is
 powered or moving. A stopped, zero-throttle train costs nothing. A derailed
 train costs nothing until recovered.
 
-All active-train costs in one fixed tick are aggregated into one
+All active-train costs in one fixed tick are summed into one
 `train-running-cost` ledger entry, keeping ledger growth bounded when later
-milestones add many trains. Per-train persisted trip/lifetime statistics divide
-the exact aggregated charge deterministically by train ID after applying each
-set's stated cost.
+milestones add many trains. Each active train receives exactly its own set's
+integer cost in persisted trip/lifetime statistics; no division or remainder
+allocation is needed.
 
 If cash cannot cover the tick's running cost, every affected train is stopped,
 no unpaid cost is posted, and the inspector explains the cash blocker.
 
-The company HUD adds a compact last-24-tick operating summary:
+The company HUD adds a compact last-24-tick operating summary. At economy tick
+`t`, the inclusive window is `max(0, t - 23)` through `t`. Presentation refresh
+occurs after the complete current-tick operations batch, so same-tick entries
+are included:
 
 - delivery revenue;
 - running expenses;
@@ -160,10 +175,11 @@ not operating profit. The first-route objective uses delivery revenue minus
 running cost since the prior delivery, not cash flow, so construction spending
 does not make an otherwise profitable service appear operationally unprofitable.
 
-At the validated local-quote bounds, a full 60-tonne load grosses roughly
-£5,640–£8,400. Fixed-seed playtests must tune speed and running cost so every
-valid starter route has positive operating margin and the first delivery takes
-roughly two to four minutes after purchase.
+At the validated local-quote bounds, batch-by-batch repricing makes a full
+60-tonne load gross roughly £5,290–£7,930 before concurrent Sawmill processing.
+Fixed-seed playtests must tune speed and running cost so every valid starter
+route has positive operating margin and the first delivery takes roughly two
+to four minutes after purchase.
 
 ## Architecture
 
@@ -209,7 +225,6 @@ interface TrainOperationsDef {
   lifetimeDeliveredUnits: number;
   lifetimeRevenue: number;
   lifetimeRunningCost: number;
-  completedProfitableDelivery: boolean;
 }
 
 interface TrainDef {
@@ -221,7 +236,15 @@ interface TrainDef {
   cargo: TrainCargoDef | null;
   operations: TrainOperationsDef;
 }
+
+interface FirstRouteProgressDef {
+  objectiveVersion: 1;
+  profitableDeliveryCompleted: boolean;
+}
 ```
+
+`WorldData.firstRouteProgress` stores this object beside `economy` and
+`trains`. Schema validation requires the exact version and a boolean latch.
 
 Reload places every train on its referenced track at `trackT`, facing the
 persisted direction, stopped. Derailed position/velocity persistence is
@@ -244,8 +267,8 @@ The current trip begins immediately after a complete unload. Empty-return and
 loaded-outbound running costs therefore belong to the next delivery. When the
 last onboard unit unloads at Sawmill, the system adds the final revenue batch,
 copies current trip totals into the last-trip fields, sets
-`completedProfitableDelivery` if revenue exceeded cost, and resets the current
-trip fields to zero for the following cycle.
+`FirstRouteProgressDef.profitableDeliveryCompleted` if revenue exceeded cost,
+and resets the current trip fields to zero for the following cycle.
 
 `economyRevision` becomes `operationsRevision`. The invariant remains:
 
@@ -260,9 +283,10 @@ increment operations revision.
 ### One authoritative operations batch
 
 `WorldManager.applyOperationsBatch(expectedRevision, mutate)` clones company,
-economy, and trains, applies a pure mutation, validates the complete candidate,
-increments root/operations revisions once, and installs all three domains
-together. Rejection leaves every domain and revision unchanged.
+economy, trains, and first-route progress, applies a pure mutation, validates
+the complete candidate, increments root/operations revisions once, and installs
+all four domains together. Rejection leaves every domain and revision
+unchanged.
 
 This boundary is used for:
 
@@ -301,10 +325,13 @@ touches Phaser objects, localStorage, or the EventBus.
 2. calculate and post one aggregate running-cost entry;
 3. advance facility recipes and boundary production;
 4. drift the market;
-5. install one atomic operations batch and request one save;
+5. install one atomic operations batch;
 6. refresh map, train, facility, objective, and company presentation.
 
 A train performs at most one load or unload batch per fixed tick.
+Catch-up may commit up to the existing four fixed ticks in order. The scene
+requests one save of the final authoritative catch-up state, not one
+localStorage write per individual tick.
 If localStorage persistence fails after an in-memory batch commits, the live
 world and train remain authoritative, the HUD reports `Unsaved`, and the exact
 state retries through the existing save path. A persistence failure never
@@ -389,7 +416,8 @@ silently reverses or duplicates an economic transaction.
 
 ### Browser acceptance
 
-At least three generated seeds must prove:
+Across at least three generated seeds, deterministic browser cases collectively
+prove:
 
 - zero initial player railway assets;
 - cheapest corridor + set + £20,000 reserve affordability;
@@ -401,10 +429,17 @@ At least three generated seeds must prove:
 - exact partial/final unload payments;
 - sawmill starts processing delivered logs;
 - positive first-delivery operating margin;
-- three repeatable cycles;
+- three repeatable cycles using controlled fixed-tick advancement;
 - exact save/reload at multiple route phases;
 - derail/re-rail with cargo retained;
 - desktop and 375×667 input-safe layouts.
+
+One desktop seed additionally performs a real-time first trip with actual
+keyboard throttle and physics, using a timeout sized for the validated
+two-to-four-minute target. The remaining seeds use controlled fixed-tick and
+runtime-position harnesses to cover economics, repetition, persistence, and
+mobile behavior without multiplying the real-time wait. A manual generated
+playtest repeats the real-time trip on at least three seeds before publication.
 
 The complete unit/integration, no-retry Playwright, construction/world-generation
 performance, production build, hygiene, independent review, and exact Sites
