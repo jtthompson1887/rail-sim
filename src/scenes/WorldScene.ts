@@ -361,9 +361,8 @@ export default class WorldScene extends Phaser.Scene {
     quote: FreightPurchaseQuote;
   }) => {
     if (GameStateManager.worldMode !== 'create') return;
-    const detachedQuote = Object.freeze({ ...quote });
     const purchaseResult = this.freightPurchaseService.purchase(
-      detachedQuote,
+      quote,
     );
     const detachedResult = Object.freeze({ ...purchaseResult });
 

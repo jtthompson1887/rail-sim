@@ -23,9 +23,9 @@ const PURCHASE_REMEDIES: Partial<Record<FreightPurchaseBlocker, string>> = {
   'duplicate-gesture': 'Purchase already in progress',
 };
 
-const detachQuote = (
+const freezeQuote = (
   quote: FreightPurchaseQuote,
-): FreightPurchaseQuote => Object.freeze({ ...quote });
+): FreightPurchaseQuote => Object.freeze(quote);
 
 /**
  * Quotes one timber freight-set purchase gesture from a snapped player track.
@@ -105,7 +105,7 @@ export class PlaceVehicleTool implements IEditorTool {
       this.publishState(null, PURCHASE_REMEDIES['no-track']!);
       return;
     }
-    const detached = detachQuote(quote);
+    const detached = freezeQuote(quote);
     const message = detached.blocker
       ? this.remedyFor(detached.blocker)
       : '';
@@ -258,7 +258,7 @@ export class PlaceVehicleTool implements IEditorTool {
         );
         return;
       }
-      const freshQuote = detachQuote(this.quoteService.quote({
+      const freshQuote = freezeQuote(this.quoteService.quote({
         ...this.lastPlacement,
         topology: this.trackManager.captureTopology(),
       }));

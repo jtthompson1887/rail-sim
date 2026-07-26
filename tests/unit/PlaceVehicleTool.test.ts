@@ -140,11 +140,11 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     EventBus.off('ui:freight-purchase-state', state);
   });
 
-  it('emits a detached frozen valid quote for confirmation', () => {
+  it('preserves the service-issued frozen quote identity for confirmation', () => {
     const track = makeTrack(scene);
     trackManager.getClosestTrack.mockReturnValue(track);
-    const mutableQuote = makeQuote();
-    quote.mockReturnValue(mutableQuote);
+    const issuedQuote = Object.freeze(makeQuote());
+    quote.mockReturnValue(issuedQuote);
     const state = jest.fn();
     EventBus.on('ui:freight-purchase-state', state);
 
@@ -160,12 +160,8 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
       topology: trackManager.captureTopology.mock.results[0].value,
     });
     expect(payload.message).toBe('');
-    expect(payload.quote).toEqual(mutableQuote);
-    expect(payload.quote).not.toBe(mutableQuote);
+    expect(payload.quote).toBe(issuedQuote);
     expect(Object.isFrozen(payload.quote)).toBe(true);
-    (mutableQuote as { trackUUID: string }).trackUUID =
-      'mutated-after-emission';
-    expect(payload.quote.trackUUID).toBe('forest-route');
     EventBus.off('ui:freight-purchase-state', state);
   });
 
@@ -197,7 +193,7 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
     quote
       .mockReturnValueOnce(makeQuote(null, 0))
-      .mockReturnValueOnce(makeQuote(null, 1));
+      .mockReturnValueOnce(Object.freeze(makeQuote(null, 1)));
     const state = jest.fn();
     EventBus.on('ui:freight-purchase-state', state);
     tool.onPointerDown(-500, 0, { button: 0 } as any);
@@ -218,6 +214,8 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
       message: 'Freight state changed Â· review and retry purchase',
     });
     expect(Object.isFrozen(state.mock.calls.at(-1)[0].quote)).toBe(true);
+    expect(state.mock.calls.at(-1)[0].quote)
+      .toBe(quote.mock.results[1].value);
     EventBus.off('ui:freight-purchase-state', state);
   });
 

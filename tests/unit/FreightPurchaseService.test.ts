@@ -344,6 +344,66 @@ describe('FreightPurchaseService', () => {
     expect(runtime.port.spawn).not.toHaveBeenCalled();
   });
 
+  it('rejects a forged current-revision valid-looking quote before spawn or mutation', () => {
+    const world = setupWorld();
+    addTrack(world, 'outside-track', {
+      p0: { x: -100, y: 100 },
+      p1: { x: -33, y: 100 },
+      p2: { x: 33, y: 100 },
+      p3: { x: 100, y: 100 },
+    });
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime();
+    const idFactory = jest.fn().mockReturnValue('forged-train');
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      idFactory,
+    );
+    const issued = service.quote(connectedInput());
+    const forged = Object.freeze({
+      ...issued,
+      trackUUID: 'outside-track',
+      trackT: 0.5,
+      facing: -1 as const,
+      valid: true,
+      blocker: null,
+    });
+
+    const result = service.purchase(forged);
+
+    expect(result).toEqual({ ok: false, blocker: 'stale-revision' });
+    expect(authoritativeSnapshot(world)).toBe(before);
+    expect(runtime.live.size).toBe(0);
+    expect(idFactory).not.toHaveBeenCalled();
+    expect(runtime.port.spawn).not.toHaveBeenCalled();
+  });
+
+  it('consumes an issued quote on its first attempt and rejects replay at the same root', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime({
+      spawn: jest.fn().mockReturnValue(null),
+    });
+    const idFactory = jest.fn().mockReturnValue('single-use-train');
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      idFactory,
+    );
+    const quote = service.quote(connectedInput());
+
+    const first = service.purchase(quote);
+    const replay = service.purchase(quote);
+
+    expect(first).toEqual({ ok: false, blocker: 'live-spawn-failed' });
+    expect(replay).toEqual({ ok: false, blocker: 'stale-revision' });
+    expect(authoritativeSnapshot(world)).toBe(before);
+    expect(runtime.live.size).toBe(0);
+    expect(idFactory).toHaveBeenCalledTimes(1);
+    expect(runtime.port.spawn).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a simultaneous reentrant purchase as duplicate-gesture', () => {
     const world = setupWorld();
     const before = authoritativeSnapshot(world);

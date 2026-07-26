@@ -1145,7 +1145,7 @@ describe('WorldScene disabled construction bypass guards', () => {
   it('clears stale construction UI/history and selects the committed train without a second save', () => {
     const scene = new WorldScene() as any;
     WorldManager.createNew('Committed purchase', 'committed-purchase');
-    const quote: FreightPurchaseQuote = {
+    const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: 0,
       freightSetId: 'timber-freight-set',
       trackUUID: 'forest-route',
@@ -1156,7 +1156,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       affordable: true,
       valid: true,
       blocker: null,
-    };
+    });
     const purchasedTrain = { getUUID: () => 'purchased-train' };
     const purchase = jest.fn().mockReturnValue(Object.freeze({
       ok: true,
@@ -1186,10 +1186,9 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.freightPurchaseConfirmedHandler({ quote });
 
     expect(purchase).toHaveBeenCalledTimes(1);
-    const detachedQuote = purchase.mock.calls[0][0];
-    expect(detachedQuote).toEqual(quote);
-    expect(detachedQuote).not.toBe(quote);
-    expect(Object.isFrozen(detachedQuote)).toBe(true);
+    const confirmedQuote = purchase.mock.calls[0][0];
+    expect(confirmedQuote).toBe(quote);
+    expect(Object.isFrozen(confirmedQuote)).toBe(true);
     expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
     expect(scene.selectionManager.clearSelection).toHaveBeenCalledTimes(1);
     expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(

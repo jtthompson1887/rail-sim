@@ -168,6 +168,8 @@ const createPurchasedTrainDef = (
 
 export class FreightPurchaseService {
   private purchaseInFlight = false;
+  private readonly issuedQuotes = new WeakSet<FreightPurchaseQuote>();
+  private readonly consumedQuotes = new WeakSet<FreightPurchaseQuote>();
 
   constructor(
     private readonly worldPort: FreightPurchaseWorldPort,
@@ -237,7 +239,7 @@ export class FreightPurchaseService {
         sawmill.railAccess,
       )
       : 1;
-    return Object.freeze({
+    const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: world?.revision ?? -1,
       freightSetId: TIMBER_FREIGHT_SET_ID,
       trackUUID: String(input.trackUUID),
@@ -249,6 +251,8 @@ export class FreightPurchaseService {
       valid: blocker === null,
       blocker,
     });
+    this.issuedQuotes.add(quote);
+    return quote;
   }
 
   purchase(quote: FreightPurchaseQuote): FreightPurchaseResult {
@@ -256,9 +260,13 @@ export class FreightPurchaseService {
     this.purchaseInFlight = true;
     try {
       const world = this.worldPort.world;
-      if (!world || world.revision !== quote.expectedRevision) {
+      if (!world
+        || !this.issuedQuotes.has(quote)
+        || this.consumedQuotes.has(quote)
+        || world.revision !== quote.expectedRevision) {
         return failure('stale-revision');
       }
+      this.consumedQuotes.add(quote);
       if (!quote.valid || quote.blocker !== null) {
         return failure(quote.blocker ?? 'world-install-failed');
       }
