@@ -640,6 +640,11 @@ test.describe('collective three-seed first freight route acceptance', () => {
       await page.waitForTimeout(60);
       await page.keyboard.up('s');
     };
+    const forwardPulse = async (): Promise<void> => {
+      await page.keyboard.down('w');
+      await page.waitForTimeout(60);
+      await page.keyboard.up('w');
+    };
     let previousDistance = Math.hypot(
       runtime(loaded).x - sawmill.railAccess.x,
       runtime(loaded).y - sawmill.railAccess.y,
@@ -679,10 +684,11 @@ test.describe('collective three-seed first freight route acceptance', () => {
             ? -live.speedWorldUnitsPerSecond
             : 0;
         unloadingStarted ||= (train(current).cargo?.units ?? 0) < 60;
+        const elapsedSeconds = (
+          await page.evaluate(() => performance.now()) - purchaseStarted
+        ) / 1_000;
         recentRuntime.push({
-          elapsedSeconds: (
-            await page.evaluate(() => performance.now()) - purchaseStarted
-          ) / 1_000,
+          elapsedSeconds,
           distance,
           speed: live.speedWorldUnitsPerSecond,
           signedSpeed,
@@ -713,14 +719,18 @@ test.describe('collective three-seed first freight route acceptance', () => {
         if (unloadingStarted) {
           await setForward(false);
         } else if (motion === 'receding') {
-          await setForward(true);
+          await setForward(false);
+          if (live.speedWorldUnitsPerSecond > 2) await forwardPulse();
         } else if (braking) {
           if (distance > sawmill.railAccess.radius) {
-            if (live.speedWorldUnitsPerSecond < 6) {
-              await setForward(true);
+            if (live.speedWorldUnitsPerSecond < 34) {
+              await setForward(false);
+              await forwardPulse();
+            } else if (live.speedWorldUnitsPerSecond > 42) {
+              await setForward(false);
+              await brakePulse();
             } else {
               await setForward(false);
-              if (signedSpeed > 10) await brakePulse();
             }
           } else {
             await setForward(false);
