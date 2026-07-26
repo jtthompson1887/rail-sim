@@ -3,6 +3,10 @@
  */
 import { EventBus } from '../../src/services/EventBus';
 import { VehiclePurchasePanel } from '../../src/ui/VehiclePurchasePanel';
+import { FreightPurchaseService } from '../../src/freight/FreightPurchaseService';
+import { WorldManager } from '../../src/managers/WorldManager';
+import { makeFirstFreightRouteWorld } from '../fixtures/FirstFreightRouteFixture';
+import { clonePlainData } from '../../src/utils/PlainData';
 
 const quote = () => ({
   expectedRevision: 4,
@@ -28,6 +32,8 @@ describe('VehiclePurchasePanel', () => {
   afterEach(() => {
     panel.destroy();
     document.body.innerHTML = '';
+    WorldManager.reset();
+    localStorage.clear();
     jest.restoreAllMocks();
   });
 
@@ -68,12 +74,70 @@ describe('VehiclePurchasePanel', () => {
     });
     expect(confirmed).toHaveBeenCalledTimes(1);
     const emittedQuote = confirmed.mock.calls[0][0].quote;
-    expect(emittedQuote).toEqual(displayedQuote);
-    expect(emittedQuote).not.toBe(displayedQuote);
+    expect(emittedQuote).toBe(displayedQuote);
     expect(Object.isFrozen(emittedQuote)).toBe(true);
 
     EventBus.off('freight:purchase-mode-requested', mode);
     EventBus.off('freight:purchase-confirmed', confirmed);
+  });
+
+  it('confirms the exact service-issued quote so the real purchase accepts its provenance', () => {
+    const world = WorldManager.createNew(
+      'Panel provenance',
+      'panel-provenance',
+    );
+    const fixture = makeFirstFreightRouteWorld();
+    world.tracks = clonePlainData(fixture.tracks);
+    world.economy = clonePlainData(fixture.economy);
+    world.trains = [];
+    const service = new FreightPurchaseService(
+      WorldManager,
+      {
+        spawn: (trainId) => ({ getUUID: () => trainId } as any),
+        place: () => true,
+        remove: jest.fn(),
+      },
+      () => 'panel-purchased-train',
+    );
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const issued = service.quote({
+      freightSetId: 'timber-freight-set',
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0,
+      x: -500,
+      y: 0,
+      topology: [{
+        kind: 'track',
+        uuid: 'forest-sawmill-track',
+        previous: null,
+        next: null,
+      }],
+    });
+    let confirmedQuote: typeof issued | undefined;
+    let result: ReturnType<FreightPurchaseService['purchase']> | undefined;
+    const listener = ({ quote: candidate }: { quote: typeof issued }) => {
+      confirmedQuote = candidate;
+      result = service.purchase(candidate);
+    };
+    EventBus.on('freight:purchase-confirmed', listener);
+    panel.setState({
+      quote: issued,
+      cash: world.company.cash,
+      message: '',
+    });
+
+    (document.querySelector(
+      '[data-testid="freight-purchase-confirm"]',
+    ) as HTMLButtonElement).click();
+
+    expect(confirmedQuote).toBe(issued);
+    expect(result).toEqual({
+      ok: true,
+      trainId: 'panel-purchased-train',
+      saved: true,
+      saveState: 'saved',
+    });
+    EventBus.off('freight:purchase-confirmed', listener);
   });
 
   it('shows the exact remedy, affordability, and bounded mobile layout', () => {

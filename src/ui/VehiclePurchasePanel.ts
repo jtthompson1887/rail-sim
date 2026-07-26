@@ -16,6 +16,7 @@ export class VehiclePurchasePanel {
   private readonly confirm = document.createElement('button');
   private currentQuote: FreightPurchaseQuote | null = null;
   private visible = true;
+  private facilityInspectionActive = false;
   private readonly resizeHandler = () => this.applyLayout();
   private readonly stopPropagation = (event: Event) => event.stopPropagation();
   private readonly stateHandler = (state: {
@@ -23,6 +24,14 @@ export class VehiclePurchasePanel {
     cash: number;
     message: string;
   }) => this.setState(state);
+  private readonly facilityInspectionHandler = () => {
+    this.facilityInspectionActive = true;
+    this.syncVisibility();
+  };
+  private readonly facilityDeselectedHandler = () => {
+    this.facilityInspectionActive = false;
+    this.syncVisibility();
+  };
 
   constructor() {
     this.root.dataset.testid = 'vehicle-purchase-panel';
@@ -99,7 +108,10 @@ export class VehiclePurchasePanel {
     this.applyLayout();
     this.setState({ quote: null, cash: 0, message: '' });
     EventBus.on('ui:freight-purchase-state', this.stateHandler);
+    EventBus.on('facility:inspection', this.facilityInspectionHandler);
+    EventBus.on('facility:deselected', this.facilityDeselectedHandler);
     window.addEventListener('resize', this.resizeHandler);
+    this.syncVisibility();
   }
 
   setState(state: {
@@ -108,7 +120,7 @@ export class VehiclePurchasePanel {
     message: string;
   }): void {
     this.currentQuote = state.quote
-      ? Object.freeze({ ...state.quote })
+      ? Object.freeze(state.quote)
       : null;
     const dto = buildFreightPurchasePresentation(
       this.currentQuote,
@@ -133,12 +145,11 @@ export class VehiclePurchasePanel {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    this.root.style.display = visible ? 'block' : 'none';
-    this.root.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    this.syncVisibility();
   }
 
   containsScreenPoint(x: number, y: number): boolean {
-    if (!this.visible) return false;
+    if (this.root.style.display === 'none') return false;
     const bounds = this.root.getBoundingClientRect();
     return x >= bounds.left && x <= bounds.right
       && y >= bounds.top && y <= bounds.bottom;
@@ -146,8 +157,16 @@ export class VehiclePurchasePanel {
 
   destroy(): void {
     EventBus.off('ui:freight-purchase-state', this.stateHandler);
+    EventBus.off('facility:inspection', this.facilityInspectionHandler);
+    EventBus.off('facility:deselected', this.facilityDeselectedHandler);
     window.removeEventListener('resize', this.resizeHandler);
     this.root.remove();
+  }
+
+  private syncVisibility(): void {
+    const displayed = this.visible && !this.facilityInspectionActive;
+    this.root.style.display = displayed ? 'block' : 'none';
+    this.root.setAttribute('aria-hidden', displayed ? 'false' : 'true');
   }
 
   private applyLayout(): void {

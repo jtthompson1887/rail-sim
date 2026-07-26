@@ -202,6 +202,56 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(showToast).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['desktop', 1280, 720],
+    ['mobile', 375, 667],
+  ])(
+    'keeps facility inspection readable and restores the Build purchase panel at %s',
+    (_layout, width, height) => {
+      Object.defineProperty(window, 'innerWidth', {
+        value: width,
+        configurable: true,
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: height,
+        configurable: true,
+      });
+      startEditorUI({
+        visible: true,
+        companyCash: 1_000_000,
+        saveState: 'saved',
+      });
+      window.dispatchEvent(new Event('resize'));
+      const facility = document.querySelector(
+        '[data-testid="facility-inspector"]',
+      ) as HTMLElement;
+      const purchase = document.querySelector(
+        '[data-testid="vehicle-purchase-panel"]',
+      ) as HTMLElement;
+
+      EventBus.emit('facility:inspection', {
+        id: 'sawmill',
+        name: 'Sawmill',
+        status: { code: 'working', label: 'Working' },
+        produces: ['structural-timber'],
+        needs: ['logs'],
+        inventories: [],
+        quotes: [],
+        railConnected: true,
+      });
+
+      expect(facility.dataset.layout).toBe(_layout);
+      expect(purchase.dataset.layout).toBe(_layout);
+      expect(facility.getAttribute('aria-hidden')).toBe('false');
+      expect(purchase.getAttribute('aria-hidden')).toBe('true');
+
+      EventBus.emit('facility:deselected', { facilityId: 'sawmill' });
+
+      expect(facility.getAttribute('aria-hidden')).toBe('true');
+      expect(purchase.getAttribute('aria-hidden')).toBe('false');
+    },
+  );
+
   it('draws the minimap in the fixed UI layer only while editor controls are visible', () => {
     const scene = startEditorUI({
       visible: true,

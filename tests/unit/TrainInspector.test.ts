@@ -140,6 +140,35 @@ describe('TrainInspector', () => {
     document.body.removeEventListener('pointerdown', bubbled);
   });
 
+  it('keeps one throttle button alive across multiframe state updates and emits once on click', async () => {
+    panel.setState(inspection());
+    const values: number[] = [];
+    const listener = ({ value }: { value: number }) => values.push(value);
+    EventBus.on('mobile:throttle', listener);
+    const root = document.querySelector(
+      '[data-testid="train-inspector"]',
+    ) as HTMLElement;
+    const pressed = root.querySelector(
+      '[data-throttle="1"]',
+    ) as HTMLButtonElement;
+
+    pressed.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await Promise.resolve();
+    EventBus.emit('ui:train-inspection', {
+      inspection: inspection('Stop the train to transfer cargo'),
+    });
+    await Promise.resolve();
+    EventBus.emit('ui:train-inspection', {
+      inspection: inspection(),
+    });
+    await Promise.resolve();
+
+    expect(root.querySelector('[data-throttle="1"]')).toBe(pressed);
+    pressed.click();
+    expect(values).toEqual([1]);
+    EventBus.off('mobile:throttle', listener);
+  });
+
   it('stays bounded at 375x667 and removes its exact listener on destroy', () => {
     Object.defineProperty(window, 'innerWidth', {
       value: 375,

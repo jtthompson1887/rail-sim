@@ -13,6 +13,16 @@ const titleCase = (value: string): string =>
 export class TrainInspector {
   private readonly root = document.createElement('section');
   private readonly content = document.createElement('div');
+  private readonly heading = document.createElement('h2');
+  private readonly movement = document.createElement('strong');
+  private readonly cargoText = document.createElement('div');
+  private readonly cargo = document.createElement('progress');
+  private readonly nearest = document.createElement('div');
+  private readonly status = document.createElement('strong');
+  private readonly batchText = document.createElement('div');
+  private readonly batch = document.createElement('progress');
+  private readonly figures = document.createElement('div');
+  private readonly controls = document.createElement('div');
   private enabled = true;
   private current: TrainInspectionDto | null = null;
   private readonly resizeHandler = () => this.applyLayout();
@@ -45,84 +55,26 @@ export class TrainInspector {
       'font:12px/1.4 Verdana,sans-serif',
       'pointer-events:auto',
     ].join(';');
-    this.root.append(this.content);
-    for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'click']) {
-      this.root.addEventListener(eventName, this.stopPropagation);
-    }
-    document.body.append(this.root);
-    this.applyLayout();
-    this.setState(null);
-    EventBus.on('ui:train-inspection', this.stateHandler);
-    window.addEventListener('resize', this.resizeHandler);
-  }
-
-  setState(dto: TrainInspectionDto | null): void {
-    this.current = dto;
-    if (!dto) {
-      this.content.replaceChildren();
-      this.syncVisibility();
-      return;
-    }
-
-    const heading = document.createElement('h2');
-    heading.textContent = dto.displayName;
-    heading.style.cssText =
+    this.heading.style.cssText =
       'margin:0 0 3px;font:700 16px/1.2 Verdana,sans-serif;color:#fff';
-    const movement = document.createElement('strong');
-    movement.textContent =
-      `${titleCase(dto.direction)} · ${dto.movementState}`;
-    movement.style.cssText =
+    this.movement.style.cssText =
       'display:block;margin-bottom:9px;color:#9feaff';
-
-    const cargoText = document.createElement('div');
-    cargoText.textContent = dto.cargo.text;
-    const cargo = document.createElement('progress');
-    cargo.dataset.testid = 'train-cargo-progress';
-    cargo.max = dto.cargo.capacityUnits;
-    cargo.value = dto.cargo.units;
-    cargo.setAttribute(
-      'aria-label',
-      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of ${dto.cargo.capacityUnits} tonnes`,
-    );
-    cargo.style.cssText =
+    this.cargo.dataset.testid = 'train-cargo-progress';
+    this.cargo.style.cssText =
       'display:block;width:100%;height:8px;accent-color:#4ad5ff';
-
-    const nearest = document.createElement('div');
-    nearest.textContent = dto.nearestEligibleFacility
-      ? `Nearest eligible: ${dto.nearestEligibleFacility}`
-      : 'Nearest eligible: none';
-    nearest.style.cssText = 'margin-top:8px;color:#bad3e2';
-    const status = document.createElement('strong');
-    status.dataset.testid = 'train-transfer-status';
-    status.textContent = dto.transfer.blocker
-      ?? titleCase(dto.transfer.kind);
-    status.style.cssText =
+    this.nearest.style.cssText = 'margin-top:8px;color:#bad3e2';
+    this.status.dataset.testid = 'train-transfer-status';
+    this.status.style.cssText =
       'display:block;margin-top:6px;color:#ffe39a';
-    const batchText = document.createElement('div');
-    batchText.textContent = `Batch ${dto.transfer.batchUnits} / 10 t`;
-    const batch = document.createElement('progress');
-    batch.dataset.testid = 'train-transfer-progress';
-    batch.max = 10;
-    batch.value = dto.transfer.batchUnits;
-    batch.setAttribute(
-      'aria-label',
-      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 tonnes`,
-    );
-    batch.style.cssText =
+    this.batch.dataset.testid = 'train-transfer-progress';
+    this.batch.max = 10;
+    this.batch.style.cssText =
       'display:block;width:100%;height:8px;accent-color:#69df9a';
-
-    const figures = document.createElement('div');
-    figures.style.cssText =
+    this.figures.style.cssText =
       'white-space:pre-line;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12)';
-    figures.textContent = [
-      `Current trip · revenue ${CURRENCY.format(dto.currentTrip.revenue)} · running ${CURRENCY.format(dto.currentTrip.runningCost)} · ${CURRENCY.format(dto.currentTrip.operatingProfit)}`,
-      `Last delivery · revenue ${CURRENCY.format(dto.lastDelivery.revenue)} · running ${CURRENCY.format(dto.lastDelivery.runningCost)} · ${CURRENCY.format(dto.lastDelivery.operatingProfit)}`,
-      `Lifetime · ${dto.lifetime.deliveredUnits} t · revenue ${CURRENCY.format(dto.lifetime.revenue)} · running ${CURRENCY.format(dto.lifetime.runningCost)} · ${CURRENCY.format(dto.lifetime.operatingProfit)}`,
-    ].join('\n');
-
-    const controls = document.createElement('div');
-    controls.setAttribute('aria-label', 'Train throttle');
-    controls.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px';
+    this.controls.setAttribute('aria-label', 'Train throttle');
+    this.controls.style.cssText =
+      'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px';
     for (const [value, label] of [
       [-1, 'Reverse'],
       [0, 'Stop'],
@@ -138,21 +90,63 @@ export class TrainInspector {
         button.blur();
         EventBus.emit('mobile:throttle', { value });
       });
-      controls.append(button);
+      this.controls.append(button);
     }
-
-    this.content.replaceChildren(
-      heading,
-      movement,
-      cargoText,
-      cargo,
-      nearest,
-      status,
-      batchText,
-      batch,
-      figures,
-      controls,
+    this.content.append(
+      this.heading,
+      this.movement,
+      this.cargoText,
+      this.cargo,
+      this.nearest,
+      this.status,
+      this.batchText,
+      this.batch,
+      this.figures,
+      this.controls,
     );
+    this.root.append(this.content);
+    for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'click']) {
+      this.root.addEventListener(eventName, this.stopPropagation);
+    }
+    document.body.append(this.root);
+    this.applyLayout();
+    this.setState(null);
+    EventBus.on('ui:train-inspection', this.stateHandler);
+    window.addEventListener('resize', this.resizeHandler);
+  }
+
+  setState(dto: TrainInspectionDto | null): void {
+    this.current = dto;
+    if (!dto) {
+      this.syncVisibility();
+      return;
+    }
+    this.heading.textContent = dto.displayName;
+    this.movement.textContent =
+      `${titleCase(dto.direction)} · ${dto.movementState}`;
+    this.cargoText.textContent = dto.cargo.text;
+    this.cargo.max = dto.cargo.capacityUnits;
+    this.cargo.value = dto.cargo.units;
+    this.cargo.setAttribute(
+      'aria-label',
+      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of ${dto.cargo.capacityUnits} tonnes`,
+    );
+    this.nearest.textContent = dto.nearestEligibleFacility
+      ? `Nearest eligible: ${dto.nearestEligibleFacility}`
+      : 'Nearest eligible: none';
+    this.status.textContent = dto.transfer.blocker
+      ?? titleCase(dto.transfer.kind);
+    this.batchText.textContent = `Batch ${dto.transfer.batchUnits} / 10 t`;
+    this.batch.value = dto.transfer.batchUnits;
+    this.batch.setAttribute(
+      'aria-label',
+      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 tonnes`,
+    );
+    this.figures.textContent = [
+      `Current trip · revenue ${CURRENCY.format(dto.currentTrip.revenue)} · running ${CURRENCY.format(dto.currentTrip.runningCost)} · ${CURRENCY.format(dto.currentTrip.operatingProfit)}`,
+      `Last delivery · revenue ${CURRENCY.format(dto.lastDelivery.revenue)} · running ${CURRENCY.format(dto.lastDelivery.runningCost)} · ${CURRENCY.format(dto.lastDelivery.operatingProfit)}`,
+      `Lifetime · ${dto.lifetime.deliveredUnits} t · revenue ${CURRENCY.format(dto.lifetime.revenue)} · running ${CURRENCY.format(dto.lifetime.runningCost)} · ${CURRENCY.format(dto.lifetime.operatingProfit)}`,
+    ].join('\n');
     this.syncVisibility();
   }
 
