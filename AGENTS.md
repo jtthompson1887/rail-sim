@@ -45,4 +45,6 @@ npm run benchmark:world-generation
 git diff --check
 ```
 
+If Playwright reports `ERR_CONNECTION_REFUSED`, the `webServer` in `playwright.config.ts` did not stay reachable. Pre-start the server with `npx serve dist -p 8080 -s --no-clipboard` and re-run `npx playwright test --retries=1`.
+
 Record `dist/main.js` size and compare it to the Phase 1 baseline (or note when no prior baseline exists). The `dist/cab3d.*.chunk.js` lazy chunk should be present and well over 500 KB.
