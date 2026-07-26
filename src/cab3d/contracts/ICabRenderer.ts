@@ -21,4 +21,7 @@ export interface ICabRenderer {
 
   /** Dispose the renderer and release all DOM/WebGL resources. */
   destroy(): void;
+
+  /** Optional reduced-motion observable. Implementations may expose this so the HUD can mirror the state. */
+  onReducedMotionChange?(callback: (reduced: boolean) => void): () => void;
 }

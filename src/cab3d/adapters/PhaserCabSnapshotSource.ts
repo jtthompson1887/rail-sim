@@ -96,6 +96,9 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
     const scenery = this.ensureScenery(vehicle);
     const elapsedSecs = time / 1000;
     const weather = computeWeatherState(this.seed, elapsedSecs, this.biome);
+    const reducedMotion = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false;
 
     return Object.freeze({
       valid: true,
@@ -106,6 +109,7 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
       scenery,
       nearestFacilityDistanceM: this.computeNearestFacilityDistance(vehicle),
       deterministic: GameConfig.CAB3D.DETERMINISTIC,
+      reducedMotion,
       elapsedSecs,
       weather,
       terrain: {

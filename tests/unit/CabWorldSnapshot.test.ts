@@ -29,6 +29,20 @@ describe('CabWorldSnapshot', () => {
     expect(frozen.biome).toBe('arid');
   });
 
+  it('carries a reduced-motion flag', () => {
+    const snapshot: CabWorldSnapshot = {
+      valid: true,
+      seed: 's1',
+      biome: 'arid',
+      vehicle: null,
+      path: [],
+      reducedMotion: true,
+      elapsedSecs: 0,
+      weather: null,
+    };
+    expect(snapshot.reducedMotion).toBe(true);
+  });
+
   it('carries a deterministic flag', () => {
     const snapshot: CabWorldSnapshot = {
       valid: true,

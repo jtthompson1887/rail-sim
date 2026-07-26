@@ -69,6 +69,9 @@ export interface CabWorldSnapshot {
   /** When true, all random/animated rendering effects are disabled for determinism. */
   readonly deterministic?: boolean;
 
+  /** When true, ride motion, grain, motion blur and DoF are reduced for accessibility. */
+  readonly reducedMotion?: boolean;
+
   /** Deterministic weather state for the cab view, or `null` when invalid. */
   readonly weather: CabWeatherState | null;
 }
@@ -83,6 +86,7 @@ export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
   nearestFacilityDistanceM: null,
   scenery: Object.freeze([]),
   deterministic: false,
+  reducedMotion: false,
   elapsedSecs: 0,
   weather: null,
 });

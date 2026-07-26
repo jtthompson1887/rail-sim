@@ -34,7 +34,7 @@ export class CabCameraRig {
   private readonly ride = new CabRideModel();
   private readonly look = new CabLookController();
 
-  update(deltaMs: number, snapshot: CabWorldSnapshot): CabEyeTransform {
+  update(deltaMs: number, snapshot: CabWorldSnapshot, motionScale = 1): CabEyeTransform {
     if (!snapshot.valid || !snapshot.vehicle) {
       return this.zeroTransform();
     }
@@ -57,6 +57,7 @@ export class CabCameraRig {
       speedMps: speed,
       curvature: eyeSample.curvature,
       grade,
+      motionScale,
     });
 
     // No external look input yet; spring back to centre.

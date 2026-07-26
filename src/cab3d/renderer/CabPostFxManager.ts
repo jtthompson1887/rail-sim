@@ -67,11 +67,21 @@ export class CabPostFxManager {
   update(snapshot: CabWorldSnapshot): void {
     if (!this.pipeline) return;
 
+    const reduced = snapshot.reducedMotion === true;
     const deterministic = snapshot.deterministic === true;
-    this.pipeline.grain.animated = !deterministic;
 
-    if (deterministic) {
+    if (reduced) {
+      this.pipeline.grainEnabled = false;
+      this.pipeline.depthOfFieldEnabled = false;
       this.setMotionBlurEnabled(false);
+    } else {
+      this.pipeline.grainEnabled = true;
+      this.pipeline.grain.animated = !deterministic;
+      this.pipeline.depthOfFieldEnabled = true;
+
+      if (deterministic) {
+        this.setMotionBlurEnabled(false);
+      }
     }
   }
 

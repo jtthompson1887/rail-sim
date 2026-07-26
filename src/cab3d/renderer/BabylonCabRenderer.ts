@@ -68,6 +68,9 @@ export default class BabylonCabRenderer implements ICabRenderer {
   private lastSnapshot: CabWorldSnapshot | null = null;
   private lastEye: CabEyeTransform | null = null;
   private lastSunAltitudeDeg: number | null = null;
+  private reducedMotion = false;
+  private reducedMotionMediaQuery: MediaQueryList | null = null;
+  private readonly reducedMotionListeners = new Set<(reduced: boolean) => void>();
 
   constructor() {
     this.mount = new CabCanvasMount();
@@ -92,11 +95,15 @@ export default class BabylonCabRenderer implements ICabRenderer {
     if (!this.isReady()) return;
     this.lastSnapshot = snapshot;
 
+    const reduced = snapshot.reducedMotion ?? this.prefersReducedMotion();
+    this.setReducedMotion(reduced);
+    const motionScale = reduced ? CabConfig.REDUCED_MOTION_SCALE : 1;
+
     if (snapshot.vehicle) {
       if (!this.cameraRig) {
         this.cameraRig = new CabCameraRig();
       }
-      this.lastEye = this.cameraRig.update(deltaMs, snapshot);
+      this.lastEye = this.cameraRig.update(deltaMs, snapshot, motionScale);
       this.camera?.position.set(this.lastEye.position.x, this.lastEye.position.y, this.lastEye.position.z);
       this.camera?.rotation.set(this.lastEye.rotation.x, this.lastEye.rotation.y, this.lastEye.rotation.z);
 
@@ -125,6 +132,12 @@ export default class BabylonCabRenderer implements ICabRenderer {
   }
 
   destroy(): void {
+    if (this.reducedMotionMediaQuery) {
+      this.reducedMotionMediaQuery.removeEventListener('change', this.handleReducedMotionMediaChange);
+      this.reducedMotionMediaQuery = null;
+    }
+    this.reducedMotionListeners.clear();
+
     this.reflectionProbe?.dispose();
     this.reflectionProbe = null;
     this.interiorLight?.dispose();
@@ -165,6 +178,40 @@ export default class BabylonCabRenderer implements ICabRenderer {
 
   private snapshot() {
     return { eye: this.lastEye, snapshot: this.lastSnapshot };
+  }
+
+  /** Current reduced-motion state. */
+  get reducedMotionState(): boolean {
+    return this.reducedMotion;
+  }
+
+  /**
+   * Subscribe to reduced-motion changes.
+   *
+   * The callback is invoked immediately with the current state and again
+   * whenever the system preference (or the snapshot flag) changes.
+   */
+  onReducedMotionChange(callback: (reduced: boolean) => void): () => void {
+    this.reducedMotionListeners.add(callback);
+    callback(this.reducedMotion);
+    return () => {
+      this.reducedMotionListeners.delete(callback);
+    };
+  }
+
+  private setReducedMotion(reduced: boolean): void {
+    if (this.reducedMotion === reduced) return;
+    this.reducedMotion = reduced;
+    this.reducedMotionListeners.forEach((cb) => cb(reduced));
+  }
+
+  private readonly handleReducedMotionMediaChange = (event: MediaQueryListEvent): void => {
+    this.setReducedMotion(event.matches);
+  };
+
+  private prefersReducedMotion(): boolean {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   private createEngine(): void {
@@ -208,6 +255,12 @@ export default class BabylonCabRenderer implements ICabRenderer {
       this.fillLight!,
       this.cabInteriorBuilder!,
     );
+
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      this.reducedMotionMediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      this.reducedMotionMediaQuery.addEventListener('change', this.handleReducedMotionMediaChange);
+      this.setReducedMotion(this.reducedMotionMediaQuery.matches);
+    }
 
     window.__railSimCab3d = { snapshot: () => this.snapshot() };
   }

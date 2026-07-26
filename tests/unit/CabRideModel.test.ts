@@ -73,6 +73,25 @@ describe('CabRideModel', () => {
     expect(state.rotation.pitch).toBeCloseTo(Math.atan(grade), 5);
   });
 
+  it('scales output by the motionScale parameter', () => {
+    const model = new CabRideModel();
+    const unscaled = model.update(16, {
+      elapsedSecs: 1 / (4 * 1.3),
+      speedMps: 0,
+      curvature: 0,
+      grade: 0,
+    });
+    const scaled = model.update(16, {
+      elapsedSecs: 1 / (4 * 1.3),
+      speedMps: 0,
+      curvature: 0,
+      grade: 0,
+      motionScale: 0.15,
+    });
+    expect(scaled.position.x).toBeCloseTo(unscaled.position.x * 0.15, 6);
+    expect(scaled.position.y).toBeCloseTo(unscaled.position.y * 0.15, 6);
+  });
+
   it('clamps grade pitch to the configured limit', () => {
     const model = new CabRideModel();
     const state = model.update(16, {

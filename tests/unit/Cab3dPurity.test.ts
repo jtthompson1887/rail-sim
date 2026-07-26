@@ -21,7 +21,7 @@ function findPureFiles(dir: string): string[] {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       const relative = path.relative(SRC_DIR, full).replace(/\\/g, '/');
-      if (relative === 'renderer' || relative === 'adapters') continue;
+      if (relative === 'renderer' || relative === 'adapters' || relative === 'ui') continue;
       result.push(...findPureFiles(full));
     } else if (entry.isFile() && entry.name.endsWith('.ts')) {
       result.push(full);

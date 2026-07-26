@@ -10,6 +10,8 @@ export interface CabRideParams {
   readonly curvature: number;
   /** Grade at the eye (rise over run, dimensionless). */
   readonly grade: number;
+  /** Multiplier applied to the resulting position and rotation offsets. */
+  readonly motionScale?: number;
 }
 
 export interface CabRideState {
@@ -85,15 +87,17 @@ export class CabRideModel {
     const pitchLimit = degToRad(CabConfig.GRADE_PITCH_MAX_DEG);
     const gradePitch = clamp(Math.atan(params.grade), -pitchLimit, pitchLimit);
 
+    const scale = params.motionScale ?? 1;
+
     return {
       position: {
-        x: lateralSway,
-        y: verticalBounce + this.jointImpulse,
+        x: lateralSway * scale,
+        y: (verticalBounce + this.jointImpulse) * scale,
         z: 0,
       },
       rotation: {
-        roll: curveRoll,
-        pitch: gradePitch,
+        roll: curveRoll * scale,
+        pitch: gradePitch * scale,
         yaw: 0,
       },
     };

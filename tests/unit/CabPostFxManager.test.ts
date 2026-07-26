@@ -83,6 +83,33 @@ describe('CabPostFxManager', () => {
     expect(pipeline.grain.animated).toBe(true);
   });
 
+  it('disables grain, DoF and motion blur when reduced motion is active', () => {
+    manager.attach();
+    manager.setMotionBlurEnabled(true);
+
+    const pipeline = (manager as any).pipeline as DefaultRenderingPipeline;
+
+    manager.update({ reducedMotion: true } as any);
+
+    expect(pipeline.grainEnabled).toBe(false);
+    expect(pipeline.depthOfFieldEnabled).toBe(false);
+    expect((manager as any).motionBlur).toBeNull();
+  });
+
+  it('re-enables grain and DoF when reduced motion is cleared', () => {
+    manager.attach();
+
+    const pipeline = (manager as any).pipeline as DefaultRenderingPipeline;
+
+    manager.update({ reducedMotion: true } as any);
+    expect(pipeline.grainEnabled).toBe(false);
+
+    manager.update({ reducedMotion: false, deterministic: false } as any);
+    expect(pipeline.grainEnabled).toBe(true);
+    expect(pipeline.depthOfFieldEnabled).toBe(true);
+    expect(pipeline.grain.animated).toBe(true);
+  });
+
   it('is safe to dispose without attach', () => {
     expect(() => manager.dispose()).not.toThrow();
   });

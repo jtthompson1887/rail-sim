@@ -20,6 +20,9 @@ export const CabConfig = Object.freeze({
   /** When true, random motion (grain, windscreen drops) becomes deterministic. */
   DETERMINISTIC: false,
 
+  /** Multiplier applied to ride-camera motion when prefers-reduced-motion is active. */
+  REDUCED_MOTION_SCALE: 0.15,
+
   /** Height of the driver's eye above the rail head, in metres. */
   EYE_HEIGHT_M: 2.40,
 

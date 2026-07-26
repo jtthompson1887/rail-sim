@@ -2,6 +2,8 @@ import { EventBus } from '../services/EventBus';
 import type { ICabSnapshotSource } from './contracts/ICabSnapshotSource';
 import type { ICabRenderer } from './contracts/ICabRenderer';
 import { CabConfig } from './CabConfig';
+import { CabViewToggleButton } from './ui/CabViewToggleButton';
+import { CabHudOverlay } from './ui/CabHudOverlay';
 
 export type RendererLoader = () => Promise<ICabRenderer>;
 
@@ -17,22 +19,26 @@ const defaultRendererLoader: RendererLoader = async () => {
  * Lifecycle owner for the 3-D cab view.
  *
  * The host is intentionally thin: it holds the Phaser adapter, lazily loads the
- * Babylon renderer into its own webpack chunk, and responds to the `cab:toggle`
- * EventBus event. All rendering state is delegated to the renderer.
+ * Babylon renderer into its own webpack chunk, responds to the `cab:toggle`
+ * EventBus event, and owns the DOM toggle button and HUD overlay.
  */
 export class CabViewHost {
   private active = false;
   private renderer: ICabRenderer | null = null;
   private rendererPromise: Promise<ICabRenderer> | null = null;
+  private readonly toggleButton: CabViewToggleButton;
+  private readonly hudOverlay: CabHudOverlay;
 
   constructor(
     private readonly source: ICabSnapshotSource,
     private readonly rendererLoader: RendererLoader = defaultRendererLoader,
   ) {
+    this.toggleButton = new CabViewToggleButton();
+    this.hudOverlay = new CabHudOverlay();
     EventBus.on('cab:toggle', this.handleToggle);
   }
 
-  /** Destroy the host and release the renderer. */
+  /** Destroy the host and release the renderer and UI. */
   destroy(): void {
     EventBus.off('cab:toggle', this.handleToggle);
     this.renderer?.hide();
@@ -40,13 +46,18 @@ export class CabViewHost {
     this.renderer = null;
     this.rendererPromise = null;
     this.active = false;
+    this.toggleButton.destroy();
+    this.hudOverlay.destroy();
   }
 
   /** Per-frame update, called from WorldScene. */
   update(time: number, delta: number): void {
-    if (!this.active || !this.renderer?.isReady()) return;
+    if (!this.active) return;
+
     const snapshot = this.source.capture(time, delta);
-    if (snapshot.valid) {
+    this.hudOverlay.update(snapshot);
+
+    if (snapshot.valid && this.renderer?.isReady()) {
       this.renderer.render(snapshot, delta);
     }
   }
@@ -69,21 +80,25 @@ export class CabViewHost {
   private async setActive(active: boolean): Promise<void> {
     if (this.active === active) return;
 
-    if (active && !this.renderer && !this.rendererPromise) {
-      this.rendererPromise = this.rendererLoader();
-      try {
-        this.renderer = await this.rendererPromise;
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[CabViewHost] failed to load cab renderer:', error);
-        this.rendererPromise = null;
-        return;
-      }
-    }
+    if (active) {
+      this.hudOverlay.show();
 
-    if (active && this.renderer) {
-      this.renderer.show();
+      if (!this.renderer && !this.rendererPromise) {
+        this.rendererPromise = this.rendererLoader();
+        try {
+          this.renderer = await this.rendererPromise;
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error('[CabViewHost] failed to load cab renderer:', error);
+          this.hudOverlay.hide();
+          this.rendererPromise = null;
+          return;
+        }
+      }
+
+      this.renderer?.show();
     } else {
+      this.hudOverlay.hide();
       this.renderer?.hide();
     }
 
