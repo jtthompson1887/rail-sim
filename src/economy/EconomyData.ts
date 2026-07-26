@@ -74,3 +74,35 @@ export type IndustryBlocker =
   | 'waiting-input'
   | 'output-full'
   | 'working';
+
+export type LedgerCategory =
+  | 'opening-balance'
+  | 'construction-capex'
+  | 'construction-refund'
+  | 'vehicle-capex'
+  | 'delivery-revenue'
+  | 'contract-bonus'
+  | 'train-running-cost'
+  | 'port-handling';
+
+export type LedgerClass =
+  | 'opening'
+  | 'revenue'
+  | 'operating-expense'
+  | 'capital-expenditure';
+
+export interface LedgerEntryDef {
+  id: number;
+  tick: number;
+  category: LedgerCategory;
+  ledgerClass: LedgerClass;
+  amount: number;
+  referenceId: string;
+  reversalOf?: number;
+}
+
+export interface CompanyStateDef {
+  cash: number;
+  nextLedgerId: number;
+  ledger: LedgerEntryDef[];
+}

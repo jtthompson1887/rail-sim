@@ -583,7 +583,7 @@ git commit -m "feat: derive bounded local freight quotes"
 - Produces: `summariseProfitAndLoss(company, fromTick, throughTick): ProfitAndLoss`
 - Consumed by Task 5 construction integration and Milestone 2B freight income.
 
-- [ ] **Step 1: Write failing money-conservation tests**
+- [x] **Step 1: Write failing money-conservation tests**
 
 Prove every accepted entry changes cash by exactly its policy-derived signed
 amount, IDs are monotonic, failed/unsafe/zero entries mutate nothing, cash
@@ -601,7 +601,7 @@ expect(summary).toEqual({
 });
 ```
 
-- [ ] **Step 2: Run the ledger test and verify failure**
+- [x] **Step 2: Run the ledger test and verify failure**
 
 ```powershell
 npx jest tests/unit/FinanceLedger.test.ts --runInBand --coverage=false
@@ -609,7 +609,7 @@ npx jest tests/unit/FinanceLedger.test.ts --runInBand --coverage=false
 
 Expected: fail because `FinanceLedger.ts` does not exist.
 
-- [ ] **Step 3: Add exact ledger types**
+- [x] **Step 3: Add exact ledger types**
 
 ```ts
 export type LedgerCategory =
@@ -645,7 +645,7 @@ export interface CompanyStateDef {
 }
 ```
 
-- [ ] **Step 4: Implement immutable ledger posting**
+- [x] **Step 4: Implement immutable ledger posting**
 
 `createCompanyState` creates entry `1`, category `opening-balance`, with the
 starting cash and sets `nextLedgerId` to `2`. `postLedgerEntry` returns a new
@@ -673,14 +673,14 @@ A reversal requires `reversalOf`, rejects opening balance, verifies the earlier
 entry has the same category/reference/magnitude, and flips its sign while
 retaining its class. It never silently clamps values.
 
-- [ ] **Step 5: Implement period P&L**
+- [x] **Step 5: Implement period P&L**
 
 Use inclusive tick bounds. Revenue and operating expenses determine operating
 profit. Capital expenditure is reported separately. Cash flow is the sum of
 all signed entries in the period, including capex and excluding the opening
 entry unless tick `0` is requested.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 ```powershell
 npx jest tests/unit/FinanceLedger.test.ts --runInBand --coverage=false
@@ -688,7 +688,7 @@ npx jest tests/unit/FinanceLedger.test.ts --runInBand --coverage=false
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add src/economy/EconomyData.ts src/economy/FinanceLedger.ts tests/unit/FinanceLedger.test.ts
