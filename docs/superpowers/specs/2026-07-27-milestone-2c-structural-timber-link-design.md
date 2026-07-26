@@ -87,7 +87,10 @@ The second objective contains four outcome-oriented steps:
 Intermediate steps derive from authoritative world state. Durable completion
 and grant latches live in root freight progress so demolition, train deletion,
 consumption, or reload cannot regress an achieved objective or duplicate the
-grant.
+grant. Before the second objective is achieved, its derived intermediate steps
+may regress if the player removes the connecting track, unloads or deletes the
+train, or exhausts Sawmill output. This is intentional feedback about the
+current railway, not a hidden per-step mission ledger.
 
 After the second objective completes, the card remains visibly achieved and
 the Prefabrication Plant explains that cement and steel are the next missing
@@ -110,6 +113,23 @@ The witness is a generation acceptance proof, not player infrastructure. It is
 not persisted as track, rendered as a solved line, or forced on the player.
 The player may choose any valid geometry and may overspend, but the objective
 copy makes the grant's purpose clear.
+
+The exact generated affordability requirement is:
+
+```text
+extension witness construction total
+  + £36,000 Sawmill access-link allowance
+  + £20,000 operating reserve
+  <= £250,000 development grant
+```
+
+The witness construction total includes its track, earthworks, bridge, tunnel,
+and endpoint topology costs. It runs from the Sawmill rail-access centre to the
+Prefabrication Plant rail-access centre. The access-link allowance bounds a
+320-unit connection from an arbitrary first-route endpoint already accepted
+inside the Sawmill access ring at the maximum base-plus-tunnel unit rate. This
+proves one affordable connected build plan; it does not claim that every
+player-chosen alignment is affordable.
 
 The other secondary industries remain generated blank-world destinations.
 Their full dependency-aware placement is added only as each link becomes
@@ -151,13 +171,14 @@ Cargo eligibility becomes catalogue-driven:
 - an empty compatible train may load a product that is an output of the
   facility's active recipe and is available above reservations;
 - a loaded train may unload where its product is an input of the destination's
-  active recipe and the destination has free capacity;
+  active recipe and `capacity - quantity` is positive;
 - the current freight set must be compatible with the product;
 - one train carries one homogeneous product from one loading origin;
-- if more than one product is eligible, definition order followed by product
-  ID is the deterministic tie-break;
+- trains are processed by train ID and contained facilities by distance then
+  facility ID;
+- within one loading facility, active-recipe output order is authoritative,
+  with product ID only as a defensive fallback for duplicate ordering data;
 - at most one transfer batch occurs for a train on a tick;
-- facilities and trains are processed in stable ID order;
 - inventory, cargo, cash, ledger, train statistics, grant, and progression
   commit in the existing single operations transaction.
 
@@ -177,6 +198,24 @@ Sawmill, logs, or “60 tonnes” in the simulation layer. The simulation emits 
 stable blocker code plus the relevant product and facility IDs. Presentation
 resolves catalogue display names and unit labels.
 
+The blocker codes, in precedence order, are:
+
+1. `not-operating`;
+2. `derailed`;
+3. `train-moving`;
+4. `unknown-freight-set`;
+5. `incompatible-product`;
+6. `outside-eligible-facility`;
+7. `source-empty`;
+8. `train-full`;
+9. `destination-full`;
+10. `product-not-accepted`;
+11. `insufficient-running-cash`.
+
+`idle` is a transfer state, not a blocker. A status includes the chosen
+`productId` and `facilityId` when known, so presentation never parses text to
+recover domain data.
+
 The selected-train inspector shows:
 
 - the General Flatbed Set;
@@ -192,6 +231,18 @@ The company HUD labels its existing rolling summary **Last 24 ticks**. Stable
 selectors expose current-trip, last-delivery, and lifetime train profit. A full
 accounts screen is not needed for this milestone.
 
+The rolling company summary separates:
+
+- delivery revenue;
+- contract/development bonuses;
+- train running expenses;
+- **railway operating profit = delivery revenue - running expenses**;
+- capital expenditure;
+- total cash flow, which includes bonuses and capital expenditure.
+
+The £250,000 grant therefore cannot make an unprofitable railway appear
+operating-profitable.
+
 The facility inspector already presents generic inventories and recipe status.
 It must clearly show:
 
@@ -205,8 +256,10 @@ It must clearly show:
 
 This milestone continues to permit multiple purchased trains. When train
 selection changes, the previously selected train's throttle is set to neutral
-before control transfers. This prevents an unseen train from continuing under
-stale player input.
+before control transfers. `selectTrain(trainId | null)` remains a synchronous
+selection operation with no invented failure result; unknown IDs select
+nothing after neutralising the previously controlled train. This prevents an
+unseen train from continuing under stale player input.
 
 Safe concurrent movement on a shared component is not implied. The acceptance
 journey uses one manually controlled train. Automated routing, junction
@@ -241,7 +294,8 @@ invariant must always hold:
 
 ```text
 developmentGrantAwarded
-  iff exactly one forward Regional Development Grant ledger entry exists
+  iff exactly one forward contract-bonus ledger entry exists with
+      referenceId "regional-development-grant:v1"
 ```
 
 The ledger remains the financial authority; the progress flag is the
@@ -282,12 +336,16 @@ The authoritative fixed-tick order remains:
 
 This means logs unloaded on a tick may contribute to Sawmill processing on that
 same tick, but newly completed structural timber cannot load until a later
-tick. The ordering is frozen in tests.
+tick. Delivery requires throttle zero and speed at or below the stop threshold,
+so its transfer tick is not an active-running tick and adds no omitted final
+running charge. The ordering and this attribution are frozen in tests.
 
 ## Failure Behaviour
 
 - An incompatible product never enters a train.
-- A full or reserved destination inventory never loses cargo or pays revenue.
+- A full destination inventory never loses cargo or pays revenue. Existing
+  `reservedQuantity` protects source stock from outbound loading; it is not a
+  reservation of inbound capacity.
 - An empty source never creates cargo.
 - An invalid recipe or missing catalogue reference produces a stable blocker,
   not partial mutation.
@@ -295,8 +353,8 @@ tick. The ordering is frozen in tests.
   statistics, progress, and runtime unchanged.
 - A failed grant post does not set the grant latch.
 - The grant cannot post twice after additional deliveries or reload.
-- A failed train-selection handoff stops neither the wrong train nor simulation
-  state.
+- Selecting another train or no train neutralises the previously selected
+  train before the selection changes.
 - A generation search that cannot place an affordable, valid Prefabrication
   Plant fails with bounded diagnostics; it never silently emits an unwinnable
   world.
@@ -315,6 +373,8 @@ tick. The ordering is frozen in tests.
   statistics;
 - first and second objective specificity and durable latches;
 - exactly-once £250,000 grant posting and reload behaviour;
+- rolling P&L that excludes the grant from railway operating profit while
+  including it in bonus income and cash flow;
 - schema-8 round-trip and deliberate schema-7 rejection;
 - same-seed replay, different-seed variation, bounded failure, terrain-valid
   Sawmill-to-Prefabrication Plant witness, and grant affordability;
@@ -334,15 +394,26 @@ Across at least three generated seeds, including a 375×667 viewport:
 5. wait for structural timber production;
 6. load structural timber into the compatible flatbed;
 7. drive and unload it at the Prefabrication Plant;
-8. observe positive trip profit, combined company P&L, exact facility stocks,
-   and the achieved objective;
+8. pause at deterministic checkpoints and observe positive trip profit,
+   combined company P&L, conserved facility/cargo stocks, and the achieved
+   objective;
 9. reload and confirm all authoritative state persists;
 10. confirm no uncaught errors, viewport overflow, hidden critical controls, or
     privileged test globals in production.
 
-Generation remains below the existing two-second budget. Economy updates with
-the seven facilities and a representative multi-train fixture stay below a
-16 ms p95 budget.
+Because recipes continue while the game runs, browser stock assertions use
+paused checkpoints and conservation relationships rather than wall-clock
+quantities: logs removed equal logs delivered, processed, or carrying;
+structural timber produced equals stored, delivered, or carrying; and
+Prefabrication Plant inflow equals delivered timber at the checkpoint.
+
+Generation remains below the existing two-second browser benchmark budget.
+The fixed-tick economy benchmark uses seven facilities and twelve trains, 100
+warm-up updates, then 500 measured one-tick updates; its p95 stays below 16 ms
+in the existing Node/Jest performance environment. The production-security gate
+builds without `testControls`, runs the existing webpack/test-control guards,
+and confirms that the production page exposes none of the privileged browser
+harness globals.
 
 ## YAGNI Boundary
 
@@ -382,3 +453,7 @@ Milestone 2C is complete only when:
 - focused, full, performance, browser, build, and production-security gates
   pass;
 - the exact verified commit is deployed through Sites and smoke-tested.
+
+Rejecting schema 7 is an explicitly accepted destructive compatibility policy:
+the user confirmed that the deployed prototype has no existing user data that
+must be preserved.
