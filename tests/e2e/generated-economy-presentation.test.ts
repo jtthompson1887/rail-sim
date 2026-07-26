@@ -2,7 +2,11 @@ import { expect, test, type Page } from '@playwright/test';
 
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 375, height: 667 };
-const WORLD_SEED = 'economy-presentation-017';
+const WORLD_SEEDS = [
+  'economy-presentation-017',
+  'economy-presentation-113',
+  'economy-presentation-271',
+] as const;
 
 interface Point {
   x: number;
@@ -20,6 +24,7 @@ interface PresentationSnapshot {
   world: {
     tracks: unknown[];
     trains: unknown[];
+    company: { cash: number };
     economy: {
       tick: number;
       facilities: Array<{
@@ -33,6 +38,7 @@ interface PresentationSnapshot {
     };
     starterOpportunity: {
       sites: Array<{ id: string; label: string; x: number; y: number }>;
+      corridors: Array<{ estimatedCost: number }>;
     };
   };
 }
@@ -65,6 +71,7 @@ async function waitForWorld(page: Page): Promise<void> {
 async function createFixedSeedWorld(
   page: Page,
   viewport: { width: number; height: number },
+  seed: string,
 ): Promise<void> {
   await page.setViewportSize(viewport);
   await page.addInitScript(() => {
@@ -83,7 +90,7 @@ async function createFixedSeedWorld(
   await page.locator('canvas').click({
     position: { x: viewport.width / 2, y: viewport.height - 90 },
   });
-  page.once('dialog', (dialog) => dialog.accept(WORLD_SEED));
+  page.once('dialog', (dialog) => dialog.accept(seed));
   await page.locator('canvas').click({
     position: {
       x: viewport.width / 2,
@@ -162,16 +169,24 @@ async function inspectSawmill(page: Page): Promise<void> {
   await expect(inspector).toBeVisible();
 }
 
-for (const viewport of [DESKTOP, MOBILE]) {
+const playtestCases = [
+  { seed: WORLD_SEEDS[0], viewport: DESKTOP },
+  { seed: WORLD_SEEDS[0], viewport: MOBILE },
+  { seed: WORLD_SEEDS[1], viewport: DESKTOP },
+  { seed: WORLD_SEEDS[2], viewport: DESKTOP },
+] as const;
+
+for (const { seed, viewport } of playtestCases) {
   const label = viewport === MOBILE ? '375x667' : 'desktop';
-  test(`presents and persists the fixed-seed blank economy at ${label}`, async ({
-    page,
-  }) => {
-    await createFixedSeedWorld(page, viewport);
+  test(`presents and persists ${seed} at ${label}`, async ({ page }) => {
+    await createFixedSeedWorld(page, viewport, seed);
     const generated = await snapshot(page);
     expect(generated.world.tracks).toHaveLength(0);
     expect(generated.world.trains).toHaveLength(0);
     expect(generated.world.economy.facilities).toHaveLength(7);
+    expect(Math.min(...generated.world.starterOpportunity.corridors.map(
+      ({ estimatedCost }) => estimatedCost,
+    ))).toBeLessThanOrEqual(generated.world.company.cash);
     const forest = generated.world.economy.facilities.find(
       ({ id }) => id === 'managed-forest',
     )!;
@@ -339,5 +354,72 @@ for (const viewport of [DESKTOP, MOBILE]) {
     await inspectSawmill(page);
     await expect(page.locator('[data-testid="facility-status"]'))
       .toHaveText(persisted.status ?? '');
+
+    if (seed === WORLD_SEEDS[0] && viewport === DESKTOP) {
+      await page.evaluate(() => {
+        const key = 'rail-sim-worlds';
+        const worlds = JSON.parse(localStorage.getItem(key) ?? '{}');
+        const world = Object.values(worlds)[0] as
+          PresentationSnapshot['world'] & { id: string };
+        const forest = world.economy.facilities.find(
+          ({ id }) => id === 'managed-forest',
+        )!;
+        const quarry = world.economy.facilities.find(
+          ({ id }) => id === 'quarry',
+        )!;
+        forest.inventories.logs.quantity = 232;
+        forest.recipeProgressTicks = 0;
+        quarry.inventories['limestone-aggregate'].quantity = 290;
+        quarry.recipeProgressTicks = 0;
+        localStorage.setItem(key, JSON.stringify({
+          [world.id]: world,
+        }));
+      });
+      await page.reload();
+      await openOnlySavedWorld(page, viewport);
+      await page.locator('canvas').click({
+        position: { x: viewport.width - 28, y: 30 },
+      });
+      await expect.poll(async () => {
+        const current = await snapshot(page);
+        const currentForest = current.world.economy.facilities.find(
+          ({ id }) => id === 'managed-forest',
+        )!;
+        const currentQuarry = current.world.economy.facilities.find(
+          ({ id }) => id === 'quarry',
+        )!;
+        return {
+          forestLogs: currentForest.inventories.logs.quantity,
+          quarryAggregate:
+            currentQuarry.inventories['limestone-aggregate'].quantity,
+        };
+      }, { timeout: 8_000 }).toEqual({
+        forestLogs: 240,
+        quarryAggregate: 300,
+      });
+      await page.locator('canvas').click({
+        position: { x: viewport.width - 28, y: 30 },
+      });
+      const saturated = await snapshot(page);
+      const saturatedForest = saturated.world.economy.facilities.find(
+        ({ id }) => id === 'managed-forest',
+      )!;
+      await page.waitForTimeout(1_100);
+      expect((await snapshot(page)).world.economy.tick)
+        .toBe(saturated.world.economy.tick);
+      const saturatedForestScreen = await toScreen(
+        page,
+        saturatedForest,
+        saturated,
+      );
+      await page.mouse.click(
+        saturatedForestScreen.x,
+        saturatedForestScreen.y,
+      );
+      await expect(page.locator('[data-testid="facility-name"]'))
+        .toHaveText('Managed Forest');
+      await expect(page.locator('[data-testid="facility-status"]'))
+        .toHaveText('Output storage full');
+    }
   });
 }
