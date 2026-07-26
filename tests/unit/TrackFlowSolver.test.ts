@@ -4,11 +4,15 @@ import Train from '../../src/entities/Train';
 import TrackManager from '../../src/managers/TrackManager';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
+import { GameConfig } from '../../src/config/GameConfig';
 
 const {
   makeScene,
+  makeMatterBody,
   simulateMatterUpdate,
 } = require('../../__mocks__/phaser');
+
+const REAL_TRAIN_DISPLAY_WIDTH = 2_305 * GameConfig.TRAIN.SCALE_X;
 
 function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 500, y2 = 0): RailTrack {
   const Phaser = require('phaser');
@@ -25,9 +29,11 @@ function makeMockTrain(scene: any, x = 0, y = 0) {
     clear: jest.fn(), lineStyle: jest.fn(), beginPath: jest.fn(),
     moveTo: jest.fn(), lineTo: jest.fn(), strokePath: jest.fn(),
   };
+  const matterBody = makeMatterBody(x, y);
+  matterBody.mass = 1000;
   const body = {
-    body: { position: { x, y }, mass: 1000, force: { x: 0, y: 0 }, velocity: { x: 0, y: 0 } },
-    displayWidth: 100, displayHeight: 50, angle: 0, rotation: 0,
+    body: matterBody,
+    displayWidth: REAL_TRAIN_DISPLAY_WIDTH, displayHeight: 50, angle: 0, rotation: 0,
     setAngle: jest.fn(),
   };
   return {
@@ -288,8 +294,20 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     const train = makeMockTrain(scene, 5000, 5000); // very far from track
     train.currentTrack = null;
     const solver = new TrackFlowSolver([track], train as any);
+    (solver as any)._handoffGuidanceLimited = true;
+    (solver as any)._handoffPreviousTrack = track;
+    (solver as any)._handoffFrontTrack = track;
+    (solver as any)._handoffRearTrack = track;
+    (solver as any)._handoffSettledFrames = 3;
     solver.applyTrackFlowForces();
     expect(train.derailed).toBe(true);
+    expect((solver as any)._handoffGuidanceLimited).toBe(false);
+    expect((solver as any)._handoffPreviousTrack).toBeNull();
+    expect((solver as any)._handoffFrontTrack).toBeNull();
+    expect((solver as any)._handoffRearTrack).toBeNull();
+    expect((solver as any)._handoffFrontRoute).toEqual([]);
+    expect((solver as any)._handoffRearRoute).toEqual([]);
+    expect((solver as any)._handoffSettledFrames).toBe(0);
   });
 
   it('preserves coasting momentum across a connected production-curve handoff', () => {
@@ -329,6 +347,8 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     const tangent = first.getCurvePath().getTangent(1);
     const train = new Train(scene, start.x, start.y);
     const body = train.getMatterBody();
+    body.displayWidth = REAL_TRAIN_DISPLAY_WIDTH;
+    expect(body.displayWidth).toBe(345.75);
     train.currentTrack = first;
     train.enginePower = 0;
     body.setAngle(Math.atan2(tangent.y, tangent.x) * 180 / Math.PI);
@@ -339,7 +359,8 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
 
     let speedBeforeHandoff: number | null = null;
     const postHandoffSpeeds: number[] = [];
-    for (let frame = 0; frame < 240; frame++) {
+    const postHandoffContactErrors: number[] = [];
+    for (let frame = 0; frame < 480; frame++) {
       train.update(frame * 16.667, 16.667);
       const before = Math.hypot(
         body.body.velocity.x,
@@ -355,12 +376,24 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
           body.body.velocity.x,
           body.body.velocity.y,
         ) * 60);
-        if (postHandoffSpeeds.length === 72) break;
+        const frontContact = solver.getFrontContactPoint();
+        const rearContact = solver.getRearContactPoint();
+        const frontTrack = (solver as any)._handoffFrontTrack ?? second;
+        const rearTrack = (solver as any)._handoffRearTrack ?? second;
+        postHandoffContactErrors.push(Math.max(
+          frontTrack.getTrackPoint(frontContact).distance(
+            new Phaser.Math.Vector2(frontContact.x, frontContact.y),
+          ),
+          rearTrack.getTrackPoint(rearContact).distance(
+            new Phaser.Math.Vector2(rearContact.x, rearContact.y),
+          ),
+        ));
+        if (postHandoffSpeeds.length === 180) break;
       }
     }
 
     expect(speedBeforeHandoff).not.toBeNull();
-    expect(postHandoffSpeeds).toHaveLength(72);
+    expect(postHandoffSpeeds).toHaveLength(180);
     expect(train.derailed).toBe(false);
     expect(Math.max(...postHandoffSpeeds)).toBeLessThan(
       speedBeforeHandoff! * 1.5,
@@ -368,10 +401,85 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
     expect(Math.min(...postHandoffSpeeds.slice(0, 24))).toBeGreaterThan(
       speedBeforeHandoff! * 0.5,
     );
+    expect(Math.max(...postHandoffContactErrors.slice(-24))).toBeLessThanOrEqual(
+      GameConfig.TRACK.RAIL_TRACK_WIDTH * GameConfig.TRACK.SCALE * 0.5,
+    );
+    expect((solver as any)._handoffFrontTrack).toBe(second);
+    expect((solver as any)._handoffRearTrack).toBe(first);
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+  });
+
+  it('migrates a real-width trailing contact naturally under power and releases durably', () => {
+    const first = makeTrack(scene, -500, 0, 0, 0);
+    const second = makeTrack(scene, 0, 0, 500, 0);
+    const train = makeMockTrain(scene, 0, 0);
+    train.currentTrack = first;
+    train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+    train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+    const manager = {
+      getClosestTrack: jest.fn().mockReturnValue(second),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+    const solver = new TrackFlowSolver(manager as any, train as any);
+    const matterImage = train.getMatterBody();
+    const body = matterImage.body;
+    body.velocity.x = 0.3;
+    (solver as any)._switchToTrack(second);
+
+    expect(matterImage.displayWidth).toBe(345.75);
+    expect((solver as any)._handoffFrontTrack).toBe(second);
+    expect((solver as any)._handoffRearTrack).toBe(first);
+
+    for (let frame = 0; frame < 180; frame++) {
+      solver.applyTrackFlowForces();
+      simulateMatterUpdate(body, 16.667);
+    }
+    expect((solver as any)._handoffRearTrack).toBe(first);
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+
+    const speeds: number[] = [];
+    const rearPidResetsBeforePower =
+      train.pidControllerRear.resetToError.mock.calls.length;
+    let rearMigrated = false;
+    let released = false;
+    for (let frame = 0; frame < 240; frame++) {
+      body.force.x += GameConfig.TRAIN.ENGINE_POWER;
+      solver.applyTrackFlowForces();
+      if ((solver as any)._handoffRearTrack === second) {
+        rearMigrated = true;
+      }
+      if (rearMigrated && (solver as any)._handoffGuidanceLimited) {
+        expect((solver as any)._handoffRearTrack).toBe(second);
+      }
+      simulateMatterUpdate(body, 16.667);
+      speeds.push(Math.hypot(body.velocity.x, body.velocity.y) * 60);
+      if (!(solver as any)._handoffGuidanceLimited) {
+        released = true;
+        break;
+      }
+    }
+
+    expect(released).toBe(true);
+    expect(rearMigrated).toBe(true);
+    expect(train.pidControllerRear.resetToError.mock.calls.length)
+      .toBeGreaterThan(rearPidResetsBeforePower);
+    expect((solver as any)._handoffRearTrack).toBeNull();
+    expect(Math.max(...speeds)).toBeLessThan(400);
+
+    const speedAtRelease = speeds[speeds.length - 1];
+    const postReleaseSpeeds: number[] = [];
+    for (let frame = 0; frame < 24; frame++) {
+      solver.applyTrackFlowForces();
+      simulateMatterUpdate(body, 16.667);
+      postReleaseSpeeds.push(Math.hypot(body.velocity.x, body.velocity.y) * 60);
+    }
+    expect(Math.max(...postReleaseSpeeds)).toBeLessThan(
+      speedAtRelease * 1.5,
+    );
   });
 
   it.each([0, 1e-12])(
-    'keeps %p-speed handoff guidance finite, then restores normal guidance',
+    'keeps %p-speed handoff guidance limited until contact guidance settles',
     (initialSpeed) => {
       const currentTrack = makeTrack(scene, 0, 0, 500, 0);
       const nextTrack = makeTrack(scene, 0, 50, 500, 50);
@@ -409,9 +517,178 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
       now += 10_000;
       solver.applyTrackFlowForces();
 
-      expect(Math.hypot(body.force.x, body.force.y)).toBeGreaterThan(0);
+      expect(Math.hypot(body.force.x, body.force.y)).toBeLessThanOrEqual(
+        maxGuidanceForce + Number.EPSILON,
+      );
     },
   );
+
+  it('requires sustained physical settlement and resets progress on violations', () => {
+    const currentTrack = makeTrack(scene, 0, 0, 500, 0);
+    const nextTrack = makeTrack(scene, 0, 50, 500, 50);
+    const train = makeMockTrain(scene, 250, 45);
+    train.currentTrack = currentTrack;
+    train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+    train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+    const manager = {
+      getClosestTrack: jest.fn().mockReturnValue(nextTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+    const solver = new TrackFlowSolver(manager as any, train as any);
+    const body = train.getMatterBody().body;
+    body.velocity.x = 1;
+
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+
+    body.force.x = 0;
+    body.force.y = 0;
+    body.position.y = 50;
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+
+    body.force.x = 0;
+    body.force.y = 0;
+    body.position.y = 45;
+    body.velocity.y = 0;
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffSettledFrames).toBe(0);
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+
+    body.position.y = 50;
+    body.force.x = 0;
+    body.force.y = 0;
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffSettledFrames).toBe(1);
+
+    body.force.x = 0;
+    body.force.y = 0;
+    body.velocity.y = 1;
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffSettledFrames).toBe(0);
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+
+    body.velocity.y = 0;
+    for (let frame = 0; frame < 6; frame++) {
+      body.force.x = 0;
+      body.force.y = 0;
+      solver.applyTrackFlowForces();
+    }
+    expect((solver as any)._handoffGuidanceLimited).toBe(false);
+
+    body.force.x = 0;
+    body.force.y = 0;
+    body.position.y = 45;
+    solver.applyTrackFlowForces();
+    expect(body.force.y).toBeCloseTo(10);
+  });
+
+  it('reactivates settled handoff limiting on a second switch', () => {
+    const firstTrack = makeTrack(scene, 0, 0, 500, 0);
+    const secondTrack = makeTrack(scene, 0, 50, 500, 50);
+    const thirdTrack = makeTrack(scene, 0, 100, 500, 100);
+    const train = makeMockTrain(scene, 250, 50);
+    train.currentTrack = firstTrack;
+    train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+    train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+    const manager = {
+      getClosestTrack: jest.fn().mockReturnValue(secondTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+    const solver = new TrackFlowSolver(manager as any, train as any);
+    const body = train.getMatterBody().body;
+    body.velocity.x = 1;
+
+    solver.applyTrackFlowForces();
+    for (let frame = 0; frame < 6; frame++) {
+      body.force.x = 0;
+      body.force.y = 0;
+      solver.applyTrackFlowForces();
+    }
+    expect((solver as any)._handoffGuidanceLimited).toBe(false);
+
+    body.position.y = 95;
+    (solver as any)._switchToTrack(thirdTrack);
+    expect((solver as any)._handoffGuidanceLimited).toBe(true);
+    expect((solver as any)._handoffPreviousTrack).toBe(secondTrack);
+    expect((solver as any)._handoffSettledFrames).toBe(0);
+
+    manager.getClosestTrack.mockReturnValue(thirdTrack);
+    body.force.x = 0;
+    body.force.y = 0;
+    solver.applyTrackFlowForces();
+    const safeForce = body.mass * body.velocity.x * 0.01
+      / (16.667 * 16.667);
+    expect(Math.hypot(body.force.x, body.force.y)).toBeLessThanOrEqual(
+      safeForce + Number.EPSILON,
+    );
+  });
+
+  it('preserves a trailing contact assignment across overlapping handoffs', () => {
+    const Phaser = require('phaser');
+    const firstTrack = makeTrack(scene, -500, 0, 0, 0);
+    const shortMiddleTrack = makeTrack(scene, 0, 0, 100, 0);
+    const thirdTrack = makeTrack(scene, 100, 0, 600, 0);
+    const train = makeMockTrain(scene, 0, 0);
+    train.currentTrack = firstTrack;
+    train.pidControllerFront.calculate.mockImplementation((error: number) => error);
+    train.pidControllerRear.calculate.mockImplementation((error: number) => error);
+    const manager = {
+      getClosestTrack: jest.fn().mockReturnValue(shortMiddleTrack),
+      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+    };
+    const solver = new TrackFlowSolver(manager as any, train as any);
+    const body = train.getMatterBody().body;
+    body.velocity.x = 1;
+
+    (solver as any)._switchToTrack(shortMiddleTrack);
+    expect((solver as any)._handoffFrontTrack).toBe(shortMiddleTrack);
+    expect((solver as any)._handoffRearTrack).toBe(firstTrack);
+
+    body.position.x = REAL_TRAIN_DISPLAY_WIDTH * 0.4;
+    (solver as any)._switchToTrack(thirdTrack);
+
+    expect((solver as any)._handoffPreviousTrack).toBe(shortMiddleTrack);
+    expect((solver as any)._handoffFrontTrack).toBe(thirdTrack);
+    expect((solver as any)._handoffRearTrack).toBe(firstTrack);
+
+    manager.getClosestTrack.mockReturnValue(thirdTrack);
+    body.force.x = 0;
+    body.force.y = 0;
+    solver.applyTrackFlowForces();
+    expect((solver as any)._handoffRearTrack).toBe(firstTrack);
+
+    const rearAssignments = [firstTrack];
+    let maxAssignedError = 0;
+    for (let step = 0; step < 50; step++) {
+      body.position.x += 5;
+      body.force.x = 0;
+      body.force.y = 0;
+      solver.applyTrackFlowForces();
+      const rearTrack = (
+        (solver as any)._handoffRearTrack ?? thirdTrack
+      ) as RailTrack;
+      const rearPoint = solver.getRearContactPoint();
+      maxAssignedError = Math.max(
+        maxAssignedError,
+        rearTrack.getTrackPoint(rearPoint).distance(
+          new Phaser.Math.Vector2(rearPoint.x, rearPoint.y),
+        ),
+      );
+      if (rearAssignments[rearAssignments.length - 1] !== rearTrack) {
+        rearAssignments.push(rearTrack);
+      }
+    }
+
+    expect(rearAssignments).toEqual([
+      firstTrack,
+      shortMiddleTrack,
+      thirdTrack,
+    ]);
+    expect(maxAssignedError).toBeLessThanOrEqual(
+      GameConfig.TRACK.RAIL_TRACK_WIDTH * GameConfig.TRACK.SCALE * 0.5 + 5,
+    );
+  });
 
   it('does not cap ordinary off-track guidance when no handoff occurred', () => {
     const track = makeTrack(scene, 0, 0, 500, 0);
