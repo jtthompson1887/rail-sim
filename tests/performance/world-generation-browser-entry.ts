@@ -8,28 +8,70 @@ import { WorldEconomyGenerator } from '../../src/economy/WorldEconomyGenerator';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 
-// First configured worst case in the canonical-grid playtest-601..884 audit.
-const AUDITED_WORST_CASE_SEED = 'playtest-644';
-const GENERATION_CONFIG = {
-  generationConfigVersion: 1 as const,
-  seed: AUDITED_WORST_CASE_SEED,
-  biome: 'temperate' as const,
-  constructionDifficultyId: 'standard' as const,
-};
+const AUDIT_RANGE_START = 601;
+const AUDIT_RANGE_END = 884;
 
-function generate() {
-  const terrain = new TerrainGenerator(AUDITED_WORST_CASE_SEED);
+function generationConfig(seed: string) {
+  return {
+    generationConfigVersion: 1 as const,
+    seed,
+    biome: 'temperate' as const,
+    constructionDifficultyId: 'standard' as const,
+  };
+}
+
+function generate(seed: string) {
+  const config = generationConfig(seed);
+  const terrain = new TerrainGenerator(seed);
   const opportunityResult = new WorldOpportunityGenerator(terrain).generate(
-    GENERATION_CONFIG,
+    config,
   );
   if (!opportunityResult.ok) {
-    throw new Error('audited opportunity generation failed');
+    throw new Error(`audited opportunity generation failed for ${seed}`);
   }
   const economyResult = new WorldEconomyGenerator(terrain).generate(
-    GENERATION_CONFIG,
+    config,
     opportunityResult.opportunity,
   );
   return { opportunityResult, economyResult };
+}
+
+function auditOpportunitySeeds() {
+  const startedAt = performance.now();
+  let maxResolvedAttempt = 0;
+  let firstWorstSeed = '';
+  let seedsEvaluated = 0;
+  let seedsResolved = 0;
+  let seedsExhausted = 0;
+  for (let index = AUDIT_RANGE_START; index <= AUDIT_RANGE_END; index++) {
+    const seed = `playtest-${index}`;
+    const terrain = new TerrainGenerator(seed);
+    const result = new WorldOpportunityGenerator(terrain).generate(
+      generationConfig(seed),
+    );
+    seedsEvaluated++;
+    if (!result.ok) {
+      seedsExhausted++;
+      continue;
+    }
+    seedsResolved++;
+    if (result.opportunity.resolvedAttempt > maxResolvedAttempt) {
+      maxResolvedAttempt = result.opportunity.resolvedAttempt;
+      firstWorstSeed = seed;
+    }
+  }
+  return {
+    range: {
+      startSeed: `playtest-${AUDIT_RANGE_START}`,
+      endSeed: `playtest-${AUDIT_RANGE_END}`,
+    },
+    seedsEvaluated,
+    seedsResolved,
+    seedsExhausted,
+    maxResolvedAttempt,
+    firstWorstSeed,
+    durationMs: performance.now() - startedAt,
+  };
 }
 
 declare global {
@@ -37,6 +79,7 @@ declare global {
     __runWorldGenerationBenchmark?: () => {
       seed: string;
       durationMs: number;
+      opportunityAudit: ReturnType<typeof auditOpportunitySeeds>;
       attemptsCap: number;
       candidatesCap: number;
       economyCandidatesCap: number;
@@ -49,13 +92,16 @@ declare global {
 }
 
 window.__runWorldGenerationBenchmark = () => {
+  const opportunityAudit = auditOpportunitySeeds();
+  const seed = opportunityAudit.firstWorstSeed;
   const startedAt = performance.now();
-  const result = generate();
+  const result = generate(seed);
   const durationMs = performance.now() - startedAt;
-  const replay = generate();
+  const replay = generate(seed);
   return {
-    seed: AUDITED_WORST_CASE_SEED,
+    seed,
     durationMs,
+    opportunityAudit,
     attemptsCap: MAX_OPPORTUNITY_ATTEMPTS,
     candidatesCap: MAX_SITE_CANDIDATES_PER_ATTEMPT,
     economyCandidatesCap: MAX_ECONOMY_SITE_CANDIDATES,

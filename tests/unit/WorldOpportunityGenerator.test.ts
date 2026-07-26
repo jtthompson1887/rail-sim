@@ -17,11 +17,12 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from '../../src/systems/ConstructionGradeMetrics';
-import {
-  canonicalizeConstructionGridPoint,
-} from '../../src/systems/ConstructionGrid';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { deriveAutomaticCubic } from '../../src/systems/TrackGeometry';
+import TrackManager from '../../src/managers/TrackManager';
+import { SnapSystem } from '../../src/systems/SnapSystem';
+
+const { makeScene } = require('../../__mocks__/phaser');
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -139,18 +140,48 @@ function expectSurveyFitsRecommendedCamera(
   }
 }
 
-function constructionGridCanonicalization(
-  point: Readonly<{ x: number; y: number }>,
-): { x: number; y: number } {
-  const canonical = canonicalizeConstructionGridPoint(
-    point.x,
-    point.y,
-    GameConfig.WORLD.SNAP_GRID_SIZE,
-  );
-  return { x: canonical.x, y: canonical.y };
-}
-
 describe('WorldOpportunityGenerator', () => {
+  it('exposes the old raw diagnostic route as too steep after real construction snapping', () => {
+    const seed = 'task15-manual-ash-dry';
+    const terrain = new TerrainGenerator(seed);
+    const snap = new SnapSystem(new TrackManager(makeScene()));
+    const rawStart = {
+      x: -3480.908468775451,
+      y: -6246.389408730858,
+    };
+    const rawEnd = {
+      x: -4950.662778654892,
+      y: -7176.117067981511,
+    };
+
+    const snappedStart = snap.snapConstructionPoint(rawStart.x, rawStart.y);
+    const snappedEnd = snap.snapConstructionPoint(rawEnd.x, rawEnd.y);
+    expect(snappedStart).toEqual({
+      x: -3500,
+      y: -6250,
+      snapped: true,
+      type: 'grid',
+    });
+    expect(snappedEnd).toEqual({
+      x: -4950,
+      y: -7200,
+      snapped: true,
+      type: 'grid',
+    });
+
+    const analyzer = new ConstructionAnalyzer(terrain);
+    const uiProposal = analyzer.analyzeDetailed(
+      deriveAutomaticCubic({
+        start: snappedStart,
+        end: snappedEnd,
+      }),
+    ).proposal;
+    expect(uiProposal.valid).toBe(false);
+    expect(uiProposal.reasonCode).toBe('grade');
+    expect(uiProposal.maximumGradePercent)
+      .toBeGreaterThan(ConstructionConfig.MAX_GRADE_PERCENT);
+  });
+
   it('keeps the known seeded witnesses feasible at construction-grid coordinates', () => {
     const seed = 'task15-manual-ash-dry';
     const terrain = new TerrainGenerator(seed);
@@ -165,25 +196,35 @@ describe('WorldOpportunityGenerator', () => {
     if (!result.ok) return;
 
     const analyzer = new ConstructionAnalyzer(terrain);
+    const snap = new SnapSystem(new TrackManager(makeScene()));
     for (const site of result.opportunity.sites) {
-      expect({ x: site.x, y: site.y }).toEqual(
-        constructionGridCanonicalization(site),
-      );
+      const snapped = snap.snapConstructionPoint(site.x, site.y);
+      expect({ x: snapped.x, y: snapped.y })
+        .toEqual({ x: site.x, y: site.y });
     }
     for (const corridor of result.opportunity.corridors) {
       for (const waypoint of corridor.waypoints) {
-        expect(waypoint).toEqual(
-          constructionGridCanonicalization(waypoint),
-        );
+        const snapped = snap.snapConstructionPoint(waypoint.x, waypoint.y);
+        expect({ x: snapped.x, y: snapped.y }).toEqual(waypoint);
       }
       for (const segment of corridor.feasibilityWitness.segments) {
-        expect(segment.geometry.p0).toEqual(
-          constructionGridCanonicalization(segment.geometry.p0),
+        const snappedStart = snap.snapConstructionPoint(
+          segment.geometry.p0.x,
+          segment.geometry.p0.y,
         );
-        expect(segment.geometry.p3).toEqual(
-          constructionGridCanonicalization(segment.geometry.p3),
+        const snappedEnd = snap.snapConstructionPoint(
+          segment.geometry.p3.x,
+          segment.geometry.p3.y,
         );
-        expect(analyzer.analyzeDetailed(segment.geometry).proposal.valid)
+        expect({ x: snappedStart.x, y: snappedStart.y })
+          .toEqual(segment.geometry.p0);
+        expect({ x: snappedEnd.x, y: snappedEnd.y })
+          .toEqual(segment.geometry.p3);
+        expect(analyzer.analyzeDetailed({
+          ...segment.geometry,
+          p0: { x: snappedStart.x, y: snappedStart.y },
+          p3: { x: snappedEnd.x, y: snappedEnd.y },
+        }).proposal.valid)
           .toBe(true);
       }
     }
@@ -195,11 +236,13 @@ describe('WorldOpportunityGenerator', () => {
       || left.id.localeCompare(right.id))[0];
     expect(cheapest.feasibilityWitness.segments).toHaveLength(1);
     const cheapestSegment = cheapest.feasibilityWitness.segments[0];
-    const uiCanonicalStart = constructionGridCanonicalization(
-      cheapestSegment.geometry.p0,
+    const uiCanonicalStart = snap.snapConstructionPoint(
+      cheapestSegment.geometry.p0.x,
+      cheapestSegment.geometry.p0.y,
     );
-    const uiCanonicalEnd = constructionGridCanonicalization(
-      cheapestSegment.geometry.p3,
+    const uiCanonicalEnd = snap.snapConstructionPoint(
+      cheapestSegment.geometry.p3.x,
+      cheapestSegment.geometry.p3.y,
     );
     const uiProposal = analyzer.analyzeDetailed(deriveAutomaticCubic({
       start: uiCanonicalStart,
@@ -207,7 +250,7 @@ describe('WorldOpportunityGenerator', () => {
     })).proposal;
 
     expect(uiProposal.valid).toBe(true);
-    expect(uiProposal.reasonCode).not.toBe('too-steep');
+    expect(uiProposal.reasonCode).toBe('ok');
     expect(uiProposal.maximumGradePercent)
       .toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
   });

@@ -84,10 +84,24 @@ function startHarnessServer() {
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const exactObservedWorstCase = measurement.seed === 'playtest-644'
+    const audit = measurement.opportunityAudit;
+    const exactOpportunityAudit = audit !== undefined
+      && audit.range.startSeed === 'playtest-601'
+      && audit.range.endSeed === 'playtest-884'
+      && audit.seedsEvaluated === 284
+      && audit.seedsResolved === 284
+      && audit.seedsExhausted === 0
+      && audit.maxResolvedAttempt === 9
+      && audit.firstWorstSeed === 'playtest-644'
+      && Number.isFinite(audit.durationMs)
+      && audit.durationMs > 0;
+    const exactObservedWorstCase = exactOpportunityAudit
+      && measurement.seed === audit.firstWorstSeed
       && measurement.opportunityResult.ok === true
-      && measurement.opportunityResult.opportunity.resolvedAttempt === 9
-      && measurement.opportunityResult.diagnostics.attemptsEvaluated === 9
+      && measurement.opportunityResult.opportunity.resolvedAttempt
+        === audit.maxResolvedAttempt
+      && measurement.opportunityResult.diagnostics.attemptsEvaluated
+        === audit.maxResolvedAttempt
       && measurement.opportunityResult.diagnostics.maxSiteCandidatesEvaluated === 256
       && measurement.economyResult.ok === true
       && measurement.economyResult.economy.facilities.length === 7
