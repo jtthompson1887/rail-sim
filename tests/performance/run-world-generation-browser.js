@@ -84,10 +84,10 @@ function startHarnessServer() {
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const exactObservedWorstCase = measurement.seed === 'playtest-884'
+    const exactObservedWorstCase = measurement.seed === 'playtest-644'
       && measurement.opportunityResult.ok === true
-      && measurement.opportunityResult.opportunity.resolvedAttempt === 12
-      && measurement.opportunityResult.diagnostics.attemptsEvaluated === 12
+      && measurement.opportunityResult.opportunity.resolvedAttempt === 9
+      && measurement.opportunityResult.diagnostics.attemptsEvaluated === 9
       && measurement.opportunityResult.diagnostics.maxSiteCandidatesEvaluated === 256
       && measurement.economyResult.ok === true
       && measurement.economyResult.economy.facilities.length === 7

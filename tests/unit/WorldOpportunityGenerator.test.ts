@@ -17,6 +17,11 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from '../../src/systems/ConstructionGradeMetrics';
+import {
+  canonicalizeConstructionGridPoint,
+} from '../../src/systems/ConstructionGrid';
+import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { deriveAutomaticCubic } from '../../src/systems/TrackGeometry';
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -134,7 +139,79 @@ function expectSurveyFitsRecommendedCamera(
   }
 }
 
+function constructionGridCanonicalization(
+  point: Readonly<{ x: number; y: number }>,
+): { x: number; y: number } {
+  const canonical = canonicalizeConstructionGridPoint(
+    point.x,
+    point.y,
+    GameConfig.WORLD.SNAP_GRID_SIZE,
+  );
+  return { x: canonical.x, y: canonical.y };
+}
+
 describe('WorldOpportunityGenerator', () => {
+  it('keeps the known seeded witnesses feasible at construction-grid coordinates', () => {
+    const seed = 'task15-manual-ash-dry';
+    const terrain = new TerrainGenerator(seed);
+    const result = new WorldOpportunityGenerator(terrain).generate({
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const analyzer = new ConstructionAnalyzer(terrain);
+    for (const site of result.opportunity.sites) {
+      expect({ x: site.x, y: site.y }).toEqual(
+        constructionGridCanonicalization(site),
+      );
+    }
+    for (const corridor of result.opportunity.corridors) {
+      for (const waypoint of corridor.waypoints) {
+        expect(waypoint).toEqual(
+          constructionGridCanonicalization(waypoint),
+        );
+      }
+      for (const segment of corridor.feasibilityWitness.segments) {
+        expect(segment.geometry.p0).toEqual(
+          constructionGridCanonicalization(segment.geometry.p0),
+        );
+        expect(segment.geometry.p3).toEqual(
+          constructionGridCanonicalization(segment.geometry.p3),
+        );
+        expect(analyzer.analyzeDetailed(segment.geometry).proposal.valid)
+          .toBe(true);
+      }
+    }
+
+    const cheapest = [...result.opportunity.corridors].sort((
+      left,
+      right,
+    ) => left.estimatedCost - right.estimatedCost
+      || left.id.localeCompare(right.id))[0];
+    expect(cheapest.feasibilityWitness.segments).toHaveLength(1);
+    const cheapestSegment = cheapest.feasibilityWitness.segments[0];
+    const uiCanonicalStart = constructionGridCanonicalization(
+      cheapestSegment.geometry.p0,
+    );
+    const uiCanonicalEnd = constructionGridCanonicalization(
+      cheapestSegment.geometry.p3,
+    );
+    const uiProposal = analyzer.analyzeDetailed(deriveAutomaticCubic({
+      start: uiCanonicalStart,
+      end: uiCanonicalEnd,
+    })).proposal;
+
+    expect(uiProposal.valid).toBe(true);
+    expect(uiProposal.reasonCode).not.toBe('too-steep');
+    expect(uiProposal.maximumGradePercent)
+      .toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
+  });
+
   it('replays identical sites, corridors, witnesses, attempt, and camera for one seed', () => {
     const generator = new WorldOpportunityGenerator(variedTerrain);
     const first = generator.generate(config);

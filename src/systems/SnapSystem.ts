@@ -1,5 +1,6 @@
 import TrackManager from '../managers/TrackManager';
 import { GameConfig } from '../config/GameConfig';
+import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
 
 export interface SnapResult {
   x: number;
@@ -168,14 +169,14 @@ export class SnapSystem {
     }
 
     // ── Grid snap ──────────────────────────────────────────────────────────
-    if (this.gridEnabled && this.gridSize > 0) {
-      const gx = Math.round(wx / this.gridSize) * this.gridSize;
-      const gy = Math.round(wy / this.gridSize) * this.gridSize;
-      const d = Math.hypot(gx - wx, gy - wy);
-      // Only snap to grid if within half a grid cell
-      if (d <= this.gridSize * 0.5) {
-        return { x: gx, y: gy, snapped: true, type: 'grid' };
-      }
+    const gridPoint = canonicalizeConstructionGridPoint(
+      wx,
+      wy,
+      this.gridSize,
+      this.gridEnabled,
+    );
+    if (gridPoint.snapped) {
+      return { ...gridPoint, type: 'grid' };
     }
 
     return { x: wx, y: wy, snapped: false, type: 'none' };

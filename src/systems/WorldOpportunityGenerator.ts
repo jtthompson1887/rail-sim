@@ -1,6 +1,7 @@
 import {
   ENDPOINT_CONNECTION_COST,
 } from '../config/ConstructionConfig';
+import { GameConfig } from '../config/GameConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
@@ -24,6 +25,7 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
+import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
 import { deriveAutomaticCubic } from './TrackGeometry';
 import {
   MAX_STARTER_CORRIDOR_COST,
@@ -55,6 +57,17 @@ interface Candidate {
   x: number;
   y: number;
   elevation: number;
+}
+
+function canonicalConstructionPoint(
+  point: Readonly<{ x: number; y: number }>,
+): Vec2Def {
+  const canonical = canonicalizeConstructionGridPoint(
+    point.x,
+    point.y,
+    GameConfig.WORLD.SNAP_GRID_SIZE,
+  );
+  return { x: canonical.x, y: canonical.y };
 }
 
 function siteRelief(
@@ -170,12 +183,19 @@ export class WorldOpportunityGenerator {
     const cellWidth = xLimit * 2 / gridSize;
     const cellHeight = yLimit * 2 / gridSize;
     const usable: Candidate[] = [];
+    const seenCoordinates = new Set<string>();
 
     for (let row = 0; row < gridSize; row++) {
       for (let column = 0; column < gridSize; column++) {
-        const candidate = {
+        const canonical = canonicalConstructionPoint({
           x: -xLimit + (column + 0.2 + random() * 0.6) * cellWidth,
           y: -yLimit + (row + 0.2 + random() * 0.6) * cellHeight,
+        });
+        const coordinateKey = `${canonical.x}:${canonical.y}`;
+        if (seenCoordinates.has(coordinateKey)) continue;
+        seenCoordinates.add(coordinateKey);
+        const candidate = {
+          ...canonical,
           elevation: 0,
         };
         candidate.elevation = this.terrain.getHeightAt(candidate.x, candidate.y);
@@ -245,10 +265,10 @@ export class WorldOpportunityGenerator {
       signedOffsets.push(offset, -offset);
     }
     for (const signedOffset of signedOffsets) {
-      const waypoint = {
+      const waypoint = canonicalConstructionPoint({
         x: (first.x + second.x) / 2 - dy * signedOffset,
         y: (first.y + second.y) / 2 + dx * signedOffset,
-      };
+      });
       if (Math.abs(waypoint.x) > WorldGenerationConfig.WORLD_HALF_WIDTH
         || Math.abs(waypoint.y) > WorldGenerationConfig.WORLD_HALF_HEIGHT) {
         continue;
@@ -331,6 +351,8 @@ export class WorldOpportunityGenerator {
         / Math.max(1, paddedWidth);
       const heightZoom = WorldGenerationConfig.CAMERA_VIEWPORT_HEIGHT
         / Math.max(1, paddedHeight);
+      const fitZoom = Math.min(widthZoom, heightZoom)
+        * (1 - Number.EPSILON);
       const opportunity: StarterOpportunityDef = {
         opportunityVersion: 1,
         resolvedAttempt: attempt,
@@ -343,8 +365,7 @@ export class WorldOpportunityGenerator {
             WorldGenerationConfig.CAMERA_MIN_ZOOM,
             Math.min(
               WorldGenerationConfig.CAMERA_MAX_ZOOM,
-              widthZoom,
-              heightZoom,
+              fitZoom,
             ),
           ),
         },

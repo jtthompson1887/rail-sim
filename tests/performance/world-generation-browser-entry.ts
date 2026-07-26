@@ -8,8 +8,8 @@ import { WorldEconomyGenerator } from '../../src/economy/WorldEconomyGenerator';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 
-// First configured worst case in the bounded playtest-601..884 browser audit.
-const AUDITED_WORST_CASE_SEED = 'playtest-884';
+// First configured worst case in the canonical-grid playtest-601..884 audit.
+const AUDITED_WORST_CASE_SEED = 'playtest-644';
 const GENERATION_CONFIG = {
   generationConfigVersion: 1 as const,
   seed: AUDITED_WORST_CASE_SEED,
