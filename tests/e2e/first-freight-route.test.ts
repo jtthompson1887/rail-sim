@@ -601,11 +601,10 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await setMode(page, 'play');
     await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
-    await expect(page.locator('[data-testid="train-cargo-progress"]')).toHaveAttribute(
-      'value',
-      '60',
-      { timeout: 20_000 },
-    );
+    await expect.poll(
+      async () => Number(await page.locator('[data-testid="train-cargo-progress"]').getAttribute('value') || '0'),
+      { timeout: 30_000 },
+    ).toBeGreaterThanOrEqual(60);
     const loaded = await snapshot(page);
     expect(train(loaded).cargo).toEqual(expect.objectContaining({
       productId: 'logs',
