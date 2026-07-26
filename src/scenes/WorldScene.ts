@@ -899,9 +899,9 @@ export default class WorldScene extends Phaser.Scene {
           facing,
         )
       ),
-      remove: (trainId) => {
-        this.trainManager.removeFreightTrain(trainId);
-      },
+      remove: (trainId) => (
+        this.trainManager.removeFreightTrain(trainId)
+      ),
     };
   }
 
@@ -956,12 +956,18 @@ export default class WorldScene extends Phaser.Scene {
     this.cameraController.update(time, delta);
     this.publishDebugState();
 
+    const playActive = GameStateManager.worldMode === 'play'
+      && GameStateManager.state === 'playing';
+    if (playActive && !this.firstRouteHarnessControlsRuntime) {
+      this.inputManager.handleTrainMovement(
+        this.trainManager.selectedTrain,
+        this.operationsLockedTrainIds,
+      );
+    }
     const runtime = (this.trainManager?.trains ?? []).map(
       (train) => captureTrainRuntime(train),
     );
-    const operating = GameStateManager.worldMode === 'play'
-      && GameStateManager.state === 'playing'
-      && !this.scene.isPaused();
+    const operating = playActive && !this.scene.isPaused();
     const economyResult = this.firstRouteHarnessControlsRuntime
       ? null
       : this.economySystem.update(
@@ -970,7 +976,6 @@ export default class WorldScene extends Phaser.Scene {
         runtime,
       );
     if (economyResult) this.applyEconomyUpdateResult(economyResult);
-    this.publishFreightPresentation(runtime);
 
     if (this.operationsLockedTrainIds.size > 0) {
       this.trainManager.stopFreightTrains(
@@ -998,12 +1003,8 @@ export default class WorldScene extends Phaser.Scene {
         this.runPeriodicSafetySave();
       }
       GameStateManager.tick(delta / 1000);
-    } else if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
+    } else if (playActive) {
       if (!this.firstRouteHarnessControlsRuntime) {
-        this.inputManager.handleTrainMovement(
-          this.trainManager.selectedTrain,
-          this.operationsLockedTrainIds,
-        );
         this.trainManager.update(
           time,
           delta,
@@ -1014,6 +1015,11 @@ export default class WorldScene extends Phaser.Scene {
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
+    this.publishFreightPresentation(
+      (this.trainManager?.trains ?? []).map(
+        (train) => captureTrainRuntime(train),
+      ),
+    );
   }
 
   private applyEconomyUpdateResult(

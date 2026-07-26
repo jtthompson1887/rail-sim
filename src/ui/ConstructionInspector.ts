@@ -178,7 +178,9 @@ export class ConstructionInspector {
       `Track ${money(costs.track)} · Earthworks ${money(costs.earthworks)}`,
       `Bridge ${money(costs.bridge)} · Tunnel ${money(costs.tunnel)} · Topology ${money(model.topologyCost)}`,
     ].join('\n');
-    const reserveWarning = model.affordable && model.breachesStarterReserve;
+    const reserveWarning = model.canConfirm
+      && model.affordable
+      && model.breachesStarterReserve;
     const message = reserveWarning
       ? 'Build leaves less than the £110,000 train and operating reserve'
       : model.message;

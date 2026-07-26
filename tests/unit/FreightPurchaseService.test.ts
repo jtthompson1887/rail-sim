@@ -66,7 +66,7 @@ function makeRuntime(overrides: Partial<FreightPurchaseRuntimePort> = {}): {
     }),
     place: jest.fn().mockReturnValue(true),
     remove: jest.fn((trainId: string) => {
-      live.delete(trainId);
+      return live.delete(trainId);
     }),
     ...overrides,
   };
@@ -456,6 +456,33 @@ describe('FreightPurchaseService', () => {
     expect(runtime.live.size).toBe(0);
   });
 
+  it('reports exceptional cleanup after a throwing partial live spawn', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime();
+    runtime.port.spawn = jest.fn((trainId: string) => {
+      runtime.live.set(trainId, { getUUID: () => trainId } as Train);
+      throw new Error('spawn failed after registration');
+    });
+    runtime.port.remove = jest.fn(() => {
+      throw new Error('physics destroy failed');
+    });
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'partial-spawn',
+    );
+
+    const result = service.purchase(service.quote(connectedInput()));
+
+    expect(result).toEqual({
+      ok: false,
+      blocker: 'live-rollback-failed',
+    });
+    expect(runtime.live.has('partial-spawn')).toBe(true);
+    expect(authoritativeSnapshot(world)).toBe(before);
+  });
+
   it('removes a provisional train when live placement fails', () => {
     const world = setupWorld();
     const before = authoritativeSnapshot(world);
@@ -476,6 +503,55 @@ describe('FreightPurchaseService', () => {
     });
     expect(runtime.port.remove).toHaveBeenCalledWith('placement-failure');
     expect(runtime.live.size).toBe(0);
+    expect(authoritativeSnapshot(world)).toBe(before);
+  });
+
+  it('reports a thrown provisional removal instead of hiding live residue', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime({
+      place: jest.fn().mockReturnValue(false),
+      remove: jest.fn(() => {
+        throw new Error('physics destroy failed');
+      }),
+    });
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'rollback-throw',
+    );
+
+    const result = service.purchase(service.quote(connectedInput()));
+
+    expect(result).toEqual({
+      ok: false,
+      blocker: 'live-rollback-failed',
+    });
+    expect(runtime.port.remove).toHaveBeenCalledWith('rollback-throw');
+    expect(runtime.live.has('rollback-throw')).toBe(true);
+    expect(authoritativeSnapshot(world)).toBe(before);
+  });
+
+  it('reports a rejected provisional removal instead of claiming rollback', () => {
+    const world = setupWorld();
+    const before = authoritativeSnapshot(world);
+    const runtime = makeRuntime({
+      place: jest.fn().mockReturnValue(false),
+      remove: jest.fn().mockReturnValue(false),
+    });
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'rollback-rejected',
+    );
+
+    const result = service.purchase(service.quote(connectedInput()));
+
+    expect(result).toEqual({
+      ok: false,
+      blocker: 'live-rollback-failed',
+    });
+    expect(runtime.live.has('rollback-rejected')).toBe(true);
     expect(authoritativeSnapshot(world)).toBe(before);
   });
 

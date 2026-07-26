@@ -703,6 +703,104 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it('applies fresh powered input before freight transfer and running costs', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId);
+    liveTrain.body.x = -500;
+    liveTrain.currentTrack.getTrackPosition = () => 0.1;
+    const handleTrainMovement = jest.fn(() => {
+      liveTrain.enginePower = 1;
+    });
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(liveTrain.getMatterBody.mock.invocationCallOrder[0]);
+    expect(world.trains[0].cargo).toBeNull();
+    expect(world.trains[0].operations.currentTripRunningCost).toBe(20);
+    expect(world.trains[0].operations.lifetimeRunningCost).toBe(20);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toHaveLength(1);
+  });
+
+  it('applies fresh neutral input before transfer without one extra running cost', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    const liveTrain = makeLiveFreightTrain(trainId, 1);
+    liveTrain.body.x = -500;
+    liveTrain.currentTrack.getTrackPosition = () => 0.1;
+    const handleTrainMovement = jest.fn(() => {
+      liveTrain.enginePower = 0;
+    });
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(),
+    };
+    scene.inputManager = { handleTrainMovement };
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(world.trains[0].cargo).toEqual({
+      productId: 'logs',
+      units: 10,
+      originFacilityId: 'managed-forest',
+    });
+    expect(world.trains[0].operations.currentTripRunningCost).toBe(0);
+    expect(world.trains[0].operations.lifetimeRunningCost).toBe(0);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toHaveLength(0);
+  });
+
+  it('publishes the post-movement runtime instead of the operations snapshot', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const liveTrain = makeLiveFreightTrain(world.trains[0].id);
+    prepareWorldLoop(scene);
+    scene.trainManager = {
+      selectedTrain: liveTrain,
+      trains: [liveTrain],
+      carriages: [],
+      stopFreightTrains: jest.fn(),
+      update: jest.fn(() => {
+        liveTrain.body.body.velocity = { x: 1, y: 0 };
+      }),
+    };
+    scene.publishFreightPresentation = jest.fn();
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    GameStateManager.enterPlay(world.id);
+
+    scene.update(0, 1_000);
+
+    expect(scene.publishFreightPresentation).toHaveBeenCalledWith([
+      expect.objectContaining({
+        trainId: world.trains[0].id,
+        speedWorldUnitsPerSecond: 60,
+      }),
+    ]);
+  });
+
   it('locks an insolvent train before same-frame input and unlocks the complete set only after an affordable committed tick', () => {
     const scene = new WorldScene() as any;
     const world = installFirstRouteWorld();
@@ -712,19 +810,22 @@ describe('WorldScene disabled construction bypass guards', () => {
     const stopFreightTrains = jest.fn((trainIds: readonly string[]) => {
       if (trainIds.indexOf(trainId) !== -1) liveTrain.enginePower = 0;
     });
+    const inputLockStates: string[][] = [];
     const handleTrainMovement = jest.fn((
       selectedTrain: typeof liveTrain,
       lockedTrainIds: ReadonlySet<string>,
     ) => {
+      inputLockStates.push(Array.from(lockedTrainIds).sort());
       selectedTrain.enginePower = lockedTrainIds.has(trainId) ? 0 : 1;
     });
+    const updateTrains = jest.fn();
     prepareWorldLoop(scene);
     scene.trainManager = {
       selectedTrain: liveTrain,
       trains: [liveTrain],
       carriages: [],
       stopFreightTrains,
-      update: jest.fn(),
+      update: updateTrains,
     };
     scene.inputManager = { handleTrainMovement };
     jest.spyOn(WorldManager, 'save').mockReturnValue(true);
@@ -735,9 +836,11 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(liveTrain.enginePower).toBe(0);
     expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
     expect(stopFreightTrains).toHaveBeenCalledWith([trainId]);
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(stopFreightTrains.mock.invocationCallOrder[0]);
     expect(stopFreightTrains.mock.invocationCallOrder[0])
-      .toBeLessThan(handleTrainMovement.mock.invocationCallOrder[0]);
-    expect(handleTrainMovement.mock.calls[0][1]).toEqual(new Set([trainId]));
+      .toBeLessThan(updateTrains.mock.invocationCallOrder[0]);
+    expect(inputLockStates[0]).toEqual([]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
       .toBe('Insufficient cash for running costs');
 
@@ -745,7 +848,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(liveTrain.enginePower).toBe(0);
     expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
-    expect(handleTrainMovement.mock.calls[1][1]).toEqual(new Set([trainId]));
+    expect(inputLockStates[1]).toEqual([trainId]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
       .toBe('Insufficient cash for running costs');
 
@@ -753,10 +856,15 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(2_000, 1_000);
 
     expect(scene.operationsLockedTrainIds.size).toBe(0);
-    expect(handleTrainMovement.mock.calls[2][1]).toEqual(new Set());
-    expect(liveTrain.enginePower).toBe(1);
+    expect(inputLockStates[2]).toEqual([trainId]);
+    expect(liveTrain.enginePower).toBe(0);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
       .not.toBe('Insufficient cash for running costs');
+
+    scene.update(3_000, 0);
+
+    expect(inputLockStates[3]).toEqual([]);
+    expect(liveTrain.enginePower).toBe(1);
   });
 
   it('refreshes once after catch-up, clears construction history once, and emits every delivery presentation event', () => {
@@ -791,7 +899,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.update(0, 4_000);
 
     expect(world.economy.tick).toBe(4);
-    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(1);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(2);
     expect(save).toHaveBeenCalledTimes(1);
     expect(scene.refreshFacilityPresentation).toHaveBeenCalledTimes(1);
     expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
@@ -966,7 +1074,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     scene.runPeriodicSafetySave();
 
     expect(saveWorld).toHaveBeenCalledTimes(2);
-    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(1);
+    expect(liveTrain.getMatterBody).toHaveBeenCalledTimes(2);
     expect(world.economy.tick).toBe(committed.economy.tick);
     expect(world.economy.facilities).toEqual(committed.economy.facilities);
     expect(world.trains).toEqual(committed.trains);
@@ -1099,12 +1207,12 @@ describe('WorldScene disabled construction bypass guards', () => {
       0.8,
       -1,
     );
-    expect(placeFreightTrain.mock.invocationCallOrder[0])
-      .toBeLessThan(handleTrainMovement.mock.invocationCallOrder[0]);
+    expect(handleTrainMovement.mock.invocationCallOrder[0])
+      .toBeLessThan(placeFreightTrain.mock.invocationCallOrder[0]);
     expect(inputStates[0]).toEqual({
-      trackUUID: 'newer-track',
-      trackT: 0.8,
-      enginePower: 0,
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.5,
+      enginePower: 1,
     });
     expect(save).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('ui:toast', {
@@ -1128,6 +1236,11 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
     expect(world.operationsRevision).toBe(2);
     expect(save).toHaveBeenCalledTimes(1);
+    expect(inputStates[1]).toEqual({
+      trackUUID: 'newer-track',
+      trackT: 0.8,
+      enginePower: 0,
+    });
   });
 
   it('merges moved runtime while retaining detached derailed authority before save', () => {

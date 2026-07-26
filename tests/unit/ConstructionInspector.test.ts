@@ -129,6 +129,26 @@ describe('ConstructionInspector', () => {
     ) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('shows a hard construction blocker ahead of the reserve advisory', () => {
+    EventBus.emit('construction:preview', preview({
+      affordable: true,
+      canConfirm: false,
+      breachesStarterReserve: true,
+      message: 'Maximum grade exceeds the engineering limit.',
+      actions: ['backstep', 'cancel'],
+    }));
+
+    const remedy = document.querySelector(
+      '[data-testid="construction-remedy"]',
+    ) as HTMLElement;
+    expect(remedy.textContent)
+      .toBe('Maximum grade exceeds the engineering limit.');
+    expect(remedy.dataset.tone).toBe('default');
+    expect((document.querySelector(
+      '[data-testid="construction-confirm"]',
+    ) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('emits display-only intents and never confirms invalid or unaffordable work', () => {
     const emit = jest.spyOn(EventBus, 'emit');
     EventBus.emit('construction:preview', preview());

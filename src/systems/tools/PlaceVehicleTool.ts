@@ -254,7 +254,7 @@ export class PlaceVehicleTool implements IEditorTool {
       if (!this.lastPlacement || !this.quoteService) {
         this.publishState(
           null,
-          'Freight state changed Â· review and retry purchase',
+          'Freight state changed · review and retry purchase',
         );
         return;
       }
@@ -264,7 +264,7 @@ export class PlaceVehicleTool implements IEditorTool {
       }));
       this.publishState(
         freshQuote,
-        'Freight state changed Â· review and retry purchase',
+        'Freight state changed · review and retry purchase',
       );
     }
   };

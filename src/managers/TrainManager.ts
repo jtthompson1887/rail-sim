@@ -81,6 +81,7 @@ export class TrainManager {
     facing: 1 | -1,
   ): boolean {
     if (this.trains.indexOf(train) === -1
+      || train.freightSetId === null
       || !Number.isFinite(trackT)
       || trackT < 0
       || trackT > 1
@@ -106,7 +107,8 @@ export class TrainManager {
 
   removeFreightTrain(trainId: string): boolean {
     const index = this.trains.findIndex(
-      (train) => train.getUUID() === trainId,
+      (train) => train.getUUID() === trainId
+        && train.freightSetId !== null,
     );
     if (index === -1) return false;
 
@@ -125,7 +127,8 @@ export class TrainManager {
   stopFreightTrains(trainIds: readonly string[]): void {
     const requested = new Set(trainIds);
     for (const train of this.trains) {
-      if (requested.has(train.getUUID())) train.enginePower = 0;
+      if (train.freightSetId !== null
+        && requested.has(train.getUUID())) train.enginePower = 0;
     }
   }
 
@@ -230,7 +233,8 @@ export class TrainManager {
     operationsLockedTrainIds: ReadonlySet<string> = new Set(),
   ): void {
     for (const train of this.trains) {
-      if (operationsLockedTrainIds.has(train.getUUID())) {
+      if (train.freightSetId !== null
+        && operationsLockedTrainIds.has(train.getUUID())) {
         train.enginePower = 0;
       }
       train.update(time, delta);

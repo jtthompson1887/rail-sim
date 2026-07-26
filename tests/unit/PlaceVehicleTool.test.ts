@@ -211,11 +211,28 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
         valid: true,
       }),
       cash: WorldManager.world!.company.cash,
-      message: 'Freight state changed Â· review and retry purchase',
+      message: 'Freight state changed · review and retry purchase',
     });
     expect(Object.isFrozen(state.mock.calls.at(-1)[0].quote)).toBe(true);
     expect(state.mock.calls.at(-1)[0].quote)
       .toBe(quote.mock.results[1].value);
+    EventBus.off('ui:freight-purchase-state', state);
+  });
+
+  it('uses a real middle dot when a stale purchase has no requotable placement', () => {
+    const state = jest.fn();
+    EventBus.on('ui:freight-purchase-state', state);
+
+    EventBus.emit('freight:purchase-result', {
+      ok: false,
+      blocker: 'stale-revision',
+    });
+
+    expect(state).toHaveBeenLastCalledWith({
+      quote: null,
+      cash: WorldManager.world!.company.cash,
+      message: 'Freight state changed · review and retry purchase',
+    });
     EventBus.off('ui:freight-purchase-state', state);
   });
 

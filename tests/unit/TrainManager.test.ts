@@ -203,6 +203,51 @@ describe('TrainManager aggregate freight trains', () => {
     expect(locked.enginePower).toBe(0);
     expect(free.enginePower).toBe(-1);
   });
+
+  it('rejects non-freight trains from freight placement and removal APIs', () => {
+    const trackManager = { getTrack: jest.fn() };
+    const manager = new TrainManager(
+      makeScene(),
+      trackManager as any,
+      {} as any,
+    );
+    const bootstrap = manager.createInitialTrain('bootstrap-train');
+    const body = bootstrap.getMatterBody();
+    const bodyDestroy = jest.spyOn(body, 'destroy');
+    const trainDestroy = jest.spyOn(bootstrap, 'destroy');
+
+    expect(manager.placeFreightTrain(
+      bootstrap,
+      'track-1',
+      0.5,
+      1,
+    )).toBe(false);
+    expect(trackManager.getTrack).not.toHaveBeenCalled();
+    expect(manager.removeFreightTrain('bootstrap-train')).toBe(false);
+    expect(manager.trains).toEqual([bootstrap]);
+    expect(bodyDestroy).not.toHaveBeenCalled();
+    expect(trainDestroy).not.toHaveBeenCalled();
+  });
+
+  it('does not stop or operation-lock non-freight trains by ID', () => {
+    const manager = new TrainManager(
+      makeScene(),
+      {} as any,
+      {} as any,
+    );
+    const bootstrap = manager.createInitialTrain('bootstrap-train');
+    jest.spyOn(bootstrap, 'update').mockImplementation();
+    const solver = (manager as any).trackSolvers.get(bootstrap);
+    jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
+    bootstrap.enginePower = 1;
+
+    manager.stopFreightTrains(['bootstrap-train']);
+    expect(bootstrap.enginePower).toBe(1);
+
+    manager.update(0, 16, new Set(['bootstrap-train']));
+    expect(bootstrap.enginePower).toBe(1);
+    expect(bootstrap.update).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('TrainManager.tryRecoverDerailedTrain()', () => {

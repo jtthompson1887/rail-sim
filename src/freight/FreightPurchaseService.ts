@@ -22,6 +22,7 @@ export type FreightPurchaseBlocker =
   | 'stale-revision'
   | 'live-spawn-failed'
   | 'live-placement-failed'
+  | 'live-rollback-failed'
   | 'world-install-failed';
 
 export interface FreightPurchaseQuote {
@@ -54,7 +55,7 @@ export interface FreightPurchaseRuntimePort {
     trackT: number,
     facing: 1 | -1,
   ): boolean;
-  remove(trainId: string): void;
+  remove(trainId: string): boolean | void;
 }
 
 export interface FreightPurchaseQuoteInput {
@@ -285,11 +286,13 @@ export class FreightPurchaseService {
       try {
         train = this.runtimePort.spawn(trainId, quote.freightSetId);
       } catch {
-        this.removeProvisional(trainId);
-        return failure('live-spawn-failed');
+        return failure(
+          this.removeProvisional(trainId) === 'threw'
+            ? 'live-rollback-failed'
+            : 'live-spawn-failed',
+        );
       }
       if (!train) {
-        this.removeProvisional(trainId);
         return failure('live-spawn-failed');
       }
 
@@ -305,8 +308,11 @@ export class FreightPurchaseService {
         placed = false;
       }
       if (!placed) {
-        this.removeProvisional(trainId);
-        return failure('live-placement-failed');
+        return failure(
+          this.removeProvisional(trainId) === 'removed'
+            ? 'live-placement-failed'
+            : 'live-rollback-failed',
+        );
       }
 
       let committed = false;
@@ -332,7 +338,9 @@ export class FreightPurchaseService {
         committed = false;
       }
       if (!committed) {
-        this.removeProvisional(trainId);
+        if (this.removeProvisional(trainId) !== 'removed') {
+          return failure('live-rollback-failed');
+        }
         return failure(
           this.worldPort.world?.revision !== quote.expectedRevision
             ? 'stale-revision'
@@ -357,11 +365,15 @@ export class FreightPurchaseService {
     }
   }
 
-  private removeProvisional(trainId: string): void {
+  private removeProvisional(
+    trainId: string,
+  ): 'removed' | 'rejected' | 'threw' {
     try {
-      this.runtimePort.remove(trainId);
+      return this.runtimePort.remove(trainId) === false
+        ? 'rejected'
+        : 'removed';
     } catch {
-      // The authoritative batch still remains untouched on rollback.
+      return 'threw';
     }
   }
 }
