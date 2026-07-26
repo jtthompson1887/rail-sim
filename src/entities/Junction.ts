@@ -11,7 +11,7 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
   private junctionPosition: number;
   private _branchState: 'left' | 'right' = 'right';
   private switched: boolean = false;
-  private readonly uuid: string;
+  private uuid: string;
   private hitArea: Phaser.GameObjects.Arc;
   protected trackConnections: {
     next?: TrackNode;
@@ -48,6 +48,7 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
 
   set branchState(value: 'left' | 'right') {
     this._branchState = value;
+    this.syncBranchVisuals();
   }
 
   getActiveTrack(): RailTrack {
@@ -65,14 +66,7 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
   toggle(): void {
     this._branchState = this._branchState === 'left' ? 'right' : 'left';
     this.switched = true;
-
-    if (this._branchState === 'left') {
-      this.leftTrack.setAlpha(1);
-      this.rightTrack.setAlpha(0.5);
-    } else {
-      this.leftTrack.setAlpha(0.5);
-      this.rightTrack.setAlpha(1);
-    }
+    this.syncBranchVisuals();
 
     EventBus.emit('junction:toggled', { junctionId: this.uuid, state: this._branchState });
   }
@@ -98,6 +92,10 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
     return this.uuid;
   }
 
+  setUUID(uuid: string): void {
+    this.uuid = uuid;
+  }
+
   getMainTrack(): RailTrack {
     return this.mainTrack;
   }
@@ -120,6 +118,11 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
 
   isSwitched(): boolean {
     return this.switched;
+  }
+
+  private syncBranchVisuals(): void {
+    this.leftTrack.setAlpha(this._branchState === 'left' ? 1 : 0.5);
+    this.rightTrack.setAlpha(this._branchState === 'right' ? 1 : 0.5);
   }
 
   hasNext(): boolean {

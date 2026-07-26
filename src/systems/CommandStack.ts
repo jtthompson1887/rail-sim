@@ -10,14 +10,42 @@ export interface Command {
   /** Human-readable label (shown in UI / used for debugging). */
   readonly description: string;
   /** Apply the operation (called once when the command is first committed). */
-  execute(): void;
+  execute(): boolean;
   /** Reverse the operation. */
-  undo(): void;
+  undo(): boolean;
+}
+
+/** Opaque authoritative state cursor shared only by revision-aware commands. */
+export interface CommandRevisionContext {
+  readonly authority: object;
+  readonly rootRevision: number;
+  readonly constructionRevision: number;
+}
+
+export interface RevisionAwareCommand extends Command {
+  getRevisionContext(): CommandRevisionContext | null;
+  rebaseRevisionContext(context: CommandRevisionContext): boolean;
+}
+
+function isRevisionAware(command: Command | undefined): command is RevisionAwareCommand {
+  return !!command
+    && typeof (command as Partial<RevisionAwareCommand>).getRevisionContext === 'function'
+    && typeof (command as Partial<RevisionAwareCommand>).rebaseRevisionContext === 'function';
+}
+
+function sameRevisionContext(
+  left: CommandRevisionContext,
+  right: CommandRevisionContext,
+): boolean {
+  return left.authority === right.authority
+    && left.rootRevision === right.rootRevision
+    && left.constructionRevision === right.constructionRevision;
 }
 
 export class CommandStack {
   private undoStack: Command[] = [];
   private redoStack: Command[] = [];
+  private lastRevisionContext: CommandRevisionContext | null = null;
   readonly maxDepth: number;
 
   /** Called whenever the stack changes so callers can update UI. */
@@ -34,46 +62,127 @@ export class CommandStack {
    * Execute a command and push it onto the undo stack.
    * Clears the redo stack (standard linear undo model).
    */
-  push(command: Command): void {
-    command.execute();
+  push(command: Command): boolean {
+    const pushContext = this.preparePushRevisionContext(command);
+    if (!pushContext.accepted) return false;
+    if (!command.execute()) {
+      if (pushContext.recovered) this.notify();
+      return false;
+    }
     this.undoStack.push(command);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
+    this.captureResultingRevisionContext(command);
     this.notify();
+    return true;
   }
 
-  undo(): void {
-    const cmd = this.undoStack.pop();
-    if (!cmd) return;
-    cmd.undo();
+  undo(): boolean {
+    const cmd = this.undoStack[this.undoStack.length - 1];
+    if (!cmd || !this.matchesLastRevisionContext(cmd) || !cmd.undo()) return false;
+    this.undoStack.pop();
     this.redoStack.push(cmd);
+    this.captureResultingRevisionContext(cmd);
+    this.rebaseExposedCommand(this.undoStack[this.undoStack.length - 1]);
     this.notify();
+    return true;
   }
 
-  redo(): void {
-    const cmd = this.redoStack.pop();
-    if (!cmd) return;
-    cmd.execute();
+  redo(): boolean {
+    const cmd = this.redoStack[this.redoStack.length - 1];
+    if (!cmd || !this.matchesLastRevisionContext(cmd) || !cmd.execute()) return false;
+    this.redoStack.pop();
     this.undoStack.push(cmd);
+    this.captureResultingRevisionContext(cmd);
+    this.rebaseExposedCommand(this.redoStack[this.redoStack.length - 1]);
     this.notify();
+    return true;
   }
 
   /**
    * Record a command that has already been executed (e.g. by live drag) without
    * calling `execute()` again.  Clears the redo stack.
    */
-  record(command: Command): void {
+  record(command: Command): boolean {
+    if (!this.canRecordRevisionContext(command)) return false;
     this.undoStack.push(command);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
+    this.captureResultingRevisionContext(command);
     this.notify();
+    return true;
   }
 
   /** Clear both stacks (e.g. when loading a new world). */
   clear(): void {
     this.undoStack = [];
     this.redoStack = [];
+    this.lastRevisionContext = null;
     this.notify();
+  }
+
+  private matchesLastRevisionContext(command: Command): boolean {
+    if (!isRevisionAware(command)) return true;
+    const context = command.getRevisionContext();
+    if (!context || !this.validRevisionContext(context)) return false;
+    return !this.lastRevisionContext
+      || sameRevisionContext(context, this.lastRevisionContext);
+  }
+
+  private preparePushRevisionContext(
+    command: Command,
+  ): { accepted: boolean; recovered: boolean } {
+    if (!isRevisionAware(command)) {
+      return { accepted: true, recovered: false };
+    }
+    const context = command.getRevisionContext();
+    if (!context || !this.validRevisionContext(context)) {
+      return { accepted: false, recovered: false };
+    }
+    if (!this.lastRevisionContext
+      || sameRevisionContext(context, this.lastRevisionContext)) {
+      return { accepted: true, recovered: false };
+    }
+    const last = this.lastRevisionContext;
+    const canRecover = context.authority === last.authority
+      && context.rootRevision >= last.rootRevision
+      && context.constructionRevision >= last.constructionRevision
+      && (context.rootRevision > last.rootRevision
+        || context.constructionRevision > last.constructionRevision);
+    if (!canRecover) return { accepted: false, recovered: false };
+    this.undoStack = [];
+    this.redoStack = [];
+    this.lastRevisionContext = context;
+    return { accepted: true, recovered: true };
+  }
+
+  private captureResultingRevisionContext(command: Command): void {
+    if (!isRevisionAware(command)) return;
+    const context = command.getRevisionContext();
+    if (context) this.lastRevisionContext = context;
+  }
+
+  private canRecordRevisionContext(command: Command): boolean {
+    if (!isRevisionAware(command)) return true;
+    const context = command.getRevisionContext();
+    if (!context || !this.validRevisionContext(context)) return false;
+    return !this.lastRevisionContext
+      || (context.authority === this.lastRevisionContext.authority
+        && context.rootRevision === this.lastRevisionContext.rootRevision + 1
+        && context.constructionRevision
+          === this.lastRevisionContext.constructionRevision + 1);
+  }
+
+  private validRevisionContext(context: CommandRevisionContext): boolean {
+    return Number.isSafeInteger(context.rootRevision)
+      && context.rootRevision >= 0
+      && Number.isSafeInteger(context.constructionRevision)
+      && context.constructionRevision >= 0;
+  }
+
+  private rebaseExposedCommand(command: Command | undefined): void {
+    if (!command || !this.lastRevisionContext || !isRevisionAware(command)) return;
+    command.rebaseRevisionContext(this.lastRevisionContext);
   }
 
   private notify(): void {
@@ -83,4 +192,4 @@ export class CommandStack {
 
 // Re-export concrete commands for backward compatibility
 export { DeleteTracksCommand } from '../commands/DeleteTracksCommand';
-export { ReshapeTrackCommand } from '../commands/ReshapeTrackCommand';
+export { PlaceTrackCommand } from '../commands/PlaceTrackCommand';

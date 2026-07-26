@@ -1,0 +1,267 @@
+import {
+  MAX_ECONOMY_SITE_CANDIDATES,
+  WorldGenerationConfig,
+} from '../config/WorldGeneration';
+import type {
+  EconomyStateDef,
+  StarterOpportunityDef,
+  WorldGenerationConfigDef,
+} from '../config/WorldData';
+import {
+  validateEconomyStateData,
+  validateStarterOpportunityData,
+} from '../config/WorldData';
+import type {
+  FacilityDefinition,
+  FacilityEconomyDef,
+  InventorySlotDef,
+} from './EconomyData';
+import {
+  INITIAL_FACILITY_DEFINITIONS,
+  INITIAL_PRODUCTS,
+} from './InitialEconomyContent';
+import type { TerrainHeightSource } from '../systems/ConstructionAnalyzer';
+import { createSeededRandom } from '../utils/SeededRandom';
+
+export interface EconomyGenerationDiagnostics {
+  candidatesEvaluated: number;
+}
+
+export type EconomyGenerationResult =
+  | {
+    ok: true;
+    economy: EconomyStateDef;
+    diagnostics: EconomyGenerationDiagnostics;
+  }
+  | {
+    ok: false;
+    error: {
+      code: 'economy-exhausted';
+      seed: string;
+      candidatesEvaluated: number;
+      facilitiesPlaced: number;
+    };
+  };
+
+interface FacilityPosition {
+  x: number;
+  y: number;
+}
+
+const SECONDARY_FACILITY_IDS = [
+  'quarry',
+  'cement-works',
+  'port-interchange',
+  'prefabrication-plant',
+  'town-construction-market',
+] as const;
+
+function footprintRelief(
+  terrain: TerrainHeightSource,
+  position: FacilityPosition,
+): number | null {
+  const radius = WorldGenerationConfig.SITE_FOOTPRINT_RADIUS;
+  const heights: number[] = [];
+  for (const dx of [-radius, 0, radius]) {
+    for (const dy of [-radius, 0, radius]) {
+      const height = terrain.getHeightAt(position.x + dx, position.y + dy);
+      if (!Number.isFinite(height)) return null;
+      heights.push(height);
+    }
+  }
+  return Math.max(...heights) - Math.min(...heights);
+}
+
+function instantiateFacility(
+  definition: FacilityDefinition,
+  position: FacilityPosition,
+): FacilityEconomyDef {
+  const inventories: Record<string, InventorySlotDef> = {};
+  definition.inventory.forEach((template) => {
+    inventories[template.productId] = {
+      productId: template.productId,
+      quantity: template.initialQuantity,
+      reservedQuantity: 0,
+      capacity: template.capacity,
+      recentInflow: 0,
+      recentOutflow: 0,
+      targetStock: template.targetStock,
+    };
+  });
+  return {
+    id: definition.id,
+    definitionId: definition.id,
+    name: definition.displayName,
+    x: position.x,
+    y: position.y,
+    railAccess: {
+      x: position.x,
+      y: position.y,
+      radius: WorldGenerationConfig.FACILITY_RAIL_ACCESS_RADIUS,
+    },
+    inventories,
+    activeRecipeId: definition.recipeIds[0] ?? null,
+    recipeProgressTicks: 0,
+  };
+}
+
+export function validateGeneratedEconomy(
+  value: unknown,
+  opportunity: unknown,
+  terrain: TerrainHeightSource,
+): value is EconomyStateDef {
+  if (!validateStarterOpportunityData(opportunity)
+    || opportunity.sites[0].id !== 'managed-forest'
+    || opportunity.sites[0].label !== 'Managed Forest'
+    || opportunity.sites[1].id !== 'sawmill'
+    || opportunity.sites[1].label !== 'Sawmill'
+    || !validateEconomyStateData(value)
+    || value.tick !== 0
+    || value.facilities.length !== INITIAL_FACILITY_DEFINITIONS.length
+    || value.market.constructionIndexBps !== 10_000) {
+    return false;
+  }
+
+  for (let index = 0; index < INITIAL_FACILITY_DEFINITIONS.length; index++) {
+    const definition = INITIAL_FACILITY_DEFINITIONS[index];
+    const facility = value.facilities[index];
+    if (facility.id !== definition.id
+      || facility.definitionId !== definition.id
+      || facility.name !== definition.displayName
+      || facility.railAccess.x !== facility.x
+      || facility.railAccess.y !== facility.y
+      || facility.railAccess.radius
+        !== WorldGenerationConfig.FACILITY_RAIL_ACCESS_RADIUS
+      || Math.abs(facility.x) + WorldGenerationConfig.SITE_FOOTPRINT_RADIUS
+        > WorldGenerationConfig.WORLD_HALF_WIDTH
+      || Math.abs(facility.y) + WorldGenerationConfig.SITE_FOOTPRINT_RADIUS
+        > WorldGenerationConfig.WORLD_HALF_HEIGHT
+      || facility.activeRecipeId !== (definition.recipeIds[0] ?? null)
+      || facility.recipeProgressTicks !== 0) {
+      return false;
+    }
+    const relief = footprintRelief(terrain, facility);
+    if (relief === null || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
+      return false;
+    }
+    for (const template of definition.inventory) {
+      const slot = facility.inventories[template.productId];
+      if (slot.quantity !== template.initialQuantity
+        || slot.reservedQuantity !== 0
+        || slot.recentInflow !== 0
+        || slot.recentOutflow !== 0) {
+        return false;
+      }
+    }
+    for (
+      let otherIndex = index + 1;
+      otherIndex < value.facilities.length;
+      otherIndex++
+    ) {
+      const other = value.facilities[otherIndex];
+      if (Math.hypot(other.x - facility.x, other.y - facility.y)
+        < WorldGenerationConfig.MIN_FACILITY_SEPARATION) {
+        return false;
+      }
+    }
+  }
+
+  const forest = value.facilities[0];
+  const sawmill = value.facilities[1];
+  return forest.x === opportunity.sites[0].x
+    && forest.y === opportunity.sites[0].y
+    && sawmill.x === opportunity.sites[1].x
+    && sawmill.y === opportunity.sites[1].y;
+}
+
+export class WorldEconomyGenerator {
+  constructor(private readonly terrain: TerrainHeightSource) {}
+
+  generate(
+    config: WorldGenerationConfigDef,
+    opportunity: StarterOpportunityDef,
+  ): EconomyGenerationResult {
+    const random = createSeededRandom(`${config.seed}:economy`);
+    const positions: FacilityPosition[] = opportunity.sites.map(
+      ({ x, y }) => ({ x, y }),
+    );
+    const secondaryPositions: FacilityPosition[] = [];
+    const gridSize = Math.sqrt(MAX_ECONOMY_SITE_CANDIDATES);
+    const xLimit = WorldGenerationConfig.WORLD_HALF_WIDTH
+      - WorldGenerationConfig.SITE_SEARCH_MARGIN;
+    const yLimit = WorldGenerationConfig.WORLD_HALF_HEIGHT
+      - WorldGenerationConfig.SITE_SEARCH_MARGIN;
+    const cellWidth = xLimit * 2 / gridSize;
+    const cellHeight = yLimit * 2 / gridSize;
+    let candidatesEvaluated = 0;
+
+    for (
+      let index = 0;
+      index < MAX_ECONOMY_SITE_CANDIDATES
+        && secondaryPositions.length < SECONDARY_FACILITY_IDS.length;
+      index++
+    ) {
+      const row = Math.floor(index / gridSize);
+      const column = index % gridSize;
+      const candidate = {
+        x: -xLimit + (column + 0.2 + random() * 0.6) * cellWidth,
+        y: -yLimit + (row + 0.2 + random() * 0.6) * cellHeight,
+      };
+      candidatesEvaluated += 1;
+      const relief = footprintRelief(this.terrain, candidate);
+      if (relief === null || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
+        continue;
+      }
+      if (positions.some((position) => Math.hypot(
+        candidate.x - position.x,
+        candidate.y - position.y,
+      ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
+        continue;
+      }
+      positions.push(candidate);
+      secondaryPositions.push(candidate);
+    }
+
+    if (secondaryPositions.length < SECONDARY_FACILITY_IDS.length) {
+      return {
+        ok: false,
+        error: {
+          code: 'economy-exhausted',
+          seed: config.seed,
+          candidatesEvaluated,
+          facilitiesPlaced: secondaryPositions.length,
+        },
+      };
+    }
+
+    const positionByDefinition = new Map<string, FacilityPosition>([
+      ['managed-forest', positions[0]],
+      ['sawmill', positions[1]],
+    ]);
+    SECONDARY_FACILITY_IDS.forEach((id, index) => {
+      positionByDefinition.set(id, secondaryPositions[index]);
+    });
+    const facilities = INITIAL_FACILITY_DEFINITIONS.map((definition) => (
+      instantiateFacility(definition, positionByDefinition.get(definition.id)!)
+    ));
+    const regionalDemandBpsByProduct: Record<string, number> = {};
+    INITIAL_PRODUCTS.forEach((product) => {
+      regionalDemandBpsByProduct[product.id] = 8_000
+        + Math.floor(random() * 4_001);
+    });
+
+    return {
+      ok: true,
+      economy: {
+        economyVersion: 1,
+        tick: 0,
+        facilities,
+        market: {
+          constructionIndexBps: 10_000,
+          regionalDemandBpsByProduct,
+        },
+      },
+      diagnostics: { candidatesEvaluated },
+    };
+  }
+}

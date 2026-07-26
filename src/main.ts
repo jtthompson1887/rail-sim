@@ -13,9 +13,26 @@ import PreloadScene from './scenes/PreloadScene';
 import SettingsScene from './scenes/SettingsScene';
 import WorldSelectScene from './scenes/WorldSelectScene';
 import WorldScene from './scenes/WorldScene';
+import { recoverDerailedFollowerOnTrack } from './managers/TrainManager';
+
+/** Expose game instance for Playwright / E2E tests. */
+declare global {
+  interface Window {
+    __railSimGame: Phaser.Game;
+    __railSimRecoverDerailedFollowerOnTrack: typeof recoverDerailedFollowerOnTrack;
+  }
+}
+
+if (
+  typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+  && __RAIL_SIM_TEST_CONTROLS__
+) {
+  window.__railSimRecoverDerailedFollowerOnTrack = recoverDerailedFollowerOnTrack;
+}
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
+  parent: 'game',
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -46,4 +63,10 @@ const config: Phaser.Types.Core.GameConfig = {
   ],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+if (
+  typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+  && __RAIL_SIM_TEST_CONTROLS__
+) {
+  window.__railSimGame = game;
+}

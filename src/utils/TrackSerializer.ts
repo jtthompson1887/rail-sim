@@ -8,19 +8,26 @@ import type { TrackDef } from '../config/WorldData';
 export class TrackSerializer {
   /** Convert a live RailTrack to a serialisable TrackDef. */
   static toTrackDef(track: RailTrack): TrackDef {
-    const curve = track.getCurvePath();
-    const p0 = curve.getStartPoint();
-    const p3 = curve.getEndPoint();
-    const p1 = curve.getPoint(0.33);
-    const p2 = curve.getPoint(0.67);
+    const { p0, p1, p2, p3 } = track.getControlPoints();
+    const verticalProfile = track.verticalProfile;
+    const structures = track.structures;
+    const paidBuildCost = track.paidBuildCost;
+    if (!verticalProfile || !structures || paidBuildCost === null) {
+      throw new Error('Track is missing construction engineering data.');
+    }
     return {
       uuid: track.getUUID(),
+      geometryVersion: 1,
       p0: { x: p0.x, y: p0.y },
       p1: { x: p1.x, y: p1.y },
       p2: { x: p2.x, y: p2.y },
       p3: { x: p3.x, y: p3.y },
-      isTunnel: track.isTunnel || undefined,
-      elevation: track.elevation || undefined,
+      verticalProfile: {
+        profileVersion: 1,
+        knots: verticalProfile.knots.map((knot) => ({ ...knot })),
+      },
+      structures: structures.map((interval) => ({ ...interval })),
+      paidBuildCost,
     };
   }
 }

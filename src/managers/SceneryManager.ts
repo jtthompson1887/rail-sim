@@ -7,6 +7,8 @@ import type { SceneryObjectDef, BiomeType } from '../config/WorldData';
 import { WorldManager } from './WorldManager';
 
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
+const HALF_W = GameConfig.TERRAIN.WORLD_WIDTH / 2;
+const HALF_H = GameConfig.TERRAIN.WORLD_HEIGHT / 2;
 
 /**
  * SceneryManager
@@ -23,7 +25,8 @@ export class SceneryManager {
   private readonly seed: string;
   /** Map of chunk key → active SceneryObject list. */
   private readonly chunkObjects: Map<string, SceneryObject[]> = new Map();
-  private readonly VIEW_RADIUS = 2;
+  /** Minimum chunk radius kept alive regardless of zoom. */
+  private readonly MIN_RADIUS = 2;
 
   constructor(
     scene: Phaser.Scene,
@@ -42,12 +45,30 @@ export class SceneryManager {
   /**
    * Call once per frame from WorldScene.update().
    * Streams scenery objects in and out with the camera.
+   *
+   * @param cameraWorldX  World-space X of the camera centre.
+   * @param cameraWorldY  World-space Y of the camera centre.
+   * @param zoom          Current camera zoom (default 1 → falls back to MIN_RADIUS).
    */
-  update(cameraWorldX: number, cameraWorldY: number): void {
+  update(cameraWorldX: number, cameraWorldY: number, zoom = 1): void {
+    // Clamp zoom to safe bounds to avoid division by zero, Infinity, or NaN.
+    const safeZoom = Math.max(
+      GameConfig.CAMERA.MIN_ZOOM,
+      Math.min(GameConfig.CAMERA.MAX_ZOOM, Number.isFinite(zoom) ? zoom : 1),
+    );
+
     const centreChunkX = Math.floor(cameraWorldX / CHUNK);
     const centreChunkY = Math.floor(cameraWorldY / CHUNK);
 
-    const r = this.VIEW_RADIUS;
+    // Compute how many chunks are visible in each half-axis at this zoom level,
+    // add +1 as a boundary buffer.
+    const { WIDTH, HEIGHT } = GameConfig.RESOLUTION;
+    const halfVisW = (WIDTH  / safeZoom) / 2;
+    const halfVisH = (HEIGHT / safeZoom) / 2;
+    const neededX  = Math.ceil(halfVisW / CHUNK) + 1;
+    const neededY  = Math.ceil(halfVisH / CHUNK) + 1;
+    const r = Math.max(this.MIN_RADIUS, neededX, neededY);
+
     const needed = new Set<string>();
 
     for (let dy = -r; dy <= r; dy++) {
@@ -109,10 +130,19 @@ export class SceneryManager {
     const chunkY = cy * CHUNK;
     const world  = WorldManager.world;
 
+    if (
+      chunkX >= HALF_W || chunkX + CHUNK <= -HALF_W ||
+      chunkY >= HALF_H || chunkY + CHUNK <= -HALF_H
+    ) {
+      return [];
+    }
+
     // Use persisted defs if the player has manually edited this chunk
     if (world && world.scenery.length > 0) {
       const persisted = world.scenery.filter(
-        (s) => s.x >= chunkX && s.x < chunkX + CHUNK &&
+        (s) => s.x >= -HALF_W && s.x < HALF_W &&
+                s.y >= -HALF_H && s.y < HALF_H &&
+                s.x >= chunkX && s.x < chunkX + CHUNK &&
                 s.y >= chunkY && s.y < chunkY + CHUNK,
       );
       if (persisted.length > 0) return persisted;

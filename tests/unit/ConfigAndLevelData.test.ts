@@ -1,5 +1,7 @@
 import { GameConfig } from '../../src/config/GameConfig';
 import { LEVELS } from '../../src/config/LevelData';
+import { createEmptyWorld, validateWorldData } from '../../src/config/WorldData';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 
 describe('GameConfig', () => {
   it('has valid resolution settings', () => {
@@ -193,5 +195,55 @@ describe('LevelData', () => {
         expect(station.passengerSpawnRate).toBeGreaterThan(0);
       });
     });
+  });
+});
+
+describe('WorldData current-schema validation', () => {
+  it('rejects legacy passenger keys instead of backfilling freight authority', () => {
+    const world = createEmptyWorld(
+      'Current world',
+      'current-seed',
+      'temperate',
+      makeStarterOpportunity('current-seed'),
+    );
+    const legacy = {
+      id: 'legacy-train',
+      trackUUID: 'track-1',
+      trackT: 0.5,
+      passengers: 4,
+      type: 'locomotive',
+    };
+    (world.trains as any) = [legacy];
+    const result = validateWorldData(world);
+
+    expect(result.compatible).toBe(false);
+    expect(world.trains[0]).toBe(legacy);
+    expect((world.trains[0] as any).freightSetId).toBeUndefined();
+  });
+
+  it('rejects schema 6 without converting it', () => {
+    const world = {
+      ...createEmptyWorld(
+        'Old world',
+        'old-seed',
+        'temperate',
+        makeStarterOpportunity('old-seed'),
+      ),
+      schemaVersion: 6,
+      economyRevision: 0,
+    } as any;
+    delete world.operationsRevision;
+    delete world.firstRouteProgress;
+    const result = validateWorldData(world);
+
+    expect(result).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+    expect(world).toEqual(expect.objectContaining({
+      schemaVersion: 6,
+      economyRevision: 0,
+    }));
+    expect(world.operationsRevision).toBeUndefined();
   });
 });

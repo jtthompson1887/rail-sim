@@ -6,8 +6,11 @@
   "scripts": {
     "start": "webpack-dev-server --open --mode=development",
     "build": "webpack --mode production",
+    "build:test-controls": "webpack --mode production --env testControls=true",
     "test": "jest --coverage",
-    "test:e2e": "npm run build && npx playwright test"
+    "test:e2e": "npx playwright test",
+    "benchmark:construction-drag": "node tests/performance/run-construction-drag-browser.js",
+    "benchmark:world-generation": "node tests/performance/run-world-generation-browser.js"
   },
   "keywords": [
     "train",
@@ -35,6 +38,8 @@
     "webpack-dev-server": "^4.0.0"
   },
   "dependencies": {
+    "@babylonjs/core": "^9.14.0",
+    "@babylonjs/materials": "^9.14.0",
     "copy-webpack-plugin": "^11.0.0",
     "matter-js": "^0.19.0",
     "phaser": "^3.60.0"

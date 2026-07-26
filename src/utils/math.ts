@@ -39,7 +39,6 @@ export function isCurveTight(p0, p1, p2, tightnessThreshold, interval = 0.05) {
         let angleChange = Phaser.Math.RadToDeg(Phaser.Math.Angle.BetweenPoints(prevTangent, tangent));
 
         if (angleChange > tightnessThreshold) {
-            console.log(angleChange);
             return true;
         }
 
@@ -184,6 +183,17 @@ export class PIDController {
 
     reset() {
         this.previousError = 0;
+        this.integral = 0;
+    }
+
+    /**
+     * Soft-reset the PID so the derivative term starts from a known error rather
+     * than zero.  This prevents a derivative spike on the very next calculate()
+     * call - useful when the controlled system jumps to a new set-point (e.g.
+     * switching from one track segment to another).
+     */
+    resetToError(error: number) {
+        this.previousError = error;
         this.integral = 0;
     }
 }

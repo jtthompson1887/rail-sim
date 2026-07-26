@@ -224,26 +224,6 @@ export class SelectionManager {
       if (!track) continue;
       this.highlightGraphics.lineStyle(4, 0xffffff, 0.9);
       this.strokeTrack(track);
-      // Endpoint dots
-      const { p0, p3 } = track.getControlPoints();
-      this.highlightGraphics.fillStyle(0x2a8cff, 1);
-      this.highlightGraphics.fillRect(p0.x - 5, p0.y - 5, 10, 10);
-      this.highlightGraphics.fillRect(p3.x - 5, p3.y - 5, 10, 10);
-      // Tangent handle dots (smaller, different colour)
-      const { p1, p2 } = track.getControlPoints();
-      this.highlightGraphics.fillStyle(0xffa040, 0.8);
-      this.highlightGraphics.fillRect(p1.x - 4, p1.y - 4, 8, 8);
-      this.highlightGraphics.fillRect(p2.x - 4, p2.y - 4, 8, 8);
-      // Lines from endpoints to tangent handles
-      this.highlightGraphics.lineStyle(1, 0xffa040, 0.4);
-      this.highlightGraphics.beginPath();
-      this.highlightGraphics.moveTo(p0.x, p0.y);
-      this.highlightGraphics.lineTo(p1.x, p1.y);
-      this.highlightGraphics.strokePath();
-      this.highlightGraphics.beginPath();
-      this.highlightGraphics.moveTo(p3.x, p3.y);
-      this.highlightGraphics.lineTo(p2.x, p2.y);
-      this.highlightGraphics.strokePath();
     }
   }
 
@@ -280,30 +260,8 @@ export class SelectionManager {
   // ── Control-point drag handles ─────────────────────────────────────────────
 
   private rebuildHandles(): void {
-    // Remove old handles
     for (const h of this.handles) h.rect.destroy();
     this.handles = [];
-
-    for (const uuid of this.selected) {
-      const track = this.trackManager.getTrack(uuid);
-      if (!track) continue;
-      const cps = track.getControlPoints();
-      const types: Array<'p0' | 'p1' | 'p2' | 'p3'> = ['p0', 'p1', 'p2', 'p3'];
-      for (const type of types) {
-        const pt = cps[type];
-        const isEndpoint = type === 'p0' || type === 'p3';
-        const size = isEndpoint ? 14 : 10;
-        const color = isEndpoint ? 0x2a8cff : 0xffa040;
-        const rect = this.scene.add.rectangle(pt.x, pt.y, size, size, color, 0.9)
-          .setStrokeStyle(1, 0xffffff, 0.6)
-          .setDepth(202)
-          .setInteractive({ draggable: true, useHandCursor: true });
-        (rect as any)._cpType = type;
-        (rect as any)._trackUUID = uuid;
-        this.scene.input.setDraggable(rect, true);
-        this.handles.push({ rect, type, trackUUID: uuid });
-      }
-    }
   }
 
   /** Return all drag-handle rectangles (for wiring up drag events in WorldScene). */

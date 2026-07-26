@@ -2,13 +2,23 @@ import Phaser from 'phaser';
 import { EditorToolbar } from '../ui/EditorToolbar';
 import type { CreateTool } from '../ui/EditorToolbar';
 import { PropertiesPanel } from '../ui/PropertiesPanel';
-import type { GeneratorParams } from '../ui/PropertiesPanel';
+import type { DeleteTracksIntent } from '../ui/PropertiesPanel';
 import { ContextMenu } from '../ui/ContextMenu';
 import type { MenuItem } from '../ui/ContextMenu';
 import { ValidationHint } from '../ui/ValidationHint';
 import { EventBus } from '../services/EventBus';
 import type TrackManager from '../managers/TrackManager';
 import type { SelectionManager } from '../systems/SelectionManager';
+import type { VehicleType } from '../config/VehicleTypes';
+import { ConstructionInspector } from '../ui/ConstructionInspector';
+import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
+import { CompanyHud } from '../ui/CompanyHud';
+import { MinimapRenderer } from '../ui/MinimapRenderer';
+import { FacilityInspector } from '../ui/FacilityInspector';
+import { VehiclePurchasePanel } from '../ui/VehiclePurchasePanel';
+import { TrainInspector } from '../ui/TrainInspector';
+import { FirstRouteObjectiveCard } from '../ui/FirstRouteObjectiveCard';
+import type { OperatingSummaryDto } from '../freight/FreightPresentation';
 
 /**
  * EditorUIScene
@@ -33,6 +43,31 @@ export default class EditorUIScene extends Phaser.Scene {
   private propertiesPanel!: PropertiesPanel;
   private contextMenu!: ContextMenu;
   private validationHint!: ValidationHint;
+  private constructionInspector!: ConstructionInspector;
+  private companyHud!: CompanyHud;
+  private facilityInspector!: FacilityInspector;
+  private vehiclePurchasePanel!: VehiclePurchasePanel;
+  private trainInspector!: TrainInspector;
+  private firstRouteObjectiveCard!: FirstRouteObjectiveCard;
+  private minimapRenderer!: MinimapRenderer;
+  private minimapVisible = true;
+  private editorControlsVisible = true;
+  private constructionDecisionActive = false;
+  private initialVisible = true;
+  private initialCash = 0;
+  private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
+  private initialSaveErrorMessage: string | null = null;
+  private initialEconomyTick = 0;
+  private initialConstructionIndexBps = 10_000;
+  private initialOperatingSummary: OperatingSummaryDto = {
+    fromTick: 0,
+    throughTick: 0,
+    deliveryRevenue: 0,
+    runningExpenses: 0,
+    operatingProfit: 0,
+    capitalExpenditure: 0,
+    cashFlow: 0,
+  };
 
   // Passed from WorldScene via scene.launch data
   private trackManager!: TrackManager;
@@ -49,49 +84,149 @@ export default class EditorUIScene extends Phaser.Scene {
   };
 
   private readonly visibleHandler = ({ visible }: { visible: boolean }) => {
+    this.editorControlsVisible = visible;
+    if (!visible) this.constructionDecisionActive = false;
     this.toolbar.setVisible(visible);
+    this.propertiesPanel.setVisible(visible);
+    this.constructionInspector.setVisible(visible);
+    this.companyHud.setVisible(true);
+    this.facilityInspector.setVisible(true);
+    this.syncVehiclePurchaseVisibility();
+    this.trainInspector.setVisible(!visible);
+    this.firstRouteObjectiveCard.setVisible(true);
+    this.validationHint.setVisible(visible);
+    this.minimapVisible = visible;
+    if (!visible) {
+      this.constructionInspector.clear();
+      this.validationHint.clear();
+      this.minimapRenderer?.clear();
+    }
   };
 
   private readonly selectToolHandler = ({ tool }: { tool: string }) => {
     this.toolbar.selectTool(tool as CreateTool);
   };
 
+  private readonly constructionPreviewHandler = (
+    event: ConstructionPreviewEvent,
+  ) => {
+    this.constructionDecisionActive = this.editorControlsVisible
+      && event.preview !== null
+      && event.phase !== 'idle'
+      && event.phase !== 'committed';
+    this.syncVehiclePurchaseVisibility();
+  };
+
   constructor() {
     super({ key: 'EditorUIScene' });
   }
 
-  init(data: { trackManager: TrackManager; selectionManager: SelectionManager }): void {
+  init(data: {
+    trackManager: TrackManager;
+    selectionManager: SelectionManager;
+    visible?: boolean;
+    companyCash?: number;
+    saveState?: 'saved' | 'unsaved' | 'saving';
+    saveErrorMessage?: string;
+    economyTick?: number;
+    constructionIndexBps?: number;
+    operatingSummary?: OperatingSummaryDto;
+  }): void {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
+    this.initialVisible = data.visible ?? true;
+    this.initialCash = data.companyCash ?? 0;
+    this.initialSaveState = data.saveState ?? 'saved';
+    this.initialSaveErrorMessage = data.saveErrorMessage ?? null;
+    this.initialEconomyTick = data.economyTick ?? 0;
+    this.initialConstructionIndexBps =
+      data.constructionIndexBps ?? 10_000;
+    this.initialOperatingSummary = data.operatingSummary ?? {
+      fromTick: 0,
+      throughTick: this.initialEconomyTick,
+      deliveryRevenue: 0,
+      runningExpenses: 0,
+      operatingProfit: 0,
+      capitalExpenditure: 0,
+      cashFlow: 0,
+    };
   }
 
   create(): void {
     this.toolbar = new EditorToolbar(this);
+    this.toolbar.setSaveIndicator(this.initialSaveState);
     this.propertiesPanel = new PropertiesPanel(
       this,
       this.trackManager,
       this.selectionManager,
-      (uuids) => EventBus.emit('editor:delete-tracks', { uuids }),
+      (intent: DeleteTracksIntent) => EventBus.emit('editor:delete-tracks', intent),
     );
     this.contextMenu = new ContextMenu(this);
     this.validationHint = new ValidationHint(this);
+    this.constructionInspector = new ConstructionInspector();
+    this.companyHud = new CompanyHud();
+    this.facilityInspector = new FacilityInspector();
+    this.vehiclePurchasePanel = new VehiclePurchasePanel();
+    this.trainInspector = new TrainInspector();
+    this.firstRouteObjectiveCard = new FirstRouteObjectiveCard();
+    this.minimapRenderer = new MinimapRenderer(
+      this,
+      this.trackManager,
+      this.selectionManager,
+    );
+    this.companyHud.setState({
+      cash: this.initialCash,
+      saveState: this.initialSaveState,
+      economyTick: this.initialEconomyTick,
+      constructionIndexBps: this.initialConstructionIndexBps,
+      operatingSummary: this.initialOperatingSummary,
+    });
+    this.visibleHandler({ visible: this.initialVisible });
 
     // Subscribe to WorldScene → EditorUIScene events
     EventBus.on('ui:toolbar-undo-state', this.undoStateHandler);
     EventBus.on('ui:toolbar-save-state', this.saveStateHandler);
     EventBus.on('ui:toolbar-visible',    this.visibleHandler);
     EventBus.on('ui:toolbar-select-tool', this.selectToolHandler);
+    EventBus.on('construction:preview', this.constructionPreviewHandler);
+
+    const startupSaveError = this.initialSaveErrorMessage;
+    this.initialSaveErrorMessage = null;
+    if (startupSaveError) {
+      EventBus.emit('ui:toast', {
+        message: startupSaveError,
+        type: 'error',
+      });
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       EventBus.off('ui:toolbar-undo-state',  this.undoStateHandler);
       EventBus.off('ui:toolbar-save-state',  this.saveStateHandler);
       EventBus.off('ui:toolbar-visible',     this.visibleHandler);
       EventBus.off('ui:toolbar-select-tool', this.selectToolHandler);
+      EventBus.off('construction:preview', this.constructionPreviewHandler);
       this.toolbar.destroy();
       this.propertiesPanel.destroy();
       this.contextMenu.destroy();
       this.validationHint.destroy();
+      this.constructionInspector.destroy();
+      this.companyHud.destroy();
+      this.facilityInspector.destroy();
+      this.vehiclePurchasePanel.destroy();
+      this.trainInspector.destroy();
+      this.firstRouteObjectiveCard.destroy();
+      this.minimapRenderer.destroy();
     });
+  }
+
+  update(): void {
+    if (this.minimapVisible) this.minimapRenderer.draw();
+  }
+
+  private syncVehiclePurchaseVisibility(): void {
+    this.vehiclePurchasePanel.setVisible(
+      this.editorControlsVisible && !this.constructionDecisionActive,
+    );
   }
 
   /**
@@ -103,8 +238,25 @@ export default class EditorUIScene extends Phaser.Scene {
     this.contextMenu.show(screenX, screenY, items);
   }
 
-  /** Returns the current generator parameters from the properties panel. */
-  getGeneratorParams(): GeneratorParams {
-    return this.propertiesPanel.getGeneratorParams();
+  /** Returns the currently selected vehicle type from the properties panel. */
+  getVehicleType(): VehicleType {
+    return this.propertiesPanel.getVehicleType();
+  }
+
+  /** Shared screen-space input gate for every visible editor overlay. */
+  containsScreenPoint(x: number, y: number): boolean {
+    const toolbar = this.toolbar.screenBounds;
+    return (
+      x >= toolbar.left && x <= toolbar.right
+      && y >= toolbar.top && y <= toolbar.bottom
+    )
+      || this.propertiesPanel.containsScreenPoint(x, y)
+      || this.constructionInspector.containsScreenPoint(x, y)
+      || this.facilityInspector.containsScreenPoint(x, y)
+      || this.vehiclePurchasePanel.containsScreenPoint(x, y)
+      || this.trainInspector.containsScreenPoint(x, y)
+      || this.firstRouteObjectiveCard.containsScreenPoint(x, y)
+      || this.companyHud.containsScreenPoint(x, y)
+      || (this.minimapVisible && this.minimapRenderer.containsScreenPoint(x, y));
   }
 }

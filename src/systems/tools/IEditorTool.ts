@@ -23,6 +23,8 @@ export interface IEditorTool {
   onPointerMove(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void;
   /** Pointer released in world coordinates. */
   onPointerUp(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void;
+  /** Browser/Phaser cancellation for one specific pointer gesture. */
+  onPointerCancel?(pointer: Phaser.Input.Pointer): void;
   /** Keyboard input. */
   onKeyDown(event: KeyboardEvent): void;
   /** Per-frame update (optional — used for animations/previews). */
@@ -42,6 +44,7 @@ export abstract class BaseEditorTool implements IEditorTool {
   abstract onPointerDown(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void;
   abstract onPointerMove(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void;
   abstract onPointerUp(worldX: number, worldY: number, pointer: Phaser.Input.Pointer): void;
+  onPointerCancel(_pointer: Phaser.Input.Pointer): void { this.cancel(); }
   onKeyDown(_event: KeyboardEvent): void { }
   update(_delta: number): void { }
   destroy(): void { }

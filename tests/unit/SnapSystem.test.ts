@@ -110,6 +110,53 @@ describe('SnapSystem', () => {
       const result = snap.snapPoint(115, 108);
       expect(result.snapped).toBe(false);
     });
+
+    it('returns deterministic endpoint identity and the outward tangent', () => {
+      snap.gridEnabled = false;
+      const track = makeTrack(scene, 100, 100, 200, 100);
+      track.setUUID('eastbound');
+      trackManager.addTrack(track);
+
+      expect(snap.snapPoint(105, 100)).toEqual(expect.objectContaining({
+        x: 100,
+        y: 100,
+        type: 'endpoint',
+        trackUUID: 'eastbound',
+        endpoint: 'start',
+        outward: { x: -1, y: 0 },
+      }));
+      expect(snap.snapPoint(195, 100)).toEqual(expect.objectContaining({
+        x: 200,
+        y: 100,
+        type: 'endpoint',
+        trackUUID: 'eastbound',
+        endpoint: 'end',
+        outward: { x: 1, y: 0 },
+      }));
+    });
+
+    it('derives both endpoint directions exactly from stored control points', () => {
+      snap.gridEnabled = false;
+      const Phaser = require('phaser');
+      const track = new RailTrack(
+        scene,
+        new Phaser.Math.Vector2(10, 20),
+        new Phaser.Math.Vector2(13, 24),
+        new Phaser.Math.Vector2(41, 35),
+        new Phaser.Math.Vector2(36, 47),
+      );
+      track.setUUID('curved');
+      trackManager.addTrack(track);
+
+      expect(snap.snapPoint(10, 20)).toEqual(expect.objectContaining({
+        endpoint: 'start',
+        outward: { x: -0.6, y: -0.8 },
+      }));
+      expect(snap.snapPoint(36, 47)).toEqual(expect.objectContaining({
+        endpoint: 'end',
+        outward: { x: -5 / 13, y: 12 / 13 },
+      }));
+    });
   });
 
   describe('Midpoint snap', () => {

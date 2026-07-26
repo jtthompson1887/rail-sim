@@ -54,6 +54,17 @@ describe('TrackManager', () => {
       manager.addTrack(t2);
       expect(manager.tracks).toHaveLength(2);
     });
+
+    it('rejects duplicate UUIDs without replacing the owned track', () => {
+      const first = makeTrack(scene);
+      first.setUUID('duplicate');
+      const second = makeTrack(scene, 200, 0, 300, 0);
+      second.setUUID('duplicate');
+      manager.addTrack(first);
+      expect(() => manager.addTrack(second)).toThrow('Duplicate track UUID');
+      expect(manager.getTrack('duplicate')).toBe(first);
+      expect(manager.tracks).toHaveLength(1);
+    });
   });
 
   describe('getTrack()', () => {
@@ -250,10 +261,9 @@ describe('TrackManager', () => {
   });
 
   describe('getTracksInRadius()', () => {
-    it('returns empty array when no visible tracks', () => {
+    it('queries all live tracks even before camera visibility is populated', () => {
       manager.createStraightTrack({ x: 0, y: 0 }, { x: 100, y: 0 });
-      // No visible tracks set, so result is empty
-      expect(manager.getTracksInRadius({ x: 50, y: 0 }, 1000)).toHaveLength(0);
+      expect(manager.getTracksInRadius({ x: 50, y: 0 }, 1000)).toHaveLength(1);
     });
 
     it('returns tracks within radius after making them visible', () => {
@@ -263,6 +273,16 @@ describe('TrackManager', () => {
       manager.updateVisibleTracks(bounds);
       const tracksInRadius = manager.getTracksInRadius({ x: 50, y: 0 }, 1000);
       expect(tracksInRadius).toHaveLength(1);
+    });
+
+    it('includes a long off-camera track whose endpoint is exactly on the radius', () => {
+      const endpointCandidate = makeTrack(scene, 100, 0, 10_000, 0);
+      const outside = makeTrack(scene, 101, 0, 10_001, 0);
+      manager.addTrack(endpointCandidate);
+      manager.addTrack(outside);
+
+      expect(manager.getTracksInRadius({ x: 0, y: 0 }, 100))
+        .toEqual([endpointCandidate]);
     });
   });
 
@@ -278,9 +298,45 @@ describe('TrackManager', () => {
       const hasConnection = tracks.some((t) => t.hasNext() || t.hasPrevious());
       expect(hasConnection).toBe(true);
     });
+
+    it('does not connect endpoints that differ by any coordinate amount', () => {
+      const exact = makeTrack(scene, 0, 0, 100, 0);
+      const near = makeTrack(scene, 100 + 5e-7, 0, 200, 0);
+      manager.addTrack(exact);
+      manager.addTrack(near);
+      expect(exact.getNext()).toBeUndefined();
+      expect(near.getPrevious()).toBeUndefined();
+    });
+
+    it('connects exactly equal endpoints bidirectionally', () => {
+      const first = makeTrack(scene, 0, 0, 100, 0);
+      const second = makeTrack(scene, 100, 0, 200, 0);
+      manager.addTrack(first);
+      manager.addTrack(second);
+      expect(first.getNext()).toBe(second);
+      expect(second.getPrevious()).toBe(first);
+    });
   });
 
   describe('graph integrity', () => {
+    describe('removeJunction', () => {
+      it('clears reciprocal neighbours outside the junction-owned tracks', () => {
+        const main = makeTrack(scene, 0, 0, 100, 0);
+        const left = makeTrack(scene, 200, 0, 300, -100);
+        const right = makeTrack(scene, 200, 0, 300, 100);
+        const tail = makeTrack(scene, 500, 0, 600, 0);
+        for (const track of [main, left, right, tail]) manager.addTrack(track);
+        const junction = new Junction(scene, main, left, right, 0.5);
+        junction.setUUID('remove-junction');
+        manager.addJunction(junction);
+        junction.setNext(tail);
+        tail.setPrevious(junction);
+
+        expect(manager.removeJunction(junction.getUUID())).toBe(true);
+        expect(tail.getPrevious()).toBeUndefined();
+      });
+    });
+
     describe('removeTrack', () => {
       it('clears next connection from neighbouring track when removed', () => {
         const Phaser = require('phaser');

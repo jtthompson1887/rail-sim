@@ -4,6 +4,9 @@ import { GameConfig } from '../config/GameConfig';
 
 type Image = Phaser.GameObjects.Image;
 
+/** Compress the source photographs so track reads as a route, not a wide texture strip. */
+const CROSS_TRACK_SCALE_RATIO = 0.45;
+
 /**
  * RailTrackRenderer – responsible for the visual representation of a RailTrack.
  *
@@ -42,7 +45,7 @@ export class RailTrackRenderer {
     }
   }
 
-  private createSegment(texture: string, i: number, iterations: number, curve: Phaser.Curves.Path): void {
+  private createSegment(texture: string, i: number, iterations: number, curve: Phaser.Curves.CubicBezier): void {
     const t = i / iterations;
     const point = curve.getPoint(t);
     const nextPoint = curve.getPoint((i + 1) / iterations);
@@ -50,11 +53,14 @@ export class RailTrackRenderer {
 
     const img = this.scene.add.image(point.x, point.y, texture);
     img.setOrigin(0, 0.5);
-    img.setScale(this.railTrackScale);
+    img.setScale(
+      this.railTrackScale,
+      this.railTrackScale * CROSS_TRACK_SCALE_RATIO,
+    );
     img.setDepth(0);
     img.rotation = angle;
 
-    if (this.track.isTunnel) {
+    if (this.track.structureTypeAt(t) === 'tunnel') {
       img.setAlpha(0.45);
       img.setTint(0x334455);
     }

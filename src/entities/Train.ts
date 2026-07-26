@@ -4,12 +4,13 @@ import type RailTrack from './RailTrack';
 import { applyForceToGameObject, matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
+import type { IVehicle, VehicleType } from '../config/VehicleTypes';
 
 interface TrainMatterImage extends Phaser.Physics.Matter.Image {
   parentTrain?: Train;
 }
 
-export default class Train extends Phaser.GameObjects.Container {
+export default class Train extends Phaser.GameObjects.Container implements IVehicle {
   private _trainBody!: TrainMatterImage;
   private texture: string;
   private readonly _pidControllerFront: PIDController;
@@ -21,15 +22,24 @@ export default class Train extends Phaser.GameObjects.Container {
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
+  readonly freightSetId: string | null;
+  readonly vehicleType: VehicleType = 'locomotive';
   readonly passengerCapacity: number = 20;
   public debugGraphics!: Phaser.GameObjects.Graphics;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, id?: string) {
+  constructor(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    id?: string,
+    freightSetId: string | null = null,
+  ) {
     super(scene);
     this.scene = scene;
     this.scene.add.existing(this);
     this.texture = 'train1';
     this.uuid = id ?? crypto.randomUUID();
+    this.freightSetId = freightSetId;
     this._pidControllerFront = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);
@@ -156,8 +166,13 @@ export default class Train extends Phaser.GameObjects.Container {
     matterScaling(this._trainBody, GameConfig.TRAIN.SCALE_X, GameConfig.TRAIN.SCALE_Y);
     this._trainBody.setFrictionAir(GameConfig.PHYSICS.FRICTION_AIR);
     this._trainBody.setMass(this._mass);
-    this._trainBody.angle = angle;
+    this._trainBody.setAngle(angle);
     this._trainBody.setVelocity(0, 0);
     this._trainBody.setAngularVelocity(0);
+    const body = this._trainBody.body as any;
+    if (body?.force) {
+      body.force.x = 0;
+      body.force.y = 0;
+    }
   }
 }

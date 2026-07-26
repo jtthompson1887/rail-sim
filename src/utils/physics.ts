@@ -6,9 +6,14 @@ import MatterBody = Phaser.Types.Physics.Matter.MatterBody;
 import {BodyType, Vector} from "matter";
 
 
-export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.Vector2, pidController?: PIDController) : Vector2 {
+export function guideForceTowardsPoint(
+    gameObject: GameObject,
+    p0: Phaser.Math.Vector2,
+    pidController?: PIDController,
+    sourcePosition?: Readonly<{ x: number; y: number }>,
+): Vector2 {
     // Calculate the vector from the cart to the track
-    let position = gameObject.body.position;
+    let position = sourcePosition ?? gameObject.body.position;
     let forceVector = qVec().copy(p0).subtract(position)
 
     let forceConstant = 0.0020; // Reduced from 0.0008/0.0020 to make the force gentler
@@ -22,7 +27,7 @@ export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.
         // history fresh and avoid artificial spikes on the next non-zero frame.
         let newMagnitude = pidController.calculate(error);
         if (error > 0) {
-            // Clamp to zero so the force can never flip direction (pull → push)
+            // Clamp to zero so the force can never flip direction (pull -> push)
             let multiplier = Math.max(0, newMagnitude) / error;
             forceVector = forceVector.scale(multiplier);
         }
@@ -65,6 +70,8 @@ export function matterScaling(gameObject: Phaser.Physics.Matter.Image, newScaleX
     newBody.friction = bodyOptions.friction;
     newBody.restitution = bodyOptions.restitution;
     newBody.frictionAir = bodyOptions.frictionAir;
+    newBody.force.x = 0;
+    newBody.force.y = 0;
 
     // Update the Phaser game object to use the new body
     gameObject.setExistingBody(newBody);

@@ -2,7 +2,11 @@
  * Tests for CameraController input locking.
  */
 
-import { CameraController } from '../../src/systems/CameraController';
+import {
+  CameraController,
+  clampCameraZoom,
+} from '../../src/systems/CameraController';
+import { GameConfig } from '../../src/config/GameConfig';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -13,6 +17,16 @@ describe('CameraController', () => {
   beforeEach(() => {
     scene = makeScene();
     controller = new CameraController(scene);
+  });
+
+  describe('shared zoom bounds', () => {
+    it.each([
+      [0.05, GameConfig.CAMERA.MIN_ZOOM],
+      [0.75, 0.75],
+      [3, GameConfig.CAMERA.MAX_ZOOM],
+    ])('constrains %s to %s', (requested, expected) => {
+      expect(clampCameraZoom(requested)).toBe(expected);
+    });
   });
 
   describe('setInputLockOwner', () => {

@@ -3,10 +3,83 @@
  */
 import { SaveService, SaveData } from '../../src/services/SaveService';
 import { GameConfig } from '../../src/config/GameConfig';
+import {
+  createEmptyEconomyState,
+  type WorldData,
+} from '../../src/config/WorldData';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
+import { createCompanyState } from '../../src/economy/FinanceLedger';
+
+function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
+  return {
+    schemaVersion: 7,
+    revision: 0,
+    constructionRevision: 0,
+    operationsRevision: 0,
+    id,
+    name,
+    generationConfig: {
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    },
+    company: createCompanyState(876_543),
+    economy: createEmptyEconomyState(),
+    firstRouteProgress: {
+      objectiveVersion: 1,
+      profitableDeliveryCompleted: false,
+    },
+    starterOpportunity: makeStarterOpportunity(seed),
+    tracks: [],
+    junctions: [],
+    stations: [],
+    trains: [],
+    scenery: [],
+    metadata: { createdAt: timestamp, updatedAt: timestamp },
+  } as any;
+}
 
 describe('SaveService', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it('preserves schema-7 revisions, progress, economy, ledger cash, and paid track value exactly', () => {
+    const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
+    world.tracks.push({
+      geometryVersion: 1,
+      uuid: 'paid-track',
+      p0: { x: 0, y: 0 },
+      p1: { x: 1, y: 0 },
+      p2: { x: 2, y: 0 },
+      p3: { x: 3, y: 0 },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      structures: [{
+        type: 'surface',
+        startT: 0,
+        endT: 1,
+        startElevation: 0,
+        endElevation: 0,
+      }],
+      paidBuildCost: 12_345,
+    });
+
+    expect(SaveService.saveWorld(world)).toBe(true);
+    const loaded = SaveService.loadWorld(world.id)!;
+    expect(loaded.company.cash).toBe(876_543);
+    expect(loaded.company.ledger).toEqual(world.company.ledger);
+    expect(loaded.economy).toEqual(world.economy);
+    expect(loaded.constructionRevision).toBe(0);
+    expect((loaded as any).operationsRevision).toBe(0);
+    expect((loaded as any).firstRouteProgress).toEqual({
+      objectiveVersion: 1,
+      profitableDeliveryCompleted: false,
+    });
+    expect(loaded.tracks[0].paidBuildCost).toBe(12_345);
   });
 
   describe('load()', () => {
@@ -145,7 +218,7 @@ describe('SaveService', () => {
 
   describe('saveWorld() / loadWorld()', () => {
     it('saves and loads a world by id', () => {
-      const world = { id: 'w1', name: 'Test', seed: '123', terrainSeed: '123', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
+      const world = makeWorld('w1', 'Test', '123', 1000);
       SaveService.saveWorld(world);
       const loaded = SaveService.loadWorld('w1');
       expect(loaded).not.toBeNull();
@@ -157,11 +230,66 @@ describe('SaveService', () => {
     });
 
     it('updates updatedAt on save', () => {
-      const world = { id: 'w-ts', name: 'TS', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const world = makeWorld('w-ts', 'TS', '0', 1);
       SaveService.saveWorld(world);
       const loaded = SaveService.loadWorld('w-ts')!;
       expect(loaded.metadata.updatedAt).toBeGreaterThanOrEqual(1);
     });
+
+    it('leaves both the prior snapshot and active timestamp intact when storage fails', () => {
+      const world = makeWorld('w-atomic', 'Atomic', '0', 123);
+      expect(SaveService.saveWorld(world)).toBe(true);
+      const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+      const previousUpdatedAt = world.metadata.updatedAt;
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(previousUpdatedAt + 10);
+      const write = jest.spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(() => { throw new Error('quota'); });
+
+      expect(SaveService.saveWorld(world)).toBe(false);
+      expect(world.metadata.updatedAt).toBe(previousUpdatedAt);
+      expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+      write.mockRestore();
+      clock.mockRestore();
+    });
+
+    it('returns false without replacing durable data when active metadata is frozen', () => {
+      const prior = makeWorld('prior', 'Prior', '0', 123);
+      expect(SaveService.saveWorld(prior)).toBe(true);
+      const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+      const frozen = makeWorld('frozen', 'Frozen', '1', 456);
+      Object.freeze(frozen.metadata);
+
+      expect(SaveService.saveWorld(frozen)).toBe(false);
+      expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+      expect(frozen.metadata.updatedAt).toBe(456);
+      expect(SaveService.loadWorld('frozen')).toBeNull();
+    });
+
+    it.each(['throwing', 'no-op'] as const)(
+      'rejects an updatedAt %s accessor without changing active or durable state',
+      (setterBehavior) => {
+        const prior = makeWorld('prior-accessor', 'Prior accessor', '0', 123);
+        expect(SaveService.saveWorld(prior)).toBe(true);
+        const previousRaw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+        const accessorWorld = makeWorld('accessor', 'Accessor', '1', 456);
+        let activeUpdatedAt = accessorWorld.metadata.updatedAt;
+        Object.defineProperty(accessorWorld.metadata, 'updatedAt', {
+          configurable: true,
+          enumerable: true,
+          get: () => activeUpdatedAt,
+          set: (value: number) => {
+            if (setterBehavior === 'throwing') throw new Error('setter rejected');
+            void value;
+          },
+        });
+
+        expect(SaveService.saveWorld(accessorWorld)).toBe(false);
+        expect(activeUpdatedAt).toBe(456);
+        expect(accessorWorld.metadata.updatedAt).toBe(456);
+        expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY)).toBe(previousRaw);
+        expect(SaveService.loadWorld('accessor')).toBeNull();
+      },
+    );
   });
 
   describe('listWorlds()', () => {
@@ -170,16 +298,16 @@ describe('SaveService', () => {
     });
 
     it('returns all saved worlds', () => {
-      const w1 = { id: 'wl1', name: 'A', seed: '1', terrainSeed: '1', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1000, updatedAt: 1000 } };
-      const w2 = { id: 'wl2', name: 'B', seed: '2', terrainSeed: '2', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 2000, updatedAt: 2000 } };
+      const w1 = makeWorld('wl1', 'A', '1', 1000);
+      const w2 = makeWorld('wl2', 'B', '2', 2000);
       SaveService.saveWorld(w1);
       SaveService.saveWorld(w2);
       expect(SaveService.listWorlds()).toHaveLength(2);
     });
 
     it('sorts worlds newest first (by updatedAt)', () => {
-      const older = { id: 'older-w', name: 'Old', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 100, updatedAt: 100 } };
-      const newer = { id: 'newer-w', name: 'New', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 999, updatedAt: 999 } };
+      const older = makeWorld('older-w', 'Old', '0', 100);
+      const newer = makeWorld('newer-w', 'New', '0', 999);
       // Manually set updatedAt after saving so the sort ordering is predictable
       SaveService.saveWorld(older);
       const raw1 = JSON.parse(localStorage.getItem('rail-sim-worlds') || '{}');
@@ -196,7 +324,7 @@ describe('SaveService', () => {
 
   describe('deleteWorld()', () => {
     it('removes a world by id', () => {
-      const w = { id: 'del-w', name: 'Del', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('del-w', 'Del', '0', 1);
       SaveService.saveWorld(w);
       SaveService.deleteWorld('del-w');
       expect(SaveService.loadWorld('del-w')).toBeNull();
@@ -209,7 +337,7 @@ describe('SaveService', () => {
 
   describe('exportWorld() / importWorld()', () => {
     it('round-trips a world through JSON', () => {
-      const w = { id: 'exp', name: 'Export Me', seed: '0', terrainSeed: '0', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('exp', 'Export Me', '0', 1);
       const json = SaveService.exportWorld(w);
       const imported = SaveService.importWorld(json);
       expect(imported).not.toBeNull();
@@ -221,7 +349,7 @@ describe('SaveService', () => {
     });
 
     it('importWorld persists the world', () => {
-      const w = { id: 'imp', name: 'Imported', seed: '1', terrainSeed: '1', biome: 'temperate' as const, tracks: [], junctions: [], stations: [], trains: [], scenarios: [], scenery: [], metadata: { createdAt: 1, updatedAt: 1 } };
+      const w = makeWorld('imp', 'Imported', '1', 1);
       const json = SaveService.exportWorld(w);
       SaveService.importWorld(json);
       expect(SaveService.loadWorld('imp')).not.toBeNull();

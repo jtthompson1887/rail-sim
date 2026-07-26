@@ -1,6 +1,25 @@
 import { GameConfig } from '../config/GameConfig';
-import type { WorldData } from '../config/WorldData';
-import { migrateWorld } from '../config/WorldData';
+import type { WorldData, WorldValidationResult } from '../config/WorldData';
+import { validateWorldData } from '../config/WorldData';
+
+function validateStoredWorld(storageId: string, raw: unknown): WorldValidationResult {
+  const result = validateWorldData(raw);
+  if (!('world' in result)) {
+    return { ...result, storageId };
+  }
+  if (result.world.id !== storageId) {
+    return {
+      compatible: false,
+      id: result.world.id,
+      storageId,
+      name: result.world.name,
+      updatedAt: result.world.metadata.updatedAt,
+      message: 'This save is incompatible: storage key does not match embedded world id.',
+      action: 'Start a new world.',
+    };
+  }
+  return result;
+}
 
 export interface SaveData {
   unlockedLevels: string[];
@@ -92,41 +111,74 @@ export const SaveService = {
   // ── World persistence ──────────────────────────────────────────────────────
 
   /** Load all worlds as an id→WorldData map. */
-  loadAllWorlds(): Record<string, WorldData> {
+  loadAllWorlds(): Record<string, unknown> {
     try {
       const raw = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
       if (!raw) return {};
-      return JSON.parse(raw) as Record<string, WorldData>;
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null
+        ? parsed as Record<string, unknown>
+        : {};
     } catch {
       return {};
     }
   },
 
   /** Persist a world (insert or update). */
-  saveWorld(world: WorldData): void {
+  saveWorld(world: WorldData): boolean {
     try {
+      if (!validateWorldData(world).compatible) return false;
+      const updatedAtDescriptor = Object.getOwnPropertyDescriptor(
+        world.metadata,
+        'updatedAt',
+      );
+      if (!updatedAtDescriptor
+        || !('value' in updatedAtDescriptor)
+        || !updatedAtDescriptor.writable) return false;
       const all = this.loadAllWorlds();
-      world.metadata.updatedAt = Date.now();
-      all[world.id] = world;
+      const savedAt = Date.now();
+      const snapshot = JSON.parse(JSON.stringify(world)) as WorldData;
+      snapshot.metadata.updatedAt = savedAt;
+      if (!validateWorldData(snapshot).compatible) return false;
+      all[world.id] = snapshot;
       localStorage.setItem(GameConfig.WORLD.WORLDS_SAVE_KEY, JSON.stringify(all));
+      world.metadata.updatedAt = savedAt;
+      return true;
     } catch {
       console.warn('SaveService: failed to save world to localStorage');
+      return false;
     }
+  },
+
+  /** Validate a single saved world, preserving incompatibility details for UI. */
+  loadWorldResult(id: string): WorldValidationResult | null {
+    const raw = this.loadAllWorlds()[id];
+    return raw === undefined ? null : validateStoredWorld(id, raw);
   },
 
   /** Retrieve a single world by id, or null if not found. */
   loadWorld(id: string): WorldData | null {
-    const raw = this.loadAllWorlds()[id];
-    if (!raw) return null;
-    return migrateWorld(raw as Partial<WorldData>);
+    const result = this.loadWorldResult(id);
+    return result?.compatible ? result.world : null;
   },
 
   /** List all worlds, sorted newest first. */
   listWorlds(): WorldData[] {
+    return this.listWorldResults()
+      .filter((result): result is Extract<WorldValidationResult, { compatible: true }> => result.compatible)
+      .map((result) => result.world);
+  },
+
+  /** List compatible and incompatible saves for the world picker. */
+  listWorldResults(): WorldValidationResult[] {
     const all = this.loadAllWorlds();
-    const worlds = Object.keys(all).map((k) => migrateWorld(all[k] as Partial<WorldData>));
-    return worlds.sort(
-      (a, b) => b.metadata.updatedAt - a.metadata.updatedAt,
+    const results = Object.keys(all).map((key) => validateStoredWorld(key, all[key]));
+    return results.sort(
+      (a, b) => {
+        const aUpdated = 'world' in a ? a.world.metadata.updatedAt : a.updatedAt;
+        const bUpdated = 'world' in b ? b.world.metadata.updatedAt : b.updatedAt;
+        return bUpdated - aUpdated;
+      },
     );
   },
 
@@ -149,10 +201,9 @@ export const SaveService = {
   /** Import a world from a JSON string (from file upload). Overwrites if id matches. */
   importWorld(json: string): WorldData | null {
     try {
-      const world = JSON.parse(json) as WorldData;
-      if (!world.id || !world.name) return null;
-      this.saveWorld(world);
-      return world;
+      const result = validateWorldData(JSON.parse(json));
+      if (!result.compatible) return null;
+      return this.saveWorld(result.world) ? result.world : null;
     } catch {
       return null;
     }

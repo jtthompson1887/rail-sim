@@ -36,6 +36,7 @@ export class ValidationHint {
   private label!: Phaser.GameObjects.Text;
   private hideTimer: ReturnType<typeof setTimeout> | null = null;
   private currentState: 'ok' | 'warning' | 'error' = 'ok';
+  private enabled = true;
 
   private readonly hintHandler = (data: { state: 'ok' | 'warning' | 'error'; message: string }) => {
     this.show(data.state, data.message);
@@ -72,6 +73,7 @@ export class ValidationHint {
 
   /** Show (or update) the hint with the given state and message. */
   show(state: 'ok' | 'warning' | 'error', message: string): void {
+    if (!this.enabled) return;
     if (this.hideTimer !== null) {
       clearTimeout(this.hideTimer);
       this.hideTimer = null;
@@ -136,6 +138,20 @@ export class ValidationHint {
     const pillW = isMobileWidth(this.sw) ? this.sw * 0.85 : 420;
     this.pill.setSize(pillW, scalePx(36, this.sw, this.sh));
     this.label.setWordWrapWidth(pillW - scalePx(16, this.sw, this.sh));
+  }
+
+  setVisible(visible: boolean): void {
+    this.enabled = visible;
+    if (!visible) this.clear();
+  }
+
+  clear(): void {
+    if (this.hideTimer !== null) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = null;
+    }
+    this.label.setText('');
+    this.container.setAlpha(0);
   }
 
   destroy(): void {

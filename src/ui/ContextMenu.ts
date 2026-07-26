@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
 import TrackManager from '../managers/TrackManager';
-import { WorldManager } from '../managers/WorldManager';
+import {
+  CONSTRUCTION_ANALYSIS_LOCK_REASON,
+} from './EditorToolbar';
 
 export interface MenuItem {
   label: string;
@@ -132,6 +134,7 @@ export class ContextMenu {
   destroy(): void {
     this.close();
     this.scene.input.off('pointerdown', this.closeHandler);
+    this.scene.input.keyboard.off('keydown', this.escHandler);
     this.container.destroy();
   }
 }
@@ -154,20 +157,20 @@ export function buildTrackContextItems(
     const track = trackManager.getTrack(selectedUUIDs[0]);
     if (track) {
       items.push({
-        label: track.isTunnel ? '☀ Set as Surface' : '🚇 Set as Tunnel',
+        label: 'Structures locked to engineering analysis',
         action: () => {
-          track.isTunnel = !track.isTunnel;
-          const def = WorldManager.world?.tracks.find((t) => t.uuid === track.getUUID());
-          if (def) { def.isTunnel = track.isTunnel; }
+          EventBus.emit('ui:toast', {
+            message: CONSTRUCTION_ANALYSIS_LOCK_REASON,
+            type: 'info',
+          });
         },
       });
     }
   }
 
   items.push({
-    label: `🗑 Delete (${selectedUUIDs.length})`,
-    color: '#ff8080',
-    action: () => onDelete(selectedUUIDs),
+    label: 'Delete · Review exact refund',
+    action: () => onDelete([...selectedUUIDs]),
   });
 
   return items;
@@ -175,11 +178,9 @@ export function buildTrackContextItems(
 
 /** Build context menu items for an empty-space right-click. */
 export function buildEmptyContextItems(
-  screenX: number,
-  screenY: number,
-  onGenerateHere: (sx: number, sy: number) => void,
+  _screenX: number,
+  _screenY: number,
+  _onGenerateHere: (sx: number, sy: number) => void,
 ): MenuItem[] {
-  return [
-    { label: '⚙ Generate tracks here', action: () => onGenerateHere(screenX, screenY) },
-  ];
+  return [];
 }

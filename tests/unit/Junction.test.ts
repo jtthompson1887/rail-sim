@@ -82,6 +82,18 @@ describe('Junction', () => {
       junction.branchState = 'right';
       expect(junction.branchState).toBe('right');
     });
+
+    it('synchronizes branch visuals without emitting a toggle event', () => {
+      const [main, left, right] = junction.getAllTracks();
+      const callback = jest.fn();
+      EventBus.on('junction:toggled', callback);
+      junction.branchState = 'left';
+      expect((left as any)._alpha).toBe(1);
+      expect((right as any)._alpha).toBe(0.5);
+      expect((main as any)._alpha).toBe(1);
+      expect(callback).not.toHaveBeenCalled();
+      EventBus.off('junction:toggled', callback);
+    });
   });
 
   describe('toggle()', () => {

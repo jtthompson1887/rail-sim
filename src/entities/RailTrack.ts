@@ -1,10 +1,15 @@
 import Phaser from 'phaser';
-type Path = Phaser.Curves.Path;
+type CubicBezier = Phaser.Curves.CubicBezier;
 import { GameConfig } from '../config/GameConfig';
 import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
 import { RailTrackRenderer } from './RailTrackRenderer';
 import { createPort, type TrackPort } from './TrackPort';
+import type {
+  StructureInterval,
+  StructureType,
+  VerticalProfileDef,
+} from '../config/WorldData';
 
 /**
  * Minimal interface for objects whose position can be projected onto a track.
@@ -29,16 +34,15 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private p0!: Phaser.Math.Vector2;
   private p1!: Phaser.Math.Vector2;
   private p2!: Phaser.Math.Vector2;
-  private curve!: Path;
+  private curve!: CubicBezier;
   private uuid: string;
   private renderer: RailTrackRenderer;
   /** Port-based connection model. */
   private _startPort!: TrackPort;
   private _endPort!: TrackPort;
-  /** When true the track runs through a tunnel and renders with a darker tint. */
-  isTunnel: boolean = false;
-  /** Average terrain elevation at the time of placement. */
-  elevation: number = 0;
+  private _verticalProfile: VerticalProfileDef | null = null;
+  private _structures: StructureInterval[] | null = null;
+  private _paidBuildCost: number | null = null;
   protected trackConnections: {
     next?: TrackNode;
     previous?: TrackNode;
@@ -56,15 +60,19 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   }
 
   updateTrackVectors(p0: Phaser.Math.Vector2, p1: Phaser.Math.Vector2, p2: Phaser.Math.Vector2, p3: Phaser.Math.Vector2): void {
-    this.curve = new Phaser.Curves.Path(p0.x, p0.y).splineTo([p1, p2, p3]);
-    this.p0 = p0;
-    this.p1 = p1;
-    this.p2 = p2;
+    const copiedP0 = new Phaser.Math.Vector2(p0.x, p0.y);
+    const copiedP1 = new Phaser.Math.Vector2(p1.x, p1.y);
+    const copiedP2 = new Phaser.Math.Vector2(p2.x, p2.y);
+    const copiedP3 = new Phaser.Math.Vector2(p3.x, p3.y);
+    this.curve = new Phaser.Curves.CubicBezier(copiedP0, copiedP1, copiedP2, copiedP3);
+    this.p0 = copiedP0;
+    this.p1 = copiedP1;
+    this.p2 = copiedP2;
     this.totalDistance = this.curve.getLength();
     this.iterations = Math.max(1, Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale)));
     // Update port positions
     this._startPort.position = { x: p0.x, y: p0.y };
-    this._endPort.position = { x: p3.x, y: p3.y };
+    this._endPort.position = { x: copiedP3.x, y: copiedP3.y };
     this.renderer.rebuild();
   }
 
@@ -122,7 +130,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     return (lo + hi) / 2;
   }
 
-  getCurvePath(): Path {
+  getCurvePath(): CubicBezier {
     return this.curve;
   }
 
@@ -160,6 +168,46 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   /** Override the auto-generated UUID (used when restoring from saved state). */
   setUUID(uuid: string): void {
     this.uuid = uuid;
+  }
+
+  setConstructionData(
+    verticalProfile: VerticalProfileDef,
+    structures: StructureInterval[],
+    paidBuildCost: number,
+  ): void {
+    this._verticalProfile = {
+      profileVersion: 1,
+      knots: verticalProfile.knots.map((knot) => ({ ...knot })),
+    };
+    this._structures = structures.map((interval) => ({ ...interval }));
+    this._paidBuildCost = paidBuildCost;
+    this.renderer.rebuild();
+  }
+
+  get verticalProfile(): VerticalProfileDef | null {
+    if (!this._verticalProfile) return null;
+    return {
+      profileVersion: 1,
+      knots: this._verticalProfile.knots.map((knot) => ({ ...knot })),
+    };
+  }
+
+  get structures(): StructureInterval[] | null {
+    return this._structures?.map((interval) => ({ ...interval })) ?? null;
+  }
+
+  get paidBuildCost(): number | null {
+    return this._paidBuildCost;
+  }
+
+  structureTypeAt(rawT: number): StructureType {
+    if (!this._structures) return 'surface';
+    const t = Math.max(0, Math.min(1, rawT));
+    const match = this._structures.find((interval, index) => (
+      t >= interval.startT
+      && (t < interval.endT || index === this._structures!.length - 1)
+    ));
+    return match?.type ?? 'surface';
   }
 
   hasNext(): boolean {
