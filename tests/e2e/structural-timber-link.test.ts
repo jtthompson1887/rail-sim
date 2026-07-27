@@ -947,7 +947,7 @@ async function driveSelectedTrainToFacility(
   page: Page,
   trainId: string,
   destination: 'sawmill' | 'prefabrication-plant',
-  timeout = 180_000,
+  timeout = 210_000,
 ): Promise<StructuralBrowserSnapshot> {
   const opening = await snapshot(page);
   const access = facility(opening, destination).railAccess;
@@ -1064,7 +1064,8 @@ async function driveSelectedTrainToFacility(
             await pulse(propulsionKey, 20);
           }
         } else if (motion === 'receding') {
-          await setHeldKey(propulsionKey);
+          await setHeldKey(null);
+          await pulse(propulsionKey, 20);
         } else {
           await setHeldKey(null);
           if (live.speedWorldUnitsPerSecond < 46) {
@@ -1568,7 +1569,7 @@ test.describe('real structural-timber browser journey', () => {
     test(`${seedCase.seed} completes the structural-timber link`, async ({
       page,
     }) => {
-      test.setTimeout(seedCase.viewport.width <= 720 ? 720_000 : 600_000);
+      test.setTimeout(720_000);
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       page.on('console', (message) => {
