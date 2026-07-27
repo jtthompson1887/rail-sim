@@ -47,9 +47,6 @@ interface PresentationSnapshot {
 declare global {
   interface Window {
     __railSimConstructionSnapshot?: () => PresentationSnapshot;
-    __railSimFirstRouteHarness?: {
-      advanceFixedTicks: (count: number) => void;
-    };
   }
 }
 
@@ -324,7 +321,12 @@ for (const { seed, viewport } of playtestCases) {
     // deterministic number of fixed ticks so headless CI rAF throttling does
     // not leave the recipes stuck between cycles.
     await page.evaluate(() => {
-      window.__railSimFirstRouteHarness?.advanceFixedTicks(7);
+      const harness = (window as unknown as {
+        __railSimFirstRouteHarness?: {
+          advanceFixedTicks: (count: number) => void;
+        };
+      }).__railSimFirstRouteHarness;
+      harness?.advanceFixedTicks(7);
     });
 
     const operated = await snapshot(page);
