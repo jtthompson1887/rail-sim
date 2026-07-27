@@ -6,6 +6,7 @@ export class FreightObjectiveCard {
   private readonly title = document.createElement('h2');
   private readonly status = document.createElement('strong');
   private readonly steps = document.createElement('ol');
+  private stateFingerprint: string | null = null;
   private visible = true;
   private readonly resizeHandler = () => this.applyLayout();
   private readonly stopPropagation = (event: Event) => event.stopPropagation();
@@ -48,6 +49,15 @@ export class FreightObjectiveCard {
   }
 
   setState(dto: FreightObjectiveDto): void {
+    const fingerprint = JSON.stringify([
+      dto.id,
+      dto.title,
+      dto.status,
+      dto.achieved,
+      dto.steps.map(({ id, label, state }) => [id, label, state]),
+    ]);
+    if (fingerprint === this.stateFingerprint) return;
+    this.stateFingerprint = fingerprint;
     this.root.dataset.objective = dto.id;
     this.root.setAttribute(
       'aria-label',

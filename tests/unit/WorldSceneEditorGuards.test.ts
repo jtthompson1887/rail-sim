@@ -20,8 +20,13 @@ import TrackManager from '../../src/managers/TrackManager';
 import { EconomySystem } from '../../src/economy/EconomySystem';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import { ConstructionService } from '../../src/systems/ConstructionService';
+import type { FreightDeliveryEvent } from '../../src/freight/CargoSystem';
 
 const { makeScene } = require('../../__mocks__/phaser');
+
+type MutableFreightDeliveryEvent = {
+  -readonly [Key in keyof FreightDeliveryEvent]: FreightDeliveryEvent[Key];
+};
 
 describe('WorldScene disabled construction bypass guards', () => {
   const startupScenes: any[] = [];
@@ -57,6 +62,26 @@ describe('WorldScene disabled construction bypass guards', () => {
     world.economy = clonePlainData(fixture.economy);
     world.trains = clonePlainData(fixture.trains);
     world.freightProgress = clonePlainData(fixture.freightProgress);
+    return world;
+  }
+
+  function installStructuralToastWorld(
+    worldId: string,
+  ): ReturnType<typeof WorldManager.createNew> {
+    const world = installFirstRouteWorld();
+    world.id = worldId;
+    const sawmill = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'sawmill',
+    );
+    if (!sawmill) throw new Error('Missing Sawmill');
+    world.economy.facilities.push({
+      ...clonePlainData(sawmill),
+      id: 'prefabrication-plant',
+      definitionId: 'prefabrication-plant',
+      name: 'Prefabrication Plant',
+    });
+    world.freightProgress.profitableLogDeliveryCompleted = true;
+    world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
     return world;
   }
 
@@ -1127,13 +1152,13 @@ describe('WorldScene disabled construction bypass guards', () => {
       ([event]) => event === 'ui:freight-objective',
     )).toHaveLength(2);
     expect(emit.mock.calls.filter(
-      ([event, payload]) => event === 'ui:toast'
-        && (payload as any).message.includes('Regional Development Grant'),
-    )).toHaveLength(1);
-    expect(emit.mock.calls.filter(
-      ([event, payload]) => event === 'ui:toast'
-        && (payload as any).message.includes('Extend the timber chain'),
-    )).toHaveLength(1);
+      ([event]) => event === 'ui:toast',
+    ).map(([, payload]) => payload)).toEqual([{
+      message:
+        'First freight route complete · Regional Development Grant +£250,000'
+        + ' · Next: Extend the timber chain',
+      type: 'success',
+    }]);
   });
 
   it('emits one payload-backed structural objective toast without a generic duplicate', () => {
@@ -1206,6 +1231,83 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(emit).toHaveBeenCalledWith('ui:toast', {
       message: 'Delivery complete · +£6,000',
+      type: 'success',
+    });
+  });
+
+  it.each<[
+    string,
+    Partial<MutableFreightDeliveryEvent>,
+    string | undefined,
+  ]>([
+    ['unprofitable full delivery', { operatingProfit: 0 }, undefined],
+    ['wrong product', { productId: 'logs' }, undefined],
+    ['wrong destination definition', {
+      destinationFacilityId: 'sawmill',
+    }, undefined],
+    ['unknown train', { trainId: 'unknown-train' }, undefined],
+    ['unknown freight set', {}, 'unknown-set'],
+    ['unknown product', { productId: 'unknown-product' }, undefined],
+  ])('emits one generic toast without crashing for %s', (
+    _case,
+    overrides,
+    freightSetId,
+  ) => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld(`negative-toast-${_case}`);
+    if (freightSetId) world.trains[0].freightSetId = freightSetId;
+    const event: MutableFreightDeliveryEvent = {
+      trainId: world.trains[0].id,
+      productId: 'structural-timber',
+      units: 60,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 30,
+      revenue: 7_000,
+      runningCost: 2_000,
+      operatingProfit: 5_000,
+      ...overrides,
+    };
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    expect(() => scene.presentCompletedDelivery(
+      Object.freeze(event),
+    )).not.toThrow();
+
+    expect(emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload)).toEqual([{
+      message: 'Delivery complete · +£7,000',
+      type: 'success',
+    }]);
+  });
+
+  it('enriches the first qualifying structural delivery and keeps repeats generic', () => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld('repeat-structural-delivery');
+    const event = Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'structural-timber',
+      units: 60,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 31,
+      revenue: 8_000,
+      runningCost: 2_000,
+      operatingProfit: 6_000,
+    });
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(event);
+    scene.presentCompletedDelivery(event);
+
+    const toasts = emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload as any);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0].message).toContain(
+      'Structural Timber delivered to Prefabrication Plant',
+    );
+    expect(toasts[1]).toEqual({
+      message: 'Delivery complete · +£8,000',
       type: 'success',
     });
   });

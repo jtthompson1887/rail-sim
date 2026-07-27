@@ -5,6 +5,19 @@ import type { FreightObjectiveDto } from '../../src/freight/FreightObjective';
 import { EventBus } from '../../src/services/EventBus';
 import { FreightObjectiveCard } from '../../src/ui/FreightObjectiveCard';
 
+interface MutableFreightObjective {
+  objectiveVersion: 1;
+  id: FreightObjectiveDto['id'];
+  title: string;
+  status: string;
+  achieved: boolean;
+  steps: Array<{
+    id: FreightObjectiveDto['steps'][number]['id'];
+    label: string;
+    state: FreightObjectiveDto['steps'][number]['state'];
+  }>;
+}
+
 const objective = (achieved = false): FreightObjectiveDto => Object.freeze({
   objectiveVersion: 1,
   id: 'structural-timber-link',
@@ -36,6 +49,39 @@ const objective = (achieved = false): FreightObjectiveDto => Object.freeze({
     }),
   ]),
 });
+
+const detachedObjective = (
+  source: FreightObjectiveDto,
+): MutableFreightObjective => (
+  JSON.parse(JSON.stringify(source)) as MutableFreightObjective
+);
+
+const semanticChanges: Array<[
+  string,
+  (dto: MutableFreightObjective) => void,
+]> = [
+  ['objective ID', (dto) => {
+    dto.id = 'first-profitable-route';
+  }],
+  ['title', (dto) => {
+    dto.title = 'Changed title';
+  }],
+  ['status', (dto) => {
+    dto.status = 'Changed status';
+  }],
+  ['achieved state', (dto) => {
+    dto.achieved = true;
+  }],
+  ['step ID', (dto) => {
+    dto.steps[0].id = 'connect-route';
+  }],
+  ['step label', (dto) => {
+    dto.steps[0].label = 'Changed step';
+  }],
+  ['transient step state', (dto) => {
+    dto.steps[0].state = 'current';
+  }],
+];
 
 describe('FreightObjectiveCard', () => {
   let card: FreightObjectiveCard;
@@ -83,6 +129,40 @@ describe('FreightObjectiveCard', () => {
       'Complete: Produce structural timber',
     );
     expect(root.textContent).toContain('Pending: Load structural timber');
+  });
+
+  it('preserves live-region DOM nodes for semantically identical updates', () => {
+    const first = objective();
+    card.setState(first);
+    const root = document.querySelector(
+      '[data-testid="freight-objective"]',
+    ) as HTMLElement;
+    const title = root.querySelector('h2');
+    const status = root.querySelector('strong');
+    const steps = Array.from(root.querySelectorAll('li'));
+
+    card.setState(detachedObjective(first));
+
+    expect(root.querySelector('h2')).toBe(title);
+    expect(root.querySelector('strong')).toBe(status);
+    Array.from(root.querySelectorAll('li')).forEach((step, index) => {
+      expect(step).toBe(steps[index]);
+    });
+  });
+
+  it.each(semanticChanges)('rerenders when %s changes', (_field, mutate) => {
+    const first = objective();
+    card.setState(first);
+    const root = document.querySelector(
+      '[data-testid="freight-objective"]',
+    ) as HTMLElement;
+    const firstStep = root.querySelector('li');
+    const changed = detachedObjective(first);
+    mutate(changed);
+
+    card.setState(changed);
+
+    expect(root.querySelector('li')).not.toBe(firstStep);
   });
 
   it('keeps the bounded mobile layout and contains pointer propagation', () => {

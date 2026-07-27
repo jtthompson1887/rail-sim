@@ -31,6 +31,7 @@ import {
   type CreateTool,
 } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
+import { REGIONAL_DEVELOPMENT_GRANT } from '../config/FreightProgression';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
 import type { IEditorTool } from '../systems/tools/IEditorTool';
@@ -1589,7 +1590,8 @@ export default class WorldScene extends Phaser.Scene {
     )) {
       EventBus.emit('ui:toast', {
         message:
-          'First freight route complete · Regional Development Grant +£250,000'
+          'First freight route complete · Regional Development Grant +£'
+          + REGIONAL_DEVELOPMENT_GRANT.toLocaleString('en-GB')
           + ' · Next: Extend the timber chain',
         type: 'success',
       });
