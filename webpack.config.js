@@ -8,7 +8,7 @@ module.exports = (env = {}) => ({
     output: {
         filename: 'main.js',
         path: path.resolve(__dirname, 'dist'),
-        publicPath: '/',
+        publicPath: 'auto',
         chunkFilename: '[name].[contenthash].chunk.js',
     },
     resolve: {
