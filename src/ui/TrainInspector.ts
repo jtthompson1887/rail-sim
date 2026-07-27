@@ -22,6 +22,9 @@ export class TrainInspector {
   private readonly batchText = document.createElement('div');
   private readonly batch = document.createElement('progress');
   private readonly figures = document.createElement('div');
+  private readonly currentTripProfit = document.createElement('span');
+  private readonly lastDeliveryProfit = document.createElement('span');
+  private readonly lifetimeProfit = document.createElement('span');
   private readonly controls = document.createElement('div');
   private enabled = true;
   private current: TrainInspectionDto | null = null;
@@ -72,6 +75,9 @@ export class TrainInspector {
       'display:block;width:100%;height:8px;accent-color:#69df9a';
     this.figures.style.cssText =
       'white-space:pre-line;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12)';
+    this.currentTripProfit.dataset.testid = 'train-current-trip-profit';
+    this.lastDeliveryProfit.dataset.testid = 'train-last-delivery-profit';
+    this.lifetimeProfit.dataset.testid = 'train-lifetime-profit';
     this.controls.setAttribute('aria-label', 'Train throttle');
     this.controls.style.cssText =
       'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px';
@@ -129,24 +135,63 @@ export class TrainInspector {
     this.cargo.value = dto.cargo.units;
     this.cargo.setAttribute(
       'aria-label',
-      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of ${dto.cargo.capacityUnits} tonnes`,
+      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of `
+      + `${dto.cargo.capacityUnits} ${dto.cargo.unitLabel}`,
     );
     this.nearest.textContent = dto.nearestEligibleFacility
       ? `Nearest eligible: ${dto.nearestEligibleFacility}`
       : 'Nearest eligible: none';
-    this.status.textContent = dto.transfer.blocker
-      ?? titleCase(dto.transfer.kind);
-    this.batchText.textContent = `Batch ${dto.transfer.batchUnits} / 10 t`;
+    this.status.textContent = dto.transferRemedy
+      || titleCase(dto.transfer.kind);
+    const compactUnit = dto.cargo.unitLabel === 'tonnes' ? 't' : 'units';
+    this.batchText.textContent =
+      `Batch ${dto.transfer.batchUnits} / 10 ${compactUnit}`;
     this.batch.value = dto.transfer.batchUnits;
     this.batch.setAttribute(
       'aria-label',
-      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 tonnes`,
+      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 `
+      + dto.cargo.unitLabel,
     );
-    this.figures.textContent = [
-      `Current trip · revenue ${CURRENCY.format(dto.currentTrip.revenue)} · running ${CURRENCY.format(dto.currentTrip.runningCost)} · ${CURRENCY.format(dto.currentTrip.operatingProfit)}`,
-      `Last delivery · revenue ${CURRENCY.format(dto.lastDelivery.revenue)} · running ${CURRENCY.format(dto.lastDelivery.runningCost)} · ${CURRENCY.format(dto.lastDelivery.operatingProfit)}`,
-      `Lifetime · ${dto.lifetime.deliveredUnits} t · revenue ${CURRENCY.format(dto.lifetime.revenue)} · running ${CURRENCY.format(dto.lifetime.runningCost)} · ${CURRENCY.format(dto.lifetime.operatingProfit)}`,
-    ].join('\n');
+    this.currentTripProfit.textContent =
+      CURRENCY.format(dto.currentTrip.operatingProfit);
+    this.lastDeliveryProfit.textContent =
+      CURRENCY.format(dto.lastDelivery.operatingProfit);
+    this.lifetimeProfit.textContent =
+      CURRENCY.format(dto.lifetime.operatingProfit);
+    const line = (
+      label: string,
+      revenue: number,
+      runningCost: number,
+      profit: HTMLElement,
+    ): HTMLDivElement => {
+      const row = document.createElement('div');
+      row.append(
+        `${label} · revenue ${CURRENCY.format(revenue)} · running `
+        + `${CURRENCY.format(runningCost)} · `,
+        profit,
+      );
+      return row;
+    };
+    this.figures.replaceChildren(
+      line(
+        'Current trip',
+        dto.currentTrip.revenue,
+        dto.currentTrip.runningCost,
+        this.currentTripProfit,
+      ),
+      line(
+        'Last delivery',
+        dto.lastDelivery.revenue,
+        dto.lastDelivery.runningCost,
+        this.lastDeliveryProfit,
+      ),
+      line(
+        `Lifetime · ${dto.lifetime.deliveredUnits} ${compactUnit}`,
+        dto.lifetime.revenue,
+        dto.lifetime.runningCost,
+        this.lifetimeProfit,
+      ),
+    );
     this.syncVisibility();
   }
 

@@ -55,7 +55,7 @@ describe('VehiclePurchasePanel', () => {
     expect(root.textContent).toContain('General Flatbed Set');
     expect(root.textContent).toContain('£90,000');
     expect(root.textContent).toContain('60 tonnes');
-    expect(root.textContent).toContain('Logs, Structural Timber');
+    expect(root.textContent).toContain('Logs · Structural Timber');
     expect(root.textContent).toContain('£20 / active tick');
     expect(root.textContent).toContain('Cash after £110,000');
     expect(root.querySelectorAll(

@@ -16,6 +16,7 @@ const inspection = (
   movementState: 'stopped',
   cargo: Object.freeze({
     productLabel: 'Logs',
+    unitLabel: 'tonnes',
     units: 40,
     capacityUnits: 60,
     text: 'Logs 40 / 60 t',
@@ -32,6 +33,11 @@ const inspection = (
     capacityUnits: 60,
     batchRevenue: 640,
   }),
+  transferRemedy: blocker === null
+    ? ''
+    : blocker === 'train-moving'
+      ? 'Stop the train to transfer cargo'
+      : `Remedy for ${blocker}`,
   currentTrip: Object.freeze({
     revenue: 900,
     runningCost: 140,
@@ -87,6 +93,15 @@ describe('TrainInspector', () => {
     expect(root.textContent).toContain('£760');
     expect(root.textContent).toContain('Last delivery');
     expect(root.textContent).toContain('Lifetime');
+    expect(root.querySelector(
+      '[data-testid="train-current-trip-profit"]',
+    )?.textContent).toBe('£760');
+    expect(root.querySelector(
+      '[data-testid="train-last-delivery-profit"]',
+    )?.textContent).toBe('£880');
+    expect(root.querySelector(
+      '[data-testid="train-lifetime-profit"]',
+    )?.textContent).toBe('£2,780');
     expect(cargo.value).toBe(40);
     expect(cargo.max).toBe(60);
     expect(cargo.getAttribute('aria-label')).toBe('Cargo Logs 40 of 60 tonnes');
@@ -109,11 +124,15 @@ describe('TrainInspector', () => {
     'destination-full',
     'product-not-accepted',
     'insufficient-running-cash',
-  ] as const)('renders the exact blocker copy: %s', (blocker) => {
+  ] as const)('renders the centralised blocker remedy: %s', (blocker) => {
     panel.setState(inspection(blocker));
     expect(document.querySelector(
       '[data-testid="train-transfer-status"]',
-    )?.textContent).toBe(blocker);
+    )?.textContent).toBe(
+      blocker === 'train-moving'
+        ? 'Stop the train to transfer cargo'
+        : `Remedy for ${blocker}`,
+    );
   });
 
   it('emits safe mobile throttle controls and stops their pointer gestures', () => {

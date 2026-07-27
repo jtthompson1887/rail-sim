@@ -1606,6 +1606,15 @@ export default class WorldScene extends Phaser.Scene {
       return;
     }
     const train = world.trains.find(({ id }) => id === selectedId);
+    const fallbackFreightSet = train
+      ? getFreightSet(train.freightSetId)
+      : undefined;
+    const fallbackProduct = train?.cargo
+      ? getProduct(train.cargo.productId)
+      : undefined;
+    const fallbackCapacity = fallbackFreightSet && fallbackProduct
+      ? capacityForProduct(fallbackFreightSet, fallbackProduct)
+      : null;
     const transfer = this.cargoStatusByTrainId.get(selectedId) ?? {
       trainId: selectedId,
       facilityId: null,
@@ -1614,7 +1623,9 @@ export default class WorldScene extends Phaser.Scene {
       blocker: null,
       batchUnits: 0,
       cargoUnits: train?.cargo?.units ?? 0,
-      capacityUnits: 60,
+      capacityUnits: fallbackCapacity?.ok
+        ? fallbackCapacity.capacityUnits
+        : 0,
       batchRevenue: 0,
     };
     EventBus.emit('ui:train-inspection', {

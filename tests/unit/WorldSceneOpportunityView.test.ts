@@ -6,6 +6,7 @@ import { GameStateManager } from '../../src/managers/GameStateManager';
 import WorldScene from '../../src/scenes/WorldScene';
 import { GameConfig } from '../../src/config/GameConfig';
 import { EventBus } from '../../src/services/EventBus';
+import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
 
 describe('WorldScene persisted opportunity view', () => {
   beforeEach(() => {
@@ -395,5 +396,49 @@ describe('WorldScene persisted opportunity view', () => {
     });
 
     emit.mockRestore();
+  });
+
+  it('uses catalogue capacity rather than a 60-unit fallback for an unknown cargo', () => {
+    const world = WorldManager.createNew(
+      'Fallback capacity',
+      'fallback-capacity-seed',
+    );
+    world.trains = [{
+      ...makeFreightTrainDef(),
+      cargo: {
+        productId: 'removed-product',
+        units: 4,
+        loadedUnits: 4,
+        originFacilityId: 'managed-forest',
+      },
+    }];
+    const scene = new WorldScene() as any;
+    scene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue([]),
+    };
+    scene.trainManager = {
+      selectedTrain: { getUUID: () => 'train-1' },
+    };
+    scene.cargoStatusByTrainId.clear();
+    const inspections: any[] = [];
+    const listener = ({ inspection }: { inspection: unknown }) => {
+      inspections.push(inspection);
+    };
+    EventBus.on('ui:train-inspection', listener);
+
+    scene.publishFreightPresentation([{
+      trainId: 'train-1',
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.5,
+      facing: 1,
+      x: 0,
+      y: 0,
+      speedWorldUnitsPerSecond: 0,
+      throttle: 0,
+      derailed: false,
+    }]);
+
+    expect(inspections.at(-1)?.transfer.capacityUnits).toBe(0);
+    EventBus.off('ui:train-inspection', listener);
   });
 });

@@ -2,6 +2,8 @@ import {
   buildFreightPurchasePresentation,
   buildOperatingSummary,
   buildTrainInspection,
+  formatCargoRemedy,
+  formatFreightPurchaseRemedy,
 } from '../../src/freight/FreightPresentation';
 import type {
   OperatingSummaryDto,
@@ -10,6 +12,7 @@ import { postLedgerEntry } from '../../src/economy/FinanceLedger';
 import type { CompanyStateDef } from '../../src/economy/EconomyData';
 import type { CargoTransferStatus } from '../../src/freight/CargoSystem';
 import type { TrainRuntimeSnapshot } from '../../src/freight/TrainRuntime';
+import { clonePlainData } from '../../src/utils/PlainData';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -96,7 +99,7 @@ describe('FreightPresentation', () => {
       freightSetId: 'flatbed-freight-set',
       displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs, Structural Timber',
+      compatibleCargoLabel: 'Logs · Structural Timber',
       capacityLabel: '60 tonnes',
       runningCostLabel: '£20 / active tick',
       cashAfter: 110_000,
@@ -138,12 +141,14 @@ describe('FreightPresentation', () => {
       movementState: 'stopped',
       cargo: {
         productLabel: 'Logs',
+        unitLabel: 'tonnes',
         units: 40,
         capacityUnits: 60,
         text: 'Logs 40 / 60 t',
       },
       nearestEligibleFacility: 'Sawmill',
       transfer: status,
+      transferRemedy: '',
       currentTrip: {
         revenue: 900,
         runningCost: 140,
@@ -169,6 +174,215 @@ describe('FreightPresentation', () => {
       runtime({ trainId: 'missing' }),
       transfer({ trainId: 'missing' }),
     )).toBeNull();
+  });
+
+  it.each([
+    ['logs', 'Logs 40 / 60 t', 'Logs', 'tonnes'],
+    [
+      'structural-timber',
+      'Structural Timber 40 / 60 t',
+      'Structural Timber',
+      'tonnes',
+    ],
+  ] as const)(
+    'derives %s cargo name, units, and capacity from the catalogues',
+    (productId, text, productLabel, unitLabel) => {
+      const world = makeFirstFreightRouteWorld();
+      world.trains[0] = makeFreightTrainDef({
+        cargo: {
+          productId,
+          units: 40,
+          loadedUnits: 40,
+          originFacilityId: 'managed-forest',
+        },
+      });
+
+      expect(buildTrainInspection(
+        world,
+        runtime(),
+        transfer({ productId }),
+      )?.cargo).toEqual({
+        productLabel,
+        unitLabel,
+        units: 40,
+        capacityUnits: 60,
+        text,
+      });
+    },
+  );
+
+  it('uses the transfer product to give an empty compatible train useful capacity', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = makeFreightTrainDef({ cargo: null });
+
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: -500 }),
+      transfer({
+        facilityId: 'managed-forest',
+        productId: 'logs',
+        kind: 'loading',
+        cargoUnits: 0,
+      }),
+    )?.cargo).toEqual({
+      productLabel: 'Empty',
+      unitLabel: 'tonnes',
+      units: 0,
+      capacityUnits: 60,
+      text: 'Empty 0 / 60 t',
+    });
+  });
+
+  it('uses the first valid compatible catalogue product for an early empty status with no product yet', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = makeFreightTrainDef({ cargo: null });
+
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: -500 }),
+      transfer({
+        facilityId: null,
+        productId: null,
+        kind: 'blocked',
+        blocker: 'not-operating',
+        cargoUnits: 0,
+        capacityUnits: 0,
+      }),
+    )?.cargo).toEqual({
+      productLabel: 'Empty',
+      unitLabel: 'tonnes',
+      units: 0,
+      capacityUnits: 60,
+      text: 'Empty 0 / 60 t',
+    });
+  });
+
+  it('prefers the chosen transfer facility, then derives the nearest eligible facility by distance and ID', () => {
+    const world = makeFirstFreightRouteWorld();
+    const secondForest = clonePlainData(world.economy.facilities.find(
+      ({ id }) => id === 'managed-forest',
+    )!);
+    secondForest.id = 'a-forest';
+    secondForest.name = 'Nearest Forest';
+    secondForest.railAccess = { x: -10, y: 0, radius: 120 };
+    world.economy.facilities.push(secondForest);
+    world.economy.facilities.find(
+      ({ id }) => id === 'managed-forest',
+    )!.railAccess = { x: 10, y: 0, radius: 120 };
+    world.trains[0] = makeFreightTrainDef({ cargo: null });
+
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: 0, y: 0 }),
+      transfer({
+        facilityId: null,
+        productId: 'logs',
+        kind: 'blocked',
+        blocker: 'not-operating',
+        cargoUnits: 0,
+      }),
+    )?.nearestEligibleFacility).toBe('Nearest Forest');
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: 0, y: 0 }),
+      transfer({
+        facilityId: 'sawmill',
+        productId: 'logs',
+        kind: 'blocked',
+        blocker: 'train-moving',
+      }),
+    )?.nearestEligibleFacility).toBe('Sawmill');
+  });
+
+  it('considers both recipe sources and destinations for a loaded train with an early blocker', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 40,
+        loadedUnits: 40,
+        originFacilityId: 'managed-forest',
+      },
+    });
+
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: -500, y: 0 }),
+      transfer({
+        facilityId: null,
+        productId: 'logs',
+        kind: 'blocked',
+        blocker: 'not-operating',
+      }),
+    )?.nearestEligibleFacility).toBe('Managed Forest');
+  });
+
+  it.each([
+    ['not-operating', 'Resume the game to transfer cargo'],
+    ['derailed', 'Rerail the train to transfer cargo'],
+    ['train-moving', 'Stop the train to transfer cargo'],
+    ['unknown-freight-set', 'This train has no recognised freight set'],
+    ['incompatible-product', 'General Flatbed Set cannot carry Logs'],
+    ['outside-eligible-facility', 'Move inside Sawmill rail access'],
+    ['source-empty', 'Sawmill has no Logs available'],
+    ['train-full', 'General Flatbed Set is full of Logs'],
+    ['destination-full', 'Sawmill Logs storage is full'],
+    ['product-not-accepted', 'Sawmill does not accept Logs'],
+    ['insufficient-running-cash', 'Add cash to cover train running costs'],
+  ] as const)('formats the %s blocker in one product-aware presenter', (
+    blocker,
+    expected,
+  ) => {
+    expect(formatCargoRemedy(
+      makeFirstFreightRouteWorld(),
+      'flatbed-freight-set',
+      transfer({ blocker, kind: 'blocked' }),
+    )).toBe(expected);
+  });
+
+  it('keeps unknown catalogue references inspectable without leaking IDs or undefined', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = {
+      ...makeFreightTrainDef(),
+      freightSetId: 'removed-set',
+      cargo: {
+        productId: 'removed-product',
+        units: 4,
+        loadedUnits: 4,
+        originFacilityId: 'managed-forest',
+      },
+    };
+    const dto = buildTrainInspection(
+      world,
+      runtime(),
+      transfer({
+        facilityId: 'removed-facility',
+        productId: 'removed-product',
+        blocker: 'unknown-freight-set',
+        kind: 'blocked',
+      }),
+    );
+
+    expect(dto).not.toBeNull();
+    expect(dto?.displayName).toBe('Unknown freight set');
+    expect(dto?.cargo).toEqual({
+      productLabel: 'Unknown cargo',
+      unitLabel: 'units',
+      units: 4,
+      capacityUnits: 0,
+      text: 'Unknown cargo 4 / 0 units',
+    });
+    expect(dto?.nearestEligibleFacility).toBe('Unknown facility');
+    expect(JSON.stringify(dto)).not.toMatch(
+      /removed-set|removed-product|removed-facility|undefined/,
+    );
+  });
+
+  it('exports the same purchase remedy used by the purchase panel and tool', () => {
+    expect(formatFreightPurchaseRemedy('outside-forest-access'))
+      .toBe('Place inside Managed Forest rail access');
+    expect(formatFreightPurchaseRemedy('world-install-failed'))
+      .toBe('General Flatbed Set purchase could not be completed');
   });
 
   it.each([

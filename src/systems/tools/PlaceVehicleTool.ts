@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
 import type RailTrack from '../../entities/RailTrack';
 import type {
-  FreightPurchaseBlocker,
   FreightPurchaseQuote,
   FreightPurchaseQuoteInput,
   FreightPurchaseResult,
   FreightPurchaseService,
 } from '../../freight/FreightPurchaseService';
+import { formatFreightPurchaseRemedy } from '../../freight/FreightPresentation';
 import { FLATBED_FREIGHT_SET_ID } from '../../freight/FreightSetCatalog';
 import type TrackManager from '../../managers/TrackManager';
 import type { TrainManager } from '../../managers/TrainManager';
@@ -15,14 +15,6 @@ import { EventBus } from '../../services/EventBus';
 import type { CommandStack } from '../CommandStack';
 import type { IEditorTool } from './IEditorTool';
 import type { VehicleType } from '../../config/VehicleTypes';
-
-const PURCHASE_REMEDIES: Partial<Record<FreightPurchaseBlocker, string>> = {
-  'no-track': 'Click on player track to place the General Flatbed Set',
-  'outside-forest-access': 'Place inside Managed Forest rail access',
-  'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for General Flatbed Set',
-  'duplicate-gesture': 'Purchase already in progress',
-};
 
 const freezeQuote = (
   quote: FreightPurchaseQuote,
@@ -84,13 +76,16 @@ export class PlaceVehicleTool implements IEditorTool {
     if (!this.wantsPointerButton(pointer.button)) return;
 
     if (this.purchaseInFlight) {
-      this.publishState(null, PURCHASE_REMEDIES['duplicate-gesture']!);
+      this.publishState(
+        null,
+        formatFreightPurchaseRemedy('duplicate-gesture'),
+      );
       return;
     }
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
       this.lastPlacement = null;
-      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
+      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
       return;
     }
 
@@ -104,12 +99,12 @@ export class PlaceVehicleTool implements IEditorTool {
     };
     const quote = this.quoteService?.quote(input);
     if (!quote) {
-      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
+      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
       return;
     }
     const detached = freezeQuote(quote);
     const message = detached.blocker
-      ? this.remedyFor(detached.blocker)
+      ? formatFreightPurchaseRemedy(detached.blocker)
       : '';
     if (detached.valid) this.purchaseInFlight = true;
     this.publishState(detached, message);
@@ -231,11 +226,6 @@ export class PlaceVehicleTool implements IEditorTool {
       cash: WorldManager.world?.company.cash ?? 0,
       message,
     }));
-  }
-
-  private remedyFor(blocker: FreightPurchaseBlocker): string {
-    return PURCHASE_REMEDIES[blocker]
-      ?? 'General Flatbed Set purchase could not be completed';
   }
 
   private drawInvalid(x: number, y: number): void {

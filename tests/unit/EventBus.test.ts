@@ -224,12 +224,14 @@ describe('EventBus', () => {
       movementState: 'stopped',
       cargo: Object.freeze({
         productLabel: 'Logs',
+        unitLabel: 'tonnes',
         units: 40,
         capacityUnits: 60,
         text: 'Logs 40 / 60 t',
       }),
       nearestEligibleFacility: 'Sawmill',
       transfer,
+      transferRemedy: '',
       currentTrip: Object.freeze({
         revenue: 500,
         runningCost: 100,
@@ -283,7 +285,7 @@ describe('EventBus', () => {
       freightSetId: 'flatbed-freight-set',
       displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs, Structural Timber',
+      compatibleCargoLabel: 'Logs · Structural Timber',
       capacityLabel: '60 tonnes',
       runningCostLabel: '£20 / active tick',
       cashAfter: 10_000,
