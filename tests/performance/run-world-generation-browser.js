@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
 const workspace = path.resolve(__dirname, '../..');
 const outputPath = path.join(workspace, 'test-results', 'world-generation-benchmark');
 const bundleName = 'world-generation-browser.js';
-const targetMs = process.env.CI ? 5_000 : 2_000;
+const targetMs = 2_000;
 
 function buildHarness() {
   return new Promise((resolve, reject) => {
@@ -77,7 +77,7 @@ function startHarnessServer() {
     const record = {
       ...measurement,
       targetMs,
-      target: process.env.CI ? 'ci-smoke' : 'local',
+      target: 'exact-2s',
       platform: `${process.platform}-${process.arch}`,
       cpu: os.cpus()[0]?.model ?? 'unknown',
       browser: `Chromium ${await browser.version()}`,

@@ -201,6 +201,27 @@ describe('WorldOpportunityGenerator', () => {
     });
   });
 
+  it('isolates an accepted opportunity from hostile predicate mutation', () => {
+    const baseline = new WorldOpportunityGenerator(variedTerrain).generate(
+      config,
+    );
+    const mutateAndAccept = jest.fn((opportunity: any) => {
+      opportunity.sites[0].x += 99_999;
+      opportunity.corridors[0].waypoints[0].y -= 99_999;
+      opportunity.corridors[0].feasibilityWitness.totalCost = -1;
+      opportunity.recommendedCamera.zoom = Number.NaN;
+      return true;
+    });
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      mutateAndAccept,
+    ).generate(config);
+
+    expect(mutateAndAccept).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(baseline);
+  });
+
   it.each([
     {
       seed: 'task15-manual-ash-keydiag',

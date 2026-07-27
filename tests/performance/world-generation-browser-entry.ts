@@ -29,27 +29,26 @@ function generate(seed: string) {
     { ok: true }
   > | null = null;
 
-  WorldEconomyGenerator.prototype.generate = function measuredGenerate(
-    generationConfig,
-    opportunity,
-  ) {
-    economyEvaluations += 1;
-    const result = originalGenerate.call(
-      this,
-      generationConfig,
-      opportunity,
-    );
-    totalEconomyCandidatesEvaluated += result.ok
-      ? result.diagnostics.candidatesEvaluated
-      : result.error.candidatesEvaluated;
-    if (result.ok) acceptedEconomy = result;
-    return result;
-  };
-
-  localStorage.clear();
-  WorldManager.reset();
   let creationResult: ReturnType<typeof WorldManager.tryCreateNew>;
   try {
+    WorldEconomyGenerator.prototype.generate = function measuredGenerate(
+      generationConfig,
+      opportunity,
+    ) {
+      economyEvaluations += 1;
+      const result = originalGenerate.call(
+        this,
+        generationConfig,
+        opportunity,
+      );
+      totalEconomyCandidatesEvaluated += result.ok
+        ? result.diagnostics.candidatesEvaluated
+        : result.error.candidatesEvaluated;
+      if (result.ok) acceptedEconomy = result;
+      return result;
+    };
+    localStorage.clear();
+    WorldManager.reset();
     creationResult = WorldManager.tryCreateNew(seed, seed);
   } finally {
     WorldEconomyGenerator.prototype.generate = originalGenerate;

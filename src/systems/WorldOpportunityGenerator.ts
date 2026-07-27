@@ -34,6 +34,7 @@ import {
   MAX_STARTER_CORRIDOR_COST,
   WorldOpportunityValidator,
 } from './WorldOpportunityValidator';
+import { clonePlainData } from '../utils/PlainData';
 
 export interface OpportunityGenerationDiagnostics {
   attemptsEvaluated: number;
@@ -57,7 +58,7 @@ export type OpportunityGenerationResult =
   };
 
 export type OpportunityAcceptancePredicate = (
-  opportunity: StarterOpportunityDef,
+  opportunity: Readonly<StarterOpportunityDef>,
 ) => boolean;
 
 interface Candidate {
@@ -242,7 +243,9 @@ export class WorldOpportunityGenerator {
       const first = candidates[firstIndex];
       const second = candidates[secondIndex];
       const opportunity = this.buildOpportunity(config, attempt, first, second);
-      if (opportunity && this.acceptsOpportunity(opportunity)) {
+      if (opportunity && this.acceptsOpportunity(
+        clonePlainData(opportunity),
+      )) {
         return opportunity;
       }
     }
