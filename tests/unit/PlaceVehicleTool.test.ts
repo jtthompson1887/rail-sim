@@ -252,6 +252,50 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     }));
   });
 
+  it('relaxes the snap threshold inside Managed Forest rail access and keeps it tight outside', () => {
+    const forest = WorldManager.world!.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'managed-forest',
+    );
+    if (!forest) throw new Error('Missing managed-forest facility in test world');
+    trackManager.getClosestTrack.mockReturnValue(null);
+
+    tool.onPointerDown(forest.railAccess.x, forest.railAccess.y, { button: 0 } as any);
+    expect(trackManager.getClosestTrack).toHaveBeenLastCalledWith(
+      { x: forest.railAccess.x, y: forest.railAccess.y },
+      forest.railAccess.radius,
+    );
+
+    tool.onPointerDown(
+      forest.railAccess.x + forest.railAccess.radius + 100,
+      forest.railAccess.y,
+      { button: 0 } as any,
+    );
+    expect(trackManager.getClosestTrack).toHaveBeenLastCalledWith(
+      {
+        x: forest.railAccess.x + forest.railAccess.radius + 100,
+        y: forest.railAccess.y,
+      },
+      80,
+    );
+  });
+
+  it('cancels an in-flight gesture so a new placement can be started', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const state = jest.fn();
+    EventBus.on('ui:freight-purchase-state', state);
+
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    expect(state).toHaveBeenLastCalledWith(expect.objectContaining({
+      quote: expect.objectContaining({ valid: true }),
+    }));
+
+    tool.cancel();
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    expect(quote).toHaveBeenCalledTimes(2);
+    EventBus.off('ui:freight-purchase-state', state);
+  });
+
   it('supports only the timber freight-set mode', () => {
     expect(() => tool.setFreightSetId('timber-freight-set')).not.toThrow();
   });
