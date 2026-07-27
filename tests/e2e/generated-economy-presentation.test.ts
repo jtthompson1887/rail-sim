@@ -319,24 +319,54 @@ for (const { seed, viewport } of playtestCases) {
 
     // The top-right HUD click toggles play mode. Advance the economy by a
     // deterministic number of fixed ticks so headless CI rAF throttling does
-    // not leave the recipes stuck between cycles.
+    // not leave the recipes stuck between cycles. A small fixed advance
+    // guarantees each recipe has produced at least one batch; we then top up
+    // one tick at a time until both facilities are observed mid-cycle so the
+    // recipeProgressTicks assertion is independent of any real-time ticks that
+    // elapsed before the harness call.
     await page.evaluate(() => {
       const harness = (window as unknown as {
         __railSimFirstRouteHarness?: {
           advanceFixedTicks: (count: number) => void;
         };
       }).__railSimFirstRouteHarness;
-      harness?.advanceFixedTicks(7);
+      harness?.advanceFixedTicks(5);
     });
 
-    const operated = await snapshot(page);
+    let operated = await snapshot(page);
     if (!operated) throw new Error('Raw-producer snapshot is unavailable');
-    const operatedForest = operated.world.economy.facilities.find(
+    let operatedForest = operated.world.economy.facilities.find(
       ({ id }) => id === 'managed-forest',
     )!;
-    const operatedQuarry = operated.world.economy.facilities.find(
+    let operatedQuarry = operated.world.economy.facilities.find(
       ({ id }) => id === 'quarry',
     )!;
+    let extraTicks = 0;
+    const maxExtraTicks = 3;
+    while (
+      extraTicks < maxExtraTicks
+      && (
+        operatedForest.recipeProgressTicks === 0
+        || operatedQuarry.recipeProgressTicks === 0
+      )
+    ) {
+      await page.evaluate(() => {
+        const harness = (window as unknown as {
+          __railSimFirstRouteHarness?: {
+            advanceFixedTicks: (count: number) => void;
+          };
+        }).__railSimFirstRouteHarness;
+        harness?.advanceFixedTicks(1);
+      });
+      operated = await snapshot(page);
+      operatedForest = operated.world.economy.facilities.find(
+        ({ id }) => id === 'managed-forest',
+      )!;
+      operatedQuarry = operated.world.economy.facilities.find(
+        ({ id }) => id === 'quarry',
+      )!;
+      extraTicks += 1;
+    }
     const operatedSawmill = operated.world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
     )!;
