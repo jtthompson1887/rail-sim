@@ -210,10 +210,11 @@ async function inspectSawmill(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="facility-status"]'))
     .toHaveText('Needs logs');
   const expectedSlots = [
-    { productId: 'logs', displayName: 'Logs' },
+    { productId: 'logs', displayName: 'Logs', unitLabel: 'tonne' },
     {
       productId: 'structural-timber',
       displayName: 'Structural Timber',
+      unitLabel: 'tonne',
     },
   ] as const;
   const inventories = page.locator('[data-testid="facility-inventories"]');
@@ -222,7 +223,7 @@ async function inspectSawmill(page: Page): Promise<void> {
   const quotes = page.locator('[data-testid="facility-quotes"]');
   const quoteRows = quotes.locator(':scope > div');
   await expect(quoteRows).toHaveCount(expectedSlots.length);
-  for (const { productId, displayName } of expectedSlots) {
+  for (const { productId, displayName, unitLabel } of expectedSlots) {
     const slot = sawmill.inventories[productId];
     expect(slot).toBeDefined();
     await expect(inventories).toContainText(
@@ -235,7 +236,7 @@ async function inspectSawmill(page: Page): Promise<void> {
     await expect(progress).toHaveAttribute('max', String(slot.capacity));
     await expect(progress).toHaveJSProperty('value', slot.quantity);
     await expect(quotes).toContainText(
-      new RegExp(`${displayName} · £[\\d,]+ / unit`),
+      new RegExp(`${displayName} · £[\\d,]+ / ${unitLabel}`),
     );
   }
   await expect(quotes).toContainText('Global construction');
