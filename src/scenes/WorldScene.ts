@@ -34,7 +34,10 @@ import { GameConfig } from '../config/GameConfig';
 import { REGIONAL_DEVELOPMENT_GRANT } from '../config/FreightProgression';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
-import type { IEditorTool } from '../systems/tools/IEditorTool';
+import type {
+  IEditorTool,
+  InputLockOwner,
+} from '../systems/tools/IEditorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
 import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
@@ -261,6 +264,12 @@ export default class WorldScene extends Phaser.Scene {
   private toolRegistry!: Map<CreateTool, IEditorTool>;
   private activeEditorTool: IEditorTool | null = null;
 
+  private inputLockOwnerForTool(tool: CreateTool): InputLockOwner {
+    return ['none', 'pan', 'terrain-view'].indexOf(tool) === -1
+      ? 'editor-tool'
+      : 'camera';
+  }
+
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
@@ -290,10 +299,9 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.activate();
     this.updateToolCursor(tool);
     // Set input lock owner: camera owns for free-pan tools, editor-tool owns for editing tools
-    const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
-    const lockOwner: import('../systems/tools/IEditorTool').InputLockOwner =
-      freePanTools.indexOf(tool) === -1 ? 'editor-tool' : 'camera';
-    this.cameraController.setInputLockOwner(lockOwner);
+    this.cameraController.setInputLockOwner(
+      this.inputLockOwnerForTool(tool),
+    );
   };
 
   private readonly undoHandler = () => {
@@ -1397,6 +1405,9 @@ export default class WorldScene extends Phaser.Scene {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
+    this.cameraController.setInputLockOwner(
+      this.inputLockOwnerForTool(this.activeTool),
+    );
     if (this.activeTool === 'place-track') this.clearFacilitySelection();
     this.updateFacilitySelectionAvailability();
     EventBus.emit('ui:toolbar-visible', { visible: true });
@@ -1487,6 +1498,7 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.cancel();
     this.selectionManager.clearSelection();
     for (const view of this.facilityViews) view.setSelectionEnabled(true);
+    this.cameraController.setInputLockOwner('camera');
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });
     // Auto-follow the first available train

@@ -2005,6 +2005,48 @@ describe('WorldScene disabled construction bypass guards', () => {
     saveSpy.mockRestore();
   });
 
+  it('gives camera ownership to Operate mode', () => {
+    const scene = new WorldScene();
+    (scene as any).activeEditorTool = { cancel: jest.fn() };
+    (scene as any).selectionManager = { clearSelection: jest.fn() };
+    (scene as any).facilityViews = [];
+    (scene as any).inputManager = { setupClickHandling: jest.fn() };
+    (scene as any).trainManager = { trains: [] };
+    (scene as any).cameraController = {
+      setInputLockOwner: jest.fn(),
+    };
+
+    (scene as any).activatePlayMode();
+
+    expect((scene as any).cameraController.setInputLockOwner)
+      .toHaveBeenCalledWith('camera');
+  });
+
+  it.each([
+    ['place-track', 'editor-tool'],
+    ['pan', 'camera'],
+  ] as const)(
+    'restores %s ownership as %s in Create mode',
+    (activeTool, lockOwner) => {
+      const scene = new WorldScene();
+      (scene as any).activeTool = activeTool;
+      (scene as any).selectedFacilityId = null;
+      (scene as any).facilityViews = [];
+      (scene as any).trainManager = { trains: [], carriages: [] };
+      (scene as any).cameraController = {
+        stopFollow: jest.fn(),
+        setInputLockOwner: jest.fn(),
+      };
+      const saveSpy = jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+
+      (scene as any).activateCreateMode();
+
+      expect((scene as any).cameraController.setInputLockOwner)
+        .toHaveBeenCalledWith(lockOwner);
+      saveSpy.mockRestore();
+    },
+  );
+
   it('launches create UI after a successful initial save with completed state', () => {
     const { save, launch } = createStartupScene('create', true);
     const editorLaunchIndex = launch.mock.calls
