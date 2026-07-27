@@ -39,9 +39,11 @@ const makeInput = (
     company: CompanyStateDef;
     economy: EconomyStateDef;
     trains: readonly TrainDef[];
-    firstRouteProgress: {
-      objectiveVersion: 1;
-      profitableDeliveryCompleted: boolean;
+    freightProgress: {
+      progressVersion: 1;
+      profitableLogDeliveryCompleted: boolean;
+      developmentGrantAwarded: boolean;
+      profitableStructuralTimberDeliveryCompleted: boolean;
     };
     runtime: readonly TrainRuntimeSnapshot[];
   }> = {},
@@ -52,7 +54,7 @@ const makeInput = (
     company: world.company,
     economy: world.economy,
     trains: world.trains,
-    firstRouteProgress: world.firstRouteProgress,
+    freightProgress: world.freightProgress,
     runtime: [makeRuntime()],
     ...overrides,
   };
@@ -696,7 +698,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       lifetimeRevenue: 400 + batchRevenue,
       lifetimeRunningCost: 0,
     });
-    expect(result.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+    expect(result.freightProgress.profitableLogDeliveryCompleted).toBe(true);
     expect(result.completedDeliveries).toEqual([{
       trainId: 'train-1',
       destinationFacilityId: sawmill.id,
@@ -733,7 +735,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.company.ledger).toEqual(input.company.ledger);
     expect(result.economy).toEqual(input.economy);
     expect(result.trains).toEqual(input.trains);
-    expect(result.firstRouteProgress).toEqual(input.firstRouteProgress);
+    expect(result.freightProgress).toEqual(input.freightProgress);
     expect(result.completedDeliveries).toEqual([]);
   });
 
@@ -880,7 +882,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       lifetimeRevenue: quote.unitPrice * 10,
       lifetimeRunningCost: 0,
     });
-    expect(result.firstRouteProgress.profitableDeliveryCompleted).toBe(false);
+    expect(result.freightProgress.profitableLogDeliveryCompleted).toBe(false);
     expect(result.completedDeliveries).toEqual([{
       trainId: 'train-1',
       destinationFacilityId: 'sawmill',
@@ -946,7 +948,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
           company: proposal.company,
           economy: proposal.economy,
           trains: proposal.trains,
-          firstRouteProgress: proposal.firstRouteProgress,
+          freightProgress: proposal.freightProgress,
           runtime: input.runtime,
         };
       }
@@ -971,7 +973,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
         lifetimeRunningCost: 0,
       });
       expect(
-        final.firstRouteProgress.profitableDeliveryCompleted,
+        final.freightProgress.profitableLogDeliveryCompleted,
       ).toBe(totalRevenue > 5_000);
       expect(final.completedDeliveries).toEqual([{
         trainId: 'train-1',
@@ -990,14 +992,16 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     const input = loadedAtSawmill(10, {
       currentTripRunningCost: 100_000,
     });
-    input.firstRouteProgress = {
-      objectiveVersion: 1,
-      profitableDeliveryCompleted: true,
+    input.freightProgress = {
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: true,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);
 
-    expect(result.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+    expect(result.freightProgress.profitableLogDeliveryCompleted).toBe(true);
   });
 });
 
@@ -1013,7 +1017,7 @@ describe('proposeCargoTick output authority', () => {
     expect(result.company).not.toBe(input.company);
     expect(result.economy).not.toBe(input.economy);
     expect(result.trains).not.toBe(input.trains);
-    expect(result.firstRouteProgress).not.toBe(input.firstRouteProgress);
+    expect(result.freightProgress).not.toBe(input.freightProgress);
     expect(result.statuses).not.toBe(input.runtime);
     expect(result.economy.facilities[0]).not.toBe(
       input.economy.facilities[0],

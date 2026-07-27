@@ -6,7 +6,7 @@ import {
 } from '../config/WorldData';
 import type {
   EconomyStateDef,
-  FirstRouteProgressDef,
+  FreightProgressDef,
   WorldData,
   TrackDef,
   JunctionDef,
@@ -55,7 +55,7 @@ export interface OperationsDraft {
   company: CompanyStateDef;
   economy: EconomyStateDef;
   trains: TrainDef[];
-  firstRouteProgress: FirstRouteProgressDef;
+  freightProgress: FreightProgressDef;
 }
 
 export interface OpportunityGeneratorPort {
@@ -478,7 +478,7 @@ class WorldManagerClass {
       company: clonePlainData(world.company),
       economy: clonePlainData(world.economy),
       trains: clonePlainData(world.trains),
-      firstRouteProgress: clonePlainData(world.firstRouteProgress),
+      freightProgress: clonePlainData(world.freightProgress),
     };
     this.batchInProgress = true;
     try {
@@ -495,8 +495,8 @@ class WorldManagerClass {
           && equalPlainData(draft.economy, snapshot.economy)
           && equalPlainData(draft.trains, snapshot.trains)
           && equalPlainData(
-            draft.firstRouteProgress,
-            snapshot.firstRouteProgress,
+            draft.freightProgress,
+            snapshot.freightProgress,
           ))) {
         return this.restoreBatchSnapshot(world, snapshot);
       }
@@ -508,7 +508,7 @@ class WorldManagerClass {
         company: draft.company,
         economy: draft.economy,
         trains: draft.trains,
-        firstRouteProgress: draft.firstRouteProgress,
+        freightProgress: draft.freightProgress,
       };
       if (!validateWorldData(candidate).compatible) {
         return this.restoreBatchSnapshot(world, snapshot);
@@ -518,8 +518,8 @@ class WorldManagerClass {
         world.company = clonePlainData(candidate.company);
         world.economy = clonePlainData(candidate.economy);
         world.trains = clonePlainData(candidate.trains);
-        world.firstRouteProgress = clonePlainData(
-          candidate.firstRouteProgress,
+        world.freightProgress = clonePlainData(
+          candidate.freightProgress,
         );
         world.revision = candidate.revision;
         world.operationsRevision = candidate.operationsRevision;

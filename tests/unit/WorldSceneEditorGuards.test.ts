@@ -56,7 +56,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     world.tracks = clonePlainData(fixture.tracks);
     world.economy = clonePlainData(fixture.economy);
     world.trains = clonePlainData(fixture.trains);
-    world.firstRouteProgress = clonePlainData(fixture.firstRouteProgress);
+    world.freightProgress = clonePlainData(fixture.freightProgress);
     return world;
   }
 
@@ -1042,7 +1042,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
   it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
     const world = installFirstRouteWorld();
-    world.firstRouteProgress.profitableDeliveryCompleted = true;
+    world.freightProgress.profitableLogDeliveryCompleted = true;
     const topology = [{
       kind: 'track' as const,
       uuid: 'forest-sawmill-track',
@@ -1111,7 +1111,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(world.trains).toEqual(committed.trains);
     expect(world.company.cash).toBe(committed.company.cash);
     expect(world.company.ledger).toEqual(committed.company.ledger);
-    expect(world.firstRouteProgress).toEqual(committed.firstRouteProgress);
+    expect(world.freightProgress).toEqual(committed.freightProgress);
     expect(world.revision).toBe(committed.revision);
     expect(world.operationsRevision).toBe(committedOperationsRevision);
     expect(world.company.ledger).toHaveLength(committedLedgerLength);
@@ -1121,7 +1121,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       company: committed.company,
       economy: committed.economy,
       trains: committed.trains,
-      firstRouteProgress: committed.firstRouteProgress,
+      freightProgress: committed.freightProgress,
     });
 
     warning.mockRestore();

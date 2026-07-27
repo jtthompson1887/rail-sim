@@ -19,7 +19,7 @@
         "baseUrl": ".",
         "paths": {},
         "types": [],
-        "lib": ["es6", "dom", "es2015.collection"],
+        "lib": ["es6", "dom", "es2015.collection", "scripthost"],
         "esModuleInterop": true,
         "allowSyntheticDefaultImports": true,
         "forceConsistentCasingInFileNames": true

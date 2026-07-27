@@ -82,8 +82,11 @@ interface FirstRouteWorld {
       readonly regionalDemandBpsByProduct: Record<string, number>;
     };
   };
-  readonly firstRouteProgress: {
-    readonly profitableDeliveryCompleted: boolean;
+  readonly freightProgress: {
+    readonly progressVersion: 1;
+    readonly profitableLogDeliveryCompleted: boolean;
+    readonly developmentGrantAwarded: boolean;
+    readonly profitableStructuralTimberDeliveryCompleted: boolean;
   };
   readonly starterOpportunity: {
     readonly corridors: readonly {
@@ -559,7 +562,7 @@ const persistedPhase = (state: FirstRouteBrowserSnapshot) => ({
   cash: state.world.company.cash,
   ledger: state.world.company.ledger,
   economy: state.world.economy,
-  progress: state.world.firstRouteProgress,
+  progress: state.world.freightProgress,
   trains: state.world.trains,
 });
 

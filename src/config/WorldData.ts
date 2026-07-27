@@ -187,14 +187,16 @@ export interface EconomyStateDef {
   market: MarketStateDef;
 }
 
-export interface FirstRouteProgressDef {
-  objectiveVersion: 1;
-  profitableDeliveryCompleted: boolean;
+export interface FreightProgressDef {
+  progressVersion: 1;
+  profitableLogDeliveryCompleted: boolean;
+  developmentGrantAwarded: boolean;
+  profitableStructuralTimberDeliveryCompleted: boolean;
 }
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 7;
+  schemaVersion: 8;
   revision: number;
   constructionRevision: number;
   operationsRevision: number;
@@ -203,7 +205,7 @@ export interface WorldData {
   generationConfig: WorldGenerationConfigDef;
   company: CompanyStateDef;
   economy: EconomyStateDef;
-  firstRouteProgress: FirstRouteProgressDef;
+  freightProgress: FreightProgressDef;
   starterOpportunity: StarterOpportunityDef;
   tracks: TrackDef[];
   junctions: JunctionDef[];
@@ -228,7 +230,7 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -244,9 +246,11 @@ export function createEmptyWorld(
       startingCashForDifficulty(constructionDifficultyId),
     ),
     economy: clonePlainData(economy),
-    firstRouteProgress: {
-      objectiveVersion: 1,
-      profitableDeliveryCompleted: false,
+    freightProgress: {
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
     },
     starterOpportunity: clonePlainData(starterOpportunity),
     tracks: [],
@@ -649,12 +653,14 @@ function isTrain(
     && value.cargo.units <= capacity.capacityUnits;
 }
 
-function isFirstRouteProgress(
+function isFreightProgress(
   value: unknown,
-): value is FirstRouteProgressDef {
+): value is FreightProgressDef {
   return isRecord(value)
-    && value.objectiveVersion === 1
-    && typeof value.profitableDeliveryCompleted === 'boolean';
+    && value.progressVersion === 1
+    && typeof value.profitableLogDeliveryCompleted === 'boolean'
+    && typeof value.developmentGrantAwarded === 'boolean'
+    && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
 }
 
 function isScenery(value: unknown): value is SceneryObjectDef {
@@ -815,13 +821,14 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 7) {
+  if (raw.schemaVersion !== 8) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
   }
   if ('seed' in raw || 'terrainSeed' in raw || 'biome' in raw
-    || 'scenarios' in raw || hasOwn(raw, 'economyRevision')) {
+    || 'scenarios' in raw || hasOwn(raw, 'economyRevision')
+    || hasOwn(raw, 'firstRouteProgress')) {
     return incompatible(raw, 'legacy generation fields are not supported.');
   }
 
@@ -852,12 +859,12 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
     || validateCompanyState(company).valid === false
     || !isEconomyState(raw.economy)
-    || !isFirstRouteProgress(raw.firstRouteProgress)
+    || !isFreightProgress(raw.freightProgress)
     || !isStarterOpportunity(raw.starterOpportunity)
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 7.');
+    return incompatible(raw, 'data does not match schema version 8.');
   }
 
   const trackIds = new Set(
@@ -869,7 +876,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   const trainIds = new Set<string>();
   for (const train of raw.trains) {
     if (!isTrain(train, trackIds, facilityIds, trainIds)) {
-      return incompatible(raw, 'data does not match schema version 7.');
+      return incompatible(raw, 'data does not match schema version 8.');
     }
   }
 

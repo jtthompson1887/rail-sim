@@ -78,16 +78,19 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 7 with a generated economy and conserved opening balance', () => {
+    it('creates schema 8 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(7);
+      expect(w.schemaVersion).toBe(8);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.operationsRevision).toBe(0);
-      expect(w.firstRouteProgress).toEqual({
-        objectiveVersion: 1,
-        profitableDeliveryCompleted: false,
+      expect(w.freightProgress).toEqual({
+        progressVersion: 1,
+        profitableLogDeliveryCompleted: false,
+        developmentGrantAwarded: false,
+        profitableStructuralTimberDeliveryCompleted: false,
       });
+      expect(w).not.toHaveProperty('firstRouteProgress');
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
@@ -534,7 +537,7 @@ describe('WorldManager', () => {
           draft.company.nextLedgerId += 1;
           draft.economy.facilities[0].name += ' upgraded';
           draft.trains.push(makeFreightTrainDef());
-          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          draft.freightProgress.profitableLogDeliveryCompleted = true;
           return true;
         },
       )).toBe(true);
@@ -547,7 +550,7 @@ describe('WorldManager', () => {
       }));
       expect(world.economy.facilities[0].name).toContain('upgraded');
       expect(world.trains).toEqual([makeFreightTrainDef()]);
-      expect(world.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+      expect(world.freightProgress.profitableLogDeliveryCompleted).toBe(true);
       expect(world.revision).toBe(rootBefore + 1);
       expect(world.constructionRevision).toBe(constructionBefore);
       expect(world.operationsRevision).toBe(operationsBefore + 1);
@@ -559,7 +562,7 @@ describe('WorldManager', () => {
       escaped.company.cash = 0;
       escaped.economy.tick += 1;
       escaped.trains[0].trackT = 0.9;
-      escaped.firstRouteProgress.profitableDeliveryCompleted = false;
+      escaped.freightProgress.profitableLogDeliveryCompleted = false;
       expect(JSON.stringify(world)).toBe(installed);
     });
 
@@ -675,7 +678,7 @@ describe('WorldManager', () => {
           });
           draft.company.nextLedgerId += 1;
           draft.economy.tick += 1;
-          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          draft.freightProgress.profitableLogDeliveryCompleted = true;
           return true;
         },
       )).toBe(false);

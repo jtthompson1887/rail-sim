@@ -265,7 +265,7 @@ describe('deriveFirstRouteObjective', () => {
       'current',
     ]));
 
-    world.firstRouteProgress.profitableDeliveryCompleted = true;
+    world.freightProgress.profitableLogDeliveryCompleted = true;
     const afterLatch = deriveFirstRouteObjective(world, connectedTopology);
     expect(afterLatch).toEqual({
       objectiveVersion: 1,
@@ -282,7 +282,7 @@ describe('deriveFirstRouteObjective', () => {
 
   it('keeps every step achieved after later track and train deletion', () => {
     const world = connectedWorldWithoutTrain();
-    world.firstRouteProgress.profitableDeliveryCompleted = true;
+    world.freightProgress.profitableLogDeliveryCompleted = true;
     world.tracks = [];
     world.trains = [];
 

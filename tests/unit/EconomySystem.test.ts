@@ -44,7 +44,7 @@ const installFirstRoute = (): WorldData => {
   world.tracks = clonePlainData(fixture.tracks);
   world.economy = clonePlainData(fixture.economy);
   world.trains = clonePlainData(fixture.trains);
-  world.firstRouteProgress = clonePlainData(fixture.firstRouteProgress);
+  world.freightProgress = clonePlainData(fixture.freightProgress);
   return world;
 };
 
@@ -439,7 +439,7 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
           expect(detachedDraft.trains[0].cargo?.units).toBe(10);
@@ -492,7 +492,7 @@ describe('EconomySystem', () => {
           company: world.company,
           economy: world.economy,
           trains: world.trains,
-          firstRouteProgress: world.firstRouteProgress,
+          freightProgress: world.freightProgress,
         });
         expect(mutate(detachedDraft)).toBe(true);
         expect(detachedDraft.economy).not.toEqual(world.economy);
@@ -562,7 +562,7 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
           return false;
@@ -606,7 +606,7 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
           return false;

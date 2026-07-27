@@ -1,6 +1,6 @@
 import type {
   EconomyStateDef,
-  FirstRouteProgressDef,
+  FreightProgressDef,
   TrainDef,
 } from '../config/WorldData';
 import type {
@@ -57,7 +57,7 @@ export interface CargoTickProposal {
   readonly company: CompanyStateDef;
   readonly economy: EconomyStateDef;
   readonly trains: readonly TrainDef[];
-  readonly firstRouteProgress: FirstRouteProgressDef;
+  readonly freightProgress: FreightProgressDef;
   readonly statuses: readonly CargoTransferStatus[];
   readonly completedDeliveries: readonly FreightDeliveryEvent[];
   readonly changed: boolean;
@@ -68,7 +68,7 @@ export interface CargoTickInput {
   readonly company: CompanyStateDef;
   readonly economy: EconomyStateDef;
   readonly trains: readonly TrainDef[];
-  readonly firstRouteProgress: FirstRouteProgressDef;
+  readonly freightProgress: FreightProgressDef;
   readonly runtime: readonly TrainRuntimeSnapshot[];
 }
 
@@ -322,7 +322,7 @@ const unloadBatch = (
   facility: FacilityEconomyDef,
   economy: EconomyStateDef,
   company: CompanyStateDef,
-  progress: FirstRouteProgressDef,
+  progress: FreightProgressDef,
 ): UnloadResult | null => {
   const cargo = train.cargo;
   if (!cargo) return null;
@@ -388,7 +388,7 @@ const unloadBatch = (
     train.operations.lastTripRunningCost = runningCost;
     train.operations.currentTripRevenue = 0;
     train.operations.currentTripRunningCost = 0;
-    progress.profitableDeliveryCompleted ||= profitable;
+    progress.profitableLogDeliveryCompleted ||= profitable;
     train.cargo = null;
     completedDelivery = {
       trainId: train.id,
@@ -419,7 +419,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   const trains = [...clonePlainData(input.trains)];
   const trainsById = [...trains]
     .sort((left, right) => left.id.localeCompare(right.id));
-  const firstRouteProgress = clonePlainData(input.firstRouteProgress);
+  const freightProgress = clonePlainData(input.freightProgress);
   const runtimeByTrainId = new Map(
     input.runtime.map((snapshot) => [snapshot.trainId, snapshot]),
   );
@@ -488,7 +488,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
           selected.facility,
           economy,
           company,
-          firstRouteProgress,
+          freightProgress,
         );
         if (unloaded) {
           company = unloaded.company;
@@ -544,7 +544,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
     company,
     economy,
     trains,
-    firstRouteProgress,
+    freightProgress,
     statuses,
     completedDeliveries,
     changed,

@@ -161,7 +161,7 @@ describe('generated blank-world start', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists a schema-7 opportunity before installing an otherwise blank world', () => {
+  it('persists a schema-8 opportunity before installing an otherwise blank world', () => {
     const generator = successfulPort();
     const economyGenerator = successfulEconomyPort();
     const saveSpy = jest.spyOn(SaveService, 'saveWorld');
@@ -190,7 +190,7 @@ describe('generated blank-world start', () => {
       },
       successfulResult('atomic-seed').opportunity,
     );
-    expect(result.world.schemaVersion).toBe(7);
+    expect(result.world.schemaVersion).toBe(8);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(

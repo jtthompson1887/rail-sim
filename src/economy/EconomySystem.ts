@@ -141,13 +141,13 @@ export class EconomySystem {
             company: draft.company,
             economy: draft.economy,
             trains: draft.trains,
-            firstRouteProgress: draft.firstRouteProgress,
+            freightProgress: draft.freightProgress,
             runtime: tickRuntime,
           });
           draft.company = clonePlainData(cargo.company);
           draft.economy = clonePlainData(cargo.economy);
-          draft.firstRouteProgress = clonePlainData(
-            cargo.firstRouteProgress,
+          draft.freightProgress = clonePlainData(
+            cargo.freightProgress,
           );
           draft.trains = cargo.trains.map(clonePlainData);
 

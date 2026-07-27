@@ -59,7 +59,7 @@ export function deriveFirstRouteObjective(
   world: WorldData,
   topology: TrackTopologySnapshot,
 ): FirstRouteObjectiveDto {
-  const achieved = world.firstRouteProgress.profitableDeliveryCompleted;
+  const achieved = world.freightProgress.profitableLogDeliveryCompleted;
   const timberTrains = world.trains.filter(
     ({ freightSetId }) => freightSetId === TIMBER_FREIGHT_SET_ID,
   );

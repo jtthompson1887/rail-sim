@@ -125,7 +125,7 @@ const phaseSnapshot = (
     trackUUID: authoritativeTrain.trackUUID,
     trackT: authoritativeTrain.trackT,
     facing: authoritativeTrain.facing,
-    progress: world.firstRouteProgress,
+    progress: world.freightProgress,
   });
 };
 
@@ -289,7 +289,7 @@ describe('Integration: first profitable timber freight route', () => {
       outputs: [{ productId: 'structural-timber', quantity: 8 }],
     });
 
-    expect(opening.schemaVersion).toBe(7);
+    expect(opening.schemaVersion).toBe(8);
     expect(opening.tracks).toEqual([]);
     expect(opening.junctions).toEqual([]);
     expect(opening.stations).toEqual([]);
@@ -388,7 +388,7 @@ describe('Integration: first profitable timber freight route', () => {
     expect(completedTrain.cargo).toBeNull();
     expect(completedTrain.operations.lastTripRevenue)
       .toBeGreaterThan(completedTrain.operations.lastTripRunningCost);
-    expect(completed.firstRouteProgress.profitableDeliveryCompleted)
+    expect(completed.freightProgress.profitableLogDeliveryCompleted)
       .toBe(true);
     expect(processingEvidence.map(
       ({ tick }) => tick - deliveryStartTick,
@@ -492,7 +492,7 @@ describe('Integration: first profitable timber freight route', () => {
 
     harness.advanceTicks(3);
     expect(train(harness, trainId).cargo).toBeNull();
-    expect(harness.world.firstRouteProgress.profitableDeliveryCompleted)
+    expect(harness.world.freightProgress.profitableLogDeliveryCompleted)
       .toBe(true);
     expected = phaseSnapshot(harness, trainId);
     harness.saveReload();

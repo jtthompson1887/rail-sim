@@ -233,7 +233,7 @@ describe('WorldData current-schema validation', () => {
       economyRevision: 0,
     } as any;
     delete world.operationsRevision;
-    delete world.firstRouteProgress;
+    delete world.freightProgress;
     const result = validateWorldData(world);
 
     expect(result).toEqual(expect.objectContaining({
