@@ -31,11 +31,17 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.railTracks = [];
+    this.trains = [];
+    this.trainStartTracks = [];
+    this.trainEnginePowers = [];
+    this.previewSolvers = [];
+    this.camControl = undefined;
+
     if (
       typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
       && __RAIL_SIM_TEST_CONTROLS__
     ) {
-      window.__railSimScene = 'MenuScene';
       window.__railSimMenuDerailCount = 0;
     }
 
@@ -221,6 +227,12 @@ export default class MenuScene extends Phaser.Scene {
 
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('WorldSelectScene'));
     this.input.keyboard.once('keydown-ENTER', () => this.scene.start('WorldSelectScene'));
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimScene = 'MenuScene';
+    }
   }
 
   update(time: number, delta: number): void {
