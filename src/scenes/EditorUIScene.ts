@@ -196,6 +196,11 @@ export default class EditorUIScene extends Phaser.Scene {
     this.companyHud = new CompanyHud();
     this.facilityInspector = new FacilityInspector();
     this.vehiclePurchasePanel = new VehiclePurchasePanel();
+    this.vehiclePurchasePanel.setState({
+      quote: null,
+      cash: this.initialCash,
+      message: '',
+    });
     this.trainInspector = new TrainInspector();
     this.freightObjectiveCard = new FreightObjectiveCard();
     this.minimapRenderer = new MinimapRenderer(

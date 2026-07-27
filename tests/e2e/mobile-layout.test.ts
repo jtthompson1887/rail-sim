@@ -61,11 +61,12 @@ async function expectWithinViewport(
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
-test('375×667 blank-world purchase controls remain reachable', async ({
-  page,
-}) => {
-  test.setTimeout(180_000);
-  await page.setViewportSize({ width: 375, height: 667 });
+async function openFreshWorld(
+  page: import('@playwright/test').Page,
+  viewport: { width: number; height: number },
+  seed: string,
+): Promise<void> {
+  await page.setViewportSize(viewport);
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -83,24 +84,60 @@ test('375×667 blank-world purchase controls remain reachable', async ({
     { timeout: 25_000 },
   );
   const canvas = page.locator('canvas');
-  await canvas.click({ position: { x: 187.5, y: 577 } });
-  page.once('dialog', (dialog) => dialog.accept('mobile-layout-controls'));
-  await canvas.click({ position: { x: 187.5, y: 146 } });
-  await canvas.click({ position: { x: 187.5, y: 603 } });
+  await canvas.click({
+    position: { x: viewport.width / 2, y: viewport.height - 90 },
+  });
+  page.once('dialog', (dialog) => dialog.accept(seed));
+  await canvas.click({ position: { x: viewport.width / 2, y: 146 } });
+  await canvas.click({
+    position: { x: viewport.width / 2, y: viewport.height - 64 },
+  });
   await page.waitForFunction(
     () => (window as any).__railSimScene === 'WorldScene',
     undefined,
     { timeout: 60_000 },
   );
+}
+
+const rectanglesOverlap = (
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number },
+): boolean => first.x < second.x + second.width
+  && first.x + first.width > second.x
+  && first.y < second.y + second.height
+  && first.y + first.height > second.y;
+
+test('375×667 blank-world purchase controls remain reachable', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await openFreshWorld(
+    page,
+    { width: 375, height: 667 },
+    'mobile-layout-controls',
+  );
 
   for (const selector of [
     '[data-testid="company-hud"]',
     '[data-testid="company-cash"]',
+    '[data-testid="freight-objective"]',
     '[data-testid="vehicle-purchase-panel"]',
     '[data-testid="flatbed-freight-set-buy"]',
   ]) {
     await expectWithinViewport(page, selector);
   }
+  const companyBounds = await page.locator(
+    '[data-testid="company-hud"]',
+  ).boundingBox();
+  const objectiveBounds = await page.locator(
+    '[data-testid="freight-objective"]',
+  ).boundingBox();
+  if (!companyBounds || !objectiveBounds) {
+    throw new Error('Finance HUD or freight objective has no mobile bounds');
+  }
+  expect(objectiveBounds.y).toBeGreaterThanOrEqual(
+    companyBounds.y + companyBounds.height + 8,
+  );
   const overflow = await page.evaluate(() => ({
     width: document.body.scrollWidth,
     height: document.body.scrollHeight,
@@ -109,6 +146,54 @@ test('375×667 blank-world purchase controls remain reachable', async ({
   }));
   expect(overflow.width).toBeLessThanOrEqual(overflow.clientWidth);
   expect(overflow.height).toBeLessThanOrEqual(overflow.clientHeight);
+});
+
+test('667×375 fresh-world economy panels do not occlude each other', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await openFreshWorld(
+    page,
+    { width: 667, height: 375 },
+    'mobile-layout-landscape',
+  );
+
+  for (const selector of [
+    '[data-testid="company-hud"]',
+    '[data-testid="freight-objective"]',
+    '[data-testid="vehicle-purchase-panel"]',
+  ]) {
+    await expectWithinViewport(page, selector);
+  }
+  const companyBounds = await page.locator(
+    '[data-testid="company-hud"]',
+  ).boundingBox();
+  const objectiveBounds = await page.locator(
+    '[data-testid="freight-objective"]',
+  ).boundingBox();
+  const purchaseBounds = await page.locator(
+    '[data-testid="vehicle-purchase-panel"]',
+  ).boundingBox();
+  if (!companyBounds || !objectiveBounds || !purchaseBounds) {
+    throw new Error('Fresh-world economy panel has no landscape bounds');
+  }
+
+  expect({
+    companyBounds,
+    objectiveBounds,
+    purchaseBounds,
+    overlaps: {
+      companyObjective: rectanglesOverlap(companyBounds, objectiveBounds),
+      companyPurchase: rectanglesOverlap(companyBounds, purchaseBounds),
+      objectivePurchase: rectanglesOverlap(objectiveBounds, purchaseBounds),
+    },
+  }).toMatchObject({
+    overlaps: {
+      companyObjective: false,
+      companyPurchase: false,
+      objectivePurchase: false,
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------

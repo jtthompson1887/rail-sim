@@ -184,6 +184,18 @@ describe('FreightObjectiveCard', () => {
     expect(root.style.maxHeight).toBe('25vh');
     expect(bubbled).not.toHaveBeenCalled();
 
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.right).toBe('auto');
+    expect(root.style.width).toBe('calc(50vw - 36px)');
+
     document.body.removeEventListener('pointerdown', bubbled);
   });
 

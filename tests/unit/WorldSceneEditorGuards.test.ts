@@ -21,6 +21,7 @@ import { EconomySystem } from '../../src/economy/EconomySystem';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import { ConstructionService } from '../../src/systems/ConstructionService';
 import type { FreightDeliveryEvent } from '../../src/freight/CargoSystem';
+import EditorUIScene from '../../src/scenes/EditorUIScene';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -2082,6 +2083,24 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(launchData?.saveErrorMessage).toBeUndefined();
     expect(save.mock.invocationCallOrder[0])
       .toBeLessThan(launch.mock.invocationCallOrder[editorLaunchIndex]);
+  });
+
+  it('shows the fresh-world cash balance when the launched purchase panel is created', () => {
+    const { launch } = createStartupScene('create', true);
+    const editorLaunch = launch.mock.calls.find(
+      ([key]) => key === 'EditorUIScene',
+    );
+    const editorUI = new EditorUIScene();
+    (editorUI.input as any).off = jest.fn();
+    (editorUI.input.keyboard as any).off = jest.fn();
+    editorUI.init(editorLaunch?.[1]);
+
+    editorUI.create();
+    startupScenes.push(editorUI);
+
+    expect(document.querySelector(
+      '[data-testid="vehicle-purchase-panel"]',
+    )?.textContent).toContain('Cash after £910,000');
   });
 
   it('hands a failed initial save to create UI once and clears the pending message', () => {

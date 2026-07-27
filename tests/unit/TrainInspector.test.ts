@@ -170,6 +170,35 @@ describe('TrainInspector', () => {
     document.body.removeEventListener('pointerdown', bubbled);
   });
 
+  it('moves the accessible and visual throttle selection with train state updates', () => {
+    const root = document.querySelector(
+      '[data-testid="train-inspector"]',
+    ) as HTMLElement;
+
+    for (const throttle of [1, 0, -1] as const) {
+      panel.setState(Object.freeze({
+        ...inspection(),
+        throttle,
+      }));
+      const selected = root.querySelectorAll(
+        '[data-throttle][aria-pressed="true"]',
+      );
+      const active = root.querySelector(
+        `[data-throttle="${throttle}"]`,
+      ) as HTMLButtonElement;
+      const inactive = root.querySelector(
+        `[data-throttle="${throttle === 1 ? 0 : 1}"]`,
+      ) as HTMLButtonElement;
+
+      expect(selected).toHaveLength(1);
+      expect(selected[0]).toBe(active);
+      expect(active.style.backgroundColor).toBe('rgb(74, 213, 255)');
+      expect(active.style.color).toBe('rgb(6, 19, 31)');
+      expect(inactive.getAttribute('aria-pressed')).toBe('false');
+      expect(inactive.style.backgroundColor).toBe('rgb(18, 60, 85)');
+    }
+  });
+
   it('keeps one throttle button alive across multiframe state updates and emits once on click', async () => {
     panel.setState(inspection());
     const values: number[] = [];
@@ -222,6 +251,18 @@ describe('TrainInspector', () => {
     ) as HTMLElement;
     expect(throttle.style.position).toBe('sticky');
     expect(throttle.style.bottom).toBe('0px');
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
 
     panel.destroy();
     EventBus.emit('ui:train-inspection', { inspection: inspection() });

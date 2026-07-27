@@ -110,12 +110,15 @@ export class FreightObjectiveCard {
 
   private applyLayout(): void {
     const mobile = window.innerWidth <= 720;
+    const shortWide = mobile && window.innerWidth > window.innerHeight;
     this.root.dataset.layout = mobile ? 'mobile' : 'desktop';
     if (mobile) {
       this.root.style.left = '56px';
-      this.root.style.right = '8px';
-      this.root.style.top = '116px';
-      this.root.style.width = 'auto';
+      this.root.style.right = shortWide ? 'auto' : '8px';
+      this.root.style.top = '192px';
+      this.root.style.width = shortWide
+        ? 'calc(50vw - 36px)'
+        : 'auto';
       this.root.style.maxHeight = '25vh';
     } else {
       this.root.style.left = '86px';

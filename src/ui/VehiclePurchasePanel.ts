@@ -180,9 +180,12 @@ export class VehiclePurchasePanel {
 
   private applyLayout(): void {
     const mobile = window.innerWidth <= 720;
+    const shortWide = mobile && window.innerWidth > window.innerHeight;
     this.root.dataset.layout = mobile ? 'mobile' : 'desktop';
     if (mobile) {
-      this.root.style.left = '56px';
+      this.root.style.left = shortWide
+        ? 'calc(50vw + 28px)'
+        : '56px';
       this.root.style.right = '8px';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';

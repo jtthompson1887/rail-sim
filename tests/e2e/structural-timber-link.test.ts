@@ -15,6 +15,7 @@ import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
 const DESKTOP = { width: 1920, height: 1400 };
 const MOBILE = { width: 375, height: 667 };
+const MOBILE_LANDSCAPE = { width: 667, height: 375 };
 const REGIONAL_DEVELOPMENT_GRANT = 250_000;
 const FLATBED_PRICE = 90_000;
 const OPERATING_RESERVE = 20_000;
@@ -35,6 +36,14 @@ interface CanvasBounds extends Point {
   readonly width: number;
   readonly height: number;
 }
+
+const rectanglesOverlap = (
+  first: CanvasBounds,
+  second: CanvasBounds,
+): boolean => first.x < second.x + second.width
+  && first.x + first.width > second.x
+  && first.y < second.y + second.height
+  && first.y + first.height > second.y;
 
 const canvasDragCandidates = (canvas: CanvasBounds): Point[] => {
   const preferred = [
@@ -1170,9 +1179,15 @@ async function clickFacilityThroughPointer(
 ): Promise<void> {
   let state = await snapshot(page);
   const target = facility(state, definitionId);
+  const mobilePortrait =
+    state.camera.width <= 720 && state.camera.width <= state.camera.height;
   await panWorldPointToCentre(page, target.railAccess, {
-    x: 0.5,
-    y: state.camera.width <= 720 ? 0.5 : 0.5,
+    x: mobilePortrait ? 0.9 : 0.5,
+    y: state.camera.width <= 720 && state.camera.width > state.camera.height
+      ? 0.3
+      : mobilePortrait
+        ? 0.15
+        : 0.5,
   });
   state = await snapshot(page);
   const screen = await toPagePoint(page, target.railAccess, state);
@@ -1216,6 +1231,8 @@ async function assertReachableWithinScrollableViewport(
   const target = container.locator(selector);
   await expect(container).toBeVisible();
   await expect(target).toBeVisible();
+  let tallTargetTopReached = false;
+  let tallTargetBottomReached = false;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const containerBox = await container.boundingBox();
     const targetBox = await target.boundingBox();
@@ -1223,24 +1240,49 @@ async function assertReachableWithinScrollableViewport(
     if (!containerBox || !targetBox || !viewport) {
       throw new Error(`${selector} has no scrollable viewport bounds`);
     }
-    const withinContainer = targetBox.x >= containerBox.x - 1
+    const horizontallyContained = targetBox.x >= containerBox.x - 1
       && targetBox.x + targetBox.width
-        <= containerBox.x + containerBox.width + 1
+        <= containerBox.x + containerBox.width + 1;
+    const targetBottom = targetBox.y + targetBox.height;
+    const containerBottom = containerBox.y + containerBox.height;
+    const targetFits = targetBox.height <= containerBox.height + 2;
+    const topReached = targetBox.y >= containerBox.y - 1
+      && targetBox.y <= containerBottom + 1
+      && targetBox.y >= -1
+      && targetBox.y <= viewport.height + 1;
+    const bottomReached = targetBottom >= containerBox.y - 1
+      && targetBottom <= containerBottom + 1
+      && targetBottom >= -1
+      && targetBottom <= viewport.height + 1;
+    tallTargetTopReached ||= horizontallyContained && topReached;
+    tallTargetBottomReached ||= horizontallyContained && bottomReached;
+    const withinContainer = horizontallyContained
       && targetBox.y >= containerBox.y - 1
-      && targetBox.y + targetBox.height
-        <= containerBox.y + containerBox.height + 1;
+      && targetBottom <= containerBottom + 1;
     const withinViewport = targetBox.x >= 0
       && targetBox.y >= 0
       && targetBox.x + targetBox.width <= viewport.width + 1
-      && targetBox.y + targetBox.height <= viewport.height + 1;
+      && targetBottom <= viewport.height + 1;
     if (withinContainer && withinViewport) return;
+    if (
+      !targetFits
+      && tallTargetTopReached
+      && tallTargetBottomReached
+    ) return;
     await page.mouse.move(
       containerBox.x + containerBox.width / 2,
       containerBox.y + containerBox.height / 2,
     );
+    const above = targetBox.y - containerBox.y;
+    const below = targetBottom - containerBottom;
+    const requiredDelta = !targetFits && !tallTargetTopReached
+      ? above - 8
+      : above < -1 && targetFits
+        ? above - 8
+        : below + 8;
     await page.mouse.wheel(
       0,
-      targetBox.y < containerBox.y ? -240 : 240,
+      Math.max(-120, Math.min(120, requiredDelta)),
     );
     await page.waitForTimeout(30);
   }
@@ -1393,6 +1435,14 @@ test('mobile facility inspection scrolls every decision section into reach', asy
   await clickFacilityThroughPointer(page, 'prefabrication-plant');
   const facilityInspector = '[data-testid="facility-inspector"]';
   await assertVisibleWithinViewport(page, facilityInspector);
+  const objectiveBounds = await page.locator(
+    '[data-testid="freight-objective"]',
+  ).boundingBox();
+  const facilityBounds = await page.locator(facilityInspector).boundingBox();
+  if (!objectiveBounds || !facilityBounds) {
+    throw new Error('Objective or facility inspector has no portrait bounds');
+  }
+  expect(rectanglesOverlap(objectiveBounds, facilityBounds)).toBe(false);
   for (const selector of [
     '[data-testid="facility-name"]',
     '[data-testid="facility-status"]',
@@ -1408,6 +1458,29 @@ test('mobile facility inspection scrolls every decision section into reach', asy
   }
   await assertNoViewportOverflow(page);
   expect(errors).toHaveLength(0);
+});
+
+test('landscape facility inspection does not occlude the objective', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await createFixedSeedWorld(
+    page,
+    'facility-layout-landscape',
+    MOBILE_LANDSCAPE,
+  );
+  await clickFacilityThroughPointer(page, 'prefabrication-plant');
+
+  const objectiveBounds = await page.locator(
+    '[data-testid="freight-objective"]',
+  ).boundingBox();
+  const facilityBounds = await page.locator(
+    '[data-testid="facility-inspector"]',
+  ).boundingBox();
+  if (!objectiveBounds || !facilityBounds) {
+    throw new Error('Objective or facility inspector has no landscape bounds');
+  }
+  expect(rectanglesOverlap(objectiveBounds, facilityBounds)).toBe(false);
 });
 
 test.describe('real structural-timber browser journey', () => {

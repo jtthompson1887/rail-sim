@@ -317,6 +317,19 @@ describe('FacilityInspector', () => {
     expect(root.style.left).toBe('56px');
     expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
       .toBe('Needs logs');
+    expect(root.style.maxHeight).toBe('calc(75vh - 208px)');
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).toBe('58vh');
   });
 });

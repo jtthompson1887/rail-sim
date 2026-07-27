@@ -208,6 +208,18 @@ describe('VehiclePurchasePanel', () => {
       'Insufficient cash for General Flatbed Set',
     );
     expect(confirm.disabled).toBe(true);
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
   });
 
   it('blocks pointer propagation, participates in hit testing, and removes listeners on destroy', () => {
