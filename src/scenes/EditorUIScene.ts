@@ -139,6 +139,8 @@ export default class EditorUIScene extends Phaser.Scene {
     constructionIndexBps?: number;
     operatingSummary?: OperatingSummaryDto;
   }): void {
+    this.trackToolActive = false;
+    this.constructionDecisionActive = false;
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
     this.initialVisible = data.visible ?? true;

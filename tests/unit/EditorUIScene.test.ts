@@ -179,6 +179,40 @@ describe('EditorUIScene construction UI boundary', () => {
     expect(purchase.getAttribute('aria-hidden')).toBe('false');
   });
 
+  it('resets transient tool and construction state on same-instance relaunch', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 1_000_000,
+      saveState: 'saved',
+    });
+    EventBus.emit('ui:toolbar-select-tool', { tool: 'place-track' });
+    (scene as any).constructionPreviewHandler({
+      phase: 'review',
+      preview: {} as any,
+    });
+    expect((scene as any).trackToolActive).toBe(true);
+    expect((scene as any).constructionDecisionActive).toBe(true);
+
+    const firstShutdown = (scene.events.once as jest.Mock).mock.calls
+      .at(-1)?.[1];
+    firstShutdown?.();
+    scene.init({
+      trackManager: { getTrack: jest.fn(), tracks: [] } as any,
+      selectionManager: { selectedUUIDs: [] } as any,
+      visible: true,
+      companyCash: 1_000_000,
+      saveState: 'saved',
+    });
+    scene.create();
+
+    expect((scene as any).toolbar.currentTool).toBe('none');
+    expect((scene as any).trackToolActive).toBe(false);
+    expect((scene as any).constructionDecisionActive).toBe(false);
+    expect(document.querySelector(
+      '[data-testid="vehicle-purchase-panel"]',
+    )?.getAttribute('aria-hidden')).toBe('false');
+  });
+
   it('hydrates a failed startup save into the HUD and Retry Save action', () => {
     startEditorUI({
       visible: true,
