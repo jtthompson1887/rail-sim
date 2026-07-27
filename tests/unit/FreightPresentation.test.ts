@@ -318,6 +318,49 @@ describe('FreightPresentation', () => {
   });
 
   it.each([
+    [
+      'a full consignment',
+      { units: 60, loadedUnits: 60, originFacilityId: 'managed-forest' },
+      'Sawmill',
+    ],
+    [
+      'a partially unloaded consignment',
+      { units: 30, loadedUnits: 40, originFacilityId: 'managed-forest' },
+      'Sawmill',
+    ],
+    [
+      'a mismatched origin',
+      { units: 40, loadedUnits: 40, originFacilityId: 'other-forest' },
+      'Sawmill',
+    ],
+    [
+      'a valid partial same-origin consignment',
+      { units: 40, loadedUnits: 40, originFacilityId: 'managed-forest' },
+      'Managed Forest',
+    ],
+  ] as const)('uses cargo authority when deriving facilities for %s', (
+    _case,
+    cargo,
+    expected,
+  ) => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = makeFreightTrainDef({
+      cargo: { productId: 'logs', ...cargo },
+    });
+
+    expect(buildTrainInspection(
+      world,
+      runtime({ x: -500, y: 0 }),
+      transfer({
+        facilityId: null,
+        productId: 'logs',
+        kind: 'blocked',
+        blocker: 'not-operating',
+      }),
+    )?.nearestEligibleFacility).toBe(expected);
+  });
+
+  it.each([
     ['not-operating', 'Resume the game to transfer cargo'],
     ['derailed', 'Rerail the train to transfer cargo'],
     ['train-moving', 'Stop the train to transfer cargo'],

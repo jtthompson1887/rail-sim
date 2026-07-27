@@ -3,6 +3,7 @@ import type {
   InventorySlotDef,
   RecipeDefinition,
 } from '../economy/EconomyData';
+import type { TrainDef } from '../config/WorldData';
 import {
   getFacilityDefinition,
   getProduct,
@@ -61,6 +62,21 @@ const validInventorySlot = (
   && (slot.capacity as number) > 0
   && (slot.reservedQuantity as number) <= (slot.quantity as number)
   && (slot.quantity as number) <= (slot.capacity as number);
+
+export function canContinueConsignment(
+  train: TrainDef,
+  facility: FacilityEconomyDef,
+  capacityUnits: number,
+): boolean {
+  const cargo = train.cargo;
+  return cargo !== null
+    && cargo.originFacilityId === facility.id
+    && Number.isSafeInteger(cargo.units)
+    && Number.isSafeInteger(cargo.loadedUnits)
+    && cargo.units === cargo.loadedUnits
+    && cargo.loadedUnits >= 0
+    && cargo.loadedUnits < capacityUnits;
+}
 
 export function potentialLoadProducts(
   facility: FacilityEconomyDef,

@@ -102,6 +102,14 @@ describe('TrainInspector', () => {
     expect(root.querySelector(
       '[data-testid="train-lifetime-profit"]',
     )?.textContent).toBe('£2,780');
+    for (const testId of [
+      'train-current-trip-profit',
+      'train-last-delivery-profit',
+      'train-lifetime-profit',
+    ]) {
+      const profit = root.querySelector(`[data-testid="${testId}"]`);
+      expect(profit?.previousSibling?.textContent).toMatch(/profit $/);
+    }
     expect(cargo.value).toBe(40);
     expect(cargo.max).toBe(60);
     expect(cargo.getAttribute('aria-label')).toBe('Cargo Logs 40 of 60 tonnes');

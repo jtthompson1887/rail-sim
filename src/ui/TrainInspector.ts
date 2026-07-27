@@ -167,7 +167,7 @@ export class TrainInspector {
       const row = document.createElement('div');
       row.append(
         `${label} · revenue ${CURRENCY.format(revenue)} · running `
-        + `${CURRENCY.format(runningCost)} · `,
+        + `${CURRENCY.format(runningCost)} · profit `,
         profit,
       );
       return row;

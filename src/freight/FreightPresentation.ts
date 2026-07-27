@@ -1,4 +1,4 @@
-import type { WorldData } from '../config/WorldData';
+import type { TrainDef, WorldData } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
 import { summariseProfitAndLoss } from '../economy/FinanceLedger';
 import { getProduct } from '../economy/ProductCatalog';
@@ -7,6 +7,7 @@ import type {
   CargoTransferStatus,
 } from './CargoSystem';
 import {
+  canContinueConsignment,
   potentialAcceptedProduct,
   potentialLoadProducts,
 } from './FacilityCargoRules';
@@ -181,7 +182,7 @@ const relevantFacilityName = (
   runtime: TrainRuntimeSnapshot,
   transfer: CargoTransferStatus,
   freightSet: FreightSetDefinition | undefined,
-  cargoProductId: string | null,
+  train: TrainDef,
 ): string | null => {
   if (transfer.facilityId) {
     return world.economy.facilities.find(
@@ -190,12 +191,18 @@ const relevantFacilityName = (
   }
   if (!freightSet) return null;
 
+  const cargoProductId = train.cargo?.productId ?? null;
   const contextProductId = cargoProductId ?? transfer.productId;
   const candidates = world.economy.facilities
     .filter((facility) => {
       if (cargoProductId) {
         const source = potentialLoadProducts(facility, freightSet)
-          .some(({ productId }) => productId === cargoProductId);
+          .some(({ productId }) => productId === cargoProductId)
+          && canContinueConsignment(
+            train,
+            facility,
+            capacityFor(freightSet, cargoProductId),
+          );
         return source
           || potentialAcceptedProduct(facility, cargoProductId) !== null;
       }
@@ -280,7 +287,7 @@ export function buildTrainInspection(
       runtime,
       transfer,
       freightSet,
-      train.cargo?.productId ?? null,
+      train,
     ),
     transfer: presentedTransfer,
     transferRemedy: formatCargoRemedy(

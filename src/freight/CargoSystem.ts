@@ -24,6 +24,7 @@ import {
 } from './FreightSetCatalog';
 import type { FreightSetDefinition } from './FreightSetCatalog';
 import {
+  canContinueConsignment,
   eligibleLoadProducts,
   facilityAcceptsProduct,
   potentialAcceptedProduct,
@@ -175,21 +176,6 @@ const sourceAvailability = (
   slot: FacilityEconomyDef['inventories'][string],
 ): number =>
   slot.quantity - slot.reservedQuantity;
-
-const canContinueConsignment = (
-  train: TrainDef,
-  facility: FacilityEconomyDef,
-  capacityUnits: number,
-): boolean => {
-  const cargo = train.cargo;
-  return cargo !== null
-    && cargo.originFacilityId === facility.id
-    && Number.isSafeInteger(cargo.units)
-    && Number.isSafeInteger(cargo.loadedUnits)
-    && cargo.units === cargo.loadedUnits
-    && cargo.loadedUnits >= 0
-    && cargo.loadedUnits < capacityUnits;
-};
 
 const containedFacilities = (
   runtime: TrainRuntimeSnapshot,

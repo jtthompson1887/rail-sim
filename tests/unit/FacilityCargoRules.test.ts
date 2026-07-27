@@ -11,11 +11,13 @@ import {
 } from '../../src/economy/ProductCatalog';
 import * as ProductCatalog from '../../src/economy/ProductCatalog';
 import {
+  canContinueConsignment,
   eligibleLoadProducts,
   facilityAcceptsProduct,
   potentialAcceptedProduct,
   potentialLoadProducts,
 } from '../../src/freight/FacilityCargoRules';
+import type { TrainDef } from '../../src/config/WorldData';
 import {
   FLATBED_FREIGHT_SET_ID,
   getFreightSet,
@@ -49,6 +51,50 @@ function cloneCatalogueFacility(definitionId: string): FacilityEconomyDef {
 }
 
 const flatbed = () => getFreightSet(FLATBED_FREIGHT_SET_ID)!;
+
+const loadedTrain = (
+  units: number,
+  loadedUnits: number,
+  originFacilityId = 'managed-forest-instance',
+): TrainDef => ({
+  id: 'train-1',
+  freightSetId: FLATBED_FREIGHT_SET_ID,
+  trackUUID: 'track-1',
+  trackT: 0,
+  facing: 1,
+  cargo: {
+    productId: 'logs',
+    units,
+    loadedUnits,
+    originFacilityId,
+  },
+  operations: {
+    currentTripRevenue: 0,
+    currentTripRunningCost: 0,
+    lastTripRevenue: 0,
+    lastTripRunningCost: 0,
+    lifetimeDeliveredUnits: 0,
+    lifetimeRevenue: 0,
+    lifetimeRunningCost: 0,
+  },
+});
+
+describe('canContinueConsignment', () => {
+  const forest = cloneCatalogueFacility('managed-forest');
+
+  it.each([
+    ['valid partial same-origin cargo', loadedTrain(40, 40), true],
+    ['a full consignment', loadedTrain(60, 60), false],
+    ['a partially unloaded consignment', loadedTrain(30, 40), false],
+    [
+      'cargo loaded at another origin',
+      loadedTrain(40, 40, 'another-forest'),
+      false,
+    ],
+  ] as const)('returns %s = %s', (_case, train, expected) => {
+    expect(canContinueConsignment(train, forest, 60)).toBe(expected);
+  });
+});
 
 describe('eligibleLoadProducts', () => {
   afterEach(() => {
