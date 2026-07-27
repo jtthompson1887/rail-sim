@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunktrain_game=self.webpackChunktrain_game||[]).push([[9271],{49271:(e,a,n)=>{n.d(a,{ThinEngine:()=>i.B});var i=n(41426)}}]);

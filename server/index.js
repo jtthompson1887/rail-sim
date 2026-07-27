@@ -1,0 +1,1 @@
+export default{fetch:async(e,t)=>t.ASSETS.fetch(e)};
