@@ -454,7 +454,7 @@ async function purchaseTimberSetAtForest(
     ),
   ).toBeLessThanOrEqual(forest.railAccess.radius);
 
-  await page.locator('[data-testid="timber-freight-set-buy"]').click();
+  await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
   const state = await snapshot(page);
   const screen = await toScreen(page, placement.point, state);
   await page.mouse.click(screen.x, screen.y);

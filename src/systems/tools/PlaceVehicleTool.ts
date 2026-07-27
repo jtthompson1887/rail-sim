@@ -7,6 +7,7 @@ import type {
   FreightPurchaseResult,
   FreightPurchaseService,
 } from '../../freight/FreightPurchaseService';
+import { FLATBED_FREIGHT_SET_ID } from '../../freight/FreightSetCatalog';
 import type TrackManager from '../../managers/TrackManager';
 import type { TrainManager } from '../../managers/TrainManager';
 import { WorldManager } from '../../managers/WorldManager';
@@ -16,10 +17,10 @@ import type { IEditorTool } from './IEditorTool';
 import type { VehicleType } from '../../config/VehicleTypes';
 
 const PURCHASE_REMEDIES: Partial<Record<FreightPurchaseBlocker, string>> = {
-  'no-track': 'Click on player track to place the Timber Freight Set',
+  'no-track': 'Click on player track to place the General Flatbed Set',
   'outside-forest-access': 'Place inside Managed Forest rail access',
   'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for Timber Freight Set',
+  'insufficient-cash': 'Insufficient cash for General Flatbed Set',
   'duplicate-gesture': 'Purchase already in progress',
 };
 
@@ -28,13 +29,14 @@ const freezeQuote = (
 ): FreightPurchaseQuote => Object.freeze(quote);
 
 /**
- * Quotes one timber freight-set purchase gesture from a snapped player track.
+ * Quotes one flatbed freight-set purchase gesture from a snapped player track.
  * Live creation is owned by FreightPurchaseService after typed confirmation.
  */
 export class PlaceVehicleTool implements IEditorTool {
   private readonly ghostGraphics: Phaser.GameObjects.Graphics;
   private readonly SNAP_THRESHOLD = 80;
-  private freightSetId: 'timber-freight-set' = 'timber-freight-set';
+  private freightSetId: typeof FLATBED_FREIGHT_SET_ID =
+    FLATBED_FREIGHT_SET_ID;
   private purchaseInFlight = false;
   private lastPlacement: Omit<FreightPurchaseQuoteInput, 'topology'> | null =
     null;
@@ -54,7 +56,7 @@ export class PlaceVehicleTool implements IEditorTool {
     void type;
   }
 
-  setFreightSetId(freightSetId: 'timber-freight-set'): void {
+  setFreightSetId(freightSetId: typeof FLATBED_FREIGHT_SET_ID): void {
     this.freightSetId = freightSetId;
   }
 
@@ -233,7 +235,7 @@ export class PlaceVehicleTool implements IEditorTool {
 
   private remedyFor(blocker: FreightPurchaseBlocker): string {
     return PURCHASE_REMEDIES[blocker]
-      ?? 'Timber Freight Set purchase could not be completed';
+      ?? 'General Flatbed Set purchase could not be completed';
   }
 
   private drawInvalid(x: number, y: number): void {

@@ -53,7 +53,10 @@ import type {
   CargoTransferStatus,
   FreightDeliveryEvent,
 } from '../freight/CargoSystem';
-import { getFreightSet } from '../freight/FreightSetCatalog';
+import {
+  FLATBED_FREIGHT_SET_ID,
+  getFreightSet,
+} from '../freight/FreightSetCatalog';
 import {
   queryRailAccessConnectivity,
   type RailAccessConnectivityResult,
@@ -419,7 +422,7 @@ export default class WorldScene extends Phaser.Scene {
   private readonly freightPurchaseModeRequestedHandler = ({
     freightSetId,
   }: {
-    freightSetId: 'timber-freight-set';
+    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   }) => {
     if (GameStateManager.worldMode !== 'create') return;
     const tool = this.toolRegistry.get(
@@ -733,7 +736,7 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:freight-purchase-state', {
       quote: null,
       cash: world?.company.cash ?? 0,
-      message: 'Click on player track to place the Timber Freight Set',
+      message: 'Click on player track to place the General Flatbed Set',
     });
     this.publishFreightPresentation(
       (this.trainManager?.trains ?? []).map(

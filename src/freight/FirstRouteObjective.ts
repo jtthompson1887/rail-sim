@@ -1,6 +1,6 @@
 import type { WorldData } from '../config/WorldData';
 import type { TrackTopologySnapshot } from '../managers/TrackManager';
-import { TIMBER_FREIGHT_SET_ID } from './FreightSetCatalog';
+import { FLATBED_FREIGHT_SET_ID } from './FreightSetCatalog';
 import { queryRailAccessConnectivity } from './RailAccessConnectivity';
 
 export type FirstRouteStepId =
@@ -61,7 +61,7 @@ export function deriveFirstRouteObjective(
 ): FirstRouteObjectiveDto {
   const achieved = world.freightProgress.profitableLogDeliveryCompleted;
   const timberTrains = world.trains.filter(
-    ({ freightSetId }) => freightSetId === TIMBER_FREIGHT_SET_ID,
+    ({ freightSetId }) => freightSetId === FLATBED_FREIGHT_SET_ID,
   );
   const hasDeliveredTimber = timberTrains.some(
     ({ operations }) => operations.lifetimeDeliveredUnits > 0,

@@ -27,7 +27,7 @@ import {
 } from '../../src/economy/WorldEconomyGenerator';
 import {
   STARTER_ROUTE_RESERVE,
-  TIMBER_TRAIN_PURCHASE_PRICE,
+  FLATBED_TRAIN_PURCHASE_PRICE,
 } from '../../src/freight/FreightSetCatalog';
 
 function expectSurveyFitsRecommendedCamera(
@@ -766,7 +766,7 @@ describe('generated blank-world start', () => {
         (corridor) => corridor.estimatedCost,
       ))).toBeLessThanOrEqual(
         STANDARD_STARTING_CASH
-        - TIMBER_TRAIN_PURCHASE_PRICE
+        - FLATBED_TRAIN_PURCHASE_PRICE
         - STARTER_ROUTE_RESERVE,
       );
     },

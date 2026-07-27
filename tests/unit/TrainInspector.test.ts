@@ -10,7 +10,7 @@ const inspection = (
   blocker: CargoBlocker | null = null,
 ): TrainInspectionDto => Object.freeze({
   trainId: 'train-1',
-  displayName: 'Timber Freight Set',
+  displayName: 'General Flatbed Set',
   direction: 'forward',
   throttle: 1,
   movementState: 'stopped',
@@ -77,7 +77,7 @@ describe('TrainInspector', () => {
     ) as HTMLProgressElement;
 
     expect(root.getAttribute('aria-hidden')).toBe('false');
-    expect(root.textContent).toContain('Timber Freight Set');
+    expect(root.textContent).toContain('General Flatbed Set');
     expect(root.textContent).toContain('Forward · stopped');
     expect(root.textContent).toContain('Logs 40 / 60 t');
     expect(root.textContent).toContain('Nearest eligible: Sawmill');

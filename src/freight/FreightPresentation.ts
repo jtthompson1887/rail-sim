@@ -4,6 +4,10 @@ import { summariseProfitAndLoss } from '../economy/FinanceLedger';
 import type {
   CargoTransferStatus,
 } from './CargoSystem';
+import {
+  FLATBED_FREIGHT_SET_ID,
+  FREIGHT_SETS,
+} from './FreightSetCatalog';
 import type { FreightPurchaseQuote } from './FreightPurchaseService';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
 
@@ -19,10 +23,10 @@ export interface OperatingSummaryDto {
 }
 
 export interface FreightPurchaseDto {
-  readonly freightSetId: 'timber-freight-set';
-  readonly displayName: 'Timber Freight Set';
-  readonly price: 90_000;
-  readonly compatibleCargoLabel: 'Logs';
+  readonly freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+  readonly displayName: string;
+  readonly price: number;
+  readonly compatibleCargoLabel: 'Logs, Structural Timber';
   readonly capacityLabel: '60 tonnes';
   readonly runningCostLabel: '£20 / active tick';
   readonly cashAfter: number;
@@ -33,7 +37,7 @@ export interface FreightPurchaseDto {
 
 export interface TrainInspectionDto {
   readonly trainId: string;
-  readonly displayName: 'Timber Freight Set';
+  readonly displayName: string;
   readonly direction: 'forward' | 'neutral' | 'reverse';
   readonly throttle: -1 | 0 | 1;
   readonly movementState: 'stopped' | 'moving' | 'derailed';
@@ -64,10 +68,10 @@ export interface TrainInspectionDto {
 }
 
 const PURCHASE_REMEDIES = {
-  'no-track': 'Click on player track to place the Timber Freight Set',
+  'no-track': 'Click on player track to place the General Flatbed Set',
   'outside-forest-access': 'Place inside Managed Forest rail access',
   'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for Timber Freight Set',
+  'insufficient-cash': 'Insufficient cash for General Flatbed Set',
   'duplicate-gesture': 'Purchase already in progress',
 } as const;
 
@@ -130,7 +134,7 @@ export function buildTrainInspection(
   transfer: CargoTransferStatus,
 ): TrainInspectionDto | null {
   const train = world.trains.find(({ id }) => id === runtime.trainId);
-  if (!train || train.freightSetId !== 'timber-freight-set'
+  if (!train || train.freightSetId !== FLATBED_FREIGHT_SET_ID
     || transfer.trainId !== runtime.trainId) return null;
 
   const units = train.cargo?.units ?? 0;
@@ -140,7 +144,7 @@ export function buildTrainInspection(
   const operations = train.operations;
   return deepFreeze({
     trainId: train.id,
-    displayName: 'Timber Freight Set' as const,
+    displayName: FREIGHT_SETS[0].displayName,
     direction: runtime.throttle > 0
       ? 'forward' as const
       : runtime.throttle < 0
@@ -193,21 +197,22 @@ export function buildFreightPurchasePresentation(
   quote: FreightPurchaseQuote | null,
   cash: number,
 ): FreightPurchaseDto {
+  const freightSet = FREIGHT_SETS[0];
   const blocker = quote?.blocker ?? 'no-track';
   return Object.freeze({
-    freightSetId: 'timber-freight-set',
-    displayName: 'Timber Freight Set',
-    price: 90_000,
-    compatibleCargoLabel: 'Logs',
+    freightSetId: FLATBED_FREIGHT_SET_ID,
+    displayName: freightSet.displayName,
+    price: freightSet.purchasePrice,
+    compatibleCargoLabel: 'Logs, Structural Timber',
     capacityLabel: '60 tonnes',
     runningCostLabel: '£20 / active tick',
-    cashAfter: quote?.cashAfter ?? cash - 90_000,
-    affordable: quote?.affordable ?? cash >= 90_000,
+    cashAfter: quote?.cashAfter ?? cash - freightSet.purchasePrice,
+    affordable: quote?.affordable ?? cash >= freightSet.purchasePrice,
     validPlacement: quote?.valid ?? false,
     remedy: blocker === null
       ? ''
       : PURCHASE_REMEDIES[
         blocker as keyof typeof PURCHASE_REMEDIES
-      ] ?? 'Timber Freight Set purchase could not be completed',
+      ] ?? 'General Flatbed Set purchase could not be completed',
   });
 }

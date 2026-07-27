@@ -163,7 +163,7 @@ const purchaseInput = (
   ))[0];
   if (!access) throw new Error('No forest endpoint for purchase');
   return {
-    freightSetId: 'timber-freight-set',
+    freightSetId: 'flatbed-freight-set',
     trackUUID: access.track.uuid,
     trackT: access.trackT,
     x: access.point.x,
@@ -624,7 +624,7 @@ describe('Integration: first profitable timber freight route', () => {
     if (first.ok === false) throw new Error(first.blocker);
     expect(serviceProbe.spawnCalls).toEqual([{
       trainId: first.trainId,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     }]);
     expect(serviceProbe.placeCalls).toEqual([{
       trainId: first.trainId,
@@ -682,7 +682,7 @@ describe('Integration: first profitable timber freight route', () => {
       });
       expect(probe.spawnCalls).toEqual([{
         trainId,
-        freightSetId: 'timber-freight-set',
+        freightSetId: 'flatbed-freight-set',
       }]);
       expect(probe.placeCalls).toEqual(index === 0 ? [] : [{
         trainId,
@@ -712,7 +712,7 @@ describe('Integration: first profitable timber freight route', () => {
     apply.mockRestore();
     expect(installProbe.spawnCalls).toEqual([{
       trainId: 'install-failure',
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     }]);
     expect(installProbe.placeCalls).toEqual([{
       trainId: 'install-failure',

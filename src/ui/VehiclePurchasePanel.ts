@@ -1,5 +1,6 @@
 import type { FreightPurchaseQuote } from '../freight/FreightPurchaseService';
 import { buildFreightPurchasePresentation } from '../freight/FreightPresentation';
+import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 import { EventBus } from '../services/EventBus';
 
 const CURRENCY = new Intl.NumberFormat('en-GB', {
@@ -65,8 +66,8 @@ export class VehiclePurchasePanel {
     this.remedy.style.cssText =
       'margin-top:8px;padding:7px 8px;border-radius:4px;background:#102c42;color:#ffe39a';
     this.buy.type = 'button';
-    this.buy.dataset.testid = 'timber-freight-set-buy';
-    this.buy.textContent = 'Place Timber Freight Set';
+    this.buy.dataset.testid = 'flatbed-freight-set-buy';
+    this.buy.textContent = 'Place General Flatbed Set';
     this.confirm.type = 'button';
     this.confirm.dataset.testid = 'freight-purchase-confirm';
     this.confirm.textContent = 'Confirm purchase';
@@ -85,7 +86,7 @@ export class VehiclePurchasePanel {
     }
     this.buy.addEventListener('click', () => {
       EventBus.emit('freight:purchase-mode-requested', {
-        freightSetId: 'timber-freight-set',
+        freightSetId: FLATBED_FREIGHT_SET_ID,
       });
     });
     this.confirm.addEventListener('click', () => {

@@ -480,7 +480,7 @@ describe('world schema validation', () => {
   it.each([
     ['unknown product', (cargo: any) => { cargo.productId = 'mystery'; }],
     ['incompatible product', (cargo: any) => {
-      cargo.productId = 'structural-timber';
+      cargo.productId = 'cement';
     }],
     ['unknown origin facility', (cargo: any) => {
       cargo.originFacilityId = 'missing-facility';

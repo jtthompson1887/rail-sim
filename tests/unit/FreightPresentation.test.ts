@@ -75,10 +75,10 @@ describe('FreightPresentation', () => {
     expect(contractBonusesIsRequired).toBe(true);
   });
 
-  it('builds one immutable timber purchase decision with exact commercial copy', () => {
+  it('builds one immutable flatbed purchase decision with exact commercial copy', () => {
     const quote = Object.freeze({
       expectedRevision: 7,
-      freightSetId: 'timber-freight-set' as const,
+      freightSetId: 'flatbed-freight-set' as const,
       trackUUID: 'forest-sawmill-track',
       trackT: 0.1,
       facing: 1 as const,
@@ -92,10 +92,10 @@ describe('FreightPresentation', () => {
     const dto = buildFreightPurchasePresentation(quote, 200_000);
 
     expect(dto).toEqual({
-      freightSetId: 'timber-freight-set',
-      displayName: 'Timber Freight Set',
+      freightSetId: 'flatbed-freight-set',
+      displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs',
+      compatibleCargoLabel: 'Logs, Structural Timber',
       capacityLabel: '60 tonnes',
       runningCostLabel: '£20 / active tick',
       cashAfter: 110_000,
@@ -130,7 +130,7 @@ describe('FreightPresentation', () => {
 
     expect(dto).toEqual({
       trainId: 'train-1',
-      displayName: 'Timber Freight Set',
+      displayName: 'General Flatbed Set',
       direction: 'forward',
       throttle: 1,
       movementState: 'stopped',

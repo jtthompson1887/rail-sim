@@ -127,10 +127,10 @@ describe('deriveFirstRouteObjective', () => {
     });
   });
 
-  it('completes Buy the train from any persisted Timber Freight Set', () => {
+  it('completes Buy the train from any persisted General Flatbed Set', () => {
     const world = connectedWorldWithoutTrain();
     world.trains.push(makeFreightTrainDef({
-      id: 'persisted-timber-set',
+      id: 'persisted-flatbed-set',
       trackUUID: 'deleted-track',
     }));
 

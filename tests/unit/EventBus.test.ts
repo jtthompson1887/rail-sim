@@ -146,7 +146,7 @@ describe('EventBus', () => {
   it('round-trips the typed frozen freight quote and purchase result payloads', () => {
     const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: 7,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-route',
       trackT: 0.125,
       facing: -1,
@@ -190,16 +190,16 @@ describe('EventBus', () => {
     EventBus.off('freight:purchase-result', resultListener);
   });
 
-  it('round-trips the timber-only purchase mode request', () => {
+  it('round-trips the flatbed purchase mode request', () => {
     const listener = jest.fn();
     EventBus.on('freight:purchase-mode-requested', listener);
 
     EventBus.emit('freight:purchase-mode-requested', {
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
 
     expect(listener).toHaveBeenCalledWith({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
     EventBus.off('freight:purchase-mode-requested', listener);
   });
@@ -217,7 +217,7 @@ describe('EventBus', () => {
     });
     const inspection: TrainInspectionDto = Object.freeze({
       trainId: 'train-1',
-      displayName: 'Timber Freight Set',
+      displayName: 'General Flatbed Set',
       direction: 'forward',
       throttle: 1,
       movementState: 'stopped',
@@ -274,10 +274,10 @@ describe('EventBus', () => {
       operatingProfit: 750,
     });
     const purchase: FreightPurchaseDto = Object.freeze({
-      freightSetId: 'timber-freight-set',
-      displayName: 'Timber Freight Set',
+      freightSetId: 'flatbed-freight-set',
+      displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs',
+      compatibleCargoLabel: 'Logs, Structural Timber',
       capacityLabel: '60 tonnes',
       runningCostLabel: '£20 / active tick',
       cashAfter: 10_000,

@@ -16,6 +16,7 @@ import type {
 } from '../freight/FreightPresentation';
 import type { FirstRouteObjectiveDto } from '../freight/FirstRouteObjective';
 import type { FreightDeliveryEvent } from '../freight/CargoSystem';
+import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -82,7 +83,7 @@ interface EventMap {
   };
   'ui:cash-pulse': { amount: number };
   'freight:purchase-mode-requested': {
-    freightSetId: 'timber-freight-set';
+    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   };
   'ui:freight-purchase-state': {
     quote: FreightPurchaseQuote | null;

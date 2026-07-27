@@ -7,8 +7,8 @@ import type { TrackTopologySnapshot } from '../managers/TrackManager';
 import { WorldManager } from '../managers/WorldManager';
 import { postLedgerEntry } from '../economy/FinanceLedger';
 import {
-  TIMBER_FREIGHT_SET_ID,
-  TIMBER_TRAIN_PURCHASE_PRICE,
+  FLATBED_FREIGHT_SET_ID,
+  FREIGHT_SETS,
 } from './FreightSetCatalog';
 import { queryRailAccessConnectivity } from './RailAccessConnectivity';
 
@@ -27,11 +27,11 @@ export type FreightPurchaseBlocker =
 
 export interface FreightPurchaseQuote {
   readonly expectedRevision: number;
-  readonly freightSetId: 'timber-freight-set';
+  readonly freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   readonly trackUUID: string;
   readonly trackT: number;
   readonly facing: 1 | -1;
-  readonly purchasePrice: 90_000;
+  readonly purchasePrice: number;
   readonly cashAfter: number;
   readonly affordable: boolean;
   readonly valid: boolean;
@@ -59,7 +59,7 @@ export interface FreightPurchaseRuntimePort {
 }
 
 export interface FreightPurchaseQuoteInput {
-  readonly freightSetId: 'timber-freight-set';
+  readonly freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   readonly trackUUID: string;
   readonly trackT: number;
   readonly x: number;
@@ -151,7 +151,7 @@ const createPurchasedTrainDef = (
   quote: FreightPurchaseQuote,
 ): TrainDef => ({
   id: trainId,
-  freightSetId: TIMBER_FREIGHT_SET_ID,
+  freightSetId: quote.freightSetId,
   trackUUID: quote.trackUUID,
   trackT: quote.trackT,
   facing: quote.facing,
@@ -181,8 +181,9 @@ export class FreightPurchaseService {
   quote(input: FreightPurchaseQuoteInput): FreightPurchaseQuote {
     const world = this.worldPort.world;
     const cash = world?.company.cash ?? 0;
-    const cashAfter = cash - TIMBER_TRAIN_PURCHASE_PRICE;
-    const affordable = cash >= TIMBER_TRAIN_PURCHASE_PRICE;
+    const freightSet = FREIGHT_SETS[0];
+    const cashAfter = cash - freightSet.purchasePrice;
+    const affordable = cash >= freightSet.purchasePrice;
     const selectedTrack = world?.tracks.find(
       ({ uuid }) => uuid === input.trackUUID,
     );
@@ -242,11 +243,11 @@ export class FreightPurchaseService {
       : 1;
     const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: world?.revision ?? -1,
-      freightSetId: TIMBER_FREIGHT_SET_ID,
+      freightSetId: FLATBED_FREIGHT_SET_ID,
       trackUUID: String(input.trackUUID),
       trackT: input.trackT,
       facing,
-      purchasePrice: TIMBER_TRAIN_PURCHASE_PRICE,
+      purchasePrice: freightSet.purchasePrice,
       cashAfter,
       affordable,
       valid: blocker === null,
@@ -326,10 +327,10 @@ export class FreightPurchaseService {
           (draft) => {
             if (draft.trains.some(({ id }) => id === trainId)) return false;
             const posted = postLedgerEntry(draft.company, {
-              magnitude: TIMBER_TRAIN_PURCHASE_PRICE,
+              magnitude: quote.purchasePrice,
               category: 'vehicle-capex',
               tick: draft.economy.tick,
-              referenceId: trainId,
+              referenceId: quote.freightSetId,
               direction: 'forward',
             });
             if (!posted.ok) return false;

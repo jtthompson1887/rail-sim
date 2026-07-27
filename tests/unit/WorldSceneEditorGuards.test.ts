@@ -1817,10 +1817,10 @@ describe('WorldScene disabled construction bypass guards', () => {
     GameStateManager.enterCreate('purchase-mode');
 
     scene.freightPurchaseModeRequestedHandler({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
 
-    expect(setFreightSetId).toHaveBeenCalledWith('timber-freight-set');
+    expect(setFreightSetId).toHaveBeenCalledWith('flatbed-freight-set');
     expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
       tool: 'place-vehicle',
     });
@@ -1831,7 +1831,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     WorldManager.createNew('Committed purchase', 'committed-purchase');
     const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: 0,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-route',
       trackT: 0.1,
       facing: -1,
@@ -1904,7 +1904,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     const scene = new WorldScene() as any;
     const quote = Object.freeze({
       expectedRevision: 0,
-      freightSetId: 'timber-freight-set' as const,
+      freightSetId: 'flatbed-freight-set' as const,
       trackUUID: 'forest-route',
       trackT: 0.1,
       facing: 1 as const,
@@ -1952,7 +1952,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(runtime.spawn(
       'runtime-train',
-      'timber-freight-set',
+      'flatbed-freight-set',
     )).toBe(train);
     expect(runtime.place(
       train,
@@ -1989,7 +1989,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     const train = manager.createFreightTrain(
       'placed-train',
-      'timber-freight-set',
+      'flatbed-freight-set',
     );
     const body = train.getMatterBody();
     const setPosition = jest.spyOn(body, 'setPosition');

@@ -115,12 +115,12 @@ describe('TrainManager aggregate freight trains', () => {
 
     const train = manager.createFreightTrain(
       'freight-train',
-      'timber-freight-set',
+      'flatbed-freight-set',
     );
 
     expect(manager.trains).toEqual([train]);
     expect(manager.carriages).toEqual([]);
-    expect(train.freightSetId).toBe('timber-freight-set');
+    expect(train.freightSetId).toBe('flatbed-freight-set');
     expect((manager as any).trackSolvers.size).toBe(1);
     expect(TrainManager.bodyToTrain.get(train.getMatterBody())).toBe(train);
     expect(GameStateManager.activeTrains).toBe(1);
@@ -139,7 +139,7 @@ describe('TrainManager aggregate freight trains', () => {
     );
     const train = manager.createFreightTrain(
       'freight-train',
-      'timber-freight-set',
+      'flatbed-freight-set',
     );
     const body = train.getMatterBody();
     const bodyDestroy = jest.spyOn(body, 'destroy');
@@ -165,8 +165,8 @@ describe('TrainManager aggregate freight trains', () => {
       {} as any,
       {} as any,
     );
-    const first = manager.createFreightTrain('first', 'timber-freight-set');
-    const second = manager.createFreightTrain('second', 'timber-freight-set');
+    const first = manager.createFreightTrain('first', 'flatbed-freight-set');
+    const second = manager.createFreightTrain('second', 'flatbed-freight-set');
     first.enginePower = 1;
     second.enginePower = -1;
 
@@ -184,11 +184,11 @@ describe('TrainManager aggregate freight trains', () => {
     );
     const locked = manager.createFreightTrain(
       'locked',
-      'timber-freight-set',
+      'flatbed-freight-set',
     );
     const free = manager.createFreightTrain(
       'free',
-      'timber-freight-set',
+      'flatbed-freight-set',
     );
     jest.spyOn(locked, 'update').mockImplementation();
     jest.spyOn(free, 'update').mockImplementation();
