@@ -29,6 +29,14 @@ const EMPTY_LOAD_PRODUCTS: readonly LoadableProduct[] = Object.freeze([]);
 const isNonNegativeSafeInteger = (value: number): boolean =>
   Number.isSafeInteger(value) && value >= 0;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const hasProductDefinition = (productId: string): boolean => {
+  const product = getProduct(productId) as unknown;
+  return isRecord(product) && product.id === productId;
+};
+
 const activeRecipe = (
   facility: FacilityEconomyDef,
 ): RecipeDefinition | null => {
@@ -42,26 +50,17 @@ const activeRecipe = (
   return getRecipe(recipeId) ?? null;
 };
 
-const validSourceSlot = (
-  slot: InventorySlotDef | undefined,
+const validInventorySlot = (
+  slot: unknown,
   productId: string,
-): slot is InventorySlotDef => slot !== undefined
+): slot is InventorySlotDef => isRecord(slot)
   && slot.productId === productId
-  && isNonNegativeSafeInteger(slot.quantity)
-  && isNonNegativeSafeInteger(slot.reservedQuantity)
+  && isNonNegativeSafeInteger(slot.quantity as number)
+  && isNonNegativeSafeInteger(slot.reservedQuantity as number)
   && Number.isSafeInteger(slot.capacity)
-  && slot.capacity > 0
-  && slot.quantity <= slot.capacity;
-
-const validDestinationSlot = (
-  slot: InventorySlotDef | undefined,
-  productId: string,
-): slot is InventorySlotDef => slot !== undefined
-  && slot.productId === productId
-  && isNonNegativeSafeInteger(slot.quantity)
-  && Number.isSafeInteger(slot.capacity)
-  && slot.capacity > 0
-  && slot.quantity <= slot.capacity;
+  && (slot.capacity as number) > 0
+  && (slot.reservedQuantity as number) <= (slot.quantity as number)
+  && (slot.quantity as number) <= (slot.capacity as number);
 
 export function eligibleLoadProducts(
   facility: FacilityEconomyDef,
@@ -81,12 +80,12 @@ export function eligibleLoadProducts(
       || !Number.isSafeInteger(output.quantity)
       || output.quantity <= 0
       || includedProductIds.has(output.productId)
-      || !getProduct(output.productId)
+      || !hasProductDefinition(output.productId)
       || freightSet.compatibleProductIds.indexOf(output.productId) === -1) {
       return;
     }
     const slot = facility.inventories?.[output.productId];
-    if (!validSourceSlot(slot, output.productId)) return;
+    if (!validInventorySlot(slot, output.productId)) return;
     const availableUnits = slot.quantity - slot.reservedQuantity;
     if (!Number.isSafeInteger(availableUnits) || availableUnits <= 0) return;
 
@@ -109,7 +108,9 @@ export function facilityAcceptsProduct(
   productId: string,
 ): AcceptedProduct | null {
   const recipe = activeRecipe(facility);
-  if (!recipe || !Array.isArray(recipe.inputs) || !getProduct(productId)) {
+  if (!recipe
+    || !Array.isArray(recipe.inputs)
+    || !hasProductDefinition(productId)) {
     return null;
   }
   const input = recipe.inputs.find((candidate) =>
@@ -117,7 +118,7 @@ export function facilityAcceptsProduct(
     && Number.isSafeInteger(candidate.quantity)
     && candidate.quantity > 0);
   const slot = facility.inventories?.[productId];
-  if (!input || !validDestinationSlot(slot, productId)) return null;
+  if (!input || !validInventorySlot(slot, productId)) return null;
 
   const freeCapacityUnits = slot.capacity - slot.quantity;
   if (!Number.isSafeInteger(freeCapacityUnits) || freeCapacityUnits <= 0) {

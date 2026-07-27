@@ -6,6 +6,7 @@ import type {
 } from '../../src/economy/EconomyData';
 import {
   getFacilityDefinition,
+  getProduct,
   getRecipe,
 } from '../../src/economy/ProductCatalog';
 import * as ProductCatalog from '../../src/economy/ProductCatalog';
@@ -103,6 +104,63 @@ describe('eligibleLoadProducts', () => {
     ]);
   });
 
+  it.each([
+    ['a null slot', (slot: any) => null],
+    ['a non-object slot', (slot: any) => 7],
+    ['an unsafe quantity', (slot: any) => ({
+      ...slot,
+      quantity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional quantity', (slot: any) => ({
+      ...slot,
+      quantity: 1.5,
+    })],
+    ['an unsafe reservation', (slot: any) => ({
+      ...slot,
+      reservedQuantity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional reservation', (slot: any) => ({
+      ...slot,
+      reservedQuantity: 1.5,
+    })],
+    ['reservation above quantity', (slot: any) => ({
+      ...slot,
+      quantity: 10,
+      reservedQuantity: 11,
+    })],
+    ['an unsafe capacity', (slot: any) => ({
+      ...slot,
+      capacity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional capacity', (slot: any) => ({
+      ...slot,
+      capacity: 240.5,
+    })],
+    ['quantity above capacity', (slot: any) => ({
+      ...slot,
+      quantity: 241,
+      capacity: 240,
+    })],
+  ])('fails closed for %s', (_description, malformedSlot) => {
+    const forest = cloneCatalogueFacility('managed-forest');
+    forest.inventories.logs = malformedSlot(forest.inventories.logs);
+
+    expect(eligibleLoadProducts(forest, flatbed())).toEqual([]);
+  });
+
+  it.each([
+    ['unknown', undefined],
+    ['invalid', { ...getProduct('logs'), id: 'wrong-product' }],
+  ])('rejects an %s output product definition', (_description, product) => {
+    jest.spyOn(ProductCatalog, 'getProduct')
+      .mockReturnValue(product as any);
+
+    expect(eligibleLoadProducts(
+      cloneCatalogueFacility('managed-forest'),
+      flatbed(),
+    )).toEqual([]);
+  });
+
   it('preserves recipe output order and returns immutable new values', () => {
     const baseDefinition = getFacilityDefinition('managed-forest')!;
     const baseRecipe = getRecipe('forest-harvest')!;
@@ -163,13 +221,17 @@ describe('eligibleLoadProducts', () => {
 });
 
 describe('facilityAcceptsProduct', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('derives Sawmill and Prefabrication Plant inputs from active recipes', () => {
     const sawmill = cloneCatalogueFacility('sawmill');
     sawmill.inventories.logs.quantity = 21;
-    sawmill.inventories.logs.reservedQuantity = 199;
+    sawmill.inventories.logs.reservedQuantity = 20;
     const prefab = cloneCatalogueFacility('prefabrication-plant');
     prefab.inventories['structural-timber'].quantity = 41;
-    prefab.inventories['structural-timber'].reservedQuantity = 159;
+    prefab.inventories['structural-timber'].reservedQuantity = 40;
 
     expect(facilityAcceptsProduct(sawmill, 'logs')).toEqual({
       productId: 'logs',
@@ -219,7 +281,7 @@ describe('facilityAcceptsProduct', () => {
     expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
 
     sawmill.inventories.logs.quantity = 199;
-    sawmill.inventories.logs.reservedQuantity = 200;
+    sawmill.inventories.logs.reservedQuantity = 199;
     const before = JSON.parse(JSON.stringify(sawmill));
     const result = facilityAcceptsProduct(sawmill, 'logs')!;
 
@@ -240,5 +302,62 @@ describe('facilityAcceptsProduct', () => {
     delete sawmill.inventories.logs;
 
     expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
+  });
+
+  it.each([
+    ['a null slot', (slot: any) => null],
+    ['a non-object slot', (slot: any) => 'logs'],
+    ['an unsafe quantity', (slot: any) => ({
+      ...slot,
+      quantity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional quantity', (slot: any) => ({
+      ...slot,
+      quantity: 1.5,
+    })],
+    ['an unsafe reservation', (slot: any) => ({
+      ...slot,
+      reservedQuantity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional reservation', (slot: any) => ({
+      ...slot,
+      reservedQuantity: 1.5,
+    })],
+    ['reservation above quantity', (slot: any) => ({
+      ...slot,
+      quantity: 10,
+      reservedQuantity: 11,
+    })],
+    ['an unsafe capacity', (slot: any) => ({
+      ...slot,
+      capacity: Number.MAX_SAFE_INTEGER + 1,
+    })],
+    ['a fractional capacity', (slot: any) => ({
+      ...slot,
+      capacity: 200.5,
+    })],
+    ['quantity above capacity', (slot: any) => ({
+      ...slot,
+      quantity: 201,
+      capacity: 200,
+    })],
+  ])('fails closed for %s', (_description, malformedSlot) => {
+    const sawmill = cloneCatalogueFacility('sawmill');
+    sawmill.inventories.logs = malformedSlot(sawmill.inventories.logs);
+
+    expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
+  });
+
+  it.each([
+    ['unknown', undefined],
+    ['invalid', { ...getProduct('logs'), id: 'wrong-product' }],
+  ])('rejects an %s input product definition', (_description, product) => {
+    jest.spyOn(ProductCatalog, 'getProduct')
+      .mockReturnValue(product as any);
+
+    expect(facilityAcceptsProduct(
+      cloneCatalogueFacility('sawmill'),
+      'logs',
+    )).toBeNull();
   });
 });
