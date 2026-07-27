@@ -347,7 +347,7 @@ describe('WorldScene persisted opportunity view', () => {
       setSelected: jest.fn(),
       setSelectionEnabled: jest.fn(),
     };
-    const train = { id: 'live-train' };
+    const train = { getUUID: () => 'live-train' };
     scene.activeEditorTool = { cancel: jest.fn() };
     scene.selectionManager = { clearSelection: jest.fn() };
     scene.facilityViews = [facility];
@@ -366,7 +366,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(emit).toHaveBeenCalledWith('facility:deselected', {
       facilityId: 'sawmill',
     });
-    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(train);
+    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith('live-train');
     expect(facility.setSelected.mock.invocationCallOrder[0])
       .toBeLessThan(scene.trainManager.selectTrain.mock.invocationCallOrder[0]);
   });

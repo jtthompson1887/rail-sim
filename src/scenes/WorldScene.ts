@@ -462,7 +462,7 @@ export default class WorldScene extends Phaser.Scene {
       const train = this.trainManager.trains.find(
         (candidate) => candidate.getUUID() === purchaseResult.trainId,
       );
-      if (train) this.trainManager.selectTrain(train);
+      if (train) this.trainManager.selectTrain(train.getUUID());
       this.clearFacilitySelection();
       this.reportSaveState(purchaseResult.saveState);
       if (!purchaseResult.saved) {
@@ -1493,7 +1493,7 @@ export default class WorldScene extends Phaser.Scene {
     const trains = this.trainManager.trains;
     if (trains.length > 0) {
       this.clearFacilitySelection();
-      this.trainManager.selectTrain(trains[0]);
+      this.trainManager.selectTrain(trains[0].getUUID());
     }
   }
 

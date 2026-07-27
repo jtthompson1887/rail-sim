@@ -2065,7 +2065,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
   });
 
-  it('clears stale construction UI/history and selects the committed train without a second save', () => {
+  it('selects a purchased train by ID and neutralises the previously controlled train without a second save', () => {
     const scene = new WorldScene() as any;
     WorldManager.createNew('Committed purchase', 'committed-purchase');
     const quote: FreightPurchaseQuote = Object.freeze({
@@ -2080,7 +2080,27 @@ describe('WorldScene disabled construction bypass guards', () => {
       valid: true,
       blocker: null,
     });
-    const purchasedTrain = { getUUID: () => 'purchased-train' };
+    const cameraController = {
+      startFollow: jest.fn(),
+      stopFollow: jest.fn(),
+    };
+    const trainManager = new TrainManager(
+      makeScene(),
+      {} as any,
+      cameraController as any,
+    );
+    const previouslyControlled = trainManager.createFreightTrain(
+      'previous-train',
+      'flatbed-freight-set',
+    );
+    const purchasedTrain = trainManager.createFreightTrain(
+      'purchased-train',
+      'flatbed-freight-set',
+    );
+    trainManager.selectTrain('previous-train');
+    previouslyControlled.enginePower = 0.8;
+    cameraController.startFollow.mockClear();
+    cameraController.stopFollow.mockClear();
     const purchase = jest.fn().mockReturnValue(Object.freeze({
       ok: true,
       trainId: 'purchased-train',
@@ -2093,10 +2113,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       clearSelection: jest.fn(),
       selectedUUIDs: ['stale-track'],
     };
-    scene.trainManager = {
-      trains: [purchasedTrain],
-      selectTrain: jest.fn(),
-    };
+    scene.trainManager = trainManager;
     scene.selectedFacilityId = 'sawmill';
     scene.facilityViews = [{
       facilityId: 'sawmill',
@@ -2114,8 +2131,14 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(Object.isFrozen(confirmedQuote)).toBe(true);
     expect(scene.commandStack.clear).toHaveBeenCalledTimes(1);
     expect(scene.selectionManager.clearSelection).toHaveBeenCalledTimes(1);
-    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(
-      purchasedTrain,
+    expect(trainManager.selectedTrain).toBe(purchasedTrain);
+    expect(previouslyControlled.enginePower).toBe(0);
+    expect(previouslyControlled.selected).toBe(false);
+    expect(purchasedTrain.selected).toBe(true);
+    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
+    expect(cameraController.startFollow).toHaveBeenCalledTimes(1);
+    expect(cameraController.startFollow).toHaveBeenCalledWith(
+      purchasedTrain.getMatterBody(),
     );
     expect(scene.facilityViews[0].setSelected).toHaveBeenCalledWith(false);
     expect(scene.selectedFacilityId).toBeNull();
