@@ -53,6 +53,7 @@ export default class EditorUIScene extends Phaser.Scene {
   private minimapVisible = true;
   private editorControlsVisible = true;
   private constructionDecisionActive = false;
+  private trackToolActive = false;
   private initialVisible = true;
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
@@ -106,6 +107,11 @@ export default class EditorUIScene extends Phaser.Scene {
 
   private readonly selectToolHandler = ({ tool }: { tool: string }) => {
     this.toolbar.selectTool(tool as CreateTool);
+  };
+
+  private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
+    this.trackToolActive = tool === 'place-track';
+    this.syncVehiclePurchaseVisibility();
   };
 
   private readonly constructionPreviewHandler = (
@@ -190,6 +196,7 @@ export default class EditorUIScene extends Phaser.Scene {
     EventBus.on('ui:toolbar-save-state', this.saveStateHandler);
     EventBus.on('ui:toolbar-visible',    this.visibleHandler);
     EventBus.on('ui:toolbar-select-tool', this.selectToolHandler);
+    EventBus.on('tool:changed', this.toolChangedHandler);
     EventBus.on('construction:preview', this.constructionPreviewHandler);
 
     const startupSaveError = this.initialSaveErrorMessage;
@@ -206,6 +213,7 @@ export default class EditorUIScene extends Phaser.Scene {
       EventBus.off('ui:toolbar-save-state',  this.saveStateHandler);
       EventBus.off('ui:toolbar-visible',     this.visibleHandler);
       EventBus.off('ui:toolbar-select-tool', this.selectToolHandler);
+      EventBus.off('tool:changed', this.toolChangedHandler);
       EventBus.off('construction:preview', this.constructionPreviewHandler);
       this.toolbar.destroy();
       this.propertiesPanel.destroy();
@@ -227,7 +235,9 @@ export default class EditorUIScene extends Phaser.Scene {
 
   private syncVehiclePurchaseVisibility(): void {
     this.vehiclePurchasePanel.setVisible(
-      this.editorControlsVisible && !this.constructionDecisionActive,
+      this.editorControlsVisible
+        && !this.trackToolActive
+        && !this.constructionDecisionActive,
     );
   }
 

@@ -157,6 +157,28 @@ describe('EditorUIScene construction UI boundary', () => {
       .toHaveBeenLastCalledWith(true);
   });
 
+  it('yields the vehicle purchase panel as soon as the Track tool is selected', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 1_000_000,
+      saveState: 'saved',
+    });
+    const purchase = document.querySelector(
+      '[data-testid="vehicle-purchase-panel"]',
+    ) as HTMLElement;
+
+    EventBus.emit('ui:toolbar-select-tool', { tool: 'place-track' });
+    expect(purchase.getAttribute('aria-hidden')).toBe('true');
+
+    EventBus.emit('ui:toolbar-visible', { visible: false });
+    expect(purchase.getAttribute('aria-hidden')).toBe('true');
+    EventBus.emit('ui:toolbar-visible', { visible: true });
+    expect(purchase.getAttribute('aria-hidden')).toBe('true');
+
+    EventBus.emit('tool:changed', { tool: 'pan' });
+    expect(purchase.getAttribute('aria-hidden')).toBe('false');
+  });
+
   it('hydrates a failed startup save into the HUD and Retry Save action', () => {
     startEditorUI({
       visible: true,
