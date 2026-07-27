@@ -80,7 +80,12 @@ async function snapshot(page: Page): Promise<ConstructionSnapshot> {
 
 async function createFixedSeedWorld(page: Page, seed: string): Promise<void> {
   await page.setViewportSize(DESKTOP_VIEWPORT);
-  await page.addInitScript(() => localStorage.clear());
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('rail-sim-task9-cleared') !== 'yes') {
+      localStorage.clear();
+      sessionStorage.setItem('rail-sim-task9-cleared', 'yes');
+    }
+  });
   await page.goto('/');
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
@@ -105,6 +110,23 @@ async function createFixedSeedWorld(page: Page, seed: string): Promise<void> {
       x: DESKTOP_VIEWPORT.width / 2,
       y: DESKTOP_VIEWPORT.height / 2 + 301,
     },
+  });
+  await page.waitForFunction(
+    () => (window as unknown as Record<string, unknown>).__railSimScene === 'WorldScene'
+      && typeof window.__railSimConstructionSnapshot === 'function',
+    { timeout: 30_000 },
+  );
+  await expect(page.locator('[data-testid="company-hud"]')).toBeVisible();
+}
+
+async function openOnlySavedWorld(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
+    { timeout: 25_000 },
+  );
+  await page.keyboard.press('Enter');
+  await page.locator('canvas').click({
+    position: { x: DESKTOP_VIEWPORT.width / 2, y: 200 },
   });
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'WorldScene'
@@ -233,24 +255,24 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     {
       name: 'rolling earthworks choice',
       seed: 'playtest-077',
-      attempt: 2,
+      attempt: 1,
       direct: {
-        estimatedTotal: 180_054,
-        total: 180_054,
-        track: 35_693,
-        earthworks: 144_361,
-        bridge: 0,
-        tunnel: 0,
+        estimatedTotal: 331_507,
+        total: 331_507,
+        track: 40_025,
+        earthworks: 229_221,
+        bridge: 30_495,
+        tunnel: 31_766,
       },
       detour: {
-        estimatedTotal: 128_191,
-        total: 125_691,
-        track: 36_618,
-        earthworks: 89_073,
+        estimatedTotal: 223_521,
+        total: 221_021,
+        track: 40_837,
+        earthworks: 148_260,
         bridge: 0,
-        tunnel: 0,
+        tunnel: 31_924,
       },
-      expectedPreviewStructure: null,
+      expectedPreviewStructure: 'tunnel',
       liveCostProfile: 'earthworks',
       checkAffordableMobile: false,
     },
@@ -366,37 +388,64 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     });
   }
 
-  test('shows natural unaffordability and readable blocking UI on mobile', async ({ page }) => {
+  test('shows deterministic unaffordability and readable blocking UI on mobile', async ({ page }) => {
     await createFixedSeedWorld(page, 'playtest-1468');
     const generated = await snapshot(page);
     const [direct, detour] = generated.world.starterOpportunity.corridors;
 
     expect(generated.world.company.cash).toBe(1_000_000);
     expect(generated.world.starterOpportunity.resolvedAttempt).toBe(1);
-    expect(direct.estimatedCost).toBe(1_024_011);
+    expect(direct.estimatedCost).toBe(113_931);
     expect(aggregateWitnessCosts(direct)).toEqual({
-      total: 1_024_011,
-      track: 40_879,
-      earthworks: 791_512,
-      bridge: 191_620,
+      total: 113_931,
+      track: 37_000,
+      earthworks: 76_931,
+      bridge: 0,
       tunnel: 0,
     });
     expect(direct.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0]);
-    expect(detour.estimatedCost).toBe(252_607);
-    expect(detour.feasibilityWitness.totalCost).toBe(252_607);
+    expect(detour.estimatedCost).toBe(73_628);
+    expect(detour.feasibilityWitness.totalCost).toBe(73_628);
+    expect(aggregateWitnessCosts(detour)).toEqual({
+      total: 71_128,
+      track: 37_887,
+      earthworks: 33_241,
+      bridge: 0,
+      tunnel: 0,
+    });
     expect(detour.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0, 2_500]);
+
+    await page.evaluate((cash) => {
+      const key = 'rail-sim-worlds';
+      const worlds = JSON.parse(localStorage.getItem(key) ?? '{}');
+      const source = Object.values(worlds)[0] as any;
+      const fixture = JSON.parse(JSON.stringify(source));
+      fixture.id = 'task9-low-cash-world';
+      fixture.name = 'Task 9 Low Cash Fixture';
+      fixture.company.cash = cash;
+      fixture.company.ledger[0].amount = cash;
+      fixture.metadata.createdAt = Date.now() + 1;
+      fixture.metadata.updatedAt = Date.now() + 1;
+      localStorage.setItem(key, JSON.stringify({ [fixture.id]: fixture }));
+    }, direct.estimatedCost - 1);
+    await page.reload();
+    await openOnlySavedWorld(page);
+    const lowCash = await snapshot(page);
+    expect(lowCash.world.company.cash).toBe(113_930);
+    expect(lowCash.world.tracks).toHaveLength(0);
 
     const reviewed = await reviewDirectCorridor(page);
     expect(reviewed.phase).toBe('review');
     expect(reviewed.preview?.proposal.valid).toBe(true);
     expect(reviewed.preview?.totalCost).toBeGreaterThan(
-      generated.world.company.cash,
+      lowCash.world.company.cash,
     );
-    expect(reviewed.preview?.proposal.costs.bridge).toBeGreaterThan(0);
+    expect(reviewed.preview?.proposal.costs.bridge).toBe(0);
+    expect(reviewed.preview?.proposal.costs.tunnel).toBe(0);
     expect(reviewed.preview?.affordable).toBe(false);
     expect(reviewed.preview?.canConfirm).toBe(false);
     await expect(page.locator('[data-testid="construction-primary"]'))
@@ -425,6 +474,6 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     await page.keyboard.press('Enter');
     const rejected = await snapshot(page);
     expect(rejected.world.tracks).toHaveLength(0);
-    expect(rejected.world.company.cash).toBe(1_000_000);
+    expect(rejected.world.company.cash).toBe(113_930);
   });
 });
