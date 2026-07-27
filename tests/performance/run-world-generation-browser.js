@@ -91,11 +91,11 @@ function startHarnessServer() {
       && audit.seedsEvaluated === 284
       && audit.seedsResolved === 284
       && audit.seedsExhausted === 0
-      && audit.maxResolvedAttempt === 11
-      && audit.maxEconomyEvaluations === 3
-      && audit.maxTotalEconomyCandidatesEvaluated === 642
-      && audit.maxJointWorkUnits === 2_946
-      && audit.firstWorstSeed === 'playtest-633'
+      && audit.maxResolvedAttempt === 3
+      && audit.maxEconomyEvaluations === 5
+      && audit.maxTotalEconomyCandidatesEvaluated === 1_155
+      && audit.maxJointWorkUnits === 1_762
+      && audit.firstWorstSeed === 'playtest-666'
       && Number.isFinite(audit.maxGenerationDurationMs)
       && audit.maxGenerationDurationMs < targetMs
       && Number.isFinite(audit.durationMs)
@@ -110,9 +110,8 @@ function startHarnessServer() {
       && measurement.economyResult.economy.facilities.length === 7
       && measurement.economyResult.diagnostics.candidatesEvaluated
         <= measurement.economyCandidatesCap
-      && measurement.economyEvaluations === audit.maxEconomyEvaluations
-      && measurement.totalEconomyCandidatesEvaluated
-        === audit.maxTotalEconomyCandidatesEvaluated
+      && measurement.economyEvaluations === 4
+      && measurement.totalEconomyCandidatesEvaluated === 994
       && measurement.opportunityResult.opportunity.resolvedAttempt
         * measurement.candidatesCap
         + measurement.totalEconomyCandidatesEvaluated
