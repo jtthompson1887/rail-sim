@@ -656,7 +656,7 @@ test.describe('collective three-seed first freight route acceptance', () => {
       distance: number;
       speed: number;
       signedSpeed: number;
-      motion: typeof motion;
+      motion: 'approaching' | 'receding' | 'stationary';
       throttle: -1 | 0 | 1;
       trackUUID: string | null;
       trackT: number | null;
