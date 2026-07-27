@@ -44,7 +44,7 @@ describe('Playwright browser gate configuration', () => {
 
     expect(config.use?.baseURL).toBe('http://127.0.0.1:41719');
     expect(config.webServer).toEqual(expect.objectContaining({
-      command: 'npm run build:test-controls && npx serve dist -p 41719 -s --no-clipboard',
+      command: 'npm run build:test-controls && npx serve dist/client -p 41719 -s --no-clipboard',
       url: 'http://127.0.0.1:41719',
       reuseExistingServer: false,
     }));
@@ -55,7 +55,7 @@ describe('Playwright browser gate configuration', () => {
 
     expect(config.use?.baseURL).toBe('http://127.0.0.1:43123');
     expect(config.webServer).toEqual(expect.objectContaining({
-      command: 'npm run build:test-controls && npx serve dist -p 43123 -s --no-clipboard',
+      command: 'npm run build:test-controls && npx serve dist/client -p 43123 -s --no-clipboard',
       url: 'http://127.0.0.1:43123',
     }));
   });
