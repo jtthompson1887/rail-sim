@@ -115,7 +115,7 @@ export class EconomySystem {
       const runtimeByTrainId = new Map(
         runtime.map((snapshot) => [
           snapshot.trainId,
-          clonePlainData(snapshot),
+          snapshot,
         ]),
       );
       const tickRuntime = Array.from(runtimeByTrainId.values()).sort(
@@ -133,16 +133,14 @@ export class EconomySystem {
           if (draft.economy.tick >= Number.MAX_SAFE_INTEGER) return false;
           const operationTick = draft.economy.tick + 1;
           draft.economy.tick = operationTick;
-          const facilitiesBefore = clonePlainData(
-            draft.economy.facilities,
-          );
+          const facilitiesBefore = draft.economy.facilities;
 
           draft.trains = draft.trains.map((authoritative) => {
             const snapshot = runtimeByTrainId.get(authoritative.id);
             const merged = snapshot
               ? TrainSerializer.mergeRuntime(authoritative, snapshot)
               : null;
-            return clonePlainData(merged ?? authoritative);
+            return merged ?? authoritative;
           });
 
           const cargo = proposeCargoTick({
@@ -153,12 +151,10 @@ export class EconomySystem {
             freightProgress: draft.freightProgress,
             runtime: tickRuntime,
           });
-          draft.company = clonePlainData(cargo.company);
+          draft.company = cargo.company;
           draft.economy = clonePlainData(cargo.economy);
-          draft.freightProgress = clonePlainData(
-            cargo.freightProgress,
-          );
-          draft.trains = cargo.trains.map(clonePlainData);
+          draft.freightProgress = cargo.freightProgress;
+          draft.trains = Array.from(cargo.trains);
 
           const costs = proposeRunningCosts({
             tick: operationTick,
@@ -166,8 +162,8 @@ export class EconomySystem {
             trains: draft.trains,
             runtime: tickRuntime,
           });
-          draft.company = clonePlainData(costs.company);
-          draft.trains = costs.trains.map(clonePlainData);
+          draft.company = costs.company;
+          draft.trains = Array.from(costs.trains);
 
           const orderedFacilities = draft.economy.facilities
             .map((facility, index) => ({ facility, index }))

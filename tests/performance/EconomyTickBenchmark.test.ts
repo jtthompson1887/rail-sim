@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @jest-environment ./tests/performance/CoverageAwareNodeEnvironment.js
  */
 
 import {
@@ -24,6 +24,11 @@ import {
 const WARMUP_TICKS = 100;
 const MEASURED_TICKS = 500;
 const P95_BUDGET_MS = 16;
+const collectingCoverage = (
+  globalThis as typeof globalThis & {
+    readonly __RAIL_SIM_COLLECT_COVERAGE__: boolean;
+  }
+).__RAIL_SIM_COLLECT_COVERAGE__;
 
 class BenchmarkWorldPort implements EconomyWorldPort {
   private current: WorldData;
@@ -176,7 +181,7 @@ const run = (measure: boolean) => {
 };
 
 describe('EconomySystem multi-train tick budget', () => {
-  it('advances a valid twelve-train mixed-state fixture under 16 ms p95 deterministically', () => {
+  it('advances a valid mixed-state fixture deterministically within the uninstrumented budget', () => {
     const first = run(true);
     const second = run(false);
     const stateCounts = Object.values(first.fixture.stateByTrainId).reduce(
@@ -237,11 +242,16 @@ describe('EconomySystem multi-train tick budget', () => {
     expect(first.world.operationsRevision).toBe(600);
     expect(first.hash).toBe(second.hash);
     expect(first.hash).toBe('0284c75e');
-    expect(p95).toBeLessThan(P95_BUDGET_MS);
+    expect(Number.isFinite(p95)).toBe(true);
+    expect(p95).toBeGreaterThanOrEqual(0);
+    if (!collectingCoverage) {
+      expect(p95).toBeLessThan(P95_BUDGET_MS);
+    }
 
     console.info(
       `[economy-tick-benchmark] trains=12 facilities=7 samples=500 `
-      + `p95=${p95.toFixed(3)}ms hash=${first.hash}`,
+      + `p95=${p95.toFixed(3)}ms hash=${first.hash} `
+      + `mode=${collectingCoverage ? 'coverage' : 'budget'}`,
     );
   });
 });
