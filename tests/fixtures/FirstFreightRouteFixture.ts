@@ -161,6 +161,7 @@ export const installFirstFreightRoutePhase = (
     world.trains[0].cargo = {
       productId: 'logs',
       units: options.cargoUnits,
+      loadedUnits: options.cargoUnits,
       originFacilityId: forest.id,
     };
   }

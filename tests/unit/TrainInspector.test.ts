@@ -1,13 +1,13 @@
 /**
  * @jest-environment jsdom
  */
-import type { CargoBlocker } from '../../src/freight/CargoSystem';
+import type { CargoBlockerCode } from '../../src/freight/CargoSystem';
 import type { TrainInspectionDto } from '../../src/freight/FreightPresentation';
 import { EventBus } from '../../src/services/EventBus';
 import { TrainInspector } from '../../src/ui/TrainInspector';
 
 const inspection = (
-  blocker: CargoBlocker | null = null,
+  blocker: CargoBlockerCode | null = null,
 ): TrainInspectionDto => Object.freeze({
   trainId: 'train-1',
   displayName: 'General Flatbed Set',
@@ -24,6 +24,7 @@ const inspection = (
   transfer: Object.freeze({
     trainId: 'train-1',
     facilityId: 'sawmill',
+    productId: 'logs',
     kind: blocker ? 'blocked' : 'unloading',
     blocker,
     batchUnits: 6,
@@ -97,15 +98,17 @@ describe('TrainInspector', () => {
   });
 
   it.each([
-    'Stop the train to transfer cargo',
-    'Move inside Managed Forest rail access',
-    'Move inside Sawmill rail access',
-    'Waiting for logs',
-    'Timber set is full',
-    'Sawmill input storage is full',
-    'Cargo is not accepted here',
-    'Insufficient cash for running costs',
-    'Re-rail the train before operating',
+    'not-operating',
+    'derailed',
+    'train-moving',
+    'unknown-freight-set',
+    'incompatible-product',
+    'outside-eligible-facility',
+    'source-empty',
+    'train-full',
+    'destination-full',
+    'product-not-accepted',
+    'insufficient-running-cash',
   ] as const)('renders the exact blocker copy: %s', (blocker) => {
     panel.setState(inspection(blocker));
     expect(document.querySelector(
@@ -155,7 +158,7 @@ describe('TrainInspector', () => {
     pressed.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await Promise.resolve();
     EventBus.emit('ui:train-inspection', {
-      inspection: inspection('Stop the train to transfer cargo'),
+      inspection: inspection('train-moving'),
     });
     await Promise.resolve();
     EventBus.emit('ui:train-inspection', {

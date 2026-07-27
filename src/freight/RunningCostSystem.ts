@@ -2,7 +2,7 @@ import type { TrainDef } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
 import { postLedgerEntry } from '../economy/FinanceLedger';
 import { clonePlainData } from '../utils/PlainData';
-import type { CargoBlocker } from './CargoSystem';
+import type { CargoBlockerCode } from './CargoSystem';
 import { getFreightSet } from './FreightSetCatalog';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
 
@@ -12,7 +12,8 @@ export interface RunningCostTickProposal {
   readonly activeTrainIds: readonly string[];
   readonly stopTrainIds: readonly string[];
   readonly aggregateCost: number;
-  readonly blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>;
+  readonly blockerByTrainId:
+    Readonly<Record<string, CargoBlockerCode | null>>;
   readonly changed: boolean;
 }
 
@@ -67,7 +68,7 @@ export function proposeRunningCosts(
     })
     .sort((left, right) => left.id.localeCompare(right.id));
   const activeTrainIds = activeTrains.map((train) => train.id);
-  const blockerByTrainId: Record<string, CargoBlocker | null> = {};
+  const blockerByTrainId: Record<string, CargoBlockerCode | null> = {};
   [...trains]
     .sort((left, right) => left.id.localeCompare(right.id))
     .forEach((train) => {
@@ -136,7 +137,7 @@ export function proposeRunningCosts(
     if (posted.code === 'insufficient-cash') {
       activeTrainIds.forEach((trainId) => {
         blockerByTrainId[trainId] =
-          'Insufficient cash for running costs';
+          'insufficient-running-cash';
       });
       return unchanged(aggregateCost, activeTrainIds);
     }

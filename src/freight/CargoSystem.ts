@@ -6,7 +6,6 @@ import type {
 import type {
   CompanyStateDef,
   FacilityEconomyDef,
-  InventorySlotDef,
 } from '../economy/EconomyData';
 import { postLedgerEntry } from '../economy/FinanceLedger';
 import { quoteLocalProduct } from '../economy/MarketSystem';
@@ -20,24 +19,32 @@ import {
   capacityForProduct,
   getFreightSet,
 } from './FreightSetCatalog';
+import type { FreightSetDefinition } from './FreightSetCatalog';
+import {
+  eligibleLoadProducts,
+  facilityAcceptsProduct,
+} from './FacilityCargoRules';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
 
-export type CargoBlocker =
-  | 'Stop the train to transfer cargo'
-  | 'Move inside Managed Forest rail access'
-  | 'Move inside Sawmill rail access'
-  | 'Waiting for logs'
-  | 'Timber set is full'
-  | 'Sawmill input storage is full'
-  | 'Cargo is not accepted here'
-  | 'Insufficient cash for running costs'
-  | 'Re-rail the train before operating';
+export type CargoBlockerCode =
+  | 'not-operating'
+  | 'derailed'
+  | 'train-moving'
+  | 'unknown-freight-set'
+  | 'incompatible-product'
+  | 'outside-eligible-facility'
+  | 'source-empty'
+  | 'train-full'
+  | 'destination-full'
+  | 'product-not-accepted'
+  | 'insufficient-running-cash';
 
 export interface CargoTransferStatus {
   readonly trainId: string;
   readonly facilityId: string | null;
+  readonly productId: string | null;
   readonly kind: 'loading' | 'unloading' | 'blocked' | 'idle';
-  readonly blocker: CargoBlocker | null;
+  readonly blocker: CargoBlockerCode | null;
   readonly batchUnits: number;
   readonly cargoUnits: number;
   readonly capacityUnits: number;
@@ -46,6 +53,8 @@ export interface CargoTransferStatus {
 
 export interface FreightDeliveryEvent {
   readonly trainId: string;
+  readonly productId: string;
+  readonly units: number;
   readonly destinationFacilityId: string;
   readonly tick: number;
   readonly revenue: number;
@@ -79,6 +88,8 @@ interface ContainedFacility {
 
 interface EligibleFacility extends ContainedFacility {
   kind: 'loading' | 'unloading';
+  productId: string;
+  capacityUnits: number;
 }
 
 const BATCH_UNITS = 10;
@@ -107,10 +118,12 @@ const compareFacility = (
 ): number => left.distance - right.distance
   || left.facility.id.localeCompare(right.facility.id);
 
-const cargoCapacity = (train: TrainDef, productId: string): number => {
-  const freightSet = getFreightSet(train.freightSetId);
+const cargoCapacity = (
+  freightSet: FreightSetDefinition,
+  productId: string,
+): number => {
   const product = getProduct(productId);
-  if (!freightSet || !product) return 0;
+  if (!product) return 0;
   const result = capacityForProduct(freightSet, product);
   return result.ok ? result.capacityUnits : 0;
 };
@@ -123,7 +136,12 @@ const status = (
   capacityUnits: number,
   values: Pick<
     CargoTransferStatus,
-    'facilityId' | 'kind' | 'blocker' | 'batchUnits' | 'batchRevenue'
+    | 'facilityId'
+    | 'productId'
+    | 'kind'
+    | 'blocker'
+    | 'batchUnits'
+    | 'batchRevenue'
   >,
 ): CargoTransferStatus => ({
   trainId: train.id,
@@ -135,62 +153,56 @@ const status = (
 const blocked = (
   train: TrainDef,
   capacityUnits: number,
-  blocker: CargoBlocker,
+  blocker: CargoBlockerCode,
   facilityId: string | null = null,
+  productId: string | null = train.cargo?.productId ?? null,
 ): CargoTransferStatus => status(train, capacityUnits, {
   facilityId,
+  productId,
   kind: 'blocked',
   blocker,
   batchUnits: 0,
   batchRevenue: 0,
 });
 
-const sourceSlot = (
+const activeRecipeProducts = (
   facility: FacilityEconomyDef,
-): InventorySlotDef | null => facility.definitionId === 'managed-forest'
-  ? facility.inventories.logs ?? null
-  : null;
-
-const destinationSlot = (
-  facility: FacilityEconomyDef,
-  productId: string,
-): InventorySlotDef | null => {
-  if (facility.definitionId !== 'sawmill'
-    || facility.activeRecipeId === null) return null;
+  kind: 'inputs' | 'outputs',
+): readonly string[] => {
   const definition = getFacilityDefinition(facility.definitionId);
+  if (!definition
+    || facility.activeRecipeId === null
+    || definition.recipeIds.indexOf(facility.activeRecipeId) === -1) {
+    return [];
+  }
   const recipe = getRecipe(facility.activeRecipeId);
-  const acceptsProduct = definition !== undefined
-    && definition.recipeIds.indexOf(facility.activeRecipeId) !== -1
-    && recipe !== undefined
-    && recipe.inputs.some((input) => input.productId === productId);
-  return acceptsProduct ? facility.inventories[productId] ?? null : null;
+  if (!recipe || !Array.isArray(recipe[kind])) return [];
+  const productIds: string[] = [];
+  recipe[kind].forEach((amount) => {
+    if (typeof amount?.productId !== 'string'
+      || !Number.isSafeInteger(amount.quantity)
+      || amount.quantity <= 0
+      || productIds.indexOf(amount.productId) !== -1
+      || !getProduct(amount.productId)
+      || !facility.inventories?.[amount.productId]) {
+      return;
+    }
+    productIds.push(amount.productId);
+  });
+  return productIds;
 };
 
-const sourceAvailability = (slot: InventorySlotDef): number =>
+const sourceAvailability = (
+  slot: FacilityEconomyDef['inventories'][string],
+): number =>
   slot.quantity - slot.reservedQuantity;
 
-const canLoadAt = (
-  train: TrainDef,
-  capacityUnits: number,
+const potentialLoadProducts = (
   facility: FacilityEconomyDef,
-): boolean => {
-  const slot = sourceSlot(facility);
-  const compatibleCargo = train.cargo === null
-    || train.cargo.productId === 'logs';
-  return slot !== null
-    && compatibleCargo
-    && capacityUnits > currentCargoUnits(train)
-    && sourceAvailability(slot) > 0;
-};
-
-const canUnloadAt = (
-  train: TrainDef,
-  facility: FacilityEconomyDef,
-): boolean => {
-  if (!train.cargo) return false;
-  const slot = destinationSlot(facility, train.cargo.productId);
-  return slot !== null && slot.quantity < slot.capacity;
-};
+  freightSet: FreightSetDefinition,
+): readonly string[] => activeRecipeProducts(facility, 'outputs')
+  .filter((productId) =>
+    freightSet.compatibleProductIds.indexOf(productId) !== -1);
 
 const containedFacilities = (
   runtime: TrainRuntimeSnapshot,
@@ -205,69 +217,140 @@ const containedFacilities = (
 
 const eligibleFacilities = (
   train: TrainDef,
-  capacityUnits: number,
+  freightSet: FreightSetDefinition,
   contained: readonly ContainedFacility[],
 ): EligibleFacility[] => {
   const eligible: EligibleFacility[] = [];
   contained.forEach((candidate) => {
-    if (canLoadAt(train, capacityUnits, candidate.facility)) {
-      eligible.push({ ...candidate, kind: 'loading' });
+    if (train.cargo === null) {
+      const loadable = eligibleLoadProducts(
+        candidate.facility,
+        freightSet,
+      );
+      const selected = loadable.find(({ productId }) =>
+        cargoCapacity(freightSet, productId) > 0);
+      if (selected) {
+        eligible.push({
+          ...candidate,
+          kind: 'loading',
+          productId: selected.productId,
+          capacityUnits: cargoCapacity(freightSet, selected.productId),
+        });
+      }
+      return;
     }
-    if (canUnloadAt(
-      train,
+
+    const productId = train.cargo.productId;
+    const capacityUnits = cargoCapacity(freightSet, productId);
+    const canExtend = eligibleLoadProducts(
       candidate.facility,
-    )) {
-      eligible.push({ ...candidate, kind: 'unloading' });
+      freightSet,
+    ).some((loadable) => loadable.productId === productId)
+      && capacityUnits > currentCargoUnits(train);
+    if (canExtend) {
+      eligible.push({
+        ...candidate,
+        kind: 'loading',
+        productId,
+        capacityUnits,
+      });
+    }
+    if (facilityAcceptsProduct(candidate.facility, productId)) {
+      eligible.push({
+        ...candidate,
+        kind: 'unloading',
+        productId,
+        capacityUnits,
+      });
     }
   });
-  return eligible.sort(compareFacility);
+  return eligible;
 };
 
 const blockerForContainedFacility = (
   train: TrainDef,
-  capacityUnits: number,
+  freightSet: FreightSetDefinition,
   facility: FacilityEconomyDef,
-): CargoBlocker => {
-  if (facility.definitionId === 'managed-forest') {
-    if (train.cargo !== null && train.cargo.productId !== 'logs') {
-      return 'Cargo is not accepted here';
+): {
+  blocker: CargoBlockerCode;
+  productId: string | null;
+  capacityUnits: number;
+} => {
+  const cargoProductId = train.cargo?.productId ?? null;
+  const potentialSources = potentialLoadProducts(facility, freightSet)
+    .filter((productId) =>
+      cargoProductId === null || productId === cargoProductId);
+  const sourceProductId = potentialSources[0] ?? null;
+  if (sourceProductId) {
+    const slot = facility.inventories[sourceProductId];
+    const capacityUnits = cargoCapacity(freightSet, sourceProductId);
+    if (sourceAvailability(slot) <= 0) {
+      return {
+        blocker: 'source-empty',
+        productId: sourceProductId,
+        capacityUnits,
+      };
     }
     if (capacityUnits <= currentCargoUnits(train)) {
-      return 'Timber set is full';
+      return {
+        blocker: 'train-full',
+        productId: sourceProductId,
+        capacityUnits,
+      };
     }
-    const slot = sourceSlot(facility);
-    if (slot && sourceAvailability(slot) <= 0) return 'Waiting for logs';
-    return 'Cargo is not accepted here';
   }
 
-  if (facility.definitionId === 'sawmill') {
-    if (!train.cargo) {
-      return 'Cargo is not accepted here';
-    }
-    const slot = destinationSlot(facility, train.cargo.productId);
-    if (!slot) return 'Cargo is not accepted here';
+  if (cargoProductId !== null
+    && activeRecipeProducts(facility, 'inputs')
+      .indexOf(cargoProductId) !== -1) {
+    const slot = facility.inventories[cargoProductId];
     if (slot.quantity >= slot.capacity) {
-      return 'Sawmill input storage is full';
+      return {
+        blocker: 'destination-full',
+        productId: cargoProductId,
+        capacityUnits: cargoCapacity(freightSet, cargoProductId),
+      };
     }
   }
-  return 'Cargo is not accepted here';
+  return {
+    blocker: 'product-not-accepted',
+    productId: cargoProductId ?? sourceProductId,
+    capacityUnits: cargoProductId === null
+      ? 0
+      : cargoCapacity(freightSet, cargoProductId),
+  };
 };
 
 const nearestRelevantFacility = (
   train: TrainDef,
   runtime: TrainRuntimeSnapshot,
   facilities: readonly FacilityEconomyDef[],
-): ContainedFacility | null => {
-  const relevantDefinition = train.cargo === null
-    ? 'managed-forest'
-    : 'sawmill';
-  return facilities
-    .filter(({ definitionId }) => definitionId === relevantDefinition)
-    .map((facility) => ({
-      facility,
-      distance: distanceToFacility(runtime, facility),
-    }))
-    .sort(compareFacility)[0] ?? null;
+  freightSet: FreightSetDefinition,
+): (ContainedFacility & { productId: string }) | null => {
+  const candidates = facilities
+    .map((facility) => {
+      const productId = train.cargo?.productId;
+      const relevantProductId = productId === undefined
+        ? potentialLoadProducts(facility, freightSet)[0]
+        : (
+          potentialLoadProducts(facility, freightSet)
+            .indexOf(productId) !== -1
+          || activeRecipeProducts(facility, 'inputs')
+            .indexOf(productId) !== -1
+        ) ? productId : undefined;
+      return relevantProductId === undefined
+        ? null
+        : {
+          facility,
+          productId: relevantProductId,
+          distance: distanceToFacility(runtime, facility),
+        };
+    })
+    .filter((candidate): candidate is ContainedFacility & {
+      productId: string;
+    } => candidate !== null)
+    .sort(compareFacility);
+  return candidates[0] ?? null;
 };
 
 const safeSum = (...values: number[]): number | null => {
@@ -277,10 +360,11 @@ const safeSum = (...values: number[]): number | null => {
 
 const loadBatch = (
   train: TrainDef,
+  productId: string,
   capacityUnits: number,
   facility: FacilityEconomyDef,
 ): CargoTransferStatus | null => {
-  const slot = sourceSlot(facility);
+  const slot = facility.inventories[productId];
   if (!slot) return null;
   const accepted = Math.min(
     BATCH_UNITS,
@@ -288,21 +372,29 @@ const loadBatch = (
     capacityUnits - currentCargoUnits(train),
   );
   const recentOutflow = safeSum(slot.recentOutflow, accepted);
-  if (accepted <= 0 || recentOutflow === null) return null;
+  const loadedUnits = train.cargo === null
+    ? accepted
+    : safeSum(train.cargo.loadedUnits, accepted);
+  if (accepted <= 0
+    || recentOutflow === null
+    || loadedUnits === null) return null;
 
   slot.quantity -= accepted;
   slot.recentOutflow = recentOutflow;
   if (train.cargo) {
     train.cargo.units += accepted;
+    train.cargo.loadedUnits = loadedUnits;
   } else {
     train.cargo = {
-      productId: 'logs',
+      productId,
       units: accepted,
+      loadedUnits,
       originFacilityId: facility.id,
     };
   }
   return status(train, capacityUnits, {
     facilityId: facility.id,
+    productId,
     kind: 'loading',
     blocker: null,
     batchUnits: accepted,
@@ -326,8 +418,12 @@ const unloadBatch = (
 ): UnloadResult | null => {
   const cargo = train.cargo;
   if (!cargo) return null;
-  const slot = destinationSlot(facility, cargo.productId);
-  if (!slot) return null;
+  const acceptedProduct = facilityAcceptsProduct(
+    facility,
+    cargo.productId,
+  );
+  const slot = facility.inventories[cargo.productId];
+  if (!acceptedProduct || !slot) return null;
 
   const quote = quoteLocalProduct(cargo.productId, economy.market, slot);
   if (quote.ok === false) return null;
@@ -388,16 +484,21 @@ const unloadBatch = (
     train.operations.lastTripRunningCost = runningCost;
     train.operations.currentTripRevenue = 0;
     train.operations.currentTripRunningCost = 0;
-    progress.profitableLogDeliveryCompleted ||= profitable;
     train.cargo = null;
     completedDelivery = {
       trainId: train.id,
+      productId: cargo.productId,
+      units: cargo.loadedUnits,
       destinationFacilityId: facility.id,
       tick: economy.tick,
       revenue: tripRevenue,
       runningCost,
       operatingProfit,
     };
+    if (cargo.productId === 'logs'
+      && facility.definitionId === 'sawmill') {
+      progress.profitableLogDeliveryCompleted ||= profitable;
+    }
   }
 
   return {
@@ -405,6 +506,7 @@ const unloadBatch = (
     completedDelivery,
     status: status(train, capacityUnits, {
       facilityId: facility.id,
+      productId: cargo.productId,
       kind: 'unloading',
       blocker: null,
       batchUnits: accepted,
@@ -428,17 +530,26 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   let changed = false;
 
   trainsById.forEach((train) => {
-    const productId = train.cargo?.productId ?? 'logs';
-    const capacityUnits = cargoCapacity(train, productId);
     const runtime = runtimeByTrainId.get(train.id);
+    if (!input.operating) {
+      statuses.push(status(train, 0, {
+        facilityId: null,
+        productId: train.cargo?.productId ?? null,
+        kind: 'idle',
+        blocker: 'not-operating',
+        batchUnits: 0,
+        batchRevenue: 0,
+      }));
+      return;
+    }
     if (!runtime
       || runtime.derailed
       || runtime.trackUUID === null
       || runtime.trackT === null) {
       statuses.push(blocked(
         train,
-        capacityUnits,
-        'Re-rail the train before operating',
+        0,
+        'derailed',
       ));
       return;
     }
@@ -446,26 +557,41 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
       || runtime.speedWorldUnitsPerSecond > TRANSFER_SPEED_LIMIT) {
       statuses.push(blocked(
         train,
-        capacityUnits,
-        'Stop the train to transfer cargo',
+        0,
+        'train-moving',
       ));
       return;
     }
-    if (!input.operating) {
-      statuses.push(status(train, capacityUnits, {
-        facilityId: null,
-        kind: 'idle',
-        blocker: null,
-        batchUnits: 0,
-        batchRevenue: 0,
-      }));
+
+    const freightSet = getFreightSet(train.freightSetId);
+    if (!freightSet) {
+      statuses.push(blocked(
+        train,
+        0,
+        'unknown-freight-set',
+      ));
+      return;
+    }
+
+    const cargoProductId = train.cargo?.productId ?? null;
+    const capacityUnits = cargoProductId === null
+      ? 0
+      : cargoCapacity(freightSet, cargoProductId);
+    if (cargoProductId !== null && capacityUnits <= 0) {
+      statuses.push(blocked(
+        train,
+        0,
+        'incompatible-product',
+        null,
+        cargoProductId,
+      ));
       return;
     }
 
     const contained = containedFacilities(runtime, economy.facilities);
     const eligible = eligibleFacilities(
       train,
-      capacityUnits,
+      freightSet,
       contained,
     );
     const selected = eligible[0];
@@ -473,7 +599,8 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
       if (selected.kind === 'loading') {
         const loaded = loadBatch(
           train,
-          capacityUnits,
+          selected.productId,
+          selected.capacityUnits,
           selected.facility,
         );
         if (loaded) {
@@ -484,7 +611,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
       } else {
         const unloaded = unloadBatch(
           train,
-          capacityUnits,
+          selected.capacityUnits,
           selected.facility,
           economy,
           company,
@@ -504,15 +631,17 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
 
     const nearestContained = contained[0];
     if (nearestContained) {
+      const blockedHere = blockerForContainedFacility(
+        train,
+        freightSet,
+        nearestContained.facility,
+      );
       statuses.push(blocked(
         train,
-        capacityUnits,
-        blockerForContainedFacility(
-          train,
-          capacityUnits,
-          nearestContained.facility,
-        ),
+        blockedHere.capacityUnits,
+        blockedHere.blocker,
         nearestContained.facility.id,
+        blockedHere.productId,
       ));
       return;
     }
@@ -521,22 +650,22 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
       train,
       runtime,
       economy.facilities,
+      freightSet,
     );
     if (!relevant) {
       statuses.push(blocked(
         train,
         capacityUnits,
-        'Cargo is not accepted here',
+        'product-not-accepted',
       ));
       return;
     }
     statuses.push(blocked(
       train,
-      capacityUnits,
-      train.cargo === null
-        ? 'Move inside Managed Forest rail access'
-        : 'Move inside Sawmill rail access',
+      cargoCapacity(freightSet, relevant.productId),
+      'outside-eligible-facility',
       relevant.facility.id,
+      relevant.productId,
     ));
   });
 

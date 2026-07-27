@@ -93,6 +93,7 @@ export interface WorldStationDef {
 export interface TrainCargoDef {
   productId: string;
   units: number;
+  loadedUnits: number;
   originFacilityId: string;
 }
 
@@ -642,7 +643,10 @@ function isTrain(
     || typeof value.cargo.originFacilityId !== 'string'
     || !facilityIds.has(value.cargo.originFacilityId)
     || !Number.isSafeInteger(value.cargo.units)
-    || value.cargo.units <= 0) {
+    || value.cargo.units <= 0
+    || !Number.isSafeInteger(value.cargo.loadedUnits)
+    || value.cargo.loadedUnits <= 0
+    || value.cargo.units > value.cargo.loadedUnits) {
     return false;
   }
   const product = getProduct(value.cargo.productId);
@@ -650,7 +654,7 @@ function isTrain(
   return product !== undefined
     && capacity !== undefined
     && capacity.ok
-    && value.cargo.units <= capacity.capacityUnits;
+    && value.cargo.loadedUnits <= capacity.capacityUnits;
 }
 
 function isFreightProgress(

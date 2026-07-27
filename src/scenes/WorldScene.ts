@@ -49,7 +49,7 @@ import {
   type TrainRuntimeSnapshot,
 } from '../freight/TrainRuntime';
 import type {
-  CargoBlocker,
+  CargoBlockerCode,
   CargoTransferStatus,
   FreightDeliveryEvent,
 } from '../freight/CargoSystem';
@@ -1261,7 +1261,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private mergeRunningCostBlockers(
-    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+    blockerByTrainId: Readonly<Record<string, CargoBlockerCode | null>>,
   ): void {
     Object.keys(blockerByTrainId).forEach((trainId) => {
       const blocker = blockerByTrainId[trainId];
@@ -1272,7 +1272,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private setTrainOperationBlocker(
     trainId: string,
-    blocker: CargoBlocker,
+    blocker: CargoBlockerCode,
   ): void {
     const existing = this.cargoStatusByTrainId.get(trainId);
     const cargoUnits = WorldManager.world?.trains.find(
@@ -1287,6 +1287,7 @@ export default class WorldScene extends Phaser.Scene {
       : {
         trainId,
         facilityId: null,
+        productId: null,
         kind: 'blocked',
         blocker,
         batchUnits: 0,
@@ -1300,14 +1301,14 @@ export default class WorldScene extends Phaser.Scene {
     this.operationsLockedTrainIds.forEach((trainId) => {
       this.setTrainOperationBlocker(
         trainId,
-        'Insufficient cash for running costs',
+        'insufficient-running-cash',
       );
     });
   }
 
   private canUnlockOperationsTrains(
     lockedTrainIds: ReadonlySet<string>,
-    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+    blockerByTrainId: Readonly<Record<string, CargoBlockerCode | null>>,
   ): boolean {
     const world = WorldManager.world;
     if (!world) return false;
@@ -1561,6 +1562,7 @@ export default class WorldScene extends Phaser.Scene {
     const transfer = this.cargoStatusByTrainId.get(selectedId) ?? {
       trainId: selectedId,
       facilityId: null,
+      productId: null,
       kind: 'idle' as const,
       blocker: null,
       batchUnits: 0,

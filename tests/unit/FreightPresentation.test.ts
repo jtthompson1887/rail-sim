@@ -57,6 +57,7 @@ const transfer = (
 ): CargoTransferStatus => ({
   trainId: 'train-1',
   facilityId: 'sawmill',
+  productId: 'logs',
   kind: 'unloading',
   blocker: null,
   batchUnits: 6,
@@ -112,6 +113,7 @@ describe('FreightPresentation', () => {
       cargo: {
         productId: 'logs',
         units: 40,
+        loadedUnits: 40,
         originFacilityId: 'managed-forest',
       },
       operations: {

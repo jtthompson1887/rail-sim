@@ -150,6 +150,7 @@ describe('deriveFirstRouteObjective', () => {
     world.trains.push(trainWith({
       productId: 'logs',
       units: 60,
+      loadedUnits: 60,
       originFacilityId: 'managed-forest',
     }));
 
@@ -178,6 +179,7 @@ describe('deriveFirstRouteObjective', () => {
           : {
             productId: 'logs',
             units: remainingUnits,
+            loadedUnits: 60,
             originFacilityId: 'managed-forest',
           },
         { lifetimeDeliveredUnits },

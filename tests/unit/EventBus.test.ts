@@ -208,6 +208,7 @@ describe('EventBus', () => {
     const transfer = Object.freeze({
       trainId: 'train-1',
       facilityId: 'sawmill',
+      productId: 'logs',
       kind: 'unloading' as const,
       blocker: null,
       batchUnits: 4,
@@ -267,6 +268,8 @@ describe('EventBus', () => {
     });
     const delivery: FreightDeliveryEvent = Object.freeze({
       trainId: 'train-1',
+      productId: 'logs',
+      units: 60,
       destinationFacilityId: 'sawmill',
       tick: 24,
       revenue: 1_000,

@@ -317,6 +317,7 @@ describe('Integration: first profitable timber freight route', () => {
     expect(train(harness, trainId).cargo).toEqual({
       productId: 'logs',
       units: 60,
+      loadedUnits: 60,
       originFacilityId: facility(harness, 'managed-forest').id,
     });
 
@@ -526,6 +527,11 @@ describe('Integration: first profitable timber freight route', () => {
     let priorLifetimeRevenue = 0;
 
     for (let cycle = 1; cycle <= 3; cycle += 1) {
+      harness.setRuntime(trainId, {
+        ...midpointRuntime(harness),
+        speedWorldUnitsPerSecond: 0,
+        throttle: 0,
+      });
       let replenishmentTicks = 0;
       while (facility(
         harness,
@@ -855,7 +861,7 @@ describe('Integration: first profitable timber freight route', () => {
     expect(moving.cargoStatuses).toEqual([
       expect.objectContaining({
         kind: 'blocked',
-        blocker: 'Stop the train to transfer cargo',
+        blocker: 'train-moving',
         batchUnits: 0,
       }),
     ]);
@@ -876,7 +882,7 @@ describe('Integration: first profitable timber freight route', () => {
     ]);
     expect(derailed.cargoStatuses).toEqual([
       expect.objectContaining({
-        blocker: 'Re-rail the train before operating',
+        blocker: 'derailed',
         batchUnits: 0,
       }),
     ]);
@@ -916,7 +922,7 @@ describe('Integration: first profitable timber freight route', () => {
     ]);
 
     expect(result.runningCostBlockerByTrainId).toEqual({
-      'train-1': 'Insufficient cash for running costs',
+      'train-1': 'insufficient-running-cash',
     });
     expect(result.stopTrainIds).toEqual(['train-1']);
     expect({

@@ -438,6 +438,7 @@ describe('world schema validation', () => {
     raw.trains[0].cargo = {
       productId: 'logs',
       units: 60,
+      loadedUnits: 60,
       originFacilityId: 'managed-forest',
     };
 
@@ -492,11 +493,29 @@ describe('world schema validation', () => {
       cargo.units = Number.MAX_SAFE_INTEGER + 1;
     }],
     ['units above derived capacity', (cargo: any) => { cargo.units = 61; }],
+    ['missing loaded units', (cargo: any) => {
+      delete cargo.loadedUnits;
+    }],
+    ['zero loaded units', (cargo: any) => { cargo.loadedUnits = 0; }],
+    ['fractional loaded units', (cargo: any) => {
+      cargo.loadedUnits = 1.5;
+    }],
+    ['unsafe loaded units', (cargo: any) => {
+      cargo.loadedUnits = Number.MAX_SAFE_INTEGER + 1;
+    }],
+    ['loaded units below remaining units', (cargo: any) => {
+      cargo.units = 2;
+      cargo.loadedUnits = 1;
+    }],
+    ['loaded units above derived capacity', (cargo: any) => {
+      cargo.loadedUnits = 61;
+    }],
   ])('rejects freight cargo with %s', (_label, mutate) => {
     const raw = worldWithTrain();
     const cargo = {
       productId: 'logs',
       units: 1,
+      loadedUnits: 1,
       originFacilityId: 'managed-forest',
     };
     mutate(cargo);

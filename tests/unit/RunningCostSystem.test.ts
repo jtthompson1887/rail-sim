@@ -214,9 +214,9 @@ describe('proposeRunningCosts atomicity and pure output', () => {
       stopTrainIds: ['timber-a', 'timber-b', 'timber-c'],
       aggregateCost: 60,
       blockerByTrainId: {
-        'timber-a': 'Insufficient cash for running costs',
-        'timber-b': 'Insufficient cash for running costs',
-        'timber-c': 'Insufficient cash for running costs',
+        'timber-a': 'insufficient-running-cash',
+        'timber-b': 'insufficient-running-cash',
+        'timber-c': 'insufficient-running-cash',
       },
       changed: false,
     }));

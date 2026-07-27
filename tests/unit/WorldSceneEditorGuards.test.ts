@@ -797,6 +797,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(world.trains[0].cargo).toEqual({
       productId: 'logs',
       units: 10,
+      loadedUnits: 10,
       originFacilityId: 'managed-forest',
     });
     expect(world.trains[0].operations.currentTripRunningCost).toBe(0);
@@ -875,7 +876,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       .toBeLessThan(updateTrains.mock.invocationCallOrder[0]);
     expect(inputLockStates[0]).toEqual([]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
-      .toBe('Insufficient cash for running costs');
+      .toBe('insufficient-running-cash');
 
     scene.update(1_000, 1_000);
 
@@ -883,7 +884,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
     expect(inputLockStates[1]).toEqual([trainId]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
-      .toBe('Insufficient cash for running costs');
+      .toBe('insufficient-running-cash');
 
     world.company = createCompanyState(100);
     scene.update(2_000, 1_000);
@@ -906,6 +907,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     world.trains[0].cargo = {
       productId: 'logs',
       units: 10,
+      loadedUnits: 10,
       originFacilityId: 'managed-forest',
     };
     const trainId = world.trains[0].id;
@@ -1289,6 +1291,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       cargo: {
         productId: 'logs',
         units: 11,
+        loadedUnits: 11,
         originFacilityId: 'managed-forest',
       },
       operations: {
@@ -1307,6 +1310,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       cargo: {
         productId: 'logs',
         units: 8,
+        loadedUnits: 8,
         originFacilityId: 'managed-forest',
       },
     });
