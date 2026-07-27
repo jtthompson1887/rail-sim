@@ -391,7 +391,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     for (const testId of [
       'vehicle-purchase-panel',
       'train-inspector',
-      'first-route-objective',
+      'freight-objective',
     ]) {
       const panel = document.createElement('section');
       panel.dataset.testid = testId;
@@ -406,6 +406,27 @@ describe('WorldScene disabled construction bypass guards', () => {
     }
 
     expect(onKeyDown).not.toHaveBeenCalled();
+  });
+
+  it('does not shield editor shortcuts through the removed objective selector', () => {
+    const scene = new WorldScene();
+    GameStateManager.enterCreate('test-world');
+    const emit = jest.spyOn(EventBus, 'emit');
+    const legacy = document.createElement('section');
+    legacy.dataset.testid = 'first-route-objective';
+    const child = document.createElement('span');
+    legacy.append(child);
+
+    (scene as any).handleKeyDown({
+      code: 'KeyP',
+      ctrlKey: false,
+      altKey: false,
+      target: child,
+    });
+
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-track',
+    });
   });
 
   it('cancels pending construction before undo changes the authority revision', () => {
@@ -1078,7 +1099,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(stack.canRedo).toBe(false);
   });
 
-  it('recreates the scene without replaying the achieved objective celebration in this page session', () => {
+  it('keys the first objective celebration explicitly after the active card advances', () => {
     const world = installFirstRouteWorld();
     world.freightProgress.profitableLogDeliveryCompleted = true;
     const topology = [{
@@ -1103,12 +1124,90 @@ describe('WorldScene disabled construction bypass guards', () => {
     reloadedScene.publishFreightPresentation([]);
 
     expect(emit.mock.calls.filter(
-      ([event]) => event === 'ui:first-route-objective',
+      ([event]) => event === 'ui:freight-objective',
     )).toHaveLength(2);
     expect(emit.mock.calls.filter(
       ([event, payload]) => event === 'ui:toast'
-        && (payload as any).message === 'First freight route complete',
+        && (payload as any).message.includes('Regional Development Grant'),
     )).toHaveLength(1);
+    expect(emit.mock.calls.filter(
+      ([event, payload]) => event === 'ui:toast'
+        && (payload as any).message.includes('Extend the timber chain'),
+    )).toHaveLength(1);
+  });
+
+  it('emits one payload-backed structural objective toast without a generic duplicate', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const sawmill = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'sawmill',
+    )!;
+    world.economy.facilities.push({
+      ...clonePlainData(sawmill),
+      id: 'prefabrication-plant',
+      definitionId: 'prefabrication-plant',
+      name: 'Prefabrication Plant',
+    });
+    world.freightProgress.profitableLogDeliveryCompleted = true;
+    world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'structural-timber',
+      units: 60,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 24,
+      revenue: 12_345,
+      runningCost: 10_000,
+      operatingProfit: 2_345,
+    }));
+
+    const successToasts = emit.mock.calls.filter(
+      ([event, payload]) => event === 'ui:toast'
+        && (payload as any).type === 'success',
+    );
+    expect(successToasts).toHaveLength(1);
+    expect(successToasts[0][1]).toEqual({
+      type: 'success',
+      message: expect.stringMatching(
+        /Structural Timber.*Prefabrication Plant.*£12,345.*trip profit £2,345/i,
+      ),
+    });
+  });
+
+  it('does not reconstruct a structural celebration from a later partial delivery', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    world.id = 'partial-structural-delivery-after-reload';
+    const sawmill = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'sawmill',
+    )!;
+    world.economy.facilities.push({
+      ...clonePlainData(sawmill),
+      id: 'prefabrication-plant',
+      definitionId: 'prefabrication-plant',
+      name: 'Prefabrication Plant',
+    });
+    world.freightProgress.profitableLogDeliveryCompleted = true;
+    world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'structural-timber',
+      units: 30,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 25,
+      revenue: 6_000,
+      runningCost: 1_000,
+      operatingProfit: 5_000,
+    }));
+
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Delivery complete · +£6,000',
+      type: 'success',
+    });
   });
 
   it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {

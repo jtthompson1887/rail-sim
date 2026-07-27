@@ -271,7 +271,7 @@ describe('InputManager drag recovery regression', () => {
     ['span', 'facility-inspector'],
     ['span', 'vehicle-purchase-panel'],
     ['span', 'train-inspector'],
-    ['span', 'first-route-objective'],
+    ['span', 'freight-objective'],
   ])('recognises focused %s controls inside %s', (tag, testId) => {
     const parent = document.createElement('section');
     if (testId) parent.dataset.testid = testId;
@@ -282,6 +282,35 @@ describe('InputManager drag recovery regression', () => {
     expect(isGameplayInputFocused(child)).toBe(true);
     expect(isGameplayInputFocused(document.body)).toBe(false);
     parent.remove();
+  });
+
+  it('shields W/S over the freight card but not the removed first-route selector', () => {
+    const train = trainManager.createInitialTrain('objective-focus-train');
+    const current = document.createElement('section');
+    current.dataset.testid = 'freight-objective';
+    const focused = document.createElement('span');
+    focused.tabIndex = 0;
+    current.append(focused);
+    document.body.append(current);
+    focused.focus();
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = -0.25;
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+
+    current.remove();
+    const removed = document.createElement('section');
+    removed.dataset.testid = 'first-route-objective';
+    const legacyFocused = document.createElement('span');
+    legacyFocused.tabIndex = 0;
+    removed.append(legacyFocused);
+    document.body.append(removed);
+    legacyFocused.focus();
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(GameConfig.TRAIN.ENGINE_POWER);
+    removed.remove();
   });
 
   it('sets no new keyboard or mobile throttle while gameplay input is focused', () => {

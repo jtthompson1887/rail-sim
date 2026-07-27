@@ -14,7 +14,7 @@ import type {
   OperatingSummaryDto,
   TrainInspectionDto,
 } from '../freight/FreightPresentation';
-import type { FirstRouteObjectiveDto } from '../freight/FirstRouteObjective';
+import type { FreightObjectiveDto } from '../freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../freight/CargoSystem';
 import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 
@@ -97,7 +97,7 @@ interface EventMap {
   'ui:train-inspection': {
     inspection: TrainInspectionDto | null;
   };
-  'ui:first-route-objective': FirstRouteObjectiveDto;
+  'ui:freight-objective': FreightObjectiveDto;
   'ui:freight-delivery-completed': FreightDeliveryEvent;
 }
 

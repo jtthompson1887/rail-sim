@@ -17,7 +17,7 @@ import { MinimapRenderer } from '../ui/MinimapRenderer';
 import { FacilityInspector } from '../ui/FacilityInspector';
 import { VehiclePurchasePanel } from '../ui/VehiclePurchasePanel';
 import { TrainInspector } from '../ui/TrainInspector';
-import { FirstRouteObjectiveCard } from '../ui/FirstRouteObjectiveCard';
+import { FreightObjectiveCard } from '../ui/FreightObjectiveCard';
 import type { OperatingSummaryDto } from '../freight/FreightPresentation';
 
 /**
@@ -48,7 +48,7 @@ export default class EditorUIScene extends Phaser.Scene {
   private facilityInspector!: FacilityInspector;
   private vehiclePurchasePanel!: VehiclePurchasePanel;
   private trainInspector!: TrainInspector;
-  private firstRouteObjectiveCard!: FirstRouteObjectiveCard;
+  private freightObjectiveCard!: FreightObjectiveCard;
   private minimapRenderer!: MinimapRenderer;
   private minimapVisible = true;
   private editorControlsVisible = true;
@@ -94,7 +94,7 @@ export default class EditorUIScene extends Phaser.Scene {
     this.facilityInspector.setVisible(true);
     this.syncVehiclePurchaseVisibility();
     this.trainInspector.setVisible(!visible);
-    this.firstRouteObjectiveCard.setVisible(true);
+    this.freightObjectiveCard.setVisible(true);
     this.validationHint.setVisible(visible);
     this.minimapVisible = visible;
     if (!visible) {
@@ -170,7 +170,7 @@ export default class EditorUIScene extends Phaser.Scene {
     this.facilityInspector = new FacilityInspector();
     this.vehiclePurchasePanel = new VehiclePurchasePanel();
     this.trainInspector = new TrainInspector();
-    this.firstRouteObjectiveCard = new FirstRouteObjectiveCard();
+    this.freightObjectiveCard = new FreightObjectiveCard();
     this.minimapRenderer = new MinimapRenderer(
       this,
       this.trackManager,
@@ -216,7 +216,7 @@ export default class EditorUIScene extends Phaser.Scene {
       this.facilityInspector.destroy();
       this.vehiclePurchasePanel.destroy();
       this.trainInspector.destroy();
-      this.firstRouteObjectiveCard.destroy();
+      this.freightObjectiveCard.destroy();
       this.minimapRenderer.destroy();
     });
   }
@@ -257,7 +257,7 @@ export default class EditorUIScene extends Phaser.Scene {
       || this.facilityInspector.containsScreenPoint(x, y)
       || this.vehiclePurchasePanel.containsScreenPoint(x, y)
       || this.trainInspector.containsScreenPoint(x, y)
-      || this.firstRouteObjectiveCard.containsScreenPoint(x, y)
+      || this.freightObjectiveCard.containsScreenPoint(x, y)
       || this.companyHud.containsScreenPoint(x, y)
       || (this.minimapVisible && this.minimapRenderer.containsScreenPoint(x, y));
   }

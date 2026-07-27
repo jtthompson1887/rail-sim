@@ -60,7 +60,7 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).trainInspector = {
       containsScreenPoint: jest.fn((x: number, y: number) => x > 1250 && y > 500),
     };
-    (scene as any).firstRouteObjectiveCard = {
+    (scene as any).freightObjectiveCard = {
       containsScreenPoint: jest.fn((x: number, y: number) => x < 500 && y < 300),
     };
     (scene as any).minimapRenderer = {
@@ -111,7 +111,7 @@ describe('EditorUIScene construction UI boundary', () => {
     (scene as any).facilityInspector = hidden();
     (scene as any).vehiclePurchasePanel = hidden();
     (scene as any).trainInspector = hidden();
-    (scene as any).firstRouteObjectiveCard = hidden();
+    (scene as any).freightObjectiveCard = hidden();
     (scene as any).validationHint = hidden();
 
     (scene as any).visibleHandler({ visible: false });
@@ -131,7 +131,7 @@ describe('EditorUIScene construction UI boundary', () => {
       .toHaveBeenCalledWith(false);
     expect((scene as any).trainInspector.setVisible)
       .toHaveBeenCalledWith(true);
-    expect((scene as any).firstRouteObjectiveCard.setVisible)
+    expect((scene as any).freightObjectiveCard.setVisible)
       .toHaveBeenCalledWith(true);
     expect((scene as any).constructionInspector.clear).toHaveBeenCalled();
     expect((scene as any).validationHint.clear).toHaveBeenCalled();

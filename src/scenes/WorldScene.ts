@@ -54,6 +54,7 @@ import type {
   FreightDeliveryEvent,
 } from '../freight/CargoSystem';
 import {
+  capacityForProduct,
   FLATBED_FREIGHT_SET_ID,
   getFreightSet,
 } from '../freight/FreightSetCatalog';
@@ -91,10 +92,11 @@ import {
   buildTrainInspection,
 } from '../freight/FreightPresentation';
 import {
-  deriveFirstRouteObjective,
-  firstRouteCelebrationSession,
-  type FirstRouteObjectiveDto,
-} from '../freight/FirstRouteObjective';
+  deriveFreightObjective,
+  freightObjectiveCelebrationSession,
+  type FreightObjectiveDto,
+} from '../freight/FreightObjective';
+import { getProduct } from '../economy/ProductCatalog';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -114,7 +116,7 @@ export interface FirstRouteBrowserSnapshot {
   readonly world: WorldData;
   readonly runtime: readonly TrainRuntimeSnapshot[];
   readonly saveState: 'saved' | 'unsaved' | 'saving';
-  readonly objective: FirstRouteObjectiveDto;
+  readonly objective: FreightObjectiveDto;
   readonly camera: {
     readonly scrollX: number;
     readonly scrollY: number;
@@ -1091,7 +1093,7 @@ export default class WorldScene extends Phaser.Scene {
       world,
       runtime,
       saveState: this.lastReportedSaveState,
-      objective: deriveFirstRouteObjective(
+      objective: deriveFreightObjective(
         world,
         this.trackManager.captureTopology(),
       ),
@@ -1333,11 +1335,45 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:freight-delivery-completed', Object.freeze({
       ...event,
     }));
-    EventBus.emit('ui:toast', {
-      message:
-        `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
-      type: 'success',
-    });
+    const world = WorldManager.world;
+    const destination = world?.economy.facilities.find(
+      ({ id }) => id === event.destinationFacilityId,
+    );
+    const product = getProduct(event.productId);
+    const train = world?.trains.find(({ id }) => id === event.trainId);
+    const freightSet = train
+      ? getFreightSet(train.freightSetId)
+      : undefined;
+    const capacity = freightSet && product
+      ? capacityForProduct(freightSet, product)
+      : null;
+    const completesStructuralObjective = event.productId === 'structural-timber'
+      && destination?.definitionId === 'prefabrication-plant'
+      && event.operatingProfit > 0
+      && capacity?.ok === true
+      && event.units === capacity.capacityUnits
+      && world?.freightProgress
+        .profitableStructuralTimberDeliveryCompleted === true;
+    const celebrateStructuralObjective = world
+      && completesStructuralObjective
+      && freightObjectiveCelebrationSession.consume(
+        world.id,
+        'structural-timber-link',
+        true,
+      );
+    EventBus.emit('ui:toast', celebrateStructuralObjective
+      ? {
+        message:
+          `${product!.displayName} delivered to ${destination!.name}`
+          + ` · +£${event.revenue.toLocaleString('en-GB')}`
+          + ` · trip profit £${event.operatingProfit.toLocaleString('en-GB')}`,
+        type: 'success',
+      }
+      : {
+        message:
+          `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
+        type: 'success',
+      });
     EventBus.emit('ui:cash-pulse', { amount: event.revenue });
   }
 
@@ -1541,14 +1577,20 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.emit('ui:train-inspection', { inspection: null });
       return;
     }
-    const objective = deriveFirstRouteObjective(
+    const objective = deriveFreightObjective(
       world,
       this.trackManager.captureTopology(),
     );
-    EventBus.emit('ui:first-route-objective', objective);
-    if (firstRouteCelebrationSession.consume(world.id, objective)) {
+    EventBus.emit('ui:freight-objective', objective);
+    if (freightObjectiveCelebrationSession.consume(
+      world.id,
+      'first-profitable-route',
+      world.freightProgress.profitableLogDeliveryCompleted,
+    )) {
       EventBus.emit('ui:toast', {
-        message: 'First freight route complete',
+        message:
+          'First freight route complete · Regional Development Grant +£250,000'
+          + ' · Next: Extend the timber chain',
         type: 'success',
       });
     }

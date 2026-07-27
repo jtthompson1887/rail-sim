@@ -8,7 +8,7 @@ import type {
   OperatingSummaryDto,
   TrainInspectionDto,
 } from '../../src/freight/FreightPresentation';
-import type { FirstRouteObjectiveDto } from '../../src/freight/FirstRouteObjective';
+import type { FreightObjectiveDto } from '../../src/freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../../src/freight/CargoSystem';
 
 // Re-import to reset singleton state between tests via module re-evaluation
@@ -247,8 +247,11 @@ describe('EventBus', () => {
         operatingProfit: 750,
       }),
     });
-    const objective: FirstRouteObjectiveDto = Object.freeze({
+    const objective: FreightObjectiveDto = Object.freeze({
       objectiveVersion: 1,
+      id: 'first-profitable-route',
+      title: 'First freight route',
+      status: 'Complete the timber service',
       achieved: false,
       steps: Object.freeze([Object.freeze({
         id: 'connect-route',
@@ -295,12 +298,12 @@ describe('EventBus', () => {
     const companyListener = jest.fn();
     const deliveryListener = jest.fn();
     EventBus.on('ui:train-inspection', trainListener);
-    EventBus.on('ui:first-route-objective', objectiveListener);
+    EventBus.on('ui:freight-objective', objectiveListener);
     EventBus.on('ui:company-state', companyListener);
     EventBus.on('ui:freight-delivery-completed', deliveryListener);
 
     EventBus.emit('ui:train-inspection', { inspection });
-    EventBus.emit('ui:first-route-objective', objective);
+    EventBus.emit('ui:freight-objective', objective);
     EventBus.emit('ui:company-state', {
       cash: 100_000,
       saveState: 'saved',
@@ -318,7 +321,7 @@ describe('EventBus', () => {
     expect(deliveryListener).toHaveBeenCalledWith(delivery);
 
     EventBus.off('ui:train-inspection', trainListener);
-    EventBus.off('ui:first-route-objective', objectiveListener);
+    EventBus.off('ui:freight-objective', objectiveListener);
     EventBus.off('ui:company-state', companyListener);
     EventBus.off('ui:freight-delivery-completed', deliveryListener);
   });

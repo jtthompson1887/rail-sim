@@ -768,10 +768,16 @@ test.describe('collective three-seed first freight route acceptance', () => {
     expect(train(completed).operations.lastTripRevenue).toBeGreaterThan(
       train(completed).operations.lastTripRunningCost,
     );
-    expect(completed.objective.achieved).toBe(true);
-    await expect(page.locator('[data-testid="first-route-objective"]')).toContainText(
-      'Route profitable',
+    expect(completed.objective).toEqual(expect.objectContaining({
+      id: 'structural-timber-link',
+      achieved: false,
+    }));
+    const objective = page.locator('[data-testid="freight-objective"]');
+    await expect(objective).toHaveAttribute(
+      'data-objective',
+      'structural-timber-link',
     );
+    await expect(objective).toContainText('Extend the timber chain');
     await expect(page.locator('[data-testid="company-operating-profit"]')).toContainText(
       /Operating profit £[1-9]/,
     );
@@ -997,7 +1003,7 @@ test.describe('collective three-seed first freight route acceptance', () => {
 
     await page.setViewportSize(MOBILE);
     const inspector = page.locator('[data-testid="train-inspector"]');
-    const objective = page.locator('[data-testid="first-route-objective"]');
+    const objective = page.locator('[data-testid="freight-objective"]');
     const company = page.locator('[data-testid="company-hud"]');
     await expect(inspector).toHaveAttribute('data-layout', 'mobile');
     await expect(objective).toHaveAttribute('data-layout', 'mobile');

@@ -1,18 +1,19 @@
-import type { FirstRouteObjectiveDto } from '../freight/FirstRouteObjective';
+import type { FreightObjectiveDto } from '../freight/FreightObjective';
 import { EventBus } from '../services/EventBus';
 
-export class FirstRouteObjectiveCard {
+export class FreightObjectiveCard {
   private readonly root = document.createElement('section');
+  private readonly title = document.createElement('h2');
   private readonly status = document.createElement('strong');
   private readonly steps = document.createElement('ol');
   private visible = true;
   private readonly resizeHandler = () => this.applyLayout();
   private readonly stopPropagation = (event: Event) => event.stopPropagation();
-  private readonly stateHandler = (dto: FirstRouteObjectiveDto) =>
+  private readonly stateHandler = (dto: FreightObjectiveDto) =>
     this.setState(dto);
 
   constructor() {
-    this.root.dataset.testid = 'first-route-objective';
+    this.root.dataset.testid = 'freight-objective';
     this.root.setAttribute('aria-live', 'polite');
     this.root.style.cssText = [
       'position:fixed',
@@ -31,33 +32,31 @@ export class FirstRouteObjectiveCard {
       'font:12px/1.35 Verdana,sans-serif',
       'pointer-events:auto',
     ].join(';');
-    const title = document.createElement('h2');
-    title.textContent = 'First freight route';
-    title.style.cssText =
+    this.title.style.cssText =
       'margin:0 0 4px;font:700 14px Verdana,sans-serif;color:#fff';
     this.status.style.cssText = 'display:block;margin-bottom:5px;color:#ffe39a';
     this.steps.style.cssText = 'margin:0;padding-left:20px';
-    this.root.append(title, this.status, this.steps);
+    this.root.append(this.title, this.status, this.steps);
     for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'click']) {
       this.root.addEventListener(eventName, this.stopPropagation);
     }
     document.body.append(this.root);
     this.applyLayout();
     this.setVisible(true);
-    EventBus.on('ui:first-route-objective', this.stateHandler);
+    EventBus.on('ui:freight-objective', this.stateHandler);
     window.addEventListener('resize', this.resizeHandler);
   }
 
-  setState(dto: FirstRouteObjectiveDto): void {
+  setState(dto: FreightObjectiveDto): void {
+    this.root.dataset.objective = dto.id;
     this.root.setAttribute(
       'aria-label',
       dto.achieved
-        ? 'First freight route objective achieved'
-        : 'First freight route objective',
+        ? `${dto.title} objective achieved`
+        : `${dto.title} objective`,
     );
-    this.status.textContent = dto.achieved
-      ? 'Route profitable'
-      : 'Complete the timber service';
+    this.title.textContent = dto.title;
+    this.status.textContent = dto.status;
     this.status.style.color = dto.achieved ? '#9af0b6' : '#ffe39a';
     this.steps.replaceChildren(...dto.steps.map((step) => {
       const item = document.createElement('li');
@@ -94,7 +93,7 @@ export class FirstRouteObjectiveCard {
   }
 
   destroy(): void {
-    EventBus.off('ui:first-route-objective', this.stateHandler);
+    EventBus.off('ui:freight-objective', this.stateHandler);
     window.removeEventListener('resize', this.resizeHandler);
     this.root.remove();
   }

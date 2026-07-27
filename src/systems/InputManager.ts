@@ -11,7 +11,7 @@ const GAMEPLAY_INPUT_PANELS = [
   '[data-testid="facility-inspector"]',
   '[data-testid="vehicle-purchase-panel"]',
   '[data-testid="train-inspector"]',
-  '[data-testid="first-route-objective"]',
+  '[data-testid="freight-objective"]',
 ].join(',');
 
 export function isGameplayInputFocused(
