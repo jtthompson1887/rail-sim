@@ -379,6 +379,24 @@ describe('WorldEconomyGenerator', () => {
     expect('economy' in result).toBe(false);
   });
 
+  it('fails closed before candidate evaluation when the Sawmill site is absent', () => {
+    const opportunity = makeStarterOpportunity(config.seed);
+    (opportunity as any).sites = [opportunity.sites[0]];
+
+    expect(new WorldEconomyGenerator(terrain).generate(
+      config,
+      opportunity,
+    )).toEqual({
+      ok: false,
+      error: {
+        code: 'economy-exhausted',
+        seed: config.seed,
+        candidatesEvaluated: 0,
+        facilitiesPlaced: 0,
+      },
+    });
+  });
+
   it('counts an accepted Prefab first when later placement exhausts', () => {
     const plateauTerrain = {
       getHeightAt(x: number, y: number): number {

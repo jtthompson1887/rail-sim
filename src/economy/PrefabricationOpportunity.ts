@@ -36,6 +36,7 @@ export function resolvePrefabricationExtensionStart(
   ]?.geometry;
   const sawmill = opportunity.sites[1];
   if (!terminal
+    || !sawmill
     || terminal.p3.x !== sawmill.x
     || terminal.p3.y !== sawmill.y) {
     return null;

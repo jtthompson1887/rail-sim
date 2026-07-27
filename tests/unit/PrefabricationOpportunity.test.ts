@@ -93,6 +93,13 @@ describe('analyzePrefabricationExtension', () => {
     expect(resolvePrefabricationExtensionStart(missing)).toBeNull();
   });
 
+  it('fails closed when the Sawmill site is absent', () => {
+    const malformed = makeStarterOpportunity('prefab-missing-sawmill');
+    (malformed as any).sites = [malformed.sites[0]];
+
+    expect(resolvePrefabricationExtensionStart(malformed)).toBeNull();
+  });
+
   it('accepts the inclusive £194,000 witness boundary with one topology charge', () => {
     const proposal = proposalWith(191_500);
     const analyzedGeometries: unknown[] = [];
