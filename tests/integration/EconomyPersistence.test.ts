@@ -91,6 +91,7 @@ describe('Integration: persisted fixed-tick economy', () => {
       tick: world.economy.tick,
       cash: world.company.cash,
       ledger: world.company.ledger,
+      freightProgress: world.freightProgress,
       revision: world.revision,
       operationsRevision: world.operationsRevision,
     });
@@ -109,6 +110,7 @@ describe('Integration: persisted fixed-tick economy', () => {
       tick: reloaded?.economy.tick,
       cash: reloaded?.company.cash,
       ledger: reloaded?.company.ledger,
+      freightProgress: reloaded?.freightProgress,
       revision: reloaded?.revision,
       operationsRevision: reloaded?.operationsRevision,
     }).toEqual(expected);

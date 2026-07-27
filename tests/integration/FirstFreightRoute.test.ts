@@ -27,6 +27,9 @@ import {
   getRecipe,
 } from '../../src/economy/ProductCatalog';
 import { clonePlainData } from '../../src/utils/PlainData';
+import {
+  countForwardRegionalDevelopmentGrants,
+} from '../../src/freight/FreightProgress';
 
 const facility = (
   harness: FirstRouteHarness,
@@ -617,6 +620,8 @@ describe('Integration: first profitable timber freight route', () => {
     )).size).toBe(18);
     expect(train(harness, trainId).operations.lifetimeDeliveredUnits)
       .toBe(180);
+    expect(countForwardRegionalDevelopmentGrants(world.company)).toBe(1);
+    expect(world.freightProgress.developmentGrantAwarded).toBe(true);
   });
 
   it('rejects stale, duplicate-ID, live, and install purchase failures atomically', () => {
