@@ -7,6 +7,7 @@ import { FreightPurchaseService } from '../../src/freight/FreightPurchaseService
 import { WorldManager } from '../../src/managers/WorldManager';
 import { makeFirstFreightRouteWorld } from '../fixtures/FirstFreightRouteFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
+import { isGameplayInputFocused } from '../../src/systems/InputManager';
 
 const quote = () => ({
   expectedRevision: 4,
@@ -138,6 +139,37 @@ describe('VehiclePurchasePanel', () => {
       saveState: 'saved',
     });
     EventBus.off('freight:purchase-confirmed', listener);
+  });
+
+  it('releases confirm focus after submitting a valid purchase', () => {
+    panel.setState({
+      quote: quote(),
+      cash: 200_000,
+      message: '',
+    });
+    const confirm = document.querySelector(
+      '[data-testid="freight-purchase-confirm"]',
+    ) as HTMLButtonElement;
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(true);
+
+    confirm.click();
+    EventBus.emit('freight:purchase-result', {
+      ok: false,
+      blocker: 'stale-revision',
+    });
+    expect(document.activeElement).toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(true);
+    EventBus.emit('freight:purchase-result', {
+      ok: true,
+      trainId: 'focus-release-train',
+      saved: true,
+      saveState: 'saved',
+    });
+
+    expect(document.activeElement).not.toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(false);
   });
 
   it('shows the exact remedy, affordability, and bounded mobile layout', () => {

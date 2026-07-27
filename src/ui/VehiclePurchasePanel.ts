@@ -1,4 +1,5 @@
 import type { FreightPurchaseQuote } from '../freight/FreightPurchaseService';
+import type { FreightPurchaseResult } from '../freight/FreightPurchaseService';
 import { buildFreightPurchasePresentation } from '../freight/FreightPresentation';
 import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 import { EventBus } from '../services/EventBus';
@@ -25,6 +26,11 @@ export class VehiclePurchasePanel {
     cash: number;
     message: string;
   }) => this.setState(state);
+  private readonly purchaseResultHandler = (
+    result: FreightPurchaseResult,
+  ) => {
+    if (result.ok) this.confirm.blur();
+  };
   private readonly facilityInspectionHandler = () => {
     this.facilityInspectionActive = true;
     this.syncVisibility();
@@ -109,6 +115,7 @@ export class VehiclePurchasePanel {
     this.applyLayout();
     this.setState({ quote: null, cash: 0, message: '' });
     EventBus.on('ui:freight-purchase-state', this.stateHandler);
+    EventBus.on('freight:purchase-result', this.purchaseResultHandler);
     EventBus.on('facility:inspection', this.facilityInspectionHandler);
     EventBus.on('facility:deselected', this.facilityDeselectedHandler);
     window.addEventListener('resize', this.resizeHandler);
@@ -158,6 +165,7 @@ export class VehiclePurchasePanel {
 
   destroy(): void {
     EventBus.off('ui:freight-purchase-state', this.stateHandler);
+    EventBus.off('freight:purchase-result', this.purchaseResultHandler);
     EventBus.off('facility:inspection', this.facilityInspectionHandler);
     EventBus.off('facility:deselected', this.facilityDeselectedHandler);
     window.removeEventListener('resize', this.resizeHandler);
