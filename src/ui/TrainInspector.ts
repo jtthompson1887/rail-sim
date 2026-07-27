@@ -229,6 +229,11 @@ export class TrainInspector {
       this.root.style.bottom = '8px';
       this.root.style.width = 'auto';
       this.root.style.maxHeight = '48vh';
+      this.controls.style.position = 'sticky';
+      this.controls.style.bottom = '0px';
+      this.controls.style.zIndex = '1';
+      this.controls.style.paddingTop = '8px';
+      this.controls.style.background = 'rgba(6, 19, 31, 0.98)';
     } else {
       this.root.style.left = 'auto';
       this.root.style.right = '14px';
@@ -236,6 +241,11 @@ export class TrainInspector {
       this.root.style.bottom = 'auto';
       this.root.style.width = '320px';
       this.root.style.maxHeight = 'calc(100vh - 76px)';
+      this.controls.style.position = 'static';
+      this.controls.style.bottom = 'auto';
+      this.controls.style.zIndex = 'auto';
+      this.controls.style.paddingTop = '0px';
+      this.controls.style.background = 'transparent';
     }
   }
 }

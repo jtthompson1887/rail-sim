@@ -2,8 +2,6 @@ import TrackFlowSolver from '../../src/systems/TrackFlowSolver';
 import RailTrack from '../../src/entities/RailTrack';
 import Train from '../../src/entities/Train';
 import TrackManager from '../../src/managers/TrackManager';
-import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
-import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGenerator';
 import { GameConfig } from '../../src/config/GameConfig';
 
 const {
@@ -311,31 +309,24 @@ describe('TrackFlowSolver.applyTrackFlowForces()', () => {
   });
 
   it('preserves coasting momentum across a connected production-curve handoff', () => {
-    const seed = 'task15-manual-ash-dry';
-    const generated = new WorldOpportunityGenerator(
-      new TerrainGenerator(seed),
-    ).generate({
-      generationConfigVersion: 1,
-      seed,
-      biome: 'temperate',
-      constructionDifficultyId: 'standard',
-    });
-    expect(generated.ok).toBe(true);
-    if (!generated.ok) return;
-    const detour = generated.opportunity.corridors.find(
-      ({ id }) => id === 'detour',
-    )!;
-    const [firstDef, secondDef] = detour.feasibilityWitness.segments;
     const Phaser = require('phaser');
-    const fromDef = (def: typeof firstDef): RailTrack => new RailTrack(
+    // Pin the production-derived curve that originally exposed the handoff bug.
+    // Generator selection has its own tests and must not silently replace this
+    // solver fixture when its candidate-search strategy changes.
+    const first = new RailTrack(
       scene,
-      new Phaser.Math.Vector2(def.geometry.p0.x, def.geometry.p0.y),
-      new Phaser.Math.Vector2(def.geometry.p1.x, def.geometry.p1.y),
-      new Phaser.Math.Vector2(def.geometry.p2.x, def.geometry.p2.y),
-      new Phaser.Math.Vector2(def.geometry.p3.x, def.geometry.p3.y),
+      new Phaser.Math.Vector2(-6150, -1400),
+      new Phaser.Math.Vector2(-6079.478560818569, -1793.734335073511),
+      new Phaser.Math.Vector2(-5846.942264575869, -3092.0278050355632),
+      new Phaser.Math.Vector2(-5776.420825394438, -3485.762140109074),
     );
-    const first = fromDef(firstDef);
-    const second = fromDef(secondDef);
+    const second = new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(-5776.420825394438, -3485.762140109074),
+      new Phaser.Math.Vector2(-5705.899386213007, -3879.496475182585),
+      new Phaser.Math.Vector2(-4554.2861277716465, -4694.558593148342),
+      new Phaser.Math.Vector2(-4269.895770174265, -4975.845145449787),
+    );
     first.setUUID('handoff-first');
     second.setUUID('handoff-second');
     const manager = new TrackManager(scene);

@@ -191,12 +191,9 @@ export class FacilityInspector {
 
   setVisible(visible: boolean): void {
     this.enabled = visible;
-    if (!visible) {
-      this.clear();
-      return;
-    }
-    this.root.style.display = this.current ? 'block' : 'none';
-    this.root.setAttribute('aria-hidden', this.current ? 'false' : 'true');
+    const displayed = visible && this.current !== null;
+    this.root.style.display = displayed ? 'block' : 'none';
+    this.root.setAttribute('aria-hidden', displayed ? 'false' : 'true');
   }
 
   clear(): void {

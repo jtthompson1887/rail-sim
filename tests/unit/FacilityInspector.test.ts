@@ -281,6 +281,23 @@ describe('FacilityInspector', () => {
     expect(inspector.containsScreenPoint(100, 100)).toBe(false);
   });
 
+  it('restores the same inspection after a temporary visibility change', () => {
+    EventBus.emit('facility:inspection', sawmillInspection());
+    const root = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+
+    inspector.setVisible(false);
+    expect(root.getAttribute('aria-hidden')).toBe('true');
+    expect(root.querySelector('[data-testid="facility-name"]')?.textContent)
+      .toBe('Sawmill');
+
+    inspector.setVisible(true);
+    expect(root.getAttribute('aria-hidden')).toBe('false');
+    expect(root.querySelector('[data-testid="facility-name"]')?.textContent)
+      .toBe('Sawmill');
+  });
+
   it('keeps the blocker readable and the world edge visible at 375x667', () => {
     Object.defineProperty(window, 'innerWidth', {
       value: 375,

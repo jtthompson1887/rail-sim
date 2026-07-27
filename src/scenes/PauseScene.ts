@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GameStateManager } from '../managers/GameStateManager';
+import { EventBus } from '../services/EventBus';
 
 export default class PauseScene extends Phaser.Scene {
   constructor() {
@@ -26,14 +27,7 @@ export default class PauseScene extends Phaser.Scene {
     const quit = this.add.text(width / 2, height * 0.67, 'Quit to Menu', { fontFamily: 'Verdana', fontSize: '32px', color: '#ffffff' })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => {
-        this.scene.stop('HUDScene');
-        this.scene.stop('DebugOverlayScene');
-        this.scene.stop('WorldScene');
-        this.scene.stop('GameScene');
-        this.scene.start('MenuScene');
-        this.scene.stop();
-      });
+      .on('pointerdown', () => this.quitToMenu());
     quit.setPadding(12);
 
     this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
@@ -42,6 +36,7 @@ export default class PauseScene extends Phaser.Scene {
   }
 
   private resumeGame(): void {
+    EventBus.emit('ui:pause-visible', { visible: false });
     GameStateManager.resume();
     this.scene.resume('WorldScene');
     this.scene.resume('GameScene');
@@ -50,7 +45,18 @@ export default class PauseScene extends Phaser.Scene {
 
   private returnToCreate(): void {
     GameStateManager.returnToCreate();
+    EventBus.emit('ui:pause-visible', { visible: false });
     this.scene.resume('WorldScene');
+    this.scene.stop();
+  }
+
+  private quitToMenu(): void {
+    EventBus.emit('ui:pause-visible', { visible: false });
+    this.scene.stop('HUDScene');
+    this.scene.stop('DebugOverlayScene');
+    this.scene.stop('WorldScene');
+    this.scene.stop('GameScene');
+    this.scene.start('MenuScene');
     this.scene.stop();
   }
 }

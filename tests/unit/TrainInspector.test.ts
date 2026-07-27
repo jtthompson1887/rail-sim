@@ -217,6 +217,11 @@ describe('TrainInspector', () => {
     expect(root.style.left).toBe('56px');
     expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).not.toBe('');
+    const throttle = root.querySelector(
+      '[aria-label="Train throttle"]',
+    ) as HTMLElement;
+    expect(throttle.style.position).toBe('sticky');
+    expect(throttle.style.bottom).toBe('0px');
 
     panel.destroy();
     EventBus.emit('ui:train-inspection', { inspection: inspection() });

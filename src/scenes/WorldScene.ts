@@ -121,6 +121,11 @@ export interface FirstRouteBrowserSnapshot {
   readonly runtime: readonly TrainRuntimeSnapshot[];
   readonly saveState: 'saved' | 'unsaved' | 'saving';
   readonly objective: FreightObjectiveDto;
+  readonly construction: {
+    readonly phase: ConstructionToolPhase;
+    readonly preview: ConstructionPreviewModel | null;
+    readonly topology: TrackTopologySnapshot;
+  };
   readonly camera: {
     readonly scrollX: number;
     readonly scrollY: number;
@@ -703,6 +708,7 @@ export default class WorldScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ESC', () => {
       if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
         GameStateManager.pause();
+        EventBus.emit('ui:pause-visible', { visible: true });
         this.scene.launch('PauseScene');
         this.scene.pause();
       }
@@ -1100,6 +1106,9 @@ export default class WorldScene extends Phaser.Scene {
     if (!world) throw new Error('No world is loaded');
     const camera = this.cameras.main;
     const runtime = this.trainManager.trains.map(captureTrainRuntime);
+    const placeTrack = this.toolRegistry.get(
+      'place-track',
+    ) as PlaceTrackTool | undefined;
     return deepFreezePlainData(clonePlainData({
       world,
       runtime,
@@ -1108,6 +1117,11 @@ export default class WorldScene extends Phaser.Scene {
         world,
         this.trackManager.captureTopology(),
       ),
+      construction: {
+        phase: placeTrack?.phase ?? 'idle',
+        preview: placeTrack?.previewModel ?? null,
+        topology: this.trackManager.captureTopology(),
+      },
       camera: {
         scrollX: camera.scrollX,
         scrollY: camera.scrollY,

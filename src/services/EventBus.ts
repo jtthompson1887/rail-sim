@@ -66,6 +66,7 @@ interface EventMap {
   'ui:toolbar-undo-state': { canUndo: boolean; canRedo: boolean };
   'ui:toolbar-save-state': { state: 'saved' | 'unsaved' | 'saving' };
   'ui:toolbar-visible': { visible: boolean };
+  'ui:pause-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
   'editor:delete-tracks': DeleteTracksIntent;
   'ui:delete-request': DeleteReviewRequest;

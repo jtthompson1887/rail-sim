@@ -357,6 +357,7 @@ describe('WorldScene persisted opportunity view', () => {
       trains: [train],
       selectTrain: jest.fn(),
     };
+    scene.cameraController = { setInputLockOwner: jest.fn() };
     const emit = jest.spyOn(EventBus, 'emit');
 
     scene.activatePlayMode();
@@ -382,7 +383,10 @@ describe('WorldScene persisted opportunity view', () => {
     scene.selectedFacilityId = 'sawmill';
     scene.activeTool = 'place-track';
     scene.trainManager = { trains: [] };
-    scene.cameraController = { stopFollow: jest.fn() };
+    scene.cameraController = {
+      stopFollow: jest.fn(),
+      setInputLockOwner: jest.fn(),
+    };
     scene.saveWorldAndReport = jest.fn();
     const emit = jest.spyOn(EventBus, 'emit');
 

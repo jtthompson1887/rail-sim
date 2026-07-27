@@ -6,6 +6,9 @@ const MOBILE = { width: 375, height: 667 };
 const REAL_TIME_SEED = 'real-terrain-alpha';
 const CONTROLLED_SEED = 'first-route-browser-beta';
 const MOBILE_SEED = 'first-route-browser-gamma';
+const DEVELOPMENT_GRANT = 250_000;
+const DEVELOPMENT_GRANT_REFERENCE =
+  'regional-development-grant:v1';
 
 interface Point {
   readonly x: number;
@@ -244,10 +247,11 @@ async function createFixedSeedWorld(
     }
   });
   await page.goto('/');
+  // Generated menu preview initialization is outside timed gameplay.
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
     undefined,
-    { timeout: 25_000 },
+    { timeout: 40_000 },
   );
   await page.keyboard.press('Enter');
   await page.locator('canvas').click({
@@ -352,6 +356,11 @@ async function buildWitnessCorridor(
       page.locator('[data-testid="company-save-state"]'),
     ).toHaveText('Saved');
   }
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('h');
+  await expect(page.locator('canvas')).toHaveCSS('cursor', 'grab');
+  await expect(page.locator('[data-testid="vehicle-purchase-panel"]'))
+    .toBeVisible();
 
   const built = await snapshot(page);
   expect(
@@ -401,6 +410,38 @@ const bezierPoint = (track: Track, t: number): Point => {
       + track.p3.y * t ** 3,
   };
 };
+
+const tangentAt = (track: Track, t: number): Point => {
+  const inverse = 1 - t;
+  return {
+    x: 3 * inverse * inverse * (track.p1.x - track.p0.x)
+      + 6 * inverse * t * (track.p2.x - track.p1.x)
+      + 3 * t * t * (track.p3.x - track.p2.x),
+    y: 3 * inverse * inverse * (track.p1.y - track.p0.y)
+      + 6 * inverse * t * (track.p2.y - track.p1.y)
+      + 3 * t * t * (track.p3.y - track.p2.y),
+  };
+};
+
+const keyToward = (
+  state: FirstRouteBrowserSnapshot,
+  live: Runtime,
+  target: Point,
+): 'w' | 's' => {
+  const track = state.world.tracks.find(
+    ({ uuid }) => uuid === live.trackUUID,
+  );
+  if (!track || live.trackT === null) return 'w';
+  const tangent = tangentAt(track, live.trackT);
+  const forwardDot = live.facing * (
+    tangent.x * (target.x - live.x)
+    + tangent.y * (target.y - live.y)
+  );
+  return forwardDot >= 0 ? 'w' : 's';
+};
+
+const oppositeKey = (key: 'w' | 's'): 'w' | 's' =>
+  key === 'w' ? 's' : 'w';
 
 const placementInsideAccess = (
   state: FirstRouteBrowserSnapshot,
@@ -552,11 +593,55 @@ const movingMidRoute = (state: FirstRouteBrowserSnapshot) => {
   };
 };
 
-const stoppedMidRoute = (state: FirstRouteBrowserSnapshot) => ({
-  ...movingMidRoute(state),
-  speedWorldUnitsPerSecond: 0,
-  throttle: 0 as const,
-});
+const stoppedOutsideFacilityAccess = (
+  state: FirstRouteBrowserSnapshot,
+) => {
+  const forestAccess = facility(state, 'managed-forest').railAccess;
+  const sawmillAccess = facility(state, 'sawmill').railAccess;
+  const candidates = state.world.tracks.flatMap((track) =>
+    Array.from({ length: 21 }, (_, index) => {
+      const trackT = index / 20;
+      const point = bezierPoint(track, trackT);
+      const forestDistance = Math.hypot(
+        point.x - forestAccess.x,
+        point.y - forestAccess.y,
+      );
+      const sawmillDistance = Math.hypot(
+        point.x - sawmillAccess.x,
+        point.y - sawmillAccess.y,
+      );
+      const clearance = Math.min(
+        ...state.world.economy.facilities.map(({ railAccess }) =>
+          Math.hypot(
+            point.x - railAccess.x,
+            point.y - railAccess.y,
+          ) - railAccess.radius),
+      );
+      return {
+        point,
+        clearance,
+        forestDistance,
+        sawmillDistance,
+        trackUUID: track.uuid,
+        trackT,
+      };
+    }),
+  ).filter(({ clearance, forestDistance, sawmillDistance }) =>
+    clearance > 0 && sawmillDistance < forestDistance)
+    .sort((left, right) => right.clearance - left.clearance
+      || left.trackUUID.localeCompare(right.trackUUID)
+      || left.trackT - right.trackT);
+  const selected = candidates[0];
+  if (!selected) {
+    throw new Error('No route point exists outside every facility access');
+  }
+  return {
+    ...selected.point,
+    speedWorldUnitsPerSecond: 0,
+    throttle: 0 as const,
+    derailed: false,
+  };
+};
 
 const persistedPhase = (state: FirstRouteBrowserSnapshot) => ({
   cash: state.world.company.cash,
@@ -623,23 +708,21 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await page.mouse.click(selectedTrainScreen.x, selectedTrainScreen.y);
     await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
-    let braking = false;
-    let wHeld = false;
-    const setForward = async (held: boolean): Promise<void> => {
-      if (held === wHeld) return;
-      wHeld = held;
-      if (held) await page.keyboard.down('w');
-      else await page.keyboard.up('w');
+    let heldKey: 'w' | 's' | null = null;
+    const setHeldKey = async (next: 'w' | 's' | null): Promise<void> => {
+      if (next === heldKey) return;
+      if (heldKey) await page.keyboard.up(heldKey);
+      heldKey = next;
+      if (heldKey) await page.keyboard.down(heldKey);
     };
-    const brakePulse = async (): Promise<void> => {
-      await page.keyboard.down('s');
-      await page.waitForTimeout(60);
-      await page.keyboard.up('s');
-    };
-    const forwardPulse = async (): Promise<void> => {
-      await page.keyboard.down('w');
-      await page.waitForTimeout(60);
-      await page.keyboard.up('w');
+    const pulse = async (
+      key: 'w' | 's',
+      duration = 20,
+    ): Promise<void> => {
+      await setHeldKey(null);
+      await page.keyboard.down(key);
+      await page.waitForTimeout(duration);
+      await page.keyboard.up(key);
     };
     let previousDistance = Math.hypot(
       runtime(loaded).x - sawmill.railAccess.x,
@@ -647,11 +730,14 @@ test.describe('collective three-seed first freight route acceptance', () => {
     );
     let motion: 'approaching' | 'receding' | 'stationary' = 'stationary';
     let unloadingStarted = false;
+    let firstInsideTick: number | null = null;
+    let firstUnloadTick: number | null = null;
     const recentRuntime: Array<{
       elapsedSeconds: number;
+      economyTick: number;
+      cargoUnits: number;
       distance: number;
       speed: number;
-      signedSpeed: number;
       motion: typeof motion;
       throttle: -1 | 0 | 1;
       trackUUID: string | null;
@@ -660,92 +746,133 @@ test.describe('collective three-seed first freight route acceptance', () => {
       y: number;
     }> = [];
     try {
-      await expect.poll(async () => {
-        const current = await snapshot(page);
-        const live = runtime(current);
-        const distance = Math.hypot(
-          live.x - sawmill.railAccess.x,
-          live.y - sawmill.railAccess.y,
-        );
-        const distanceDelta = distance - previousDistance;
-        if (Math.abs(distanceDelta) >= 0.5) {
-          motion = distanceDelta < 0 ? 'approaching' : 'receding';
-        } else if (live.speedWorldUnitsPerSecond <= 2) {
-          motion = 'stationary';
-        }
-        previousDistance = distance;
-        const signedSpeed = motion === 'approaching'
-          ? live.speedWorldUnitsPerSecond
-          : motion === 'receding'
-            ? -live.speedWorldUnitsPerSecond
-            : 0;
-        unloadingStarted ||= (train(current).cargo?.units ?? 0) < 60;
-        const elapsedSeconds = (
-          await page.evaluate(() => performance.now()) - purchaseStarted
-        ) / 1_000;
-        recentRuntime.push({
-          elapsedSeconds,
-          distance,
-          speed: live.speedWorldUnitsPerSecond,
-          signedSpeed,
-          motion,
-          throttle: live.throttle,
-          trackUUID: live.trackUUID,
-          trackT: live.trackT,
-          x: live.x,
-          y: live.y,
-        });
-        if (recentRuntime.length > 8) recentRuntime.shift();
-        if (live.derailed) {
-          const endpoints = loaded.world.tracks.map((track) => ({
-            uuid: track.uuid,
-            p0: track.p0,
-            p3: track.p3,
-          }));
-          throw new Error(JSON.stringify({
-            braking,
-            recentRuntime,
-            endpoints,
-            sawmill: sawmill.railAccess,
-          }));
-        }
-        if (!braking && distance <= sawmill.railAccess.radius * 3) {
-          braking = true;
-        }
-        if (unloadingStarted) {
-          await setForward(false);
-        } else if (motion === 'receding') {
-          await setForward(false);
-          if (live.speedWorldUnitsPerSecond > 2) await forwardPulse();
-        } else if (braking) {
-          if (distance > sawmill.railAccess.radius) {
-            if (live.speedWorldUnitsPerSecond < 34) {
-              await setForward(false);
-              await forwardPulse();
-            } else if (live.speedWorldUnitsPerSecond > 42) {
-              await setForward(false);
-              await brakePulse();
-            } else {
-              await setForward(false);
-            }
-          } else {
-            await setForward(false);
-            if (signedSpeed > 2) await brakePulse();
+      try {
+        await expect.poll(async () => {
+          const current = await snapshot(page);
+          const live = runtime(current);
+          const cargoUnits = train(current).cargo?.units ?? 0;
+          const distance = Math.hypot(
+            live.x - sawmill.railAccess.x,
+            live.y - sawmill.railAccess.y,
+          );
+          const distanceDelta = distance - previousDistance;
+          if (Math.abs(distanceDelta) >= 0.5) {
+            motion = distanceDelta < 0 ? 'approaching' : 'receding';
+          } else if (live.speedWorldUnitsPerSecond <= 2) {
+            motion = 'stationary';
           }
-        } else if (live.speedWorldUnitsPerSecond < 4) {
-          await setForward(true);
-        } else {
-          await setForward(false);
-        }
-        return {
-          inside: distance <= sawmill.railAccess.radius,
-          stopped: live.speedWorldUnitsPerSecond <= 2,
-          empty: train(current).cargo === null,
-        };
-      }, {
-        timeout: 235_000,
-        intervals: [250, 500, 750],
-      }).toEqual({ inside: true, stopped: true, empty: true });
+          previousDistance = distance;
+          if (distance <= sawmill.railAccess.radius
+            && firstInsideTick === null) {
+            firstInsideTick = current.world.economy.tick;
+          }
+          if (cargoUnits < 60 && firstUnloadTick === null) {
+            firstUnloadTick = current.world.economy.tick;
+          }
+          unloadingStarted ||= cargoUnits < 60;
+          const elapsedSeconds = (
+            await page.evaluate(() => performance.now()) - purchaseStarted
+          ) / 1_000;
+          recentRuntime.push({
+            elapsedSeconds,
+            economyTick: current.world.economy.tick,
+            cargoUnits,
+            distance,
+            speed: live.speedWorldUnitsPerSecond,
+            motion,
+            throttle: live.throttle,
+            trackUUID: live.trackUUID,
+            trackT: live.trackT,
+            x: live.x,
+            y: live.y,
+          });
+          if (recentRuntime.length > 8) recentRuntime.shift();
+          if (live.derailed) {
+            const endpoints = loaded.world.tracks.map((track) => ({
+              uuid: track.uuid,
+              p0: track.p0,
+              p3: track.p3,
+            }));
+            throw new Error(JSON.stringify({
+              recentRuntime,
+              endpoints,
+              sawmill: sawmill.railAccess,
+            }));
+          }
+          const propulsionKey = keyToward(
+            current,
+            live,
+            sawmill.railAccess,
+          );
+          if (unloadingStarted) {
+            await setHeldKey(null);
+          } else if (distance <= sawmill.railAccess.radius) {
+            await setHeldKey(null);
+            if (live.speedWorldUnitsPerSecond > 2) {
+              const brakingKey = motion === 'receding'
+                ? propulsionKey
+                : oppositeKey(propulsionKey);
+              await pulse(
+                brakingKey,
+                live.speedWorldUnitsPerSecond > 20 ? 60 : 20,
+              );
+            }
+          } else if (distance <= sawmill.railAccess.radius * 2) {
+            await setHeldKey(null);
+            if (motion === 'receding') {
+              await pulse(propulsionKey, 20);
+            } else if (live.speedWorldUnitsPerSecond > 28) {
+              await pulse(oppositeKey(propulsionKey), 20);
+            } else if (live.speedWorldUnitsPerSecond < 24) {
+              await pulse(propulsionKey, 20);
+            }
+          } else if (motion === 'receding') {
+            await setHeldKey(propulsionKey);
+          } else {
+            await setHeldKey(null);
+            if (live.speedWorldUnitsPerSecond < 34) {
+              await pulse(propulsionKey, 60);
+            } else if (live.speedWorldUnitsPerSecond > 42) {
+              await pulse(oppositeKey(propulsionKey), 60);
+            }
+          }
+          return {
+            inside: distance <= sawmill.railAccess.radius,
+            stopped: live.speedWorldUnitsPerSecond <= 2,
+            empty: train(current).cargo === null,
+          };
+        }, {
+          timeout: 235_000,
+          intervals: [50, 75, 100, 150],
+        }).toEqual({ inside: true, stopped: true, empty: true });
+      } catch (error) {
+        const finalState = await snapshot(page);
+        const finalRuntime = runtime(finalState);
+        const transferStatus = await page
+          .locator('[data-testid="train-transfer-status"]')
+          .textContent()
+          .catch(() => null);
+        throw new Error(JSON.stringify({
+          message: error instanceof Error ? error.message : String(error),
+          trainId: train(finalState).id,
+          firstInsideTick,
+          firstUnloadTick,
+          transferStatus,
+          final: {
+            economyTick: finalState.world.economy.tick,
+            cargoUnits: train(finalState).cargo?.units ?? 0,
+            distance: Math.hypot(
+              finalRuntime.x - sawmill.railAccess.x,
+              finalRuntime.y - sawmill.railAccess.y,
+            ),
+            speed: finalRuntime.speedWorldUnitsPerSecond,
+            throttle: finalRuntime.throttle,
+            trackUUID: finalRuntime.trackUUID,
+            trackT: finalRuntime.trackT,
+          },
+          recentRuntime,
+        }));
+      }
     } finally {
       await page.keyboard.up('w');
       await page.keyboard.up('s');
@@ -778,9 +905,15 @@ test.describe('collective three-seed first freight route acceptance', () => {
       'structural-timber-link',
     );
     await expect(objective).toContainText('Extend the timber chain');
-    await expect(page.locator('[data-testid="company-operating-profit"]')).toContainText(
-      /Operating profit £[1-9]/,
-    );
+    await expect(
+      page.locator('[data-testid="company-delivery-revenue"]'),
+    ).toContainText(/Deliveries £[1-9]/);
+    await expect(
+      page.locator('[data-testid="company-contract-bonuses"]'),
+    ).toContainText('Development £250,000');
+    await expect(
+      page.locator('[data-testid="company-operating-profit"]'),
+    ).toContainText(/Rail profit £[1-9]/);
   });
 
   test('controlled seed proves exact transfers, four reload phases, and three cycles', async ({
@@ -839,7 +972,11 @@ test.describe('collective three-seed first freight route acceptance', () => {
     });
 
     await test.step('stopped outside Sawmill access does not transfer', async () => {
-      await setTrainRuntime(page, trainId, stoppedMidRoute(current));
+      await setTrainRuntime(
+        page,
+        trainId,
+        stoppedOutsideFacilityAccess(current),
+      );
       const beforeOutsideTick = await snapshot(page);
       const sawmillAccess = facility(beforeOutsideTick, 'sawmill').railAccess;
       expect(Math.hypot(
@@ -852,6 +989,21 @@ test.describe('collective three-seed first freight route acceptance', () => {
         derailed: false,
       }));
       expect(train(beforeOutsideTick).cargo?.units).toBe(30);
+      const forestAccess =
+        facility(beforeOutsideTick, 'managed-forest').railAccess;
+      expect(Math.hypot(
+        runtime(beforeOutsideTick).x - sawmillAccess.x,
+        runtime(beforeOutsideTick).y - sawmillAccess.y,
+      )).toBeLessThan(Math.hypot(
+        runtime(beforeOutsideTick).x - forestAccess.x,
+        runtime(beforeOutsideTick).y - forestAccess.y,
+      ));
+      for (const candidate of beforeOutsideTick.world.economy.facilities) {
+        expect(Math.hypot(
+          runtime(beforeOutsideTick).x - candidate.railAccess.x,
+          runtime(beforeOutsideTick).y - candidate.railAccess.y,
+        )).toBeGreaterThan(candidate.railAccess.radius);
+      }
       expect(
         facility(beforeOutsideTick, 'sawmill').inventories.logs.capacity
         - facility(beforeOutsideTick, 'sawmill').inventories.logs.quantity,
@@ -920,6 +1072,10 @@ test.describe('collective three-seed first freight route acceptance', () => {
     const finalUnloadBefore = await snapshot(page);
     expect(train(finalUnloadBefore).cargo?.units).toBe(10);
     const expectedFinalRevenue = expectedLogBatchRevenue(finalUnloadBefore);
+    const bonusesBefore = categoryTotal(
+      finalUnloadBefore,
+      'contract-bonus',
+    );
     await advanceFixedTicks(page, 1);
     current = await snapshot(page);
     expect(train(current).cargo).toBeNull();
@@ -929,7 +1085,14 @@ test.describe('collective three-seed first freight route acceptance', () => {
     ).toBe(expectedFinalRevenue);
     expect(
       current.world.company.cash - finalUnloadBefore.world.company.cash,
-    ).toBe(expectedFinalRevenue);
+    ).toBe(expectedFinalRevenue + DEVELOPMENT_GRANT);
+    expect(
+      categoryTotal(current, 'contract-bonus') - bonusesBefore,
+    ).toBe(DEVELOPMENT_GRANT);
+    expect(current.world.company.ledger.filter(
+      ({ referenceId }) =>
+        referenceId === DEVELOPMENT_GRANT_REFERENCE,
+    )).toHaveLength(1);
     expect(train(current).operations.lastTripRevenue).toBeGreaterThan(
       train(current).operations.lastTripRunningCost,
     );
@@ -943,10 +1106,15 @@ test.describe('collective three-seed first freight route acceptance', () => {
     for (let cycle = 2; cycle <= 3; cycle += 1) {
       current = await snapshot(page);
       while (facility(current, 'managed-forest').inventories.logs.quantity < 60) {
-        await setTrainRuntime(page, trainId, stoppedAt(current, 'sawmill'));
+        await setTrainRuntime(
+          page,
+          trainId,
+          stoppedOutsideFacilityAccess(current),
+        );
         await advanceFixedTicks(page, 1);
         current = await snapshot(page);
       }
+      expect(train(current).cargo).toBeNull();
       await setTrainRuntime(page, trainId, stoppedAt(current, 'managed-forest'));
       await advanceFixedTicks(page, 6);
       current = await snapshot(page);

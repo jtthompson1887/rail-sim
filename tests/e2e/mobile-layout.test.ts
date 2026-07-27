@@ -46,6 +46,71 @@ async function waitForCanvas(page: import('@playwright/test').Page): Promise<voi
   await page.waitForTimeout(1_000);
 }
 
+async function expectWithinViewport(
+  page: import('@playwright/test').Page,
+  selector: string,
+): Promise<void> {
+  const locator = page.locator(selector);
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
+  if (!box || !viewport) throw new Error(`${selector} has no viewport bounds`);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+}
+
+test('375×667 blank-world purchase controls remain reachable', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.addInitScript(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.goto('/');
+  await page.waitForFunction(
+    () => (window as any).__railSimScene === 'MenuScene',
+    undefined,
+    { timeout: 60_000 },
+  );
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(
+    () => (window as any).__railSimScene === 'WorldSelectScene',
+    undefined,
+    { timeout: 25_000 },
+  );
+  const canvas = page.locator('canvas');
+  await canvas.click({ position: { x: 187.5, y: 577 } });
+  page.once('dialog', (dialog) => dialog.accept('mobile-layout-controls'));
+  await canvas.click({ position: { x: 187.5, y: 146 } });
+  await canvas.click({ position: { x: 187.5, y: 603 } });
+  await page.waitForFunction(
+    () => (window as any).__railSimScene === 'WorldScene',
+    undefined,
+    { timeout: 60_000 },
+  );
+
+  for (const selector of [
+    '[data-testid="company-hud"]',
+    '[data-testid="company-cash"]',
+    '[data-testid="vehicle-purchase-panel"]',
+    '[data-testid="flatbed-freight-set-buy"]',
+  ]) {
+    await expectWithinViewport(page, selector);
+  }
+  const overflow = await page.evaluate(() => ({
+    width: document.body.scrollWidth,
+    height: document.body.scrollHeight,
+    clientWidth: document.documentElement.clientWidth,
+    clientHeight: document.documentElement.clientHeight,
+  }));
+  expect(overflow.width).toBeLessThanOrEqual(overflow.clientWidth);
+  expect(overflow.height).toBeLessThanOrEqual(overflow.clientHeight);
+});
+
 // ---------------------------------------------------------------------------
 // Feature: Game canvas renders at every viewport size
 // ---------------------------------------------------------------------------

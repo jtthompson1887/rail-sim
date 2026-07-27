@@ -137,6 +137,81 @@ describe('EditorUIScene construction UI boundary', () => {
     expect((scene as any).validationHint.clear).toHaveBeenCalled();
   });
 
+  it('hides every overlay for pause and restores the stored world mode', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'saved',
+    });
+    EventBus.emit('facility:inspection', {
+      id: 'sawmill',
+      name: 'Sawmill',
+      status: { code: 'working', label: 'Working' },
+      produces: ['structural-timber'],
+      needs: ['logs'],
+      inputRows: [],
+      outputRows: [],
+      inventories: [],
+      quotes: [],
+      railConnected: true,
+    });
+    const facilityRoot = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+    const visibilityKeys = [
+      'toolbar',
+      'propertiesPanel',
+      'constructionInspector',
+      'companyHud',
+      'facilityInspector',
+      'vehiclePurchasePanel',
+      'trainInspector',
+      'freightObjectiveCard',
+      'validationHint',
+    ];
+    const visibilitySpies = visibilityKeys.map((key) =>
+      jest.spyOn((scene as any)[key], 'setVisible').mockClear());
+    const closeContextMenu = jest.spyOn(
+      (scene as any).contextMenu,
+      'close',
+    );
+
+    expect(scene.containsScreenPoint(40, 500)).toBe(true);
+    EventBus.emit('ui:pause-visible', { visible: true });
+
+    visibilitySpies.forEach((spy) => {
+      expect(spy).toHaveBeenLastCalledWith(false);
+    });
+    expect((scene as any).editorControlsVisible).toBe(true);
+    expect((scene as any).minimapVisible).toBe(false);
+    expect(closeContextMenu).toHaveBeenCalled();
+    expect(scene.containsScreenPoint(40, 500)).toBe(false);
+    expect(facilityRoot.getAttribute('aria-hidden')).toBe('true');
+    expect(facilityRoot.querySelector('[data-testid="facility-name"]')
+      ?.textContent).toBe('Sawmill');
+
+    EventBus.emit('ui:toolbar-visible', { visible: false });
+    EventBus.emit('ui:pause-visible', { visible: false });
+
+    expect((scene as any).editorControlsVisible).toBe(false);
+    expect((scene as any).toolbar.setVisible)
+      .toHaveBeenLastCalledWith(false);
+    expect((scene as any).vehiclePurchasePanel.setVisible)
+      .toHaveBeenLastCalledWith(false);
+    for (const key of [
+      'companyHud',
+      'facilityInspector',
+      'trainInspector',
+      'freightObjectiveCard',
+    ]) {
+      expect((scene as any)[key].setVisible).toHaveBeenLastCalledWith(true);
+    }
+    expect((scene as any).minimapVisible).toBe(false);
+    expect(facilityRoot.getAttribute('aria-hidden')).toBe('false');
+    expect(facilityRoot.querySelector('[data-testid="facility-name"]')
+      ?.textContent).toBe('Sawmill');
+  });
+
   it('yields the vehicle purchase panel during a construction decision and restores it afterward', () => {
     const scene = new EditorUIScene();
     (scene as any).vehiclePurchasePanel = { setVisible: jest.fn() };
@@ -190,8 +265,10 @@ describe('EditorUIScene construction UI boundary', () => {
       phase: 'review',
       preview: {} as any,
     });
+    EventBus.emit('ui:pause-visible', { visible: true });
     expect((scene as any).trackToolActive).toBe(true);
     expect((scene as any).constructionDecisionActive).toBe(true);
+    expect((scene as any).pauseOverlayVisible).toBe(true);
 
     const firstShutdown = (scene.events.once as jest.Mock).mock.calls
       .at(-1)?.[1];
@@ -208,9 +285,30 @@ describe('EditorUIScene construction UI boundary', () => {
     expect((scene as any).toolbar.currentTool).toBe('none');
     expect((scene as any).trackToolActive).toBe(false);
     expect((scene as any).constructionDecisionActive).toBe(false);
+    expect((scene as any).pauseOverlayVisible).toBe(false);
     expect(document.querySelector(
       '[data-testid="vehicle-purchase-panel"]',
     )?.getAttribute('aria-hidden')).toBe('false');
+  });
+
+  it('removes the pause visibility listener on shutdown', () => {
+    const scene = startEditorUI({
+      visible: true,
+      companyCash: 875_000,
+      saveState: 'saved',
+    });
+    const setToolbarVisible = jest.spyOn(
+      (scene as any).toolbar,
+      'setVisible',
+    );
+    const shutdown = (scene.events.once as jest.Mock).mock.calls.at(-1)?.[1];
+    shutdown?.();
+    startedScenes.splice(startedScenes.indexOf(scene), 1);
+    setToolbarVisible.mockClear();
+
+    EventBus.emit('ui:pause-visible', { visible: true });
+
+    expect(setToolbarVisible).not.toHaveBeenCalled();
   });
 
   it('hydrates a failed startup save into the HUD and Retry Save action', () => {
