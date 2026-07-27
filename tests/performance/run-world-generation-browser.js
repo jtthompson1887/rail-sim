@@ -84,29 +84,43 @@ function startHarnessServer() {
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const audit = measurement.opportunityAudit;
-    const exactOpportunityAudit = audit !== undefined
+    const audit = measurement.jointAudit;
+    const exactJointAudit = audit !== undefined
       && audit.range.startSeed === 'playtest-601'
       && audit.range.endSeed === 'playtest-884'
       && audit.seedsEvaluated === 284
       && audit.seedsResolved === 284
       && audit.seedsExhausted === 0
       && audit.maxResolvedAttempt === 11
-      && audit.firstWorstSeed === 'playtest-753'
+      && audit.maxEconomyEvaluations === 3
+      && audit.maxTotalEconomyCandidatesEvaluated === 642
+      && audit.maxJointWorkUnits === 2_946
+      && audit.firstWorstSeed === 'playtest-633'
+      && Number.isFinite(audit.maxGenerationDurationMs)
+      && audit.maxGenerationDurationMs < targetMs
       && Number.isFinite(audit.durationMs)
       && audit.durationMs > 0;
-    const exactObservedWorstCase = exactOpportunityAudit
+    const exactObservedWorstCase = exactJointAudit
       && measurement.seed === audit.firstWorstSeed
       && measurement.opportunityResult.ok === true
-      && measurement.opportunityResult.opportunity.resolvedAttempt
-        === audit.maxResolvedAttempt
       && measurement.opportunityResult.diagnostics.attemptsEvaluated
-        === audit.maxResolvedAttempt
+        === measurement.opportunityResult.opportunity.resolvedAttempt
       && measurement.opportunityResult.diagnostics.maxSiteCandidatesEvaluated === 256
       && measurement.economyResult.ok === true
       && measurement.economyResult.economy.facilities.length === 7
       && measurement.economyResult.diagnostics.candidatesEvaluated
-        <= measurement.economyCandidatesCap;
+        <= measurement.economyCandidatesCap
+      && measurement.economyEvaluations === audit.maxEconomyEvaluations
+      && measurement.totalEconomyCandidatesEvaluated
+        === audit.maxTotalEconomyCandidatesEvaluated
+      && measurement.opportunityResult.opportunity.resolvedAttempt
+        * measurement.candidatesCap
+        + measurement.totalEconomyCandidatesEvaluated
+        === audit.maxJointWorkUnits
+      && measurement.totalEconomyCandidatesEvaluated
+        <= measurement.economyEvaluations * measurement.economyCandidatesCap
+      && measurement.prefabWitnessCost <= 194_000
+      && measurement.blankInfrastructure === true;
     if (!exactObservedWorstCase
       || measurement.attemptsCap !== 12
       || measurement.candidatesCap !== 256

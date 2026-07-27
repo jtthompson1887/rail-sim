@@ -56,6 +56,10 @@ export type OpportunityGenerationResult =
     };
   };
 
+export type OpportunityAcceptancePredicate = (
+  opportunity: StarterOpportunityDef,
+) => boolean;
+
 interface Candidate {
   x: number;
   y: number;
@@ -140,7 +144,11 @@ export class WorldOpportunityGenerator {
   private readonly analyzer: ConstructionAnalyzer;
   private readonly validator: WorldOpportunityValidator;
 
-  constructor(private readonly terrain: TerrainHeightSource) {
+  constructor(
+    private readonly terrain: TerrainHeightSource,
+    private readonly acceptsOpportunity: OpportunityAcceptancePredicate =
+      () => true,
+  ) {
     this.analyzer = new ConstructionAnalyzer(terrain);
     this.validator = new WorldOpportunityValidator(terrain, this.analyzer);
   }
@@ -234,7 +242,9 @@ export class WorldOpportunityGenerator {
       const first = candidates[firstIndex];
       const second = candidates[secondIndex];
       const opportunity = this.buildOpportunity(config, attempt, first, second);
-      if (opportunity) return opportunity;
+      if (opportunity && this.acceptsOpportunity(opportunity)) {
+        return opportunity;
+      }
     }
     return null;
   }

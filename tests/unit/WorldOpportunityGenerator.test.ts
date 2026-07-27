@@ -152,6 +152,55 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
+  it('continues its bounded deterministic search when acceptance rejects an otherwise-valid opportunity', () => {
+    const considered: StarterOpportunityDef[] = [];
+    const acceptAfterFirst = jest.fn((opportunity: StarterOpportunityDef) => {
+      considered.push(opportunity);
+      return considered.length === 2;
+    });
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      acceptAfterFirst,
+    ).generate(config);
+
+    expect(acceptAfterFirst).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.opportunity).toEqual(considered[1]);
+
+    const replayConsidered: StarterOpportunityDef[] = [];
+    const replay = new WorldOpportunityGenerator(
+      variedTerrain,
+      (opportunity) => {
+        replayConsidered.push(opportunity);
+        return replayConsidered.length === 2;
+      },
+    ).generate(config);
+    expect(replay).toEqual(result);
+    expect(replayConsidered).toEqual(considered);
+  });
+
+  it('honours the existing attempt bound when acceptance rejects every valid opportunity', () => {
+    const reject = jest.fn().mockReturnValue(false);
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      reject,
+    ).generate(config);
+
+    expect(reject).toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'opportunity-exhausted',
+        seed: config.seed,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
+      },
+    });
+  });
+
   it.each([
     {
       seed: 'task15-manual-ash-keydiag',

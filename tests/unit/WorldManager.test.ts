@@ -11,6 +11,16 @@ import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
 import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
+import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import {
+  analyzePrefabricationExtension,
+} from '../../src/economy/PrefabricationOpportunity';
+import {
+  WorldEconomyGenerator,
+  type EconomyGenerationResult,
+} from '../../src/economy/WorldEconomyGenerator';
+import { MAX_ECONOMY_SITE_CANDIDATES } from '../../src/config/WorldGeneration';
 
 function makeTrackDef(
   uuid: string,
@@ -48,6 +58,146 @@ describe('WorldManager', () => {
   });
 
   describe('createNew()', () => {
+    it('continues default opportunity search and persists the exact accepted economy', () => {
+      const originalGenerate = WorldEconomyGenerator.prototype.generate;
+      const accepted: Array<{
+        opportunity: Parameters<typeof originalGenerate>[1];
+        result: Extract<EconomyGenerationResult, { ok: true }>;
+      }> = [];
+      let calls = 0;
+      const generate = jest.spyOn(
+        WorldEconomyGenerator.prototype,
+        'generate',
+      ).mockImplementation(function generateForAcceptedOpportunity(
+        generationConfig,
+        opportunity,
+      ) {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            ok: false,
+            error: {
+              code: 'economy-exhausted',
+              seed: generationConfig.seed,
+              candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+              facilitiesPlaced: 0,
+            },
+          };
+        }
+        const result = originalGenerate.call(
+          this,
+          generationConfig,
+          opportunity,
+        );
+        if (result.ok) {
+          accepted.push({
+            opportunity: clonePlainData(opportunity),
+            result: clonePlainData(result),
+          });
+        }
+        return result;
+      });
+
+      const result = WorldManager.tryCreateNew(
+        'Retried default generation',
+        'real-terrain-alpha',
+      );
+
+      expect(result.ok).toBe(true);
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(accepted).toHaveLength(1);
+      if (!result.ok) return;
+      expect(result.world.starterOpportunity).toEqual(
+        accepted[0].opportunity,
+      );
+      expect(result.world.economy).toEqual(accepted[0].result.economy);
+      generate.mockRestore();
+    });
+
+    it.each([
+      ['thrown', () => {
+        throw new Error('default economy failure');
+      }],
+      ['malformed', () => ({ ok: true })],
+    ] as const)(
+      'aborts default joint generation on a %s economy result',
+      (_label, implementation) => {
+        const generate = jest.spyOn(
+          WorldEconomyGenerator.prototype,
+          'generate',
+        ).mockImplementation(implementation as any);
+        const save = jest.spyOn(SaveService, 'saveWorld');
+
+        const result = WorldManager.tryCreateNew(
+          'Invalid default economy',
+          'default-economy-fatal',
+        );
+
+        const generateCalls = generate.mock.calls.length;
+        const saveCalls = save.mock.calls.length;
+        generate.mockRestore();
+        save.mockRestore();
+        expect(result).toEqual({
+          ok: false,
+          error: {
+            code: 'world-validation-failed',
+            seed: 'default-economy-fatal',
+          },
+        });
+        expect(generateCalls).toBe(1);
+        expect(saveCalls).toBe(0);
+        expect(WorldManager.world).toBeNull();
+      },
+    );
+
+    it('aborts default joint generation on an independently invalid economy', () => {
+      const originalGenerate = WorldEconomyGenerator.prototype.generate;
+      const generate = jest.spyOn(
+        WorldEconomyGenerator.prototype,
+        'generate',
+      ).mockImplementation(function generateInvalidEconomy(
+        generationConfig,
+        opportunity,
+      ) {
+        const result = originalGenerate.call(
+          this,
+          generationConfig,
+          opportunity,
+        );
+        if (!result.ok) return result;
+        const invalid = clonePlainData(result);
+        const prefab = invalid.economy.facilities.find(
+          ({ id }) => id === 'prefabrication-plant',
+        )!;
+        prefab.x = 7_000;
+        prefab.y = 7_000;
+        prefab.railAccess.x = 7_000;
+        prefab.railAccess.y = 7_000;
+        return invalid;
+      });
+      const save = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.tryCreateNew(
+        'Invalid default economy',
+        'real-terrain-alpha',
+      );
+
+      const generateCalls = generate.mock.calls.length;
+      const saveCalls = save.mock.calls.length;
+      generate.mockRestore();
+      save.mockRestore();
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'world-validation-failed',
+          seed: 'real-terrain-alpha',
+        },
+      });
+      expect(generateCalls).toBe(1);
+      expect(saveCalls).toBe(0);
+      expect(WorldManager.world).toBeNull();
+    });
+
     it('creates a world with the given name', () => {
       const world = WorldManager.createNew('Test World', 'real-terrain-alpha');
       expect(world.name).toBe('Test World');
@@ -71,6 +221,27 @@ describe('WorldManager', () => {
       expect(w.junctions).toHaveLength(0);
       expect(w.stations).toHaveLength(0);
       expect(w.trains).toHaveLength(0);
+      expect(w).not.toHaveProperty('services');
+    });
+
+    it('installs only a world with a recomputable affordable Prefab extension', () => {
+      const seed = 'real-terrain-alpha';
+      const world = WorldManager.createNew('Affordable', seed);
+      const sawmill = world.economy.facilities.find(
+        ({ id }) => id === 'sawmill',
+      )!;
+      const prefab = world.economy.facilities.find(
+        ({ id }) => id === 'prefabrication-plant',
+      )!;
+
+      const witness = analyzePrefabricationExtension(
+        new ConstructionAnalyzer(new TerrainGenerator(seed)),
+        sawmill.railAccess,
+        prefab.railAccess,
+      );
+
+      expect(witness).not.toBeNull();
+      expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
     });
 
     it('accepts a custom seed', () => {

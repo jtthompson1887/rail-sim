@@ -20,7 +20,10 @@ import {
 } from '../../src/systems/WorldOpportunityGenerator';
 import { GameConfig } from '../../src/config/GameConfig';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
-import { OPPORTUNITY_CAMERA_PADDING } from '../../src/config/WorldGeneration';
+import {
+  OPPORTUNITY_CAMERA_PADDING,
+  WorldGenerationConfig,
+} from '../../src/config/WorldGeneration';
 import {
   type EconomyGenerationResult,
   WorldEconomyGenerator,
@@ -29,6 +32,16 @@ import {
   STARTER_ROUTE_RESERVE,
   FLATBED_TRAIN_PURCHASE_PRICE,
 } from '../../src/freight/FreightSetCatalog';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import { deriveAutomaticCubic } from '../../src/systems/TrackGeometry';
+import {
+  analyzePrefabricationExtension,
+} from '../../src/economy/PrefabricationOpportunity';
+import {
+  PREFAB_ACCESS_LINK_ALLOWANCE,
+  PREFAB_EXTENSION_OPERATING_RESERVE,
+  REGIONAL_DEVELOPMENT_GRANT,
+} from '../../src/config/FreightProgression';
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -50,6 +63,44 @@ function expectSurveyFitsRecommendedCamera(
     expect(Math.abs(site.y - y) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
       .toBeLessThanOrEqual(halfHeight);
   }
+}
+
+function findSchemaValidUnaffordablePrefabPosition(
+  terrain: TerrainGenerator,
+  economy: Extract<EconomyGenerationResult, { ok: true }>['economy'],
+): { x: number; y: number } {
+  const sawmill = economy.facilities.find(({ id }) => id === 'sawmill')!;
+  const otherFacilities = economy.facilities.filter(
+    ({ id }) => id !== 'prefabrication-plant',
+  );
+  const analyzer = new ConstructionAnalyzer(terrain);
+  const radius = WorldGenerationConfig.SITE_FOOTPRINT_RADIUS;
+  for (let y = -7_500; y <= 7_500; y += 250) {
+    for (let x = -7_500; x <= 7_500; x += 250) {
+      if (otherFacilities.some((facility) => Math.hypot(
+        x - facility.x,
+        y - facility.y,
+      ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
+        continue;
+      }
+      const heights = [-radius, 0, radius].flatMap((dx) => (
+        [-radius, 0, radius].map((dy) => terrain.getHeightAt(x + dx, y + dy))
+      ));
+      if (Math.max(...heights) - Math.min(...heights)
+        > WorldGenerationConfig.MAX_SITE_RELIEF) {
+        continue;
+      }
+      const proposal = analyzer.analyze(deriveAutomaticCubic({
+        start: sawmill.railAccess,
+        end: { x, y },
+      }));
+      if (proposal.valid
+        && proposal.costs.total + ENDPOINT_CONNECTION_COST > 194_000) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error('test fixture could not find an unaffordable valid Prefab site');
 }
 
 function successfulResult(
@@ -154,6 +205,21 @@ function spendCompanyCashTo(targetCash: number): void {
   )).toBe(true);
 }
 
+const TASK_7_JOINT_GENERATION_SWEEP_SEEDS = [
+  'economy-alpha',
+  'economy-beta',
+  'real-terrain-alpha',
+  'real-terrain-beta',
+  'playtest-753',
+  'economy-accumulator',
+  'replacement-economy-failed',
+  'economy-tick-catchup',
+  ...Array.from(
+    { length: 25 },
+    (_, index) => `neutral-generator-audit-${String(index).padStart(3, '0')}`,
+  ),
+];
+
 describe('generated blank-world start', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -212,7 +278,25 @@ describe('generated blank-world start', () => {
     expect(result.world.junctions).toEqual([]);
     expect(result.world.stations).toEqual([]);
     expect(result.world.trains).toEqual([]);
+    expect(result.world).not.toHaveProperty('services');
     expect('scenarios' in result.world).toBe(false);
+    const sawmill = result.world.economy.facilities.find(
+      ({ id }) => id === 'sawmill',
+    )!;
+    const prefab = result.world.economy.facilities.find(
+      ({ id }) => id === 'prefabrication-plant',
+    )!;
+    const witness = analyzePrefabricationExtension(
+      new ConstructionAnalyzer(new TerrainGenerator('atomic-seed')),
+      sawmill.railAccess,
+      prefab.railAccess,
+    );
+    expect(witness).not.toBeNull();
+    expect(
+      witness!.totalCost
+        + PREFAB_ACCESS_LINK_ALLOWANCE
+        + PREFAB_EXTENSION_OPERATING_RESERVE,
+    ).toBeLessThanOrEqual(REGIONAL_DEVELOPMENT_GRANT);
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(WorldManager.world).toBe(result.world);
     expect(SaveService.loadWorld(result.world.id)).toEqual(result.world);
@@ -330,6 +414,68 @@ describe('generated blank-world start', () => {
     expect(saveSpy).not.toHaveBeenCalled();
     expect(WorldManager.world).toBeNull();
     expect(SaveService.listWorlds()).toEqual([]);
+  });
+
+  it('atomically rejects a hostile economy port with an unaffordable Prefab site', () => {
+    const prior = WorldManager.tryCreateNew(
+      'Prior valid world',
+      'real-terrain-alpha',
+      'temperate',
+      successfulPort(),
+      successfulEconomyPort(),
+    );
+    expect(prior.ok).toBe(true);
+    if (!prior.ok) return;
+    const storageBefore = localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY);
+    const seed = 'real-terrain-beta';
+    const economyGenerator: EconomyGeneratorPort = {
+      generate: jest.fn().mockImplementation((
+        generationConfig: WorldGenerationConfigDef,
+        opportunity: StarterOpportunityDef,
+      ) => {
+        const terrain = new TerrainGenerator(generationConfig.seed);
+        const generated = new WorldEconomyGenerator(terrain).generate(
+          generationConfig,
+          opportunity,
+        );
+        if (!generated.ok) return generated;
+        const economy = JSON.parse(JSON.stringify(generated.economy));
+        const hostilePosition = findSchemaValidUnaffordablePrefabPosition(
+          terrain,
+          economy,
+        );
+        const prefab = economy.facilities.find(
+          ({ id }: { id: string }) => id === 'prefabrication-plant',
+        );
+        prefab.x = hostilePosition.x;
+        prefab.y = hostilePosition.y;
+        prefab.railAccess.x = hostilePosition.x;
+        prefab.railAccess.y = hostilePosition.y;
+        return {
+          ok: true as const,
+          economy,
+          diagnostics: generated.diagnostics,
+        };
+      }),
+    };
+    const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+    const result = WorldManager.tryCreateNew(
+      'Hostile replacement',
+      seed,
+      'temperate',
+      successfulPort(),
+      economyGenerator,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'world-validation-failed', seed },
+    });
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(WorldManager.world).toBe(prior.world);
+    expect(localStorage.getItem(GameConfig.WORLD.WORLDS_SAVE_KEY))
+      .toBe(storageBefore);
   });
 
   it.each([
@@ -771,4 +917,63 @@ describe('generated blank-world start', () => {
       );
     },
   );
+
+  it.each(['real-terrain-alpha', 'real-terrain-beta', 'playtest-753'])(
+    'creates an affordable blank Prefab opportunity on representative real-world seed %s',
+    (seed) => {
+      const result = WorldManager.tryCreateNew(
+        `Generated ${seed}`,
+        seed,
+        'temperate',
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const sawmill = result.world.economy.facilities.find(
+        ({ id }) => id === 'sawmill',
+      )!;
+      const prefab = result.world.economy.facilities.find(
+        ({ id }) => id === 'prefabrication-plant',
+      )!;
+      const witness = analyzePrefabricationExtension(
+        new ConstructionAnalyzer(new TerrainGenerator(seed)),
+        sawmill.railAccess,
+        prefab.railAccess,
+      );
+      expect(witness).not.toBeNull();
+      expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
+      expect(result.world.tracks).toEqual([]);
+      expect(result.world.junctions).toEqual([]);
+      expect(result.world.stations).toEqual([]);
+      expect(result.world.trains).toEqual([]);
+      expect(result.world).not.toHaveProperty('services');
+    },
+  );
+
+  it('jointly resolves an affordable blank start across the named Task 7 seed sweep', () => {
+    for (const seed of TASK_7_JOINT_GENERATION_SWEEP_SEEDS) {
+      const result = WorldManager.tryCreateNew(`Task 7 ${seed}`, seed);
+      if (result.ok === false) {
+        throw new Error(`${seed} failed with ${result.error.code}`);
+      }
+      const sawmill = result.world.economy.facilities.find(
+        ({ id }) => id === 'sawmill',
+      )!;
+      const prefab = result.world.economy.facilities.find(
+        ({ id }) => id === 'prefabrication-plant',
+      )!;
+      const witness = analyzePrefabricationExtension(
+        new ConstructionAnalyzer(new TerrainGenerator(seed)),
+        sawmill.railAccess,
+        prefab.railAccess,
+      );
+      expect(witness).not.toBeNull();
+      expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
+      expect(result.world.tracks).toEqual([]);
+      expect(result.world.junctions).toEqual([]);
+      expect(result.world.stations).toEqual([]);
+      expect(result.world.trains).toEqual([]);
+      expect(result.world).not.toHaveProperty('services');
+    }
+  }, 30_000);
 });
