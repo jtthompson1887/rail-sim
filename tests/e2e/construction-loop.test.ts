@@ -220,7 +220,7 @@ test.describe('fixed-seed construction decision loop', () => {
     await page.locator('[data-testid="construction-cancel"]').click();
     expect((await snapshot(page)).phase).toBe('idle');
     await expect(page.locator('[data-testid="construction-inspector"]')).toBeHidden();
-    await expect(page.locator('[data-testid="vehicle-purchase-panel"]')).toBeVisible();
+    await expect(page.locator('[data-testid="vehicle-purchase-panel"]')).toBeHidden();
 
     await dragRoute(page, start, start);
     const invalid = await snapshot(page);
@@ -240,7 +240,7 @@ test.describe('fixed-seed construction decision loop', () => {
     const firstBuilt = await snapshot(page);
     expect(firstBuilt.phase).toBe('chained');
     await expect(page.locator('[data-testid="construction-inspector"]')).toBeHidden();
-    await expect(page.locator('[data-testid="vehicle-purchase-panel"]')).toBeVisible();
+    await expect(page.locator('[data-testid="vehicle-purchase-panel"]')).toBeHidden();
     expect(firstBuilt.world.tracks).toHaveLength(1);
     expect(firstBuilt.world.tracks[0].paidBuildCost).toBe(firstReview.preview?.totalCost);
     expect(firstBuilt.world.company.cash).toBe(firstReview.preview?.cashAfter);
@@ -298,6 +298,7 @@ test.describe('fixed-seed construction decision loop', () => {
     await expect(page.locator('[data-testid="company-cash"]')).toContainText(
       reloaded.world.company.cash.toLocaleString('en-GB'),
     );
+    await expect(page.locator('[data-testid="vehicle-purchase-panel"]')).toBeVisible();
   });
 
   test('keeps a failed construction save live and retries the exact change durably', async ({ page }) => {
