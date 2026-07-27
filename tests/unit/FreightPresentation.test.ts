@@ -3,6 +3,9 @@ import {
   buildOperatingSummary,
   buildTrainInspection,
 } from '../../src/freight/FreightPresentation';
+import type {
+  OperatingSummaryDto,
+} from '../../src/freight/FreightPresentation';
 import { postLedgerEntry } from '../../src/economy/FinanceLedger';
 import type { CompanyStateDef } from '../../src/economy/EconomyData';
 import type { CargoTransferStatus } from '../../src/freight/CargoSystem';
@@ -64,6 +67,14 @@ const transfer = (
 });
 
 describe('FreightPresentation', () => {
+  it('requires every operating summary producer to report contract bonuses', () => {
+    type ContractBonusesIsRequired =
+      {} extends Pick<OperatingSummaryDto, 'contractBonuses'> ? false : true;
+    const contractBonusesIsRequired: ContractBonusesIsRequired = true;
+
+    expect(contractBonusesIsRequired).toBe(true);
+  });
+
   it('builds one immutable timber purchase decision with exact commercial copy', () => {
     const quote = Object.freeze({
       expectedRevision: 7,

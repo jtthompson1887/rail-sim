@@ -259,6 +259,7 @@ describe('EventBus', () => {
       fromTick: 1,
       throughTick: 24,
       deliveryRevenue: 1_000,
+      contractBonuses: 0,
       runningExpenses: 250,
       operatingProfit: 750,
       capitalExpenditure: 0,

@@ -1719,6 +1719,7 @@ describe('WorldScene disabled construction bypass guards', () => {
           fromTick: 0,
           throughTick: 0,
           deliveryRevenue: 0,
+          contractBonuses: 0,
           runningExpenses: 0,
           operatingProfit: 0,
           capitalExpenditure: 0,

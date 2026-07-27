@@ -11,7 +11,7 @@ export interface OperatingSummaryDto {
   readonly fromTick: number;
   readonly throughTick: number;
   readonly deliveryRevenue: number;
-  readonly contractBonuses?: number;
+  readonly contractBonuses: number;
   readonly runningExpenses: number;
   readonly operatingProfit: number;
   readonly capitalExpenditure: number;

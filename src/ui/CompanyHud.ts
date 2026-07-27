@@ -124,7 +124,7 @@ export class CompanyHud {
     this.deliveryRevenue.textContent =
       `Deliveries ${CASH.format(state.operatingSummary.deliveryRevenue)}`;
     this.contractBonuses.textContent =
-      `Development ${CASH.format(state.operatingSummary.contractBonuses ?? 0)}`;
+      `Development ${CASH.format(state.operatingSummary.contractBonuses)}`;
     this.runningExpenses.textContent =
       `Running ${CASH.format(state.operatingSummary.runningExpenses)}`;
     this.operatingProfit.textContent =
