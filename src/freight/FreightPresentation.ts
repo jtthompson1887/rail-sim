@@ -11,6 +11,7 @@ export interface OperatingSummaryDto {
   readonly fromTick: number;
   readonly throughTick: number;
   readonly deliveryRevenue: number;
+  readonly contractBonuses?: number;
   readonly runningExpenses: number;
   readonly operatingProfit: number;
   readonly capitalExpenditure: number;
@@ -88,9 +89,10 @@ export function buildOperatingSummary(
   return Object.freeze({
     fromTick,
     throughTick: economyTick,
-    deliveryRevenue: summary.revenue,
+    deliveryRevenue: summary.deliveryRevenue,
+    contractBonuses: summary.contractBonuses,
     runningExpenses: summary.operatingExpenses,
-    operatingProfit: summary.operatingProfit,
+    operatingProfit: summary.railwayOperatingProfit,
     capitalExpenditure: summary.capitalExpenditure,
     cashFlow: summary.cashFlow,
   });

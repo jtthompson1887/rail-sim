@@ -7,11 +7,12 @@ import { CompanyHud } from '../../src/ui/CompanyHud';
 const operatingSummary = {
   fromTick: 1,
   throughTick: 24,
-  deliveryRevenue: 2_000,
-  runningExpenses: 500,
-  operatingProfit: 1_500,
-  capitalExpenditure: 90_000,
-  cashFlow: -88_500,
+  deliveryRevenue: 1_000,
+  contractBonuses: 250_000,
+  runningExpenses: 300,
+  operatingProfit: 700,
+  capitalExpenditure: 2_000,
+  cashFlow: 248_700,
 };
 
 describe('CompanyHud', () => {
@@ -116,20 +117,26 @@ describe('CompanyHud', () => {
     });
 
     expect(document.querySelector(
+      '[data-testid="company-operating-period"]',
+    )?.textContent).toBe('Last 24 ticks');
+    expect(document.querySelector(
       '[data-testid="company-delivery-revenue"]',
-    )?.textContent).toBe('Revenue £2,000');
+    )?.textContent).toBe('Deliveries £1,000');
+    expect(document.querySelector(
+      '[data-testid="company-contract-bonuses"]',
+    )?.textContent).toBe('Development £250,000');
     expect(document.querySelector(
       '[data-testid="company-running-expenses"]',
-    )?.textContent).toBe('Running £500');
+    )?.textContent).toBe('Running £300');
     expect(document.querySelector(
       '[data-testid="company-operating-profit"]',
-    )?.textContent).toBe('Operating profit £1,500');
+    )?.textContent).toBe('Rail profit £700');
     expect(document.querySelector(
       '[data-testid="company-capital-expenditure"]',
-    )?.textContent).toBe('Capex £90,000');
+    )?.textContent).toBe('Capex £2,000');
     expect(document.querySelector(
       '[data-testid="company-cash-flow"]',
-    )?.textContent).toBe('Cash flow −£88,500');
+    )?.textContent).toBe('Cash flow £248,700');
   });
 
   it('shows one visible positive delivery cash pulse and removes its listener', () => {

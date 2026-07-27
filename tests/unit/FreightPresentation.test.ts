@@ -17,6 +17,7 @@ const post = (
   tick: number,
   category:
     | 'delivery-revenue'
+    | 'contract-bonus'
     | 'train-running-cost'
     | 'construction-capex'
     | 'vehicle-capex',
@@ -181,32 +182,35 @@ describe('FreightPresentation', () => {
       fromTick: 0,
       throughTick: 23,
       deliveryRevenue: 330,
+      contractBonuses: 0,
       operatingProfit: 330,
     });
     expect(buildOperatingSummary(company, 24)).toMatchObject({
       fromTick: 1,
       throughTick: 24,
       deliveryRevenue: 470,
+      contractBonuses: 0,
       operatingProfit: 470,
     });
   });
 
-  it('excludes construction and vehicle capex from operating profit', () => {
+  it('separates development bonuses and capex from railway operating profit', () => {
     const world = makeFirstFreightRouteWorld();
     let company = world.company;
-    company = post(company, 24, 'delivery-revenue', 3_000);
-    company = post(company, 24, 'train-running-cost', 800);
-    company = post(company, 24, 'construction-capex', 5_000);
-    company = post(company, 24, 'vehicle-capex', 90_000);
+    company = post(company, 24, 'delivery-revenue', 1_000);
+    company = post(company, 24, 'contract-bonus', 250_000);
+    company = post(company, 24, 'train-running-cost', 300);
+    company = post(company, 24, 'construction-capex', 2_000);
 
     expect(buildOperatingSummary(company, 24)).toEqual({
       fromTick: 1,
       throughTick: 24,
-      deliveryRevenue: 3_000,
-      runningExpenses: 800,
-      operatingProfit: 2_200,
-      capitalExpenditure: 95_000,
-      cashFlow: -92_800,
+      deliveryRevenue: 1_000,
+      contractBonuses: 250_000,
+      runningExpenses: 300,
+      operatingProfit: 700,
+      capitalExpenditure: 2_000,
+      cashFlow: 248_700,
     });
   });
 });

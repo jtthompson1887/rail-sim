@@ -348,7 +348,7 @@ describe('EconomySystem', () => {
     );
     expect(summariseProfitAndLoss(world.company, 1, 24)).toMatchObject({
       operatingExpenses: 480,
-      operatingProfit: -480,
+      railwayOperatingProfit: -480,
       cashFlow: -480,
     });
     expect(world.revision).toBe(24);
