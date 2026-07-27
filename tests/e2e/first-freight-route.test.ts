@@ -619,6 +619,14 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await page.mouse.click(selectedTrainScreen.x, selectedTrainScreen.y);
     await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
+    // The purchase confirm button can remain focused, which suppresses W/S
+    // gameplay input. Blur any active element so keyboard events reach the
+    // canvas instead of a focused UI control.
+    await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body) active.blur();
+    });
+
     let braking = false;
     let wHeld = false;
     const setForward = async (held: boolean): Promise<void> => {
@@ -629,12 +637,12 @@ test.describe('collective three-seed first freight route acceptance', () => {
     };
     const brakePulse = async (): Promise<void> => {
       await page.keyboard.down('s');
-      await page.waitForTimeout(60);
+      await page.waitForTimeout(150);
       await page.keyboard.up('s');
     };
     const forwardPulse = async (): Promise<void> => {
       await page.keyboard.down('w');
-      await page.waitForTimeout(60);
+      await page.waitForTimeout(150);
       await page.keyboard.up('w');
     };
     let previousDistance = Math.hypot(
