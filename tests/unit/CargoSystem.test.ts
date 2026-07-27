@@ -1716,6 +1716,60 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.completedDeliveries).toEqual([]);
   });
 
+  it('rolls back earlier trains when a later grant post fails', () => {
+    const input = loadedAtSawmill(10, {
+      currentTripRevenue: 5_000,
+      currentTripRunningCost: 1_000,
+    });
+    const sawmill = facility(input.economy, 'sawmill');
+    const quote = quoteLocalProduct(
+      'logs',
+      input.economy.market,
+      { ...sawmill.inventories.logs },
+    );
+    if (quote.ok === false) throw new Error(quote.code);
+    input.company = createCompanyState(
+      Number.MAX_SAFE_INTEGER - quote.unitPrice * 10,
+    );
+    input.trains = [
+      makeFreightTrainDef({
+        id: 'a-loader',
+        cargo: null,
+      }),
+      makeFreightTrainDef({
+        id: 'z-grant',
+        cargo: {
+          productId: 'logs',
+          units: 10,
+          loadedUnits: 60,
+          originFacilityId: 'managed-forest',
+        },
+        operations: {
+          ...makeFreightTrainDef().operations,
+          currentTripRevenue: 5_000,
+          currentTripRunningCost: 1_000,
+        },
+      }),
+    ];
+    input.runtime = [
+      makeRuntime('a-loader', { x: -500, trackT: 0.1 }),
+      makeRuntime('z-grant', { x: 500, trackT: 0.9 }),
+    ];
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
+  });
+
   it('rejects the whole proposal when persisted freight progress is invalid', () => {
     const input = loadedAtSawmill(10);
     input.trains[0].cargo!.loadedUnits = 60;
@@ -1731,6 +1785,36 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.trains).toEqual(before.trains);
     expect(result.freightProgress).toEqual(before.freightProgress);
     expect(result.completedDeliveries).toEqual([]);
+  });
+
+  it.each([
+    ['null', null],
+    ['number', 7],
+    ['string', 'invalid'],
+    ['array', []],
+  ])('fails closed for %s freight progress at the proposal boundary', (
+    _name,
+    malformedProgress,
+  ) => {
+    const input = makeInput();
+    (input as unknown as { freightProgress: unknown }).freightProgress =
+      malformedProgress;
+    const before = JSON.parse(JSON.stringify(input));
+    let result: CargoTickProposal | null = null;
+
+    expect(() => {
+      result = proposeCargoTick(input);
+    }).not.toThrow();
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
   });
 
   it.each([

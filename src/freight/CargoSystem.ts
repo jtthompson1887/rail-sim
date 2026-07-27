@@ -380,9 +380,15 @@ const safeSum = (...values: number[]): number | null => {
   return Number.isSafeInteger(total) ? total : null;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object'
+  && value !== null
+  && !Array.isArray(value);
+
 const isValidFreightProgress = (
-  value: FreightProgressDef,
-): boolean => value.progressVersion === 1
+  value: unknown,
+): value is FreightProgressDef => isRecord(value)
+  && value.progressVersion === 1
   && typeof value.profitableLogDeliveryCompleted === 'boolean'
   && typeof value.developmentGrantAwarded === 'boolean'
   && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
@@ -393,12 +399,24 @@ const hasConsistentDevelopmentGrant = (
 ): boolean => countForwardRegionalDevelopmentGrants(company)
   === (progress.developmentGrantAwarded ? 1 : 0);
 
+interface FatalTransferFailure {
+  readonly fatal: true;
+}
+
+const FATAL_TRANSFER_FAILURE: FatalTransferFailure = Object.freeze({
+  fatal: true,
+});
+
+const isFatalTransferFailure = (
+  value: unknown,
+): value is FatalTransferFailure => value === FATAL_TRANSFER_FAILURE;
+
 const loadBatch = (
   train: TrainDef,
   productId: string,
   capacityUnits: number,
   facility: FacilityEconomyDef,
-): CargoTransferStatus | null => {
+): CargoTransferStatus | FatalTransferFailure | null => {
   const slot = facility.inventories[productId];
   if (!slot) return null;
   const cargo = train.cargo;
@@ -415,12 +433,12 @@ const loadBatch = (
   const recentOutflow = safeSum(slot.recentOutflow, accepted);
   const cargoUnits = safeSum(cargo?.units ?? 0, accepted);
   const loadedUnits = safeSum(loadedBefore, accepted);
-  if (accepted <= 0
-    || recentOutflow === null
+  if (accepted <= 0) return null;
+  if (recentOutflow === null
     || cargoUnits === null
     || loadedUnits === null
     || cargoUnits > capacityUnits
-    || loadedUnits > capacityUnits) return null;
+    || loadedUnits > capacityUnits) return FATAL_TRANSFER_FAILURE;
 
   slot.quantity -= accepted;
   slot.recentOutflow = recentOutflow;
@@ -458,7 +476,7 @@ const unloadBatch = (
   economy: EconomyStateDef,
   company: CompanyStateDef,
   progress: FreightProgressDef,
-): UnloadResult | null => {
+): UnloadResult | FatalTransferFailure | null => {
   const cargo = train.cargo;
   if (!cargo) return null;
   const acceptedProduct = facilityAcceptsProduct(
@@ -469,7 +487,7 @@ const unloadBatch = (
   if (!acceptedProduct || !slot) return null;
 
   const quote = quoteLocalProduct(cargo.productId, economy.market, slot);
-  if (quote.ok === false) return null;
+  if (quote.ok === false) return FATAL_TRANSFER_FAILURE;
   const accepted = Math.min(
     BATCH_UNITS,
     cargo.units,
@@ -490,20 +508,22 @@ const unloadBatch = (
     train.operations.lifetimeRevenue,
     batchRevenue,
   );
-  if (accepted <= 0
-    || !Number.isSafeInteger(batchRevenue)
+  if (accepted <= 0) return null;
+  if (!Number.isSafeInteger(batchRevenue)
     || batchRevenue <= 0
     || destinationQuantity === null
     || recentInflow === null
     || tripRevenue === null
     || lifetimeDeliveredUnits === null
     || lifetimeRevenue === null) {
-    return null;
+    return FATAL_TRANSFER_FAILURE;
   }
 
   const runningCost = train.operations.currentTripRunningCost;
   const operatingProfit = tripRevenue - runningCost;
-  if (!Number.isSafeInteger(operatingProfit)) return null;
+  if (!Number.isSafeInteger(operatingProfit)) {
+    return FATAL_TRANSFER_FAILURE;
+  }
   const deliveryPost = postLedgerEntry(company, {
     category: 'delivery-revenue',
     magnitude: batchRevenue,
@@ -511,7 +531,7 @@ const unloadBatch = (
     referenceId: `${train.id}:${economy.tick}:${facility.id}`,
     direction: 'forward',
   });
-  if (deliveryPost.ok === false) return null;
+  if (deliveryPost.ok === false) return FATAL_TRANSFER_FAILURE;
 
   const completesDelivery = cargo.units === accepted;
   const profitable = operatingProfit > 0;
@@ -536,7 +556,7 @@ const unloadBatch = (
       referenceId: REGIONAL_DEVELOPMENT_GRANT_REFERENCE,
       direction: 'forward',
     });
-    if (grantPost.ok === false) return null;
+    if (grantPost.ok === false) return FATAL_TRANSFER_FAILURE;
     postedCompany = grantPost.company;
   }
 
@@ -600,6 +620,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   const statuses: CargoTransferStatus[] = [];
   const completedDeliveries: FreightDeliveryEvent[] = [];
   let changed = false;
+  let fatalFailure = false;
 
   if (validateCompanyState(company).valid === false
     || !isValidFreightProgress(freightProgress)
@@ -616,6 +637,7 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   }
 
   trainsById.forEach((train) => {
+    if (fatalFailure) return;
     const runtime = runtimeByTrainId.get(train.id);
     if (!input.operating) {
       statuses.push(status(train, 0, {
@@ -689,6 +711,10 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
           selected.capacityUnits,
           selected.facility,
         );
+        if (isFatalTransferFailure(loaded)) {
+          fatalFailure = true;
+          return;
+        }
         if (loaded) {
           statuses.push(loaded);
           changed = true;
@@ -703,6 +729,10 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
           company,
           freightProgress,
         );
+        if (isFatalTransferFailure(unloaded)) {
+          fatalFailure = true;
+          return;
+        }
         if (unloaded) {
           company = unloaded.company;
           statuses.push(unloaded.status);
@@ -754,6 +784,18 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
       relevant.productId,
     ));
   });
+
+  if (fatalFailure) {
+    return deepFreeze({
+      company: clonePlainData(input.company),
+      economy: clonePlainData(input.economy),
+      trains: clonePlainData(input.trains),
+      freightProgress: clonePlainData(input.freightProgress),
+      statuses: [],
+      completedDeliveries: [],
+      changed: false,
+    });
+  }
 
   return deepFreeze({
     company,
