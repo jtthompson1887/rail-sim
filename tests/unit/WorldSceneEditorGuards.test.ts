@@ -876,7 +876,7 @@ describe('WorldScene disabled construction bypass guards', () => {
       .toBeLessThan(updateTrains.mock.invocationCallOrder[0]);
     expect(inputLockStates[0]).toEqual([]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
-      .toBe('insufficient-running-cash');
+      .toBe('train-moving');
 
     scene.update(1_000, 1_000);
 
@@ -884,7 +884,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(Array.from(scene.operationsLockedTrainIds)).toEqual([trainId]);
     expect(inputLockStates[1]).toEqual([trainId]);
     expect(scene.cargoStatusByTrainId.get(trainId).blocker)
-      .toBe('insufficient-running-cash');
+      .toBe('outside-eligible-facility');
 
     world.company = createCompanyState(100);
     scene.update(2_000, 1_000);
@@ -899,6 +899,40 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(inputLockStates[3]).toEqual([]);
     expect(liveTrain.enginePower).toBe(1);
+  });
+
+  it('fills an empty operation blocker without replacing a cargo blocker', () => {
+    const scene = new WorldScene() as any;
+    const world = installFirstRouteWorld();
+    const trainId = world.trains[0].id;
+    scene.cargoStatusByTrainId.set(trainId, {
+      trainId,
+      facilityId: null,
+      productId: null,
+      kind: 'blocked',
+      blocker: 'derailed',
+      batchUnits: 0,
+      cargoUnits: 0,
+      capacityUnits: 0,
+      batchRevenue: 0,
+    });
+
+    scene.setTrainOperationBlocker(
+      trainId,
+      'insufficient-running-cash',
+    );
+
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('derailed');
+
+    scene.cargoStatusByTrainId.get(trainId).blocker = null;
+    scene.setTrainOperationBlocker(
+      trainId,
+      'insufficient-running-cash',
+    );
+
+    expect(scene.cargoStatusByTrainId.get(trainId).blocker)
+      .toBe('insufficient-running-cash');
   });
 
   it('refreshes once after catch-up, clears construction history once, and emits every delivery presentation event', () => {

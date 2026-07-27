@@ -13,6 +13,8 @@ import * as ProductCatalog from '../../src/economy/ProductCatalog';
 import {
   eligibleLoadProducts,
   facilityAcceptsProduct,
+  potentialAcceptedProduct,
+  potentialLoadProducts,
 } from '../../src/freight/FacilityCargoRules';
 import {
   FLATBED_FREIGHT_SET_ID,
@@ -104,6 +106,17 @@ describe('eligibleLoadProducts', () => {
     ]);
   });
 
+  it('discovers a valid source with zero availability', () => {
+    const forest = cloneCatalogueFacility('managed-forest');
+    forest.inventories.logs.reservedQuantity =
+      forest.inventories.logs.quantity;
+
+    expect(potentialLoadProducts(forest, flatbed())).toEqual([
+      { productId: 'logs', availableUnits: 0 },
+    ]);
+    expect(eligibleLoadProducts(forest, flatbed())).toEqual([]);
+  });
+
   it.each([
     ['a null slot', (slot: any) => null],
     ['a non-object slot', (slot: any) => 7],
@@ -145,6 +158,7 @@ describe('eligibleLoadProducts', () => {
     const forest = cloneCatalogueFacility('managed-forest');
     forest.inventories.logs = malformedSlot(forest.inventories.logs);
 
+    expect(potentialLoadProducts(forest, flatbed())).toEqual([]);
     expect(eligibleLoadProducts(forest, flatbed())).toEqual([]);
   });
 
@@ -297,6 +311,18 @@ describe('facilityAcceptsProduct', () => {
     }).toThrow(TypeError);
   });
 
+  it('discovers a valid destination with zero free capacity', () => {
+    const sawmill = cloneCatalogueFacility('sawmill');
+    sawmill.inventories.logs.quantity =
+      sawmill.inventories.logs.capacity;
+
+    expect(potentialAcceptedProduct(sawmill, 'logs')).toEqual({
+      productId: 'logs',
+      freeCapacityUnits: 0,
+    });
+    expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
+  });
+
   it('fails closed when the required inventory slot is missing', () => {
     const sawmill = cloneCatalogueFacility('sawmill');
     delete sawmill.inventories.logs;
@@ -345,6 +371,7 @@ describe('facilityAcceptsProduct', () => {
     const sawmill = cloneCatalogueFacility('sawmill');
     sawmill.inventories.logs = malformedSlot(sawmill.inventories.logs);
 
+    expect(potentialAcceptedProduct(sawmill, 'logs')).toBeNull();
     expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
   });
 

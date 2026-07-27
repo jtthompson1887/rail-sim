@@ -1275,6 +1275,9 @@ export default class WorldScene extends Phaser.Scene {
     blocker: CargoBlockerCode,
   ): void {
     const existing = this.cargoStatusByTrainId.get(trainId);
+    if (existing?.blocker !== null && existing?.blocker !== undefined) {
+      return;
+    }
     const cargoUnits = WorldManager.world?.trains.find(
       ({ id }) => id === trainId,
     )?.cargo?.units ?? 0;

@@ -424,6 +424,88 @@ describe('proposeCargoTick eligibility and facility resolution', () => {
     expect(result.statuses[0].facilityId).toBe(sawmill.id);
   });
 
+  it('uses only the consignment origin as an outside reload remedy', () => {
+    const input = makeInput();
+    const forest = facility(input.economy, 'managed-forest');
+    const nearerForest = {
+      ...forest,
+      id: 'nearer-forest',
+      railAccess: { x: -200, y: 0, radius: 20 },
+      inventories: { logs: { ...forest.inventories.logs } },
+    };
+    input.economy.facilities.push(nearerForest);
+    const loaded = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 10,
+        loadedUnits: 10,
+        originFacilityId: forest.id,
+      },
+    });
+
+    const result = proposeCargoTick({
+      ...input,
+      trains: [loaded],
+      runtime: [makeRuntime('train-1', { x: 0 })],
+    });
+
+    expectSingleBlocked(result, 'outside-eligible-facility');
+    expect(result.statuses[0].facilityId).toBe(forest.id);
+  });
+
+  it('uses only a destination as the remedy after a partial unload', () => {
+    const input = makeInput();
+    const forest = facility(input.economy, 'managed-forest');
+    const sawmill = facility(input.economy, 'sawmill');
+    const loaded = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 10,
+        loadedUnits: 20,
+        originFacilityId: forest.id,
+      },
+    });
+
+    const result = proposeCargoTick({
+      ...input,
+      trains: [loaded],
+      runtime: [makeRuntime('train-1', { x: -300 })],
+    });
+
+    expectSingleBlocked(result, 'outside-eligible-facility');
+    expect(result.statuses[0].facilityId).toBe(sawmill.id);
+  });
+
+  it('fails closed for malformed source and destination slots', () => {
+    const sourceInput = makeInput();
+    const forest = facility(sourceInput.economy, 'managed-forest');
+    forest.inventories.logs = null as any;
+
+    const sourceResult = proposeCargoTick(sourceInput);
+
+    expectSingleBlocked(sourceResult, 'product-not-accepted');
+
+    const destinationInput = makeInput();
+    const sawmill = facility(destinationInput.economy, 'sawmill');
+    sawmill.inventories.logs = {
+      ...sawmill.inventories.logs,
+      quantity: Number.MAX_SAFE_INTEGER + 1,
+    };
+    destinationInput.trains[0].cargo = {
+      productId: 'logs',
+      units: 10,
+      loadedUnits: 10,
+      originFacilityId: 'managed-forest',
+    };
+    destinationInput.runtime = [
+      makeRuntime('train-1', { x: 500 }),
+    ];
+
+    const destinationResult = proposeCargoTick(destinationInput);
+
+    expectSingleBlocked(destinationResult, 'product-not-accepted');
+  });
+
   it('applies the complete blocker precedence without mutating authority', () => {
     const cases: Array<{
       expected: ExpectedCargoBlockerCode;
@@ -615,17 +697,17 @@ describe('proposeCargoTick loading conservation and capacity', () => {
     );
   });
 
-  it('extends compatible onboard logs while preserving the first origin', () => {
+  it('extends compatible onboard logs at their consignment origin', () => {
     const input = makeInput();
+    const forest = facility(input.economy, 'managed-forest');
     const loaded = makeFreightTrainDef({
       cargo: {
         productId: 'logs',
         units: 20,
         loadedUnits: 20,
-        originFacilityId: 'original-forest',
+        originFacilityId: forest.id,
       },
     });
-    const forest = facility(input.economy, 'managed-forest');
     const beforeLogs = forest.inventories.logs.quantity;
 
     const result = proposeCargoTick({
@@ -637,7 +719,7 @@ describe('proposeCargoTick loading conservation and capacity', () => {
       productId: 'logs',
       units: 30,
       loadedUnits: 30,
-      originFacilityId: 'original-forest',
+      originFacilityId: forest.id,
     });
     expect(
       beforeLogs + 20,
@@ -645,6 +727,76 @@ describe('proposeCargoTick loading conservation and capacity', () => {
       facility(result.economy, 'managed-forest').inventories.logs.quantity
         + (result.trains[0].cargo?.units ?? 0),
     );
+  });
+
+  it('blocks same-origin reload after a partial unload', () => {
+    const input = makeInput();
+    const forest = facility(input.economy, 'managed-forest');
+    const loaded = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 10,
+        loadedUnits: 20,
+        originFacilityId: forest.id,
+      },
+    });
+
+    const result = proposeCargoTick({
+      ...input,
+      trains: [loaded],
+    });
+
+    expectSingleBlocked(result, 'product-not-accepted');
+    expect(result.trains[0]).toEqual(loaded);
+    expect(result.economy).toEqual(input.economy);
+  });
+
+  it('blocks reload of the same product at a second origin', () => {
+    const input = makeInput();
+    const forest = facility(input.economy, 'managed-forest');
+    const secondForest = {
+      ...forest,
+      id: 'second-forest',
+      inventories: { logs: { ...forest.inventories.logs } },
+    };
+    forest.railAccess = { x: -800, y: 0, radius: 20 };
+    input.economy.facilities.push(secondForest);
+    const loaded = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 20,
+        loadedUnits: 20,
+        originFacilityId: forest.id,
+      },
+    });
+
+    const result = proposeCargoTick({
+      ...input,
+      trains: [loaded],
+    });
+
+    expectSingleBlocked(result, 'product-not-accepted');
+    expect(result.trains[0]).toEqual(loaded);
+    expect(result.economy).toEqual(input.economy);
+  });
+
+  it.each([
+    ['above capacity', 61],
+    ['unsafe', Number.MAX_SAFE_INTEGER],
+  ])('rejects %s cumulative loaded units', (_description, loadedUnits) => {
+    const loaded = makeFreightTrainDef({
+      cargo: {
+        productId: 'logs',
+        units: 59,
+        loadedUnits,
+        originFacilityId: 'managed-forest',
+      },
+    });
+
+    const result = propose({ trains: [loaded] });
+
+    expectSingleBlocked(result, 'train-full');
+    expect(result.trains[0]).toEqual(loaded);
   });
 
   it('clamps a partial train to its remaining compatible capacity', () => {
@@ -1119,7 +1271,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.completedDeliveries).toEqual([]);
   });
 
-  it('reports an empty same-product source without changing accounting', () => {
+  it('rejects an empty same-product source from another origin', () => {
     const input = loadedAtSawmill(4, {
       currentTripRevenue: 100,
       currentTripRunningCost: 20,
@@ -1135,7 +1287,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
 
     const result = proposeCargoTick(input);
 
-    expectSingleBlocked(result, 'source-empty');
+    expectSingleBlocked(result, 'product-not-accepted');
     expect(result.statuses[0]).toEqual(expect.objectContaining({
       facilityId: 'sawmill',
       productId: 'structural-timber',

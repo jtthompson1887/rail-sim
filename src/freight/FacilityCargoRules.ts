@@ -62,7 +62,7 @@ const validInventorySlot = (
   && (slot.reservedQuantity as number) <= (slot.quantity as number)
   && (slot.quantity as number) <= (slot.capacity as number);
 
-export function eligibleLoadProducts(
+export function potentialLoadProducts(
   facility: FacilityEconomyDef,
   freightSet: FreightSetDefinition,
 ): readonly LoadableProduct[] {
@@ -87,7 +87,7 @@ export function eligibleLoadProducts(
     const slot = facility.inventories?.[output.productId];
     if (!validInventorySlot(slot, output.productId)) return;
     const availableUnits = slot.quantity - slot.reservedQuantity;
-    if (!Number.isSafeInteger(availableUnits) || availableUnits <= 0) return;
+    if (!Number.isSafeInteger(availableUnits)) return;
 
     includedProductIds.add(output.productId);
     candidates.push({
@@ -103,7 +103,18 @@ export function eligibleLoadProducts(
     Object.freeze({ productId, availableUnits })));
 }
 
-export function facilityAcceptsProduct(
+export function eligibleLoadProducts(
+  facility: FacilityEconomyDef,
+  freightSet: FreightSetDefinition,
+): readonly LoadableProduct[] {
+  const candidates = potentialLoadProducts(facility, freightSet)
+    .filter(({ availableUnits }) => availableUnits > 0);
+  return candidates.length === 0
+    ? EMPTY_LOAD_PRODUCTS
+    : Object.freeze(candidates);
+}
+
+export function potentialAcceptedProduct(
   facility: FacilityEconomyDef,
   productId: string,
 ): AcceptedProduct | null {
@@ -121,8 +132,14 @@ export function facilityAcceptsProduct(
   if (!input || !validInventorySlot(slot, productId)) return null;
 
   const freeCapacityUnits = slot.capacity - slot.quantity;
-  if (!Number.isSafeInteger(freeCapacityUnits) || freeCapacityUnits <= 0) {
-    return null;
-  }
+  if (!Number.isSafeInteger(freeCapacityUnits)) return null;
   return Object.freeze({ productId, freeCapacityUnits });
+}
+
+export function facilityAcceptsProduct(
+  facility: FacilityEconomyDef,
+  productId: string,
+): AcceptedProduct | null {
+  const candidate = potentialAcceptedProduct(facility, productId);
+  return candidate && candidate.freeCapacityUnits > 0 ? candidate : null;
 }
