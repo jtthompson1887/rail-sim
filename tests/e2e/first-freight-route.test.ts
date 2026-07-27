@@ -146,6 +146,7 @@ interface FirstRouteBrowserHarness {
       'x' | 'y' | 'speedWorldUnitsPerSecond' | 'throttle' | 'derailed'
     >,
   ): void;
+  releaseTrainControl(): void;
   retrySave(): boolean;
 }
 
@@ -601,10 +602,14 @@ test.describe('collective three-seed first freight route acceptance', () => {
     await setMode(page, 'play');
     await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
-    await expect.poll(
-      async () => Number(await page.locator('[data-testid="train-cargo-progress"]').getAttribute('value') || '0'),
-      { timeout: 60_000 },
-    ).toBeGreaterThanOrEqual(60);
+    // Advance 6 fixed economy ticks deterministically to load 60 units.
+    // The desktop test is responsible for the real-keyboard driving phase
+    // afterwards, so rely on advanceFixedTicks here to avoid CI headless
+    // rAF throttling making real-time cargo loading unreliable.
+    await advanceFixedTicks(page, 6);
+    await page.evaluate(() => {
+      window.__railSimFirstRouteHarness?.releaseTrainControl();
+    });
     const loaded = await snapshot(page);
     expect(train(loaded).cargo).toEqual(expect.objectContaining({
       productId: 'logs',

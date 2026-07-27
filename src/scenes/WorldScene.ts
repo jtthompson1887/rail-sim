@@ -133,6 +133,7 @@ export interface FirstRouteBrowserHarness {
       'x' | 'y' | 'speedWorldUnitsPerSecond' | 'throttle' | 'derailed'
     >,
   ): void;
+  releaseTrainControl(): void;
   retrySave(): boolean;
 }
 
@@ -649,6 +650,7 @@ export default class WorldScene extends Phaser.Scene {
         setTrainRuntime: (trainId, runtime) => {
           this.setFirstRouteTrainRuntime(trainId, runtime);
         },
+        releaseTrainControl: () => this.releaseFirstRouteTrainControl(),
         retrySave: () => this.saveWorldAndReport(),
       };
     }
@@ -1164,6 +1166,10 @@ export default class WorldScene extends Phaser.Scene {
       this.trainManager.trains.map(captureTrainRuntime),
     );
     this.publishHUDState();
+  }
+
+  private releaseFirstRouteTrainControl(): void {
+    this.firstRouteHarnessControlsRuntime = false;
   }
 
   private setFirstRouteTrainRuntime(

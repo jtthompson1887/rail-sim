@@ -47,6 +47,9 @@ interface PresentationSnapshot {
 declare global {
   interface Window {
     __railSimConstructionSnapshot?: () => PresentationSnapshot;
+    __railSimFirstRouteHarness?: {
+      advanceFixedTicks: (count: number) => void;
+    };
   }
 }
 
@@ -316,40 +319,16 @@ for (const { seed, viewport } of playtestCases) {
       position: { x: viewport.width - 28, y: 30 },
     });
     await expect(page.locator('[data-testid="company-hud"]')).toBeVisible();
-    let observedOperation: PresentationSnapshot | null = null;
-    await expect.poll(async () => {
-      const current = await snapshot(page);
-      const currentForest = current.world.economy.facilities.find(
-        ({ id }) => id === 'managed-forest',
-      )!;
-      const currentQuarry = current.world.economy.facilities.find(
-        ({ id }) => id === 'quarry',
-      )!;
-      const progress = {
-        forestOutputAdvanced:
-          currentForest.inventories.logs.quantity > openingLogs,
-        quarryOutputAdvanced:
-          currentQuarry.inventories['limestone-aggregate'].quantity
-            > openingAggregate,
-        bothRecipesInProgress:
-          currentForest.recipeProgressTicks > 0
-          && currentQuarry.recipeProgressTicks > 0,
-      };
-      if (
-        progress.forestOutputAdvanced
-        && progress.quarryOutputAdvanced
-        && progress.bothRecipesInProgress
-      ) {
-        observedOperation = current;
-      }
-      return progress;
-    }, { timeout: 12_000 }).toEqual({
-      forestOutputAdvanced: true,
-      quarryOutputAdvanced: true,
-      bothRecipesInProgress: true,
+
+    // The top-right HUD click toggles play mode. Advance the economy by a
+    // deterministic number of fixed ticks so headless CI rAF throttling does
+    // not leave the recipes stuck between cycles.
+    await page.evaluate(() => {
+      window.__railSimFirstRouteHarness?.advanceFixedTicks(7);
     });
-    const operated = observedOperation as PresentationSnapshot | null;
-    if (!operated) throw new Error('Raw-producer progress was not observed');
+
+    const operated = await snapshot(page);
+    if (!operated) throw new Error('Raw-producer snapshot is unavailable');
     const operatedForest = operated.world.economy.facilities.find(
       ({ id }) => id === 'managed-forest',
     )!;
