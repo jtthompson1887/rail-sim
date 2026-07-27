@@ -27,6 +27,7 @@ import {
 import { createSeededRandom } from '../utils/SeededRandom';
 import {
   analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
 } from './PrefabricationOpportunity';
 import { canonicalizeConstructionGridPoint } from '../systems/ConstructionGrid';
 import { GameConfig } from '../config/GameConfig';
@@ -181,14 +182,16 @@ export function validateGeneratedEconomy(
   const prefabricationPlant = value.facilities.find(
     ({ id }) => id === 'prefabrication-plant',
   );
+  const extensionStart = resolvePrefabricationExtensionStart(opportunity);
   return forest.x === opportunity.sites[0].x
     && forest.y === opportunity.sites[0].y
     && sawmill.x === opportunity.sites[1].x
     && sawmill.y === opportunity.sites[1].y
     && prefabricationPlant !== undefined
+    && extensionStart !== null
     && analyzePrefabricationExtension(
       new ConstructionAnalyzer(terrain),
-      sawmill.railAccess,
+      extensionStart,
       prefabricationPlant.railAccess,
     ) !== null;
 }
@@ -202,6 +205,18 @@ export class WorldEconomyGenerator {
   ): EconomyGenerationResult {
     const random = createSeededRandom(`${config.seed}:economy`);
     const analyzer = new ConstructionAnalyzer(this.terrain);
+    const extensionStart = resolvePrefabricationExtensionStart(opportunity);
+    if (!extensionStart) {
+      return {
+        ok: false,
+        error: {
+          code: 'economy-exhausted',
+          seed: config.seed,
+          candidatesEvaluated: 0,
+          facilitiesPlaced: 0,
+        },
+      };
+    }
     const positions: FacilityPosition[] = opportunity.sites.map(
       ({ x, y }) => ({ x, y }),
     );
@@ -273,7 +288,7 @@ export class WorldEconomyGenerator {
       if (facilityId === 'prefabrication-plant') {
         if (analyzePrefabricationExtension(
           analyzer,
-          positions[1],
+          extensionStart,
           candidate,
         ) === null) {
           deferredFacilityCandidates.push(candidate);

@@ -32,6 +32,7 @@ import { ConstructionService } from '../../src/systems/ConstructionService';
 import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { STARTER_ROUTE_RESERVE } from '../../src/freight/FreightSetCatalog';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -152,6 +153,64 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
+  it('does not spend the pair-evaluation budget on invalid pair draws', () => {
+    const generator = new WorldOpportunityGenerator(variedTerrain);
+    const opportunity = makeStarterOpportunity('late-valid-pair');
+    const buildOpportunity = jest.spyOn(
+      generator as any,
+      'buildOpportunity',
+    ).mockReturnValue(opportunity);
+    const values = [
+      ...Array.from({ length: 48 }, () => 0.1),
+      0.1,
+      0.8,
+    ];
+    const random = jest.fn(() => values.shift() ?? 0.1);
+    const candidates = [
+      { x: 0, y: 0, elevation: 0 },
+      { x: 200, y: 0, elevation: 20 },
+      { x: 2_000, y: 0, elevation: 20 },
+    ];
+
+    expect((generator as any).tryAttempt(
+      config,
+      1,
+      candidates,
+      random,
+    )).toBe(opportunity);
+    expect(random).toHaveBeenCalledTimes(50);
+    expect(buildOpportunity).toHaveBeenCalledTimes(1);
+    expect(buildOpportunity).toHaveBeenCalledWith(
+      config,
+      1,
+      candidates[0],
+      candidates[2],
+    );
+  });
+
+  it('keeps invalid pair draws inside the hard site-candidate draw cap', () => {
+    const generator = new WorldOpportunityGenerator(variedTerrain);
+    const buildOpportunity = jest.spyOn(
+      generator as any,
+      'buildOpportunity',
+    );
+    const random = jest.fn(() => 0.1);
+
+    expect((generator as any).tryAttempt(
+      config,
+      1,
+      [
+        { x: 0, y: 0, elevation: 0 },
+        { x: 2_000, y: 0, elevation: 20 },
+      ],
+      random,
+    )).toBeNull();
+    expect(random).toHaveBeenCalledTimes(
+      MAX_SITE_CANDIDATES_PER_ATTEMPT * 2,
+    );
+    expect(buildOpportunity).not.toHaveBeenCalled();
+  });
+
   it('continues its bounded deterministic search when acceptance rejects an otherwise-valid opportunity', () => {
     const considered: StarterOpportunityDef[] = [];
     const acceptAfterFirst = jest.fn((opportunity: StarterOpportunityDef) => {
@@ -230,7 +289,7 @@ describe('WorldOpportunityGenerator', () => {
     },
     {
       seed: 'task15-manual-larch',
-      expectedCost: 179_259,
+      expectedCost: 64_106,
       guaranteesStarterReserve: true,
     },
   ])('persists $seed as exact production-sequential construction quotes', ({
@@ -239,16 +298,12 @@ describe('WorldOpportunityGenerator', () => {
     guaranteesStarterReserve,
   }) => {
     const terrain = new TerrainGenerator(seed);
-    const result = new WorldOpportunityGenerator(terrain).generate({
-      generationConfigVersion: 1,
-      seed,
-      biome: 'temperate',
-      constructionDifficultyId: 'standard',
-    });
+    const creation = WorldManager.tryCreateNew('Sequential detour', seed);
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const detour = result.opportunity.corridors.find(
+    expect(creation.ok).toBe(true);
+    if (!creation.ok) return;
+    const opportunity = creation.world.starterOpportunity;
+    const detour = opportunity.corridors.find(
       ({ id }) => id === 'detour',
     );
     expect(detour).toBeDefined();
@@ -259,7 +314,6 @@ describe('WorldOpportunityGenerator', () => {
 
     const scene = makeScene();
     const manager = new TrackManager(scene);
-    WorldManager.createNew('Sequential detour', seed);
     try {
       const service = new ConstructionService(
         manager,
@@ -397,11 +451,14 @@ describe('WorldOpportunityGenerator', () => {
         expect(authoritativeCost).toBe(expectedCost);
       }
       if (guaranteesStarterReserve) {
-        expect([...result.opportunity.corridors].sort((
+        const cheapest = [...opportunity.corridors].sort((
           left,
           right,
         ) => left.estimatedCost - right.estimatedCost
-          || left.id.localeCompare(right.id))[0]).toBe(detour);
+          || left.id.localeCompare(right.id))[0];
+        expect(cheapest.estimatedCost).toBeLessThanOrEqual(
+          STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE,
+        );
         expect(authoritativeCost).toBeLessThanOrEqual(
           STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE,
         );

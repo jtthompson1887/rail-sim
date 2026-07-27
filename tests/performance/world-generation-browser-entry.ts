@@ -11,6 +11,7 @@ import {
 } from '../../src/economy/WorldEconomyGenerator';
 import {
   analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
 } from '../../src/economy/PrefabricationOpportunity';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
@@ -68,15 +69,15 @@ function generate(seed: string) {
     throw new Error(`audited economy validation failed for ${seed}`);
   }
 
-  const sawmill = creationResult.world.economy.facilities.find(
-    ({ id }) => id === 'sawmill',
-  )!;
   const prefab = creationResult.world.economy.facilities.find(
     ({ id }) => id === 'prefabrication-plant',
   )!;
+  const extensionStart = resolvePrefabricationExtensionStart(
+    creationResult.world.starterOpportunity,
+  );
   const prefabWitnessCost = analyzePrefabricationExtension(
     new ConstructionAnalyzer(terrain),
-    sawmill.railAccess,
+    extensionStart!,
     prefab.railAccess,
   )?.totalCost ?? null;
   const blankInfrastructure = creationResult.world.tracks.length === 0

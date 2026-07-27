@@ -14,6 +14,7 @@ import { INITIAL_PRODUCTS } from '../../src/economy/InitialEconomyContent';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 import {
   analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
 } from '../../src/economy/PrefabricationOpportunity';
 import {
   PREFAB_ACCESS_LINK_ALLOWANCE,
@@ -68,6 +69,7 @@ function generate(
 
 function expectAffordablePrefab(
   result: ReturnType<typeof generate>,
+  opportunity: StarterOpportunityDef,
   sourceTerrain = terrain,
 ): number {
   expect(result.ok).toBe(true);
@@ -78,9 +80,11 @@ function expectAffordablePrefab(
   const prefab = result.economy.facilities.find(
     ({ id }) => id === 'prefabrication-plant',
   )!;
+  const start = resolvePrefabricationExtensionStart(opportunity);
+  expect(start).not.toBeNull();
   const witness = analyzePrefabricationExtension(
     new ConstructionAnalyzer(sourceTerrain),
-    sawmill.railAccess,
+    start!,
     prefab.railAccess,
   );
   expect(witness).not.toBeNull();
@@ -265,9 +269,10 @@ describe('WorldEconomyGenerator', () => {
     'places an affordable terrain-valid Prefab extension for representative seed %s',
     (seed) => {
       const generationConfig = { ...config, seed };
-      const result = generate(generationConfig);
+      const opportunity = makeStarterOpportunity(seed);
+      const result = generate(generationConfig, opportunity);
 
-      expectAffordablePrefab(result);
+      expectAffordablePrefab(result, opportunity);
     },
   );
 
@@ -284,8 +289,8 @@ describe('WorldEconomyGenerator', () => {
       const replay = generate(generationConfig, opportunity);
 
       expect(replay).toEqual(first);
-      const firstWitnessCost = expectAffordablePrefab(first);
-      const replayWitnessCost = expectAffordablePrefab(replay);
+      const firstWitnessCost = expectAffordablePrefab(first, opportunity);
+      const replayWitnessCost = expectAffordablePrefab(replay, opportunity);
       expect(replayWitnessCost).toBe(firstWitnessCost);
       if (!first.ok) continue;
       expect(first.diagnostics.candidatesEvaluated)
@@ -388,6 +393,17 @@ describe('WorldEconomyGenerator', () => {
     opportunity.sites[0].y = -6_950;
     opportunity.sites[1].x = -5_800;
     opportunity.sites[1].y = -6_950;
+    for (const corridor of opportunity.corridors) {
+      corridor.waypoints[corridor.waypoints.length - 1] = {
+        x: -5_800,
+        y: -6_950,
+      };
+      const terminal = corridor.feasibilityWitness.segments[
+        corridor.feasibilityWitness.segments.length - 1
+      ].geometry;
+      terminal.p2 = { x: -5_400, y: -6_950 };
+      terminal.p3 = { x: -5_800, y: -6_950 };
+    }
 
     const result = new WorldEconomyGenerator(plateauTerrain).generate(
       config,

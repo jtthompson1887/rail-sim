@@ -15,6 +15,7 @@ import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import {
   analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
 } from '../../src/economy/PrefabricationOpportunity';
 import {
   WorldEconomyGenerator,
@@ -233,13 +234,21 @@ describe('WorldManager', () => {
       const prefab = world.economy.facilities.find(
         ({ id }) => id === 'prefabrication-plant',
       )!;
+      const start = resolvePrefabricationExtensionStart(
+        world.starterOpportunity,
+      );
 
       const witness = analyzePrefabricationExtension(
         new ConstructionAnalyzer(new TerrainGenerator(seed)),
-        sawmill.railAccess,
+        start!,
         prefab.railAccess,
       );
 
+      expect(start).not.toBeNull();
+      expect(start?.point).toEqual({
+        x: sawmill.railAccess.x,
+        y: sawmill.railAccess.y,
+      });
       expect(witness).not.toBeNull();
       expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
     });

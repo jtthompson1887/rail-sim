@@ -36,6 +36,7 @@ import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
 import { deriveAutomaticCubic } from '../../src/systems/TrackGeometry';
 import {
   analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
 } from '../../src/economy/PrefabricationOpportunity';
 import {
   PREFAB_ACCESS_LINK_ALLOWANCE,
@@ -112,8 +113,11 @@ function successfulResult(
     biome: 'temperate',
     constructionDifficultyId: 'standard',
   };
+  const terrain = new TerrainGenerator(seed);
+  const economy = new WorldEconomyGenerator(terrain);
   const result = new WorldOpportunityGenerator(
-    new TerrainGenerator(seed),
+    terrain,
+    (opportunity) => economy.generate(config, opportunity).ok,
   ).generate(config);
   if (!result.ok) throw new Error('opportunity fixture generation failed');
   return result;
@@ -286,11 +290,18 @@ describe('generated blank-world start', () => {
     const prefab = result.world.economy.facilities.find(
       ({ id }) => id === 'prefabrication-plant',
     )!;
+    const extensionStart = resolvePrefabricationExtensionStart(
+      result.world.starterOpportunity,
+    );
     const witness = analyzePrefabricationExtension(
       new ConstructionAnalyzer(new TerrainGenerator('atomic-seed')),
-      sawmill.railAccess,
+      extensionStart!,
       prefab.railAccess,
     );
+    expect(extensionStart?.point).toEqual({
+      x: sawmill.railAccess.x,
+      y: sawmill.railAccess.y,
+    });
     expect(witness).not.toBeNull();
     expect(
       witness!.totalCost
@@ -789,6 +800,7 @@ describe('generated blank-world start', () => {
       'save-failure-seed',
       'temperate',
       successfulPort(),
+      successfulEconomyPort(),
     );
 
     expect(result).toEqual({
@@ -935,11 +947,15 @@ describe('generated blank-world start', () => {
       const prefab = result.world.economy.facilities.find(
         ({ id }) => id === 'prefabrication-plant',
       )!;
+      const extensionStart = resolvePrefabricationExtensionStart(
+        result.world.starterOpportunity,
+      );
       const witness = analyzePrefabricationExtension(
         new ConstructionAnalyzer(new TerrainGenerator(seed)),
-        sawmill.railAccess,
+        extensionStart!,
         prefab.railAccess,
       );
+      expect(extensionStart).not.toBeNull();
       expect(witness).not.toBeNull();
       expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
       expect(result.world.tracks).toEqual([]);
@@ -962,11 +978,15 @@ describe('generated blank-world start', () => {
       const prefab = result.world.economy.facilities.find(
         ({ id }) => id === 'prefabrication-plant',
       )!;
+      const extensionStart = resolvePrefabricationExtensionStart(
+        result.world.starterOpportunity,
+      );
       const witness = analyzePrefabricationExtension(
         new ConstructionAnalyzer(new TerrainGenerator(seed)),
-        sawmill.railAccess,
+        extensionStart!,
         prefab.railAccess,
       );
+      expect(extensionStart).not.toBeNull();
       expect(witness).not.toBeNull();
       expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
       expect(result.world.tracks).toEqual([]);
