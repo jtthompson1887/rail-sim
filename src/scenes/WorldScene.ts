@@ -489,6 +489,8 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   init(data: { worldId?: string; mode?: 'create' | 'play' }): void {
+    this.activeTool = 'none';
+    this.activeEditorTool = null;
     this.worldLoadFailed = false;
     this.lastReportedSaveState = 'saved';
     this.pendingStartupSaveError = null;

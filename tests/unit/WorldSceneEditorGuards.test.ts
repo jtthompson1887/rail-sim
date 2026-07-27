@@ -1983,6 +1983,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     (scene as any).trainManager = { trains: [], carriages: [] };
     (scene as any).cameraController = {
       stopFollow: jest.fn(),
+      setInputLockOwner: jest.fn(),
     };
     const saveSpy = jest.spyOn(WorldManager, 'save').mockReturnValue(false);
     const emitSpy = jest.spyOn(EventBus, 'emit');
@@ -2000,6 +2001,8 @@ describe('WorldScene disabled construction bypass guards', () => {
         type: 'error',
       },
     );
+    expect((scene as any).cameraController.setInputLockOwner)
+      .toHaveBeenCalledWith('camera');
 
     emitSpy.mockRestore();
     saveSpy.mockRestore();
@@ -2046,6 +2049,25 @@ describe('WorldScene disabled construction bypass guards', () => {
       saveSpy.mockRestore();
     },
   );
+
+  it('resets stale editor tool state on same-instance relaunch', () => {
+    const { scene } = createStartupScene('create', true);
+    const staleTool = {
+      cancel: jest.fn(),
+      deactivate: jest.fn(),
+    };
+    (scene as any).activeTool = 'place-track';
+    (scene as any).activeEditorTool = staleTool;
+    const shutdownCallbacks = (scene.events.once as jest.Mock).mock.calls
+      .filter(([event]) => event === Phaser.Scenes.Events.SHUTDOWN)
+      .map(([, callback]) => callback);
+    for (const callback of shutdownCallbacks) callback();
+
+    scene.init({ mode: 'create' });
+
+    expect((scene as any).activeTool).toBe('none');
+    expect((scene as any).activeEditorTool).toBeNull();
+  });
 
   it('launches create UI after a successful initial save with completed state', () => {
     const { save, launch } = createStartupScene('create', true);
