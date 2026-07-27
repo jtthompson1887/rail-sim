@@ -1,17 +1,29 @@
 import Phaser from 'phaser';
-import type { WorldData } from '../../src/config/WorldData';
+import {
+  createEmptyWorld,
+  type TrainDef,
+  type WorldData,
+} from '../../src/config/WorldData';
 import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
 import {
   ECONOMY_TICK_MS,
   EconomySystem,
   type EconomyUpdateResult,
 } from '../../src/economy/EconomySystem';
+import type {
+  FacilityDefinition,
+  FacilityEconomyDef,
+} from '../../src/economy/EconomyData';
+import { getFacilityDefinition } from '../../src/economy/ProductCatalog';
 import type Train from '../../src/entities/Train';
 import {
   FreightPurchaseService,
   type FreightPurchaseRuntimePort,
 } from '../../src/freight/FreightPurchaseService';
-import { captureTrainRuntime } from '../../src/freight/TrainRuntime';
+import {
+  captureTrainRuntime,
+  type TrainRuntimeSnapshot,
+} from '../../src/freight/TrainRuntime';
 import TrackManager from '../../src/managers/TrackManager';
 import { TrainManager } from '../../src/managers/TrainManager';
 import { WorldManager } from '../../src/managers/WorldManager';
@@ -27,8 +39,265 @@ import {
 import { SnapSystem, type SnapResult } from '../../src/systems/SnapSystem';
 import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
 import { clonePlainData } from '../../src/utils/PlainData';
+import { makeStarterOpportunity } from './StarterOpportunityFixture';
 
 const { makeScene } = require('../../__mocks__/phaser');
+
+export type EconomyTickBenchmarkState =
+  | 'loading'
+  | 'transit'
+  | 'unloading'
+  | 'idle'
+  | 'full-destination'
+  | 'contention';
+
+export interface EconomyTickBenchmarkFixture {
+  readonly world: WorldData;
+  readonly runtime: readonly TrainRuntimeSnapshot[];
+  readonly stateByTrainId:
+    Readonly<Record<string, EconomyTickBenchmarkState>>;
+}
+
+const BENCHMARK_TRACK_ID = 'economy-benchmark-mainline';
+
+const makeBenchmarkFacility = (
+  definition: FacilityDefinition,
+  x: number,
+): FacilityEconomyDef => ({
+  id: `benchmark-${definition.id}`,
+  definitionId: definition.id,
+  name: `Benchmark ${definition.displayName}`,
+  x,
+  y: 0,
+  railAccess: { x, y: 0, radius: 40 },
+  inventories: Object.fromEntries(definition.inventory.map((slot) => [
+    slot.productId,
+    {
+      productId: slot.productId,
+      quantity: slot.initialQuantity,
+      reservedQuantity: 0,
+      capacity: slot.capacity,
+      recentInflow: 0,
+      recentOutflow: 0,
+      targetStock: slot.targetStock,
+    },
+  ])),
+  activeRecipeId: definition.recipeIds[0] ?? null,
+  recipeProgressTicks: 0,
+});
+
+const makeBenchmarkTrain = (
+  id: string,
+  trackT: number,
+  cargo: TrainDef['cargo'],
+): TrainDef => ({
+  id,
+  freightSetId: 'flatbed-freight-set',
+  trackUUID: BENCHMARK_TRACK_ID,
+  trackT,
+  facing: 1,
+  cargo,
+  operations: {
+    currentTripRevenue: 0,
+    currentTripRunningCost: 0,
+    lastTripRevenue: 0,
+    lastTripRunningCost: 0,
+    lifetimeDeliveredUnits: 0,
+    lifetimeRevenue: 0,
+    lifetimeRunningCost: 0,
+  },
+});
+
+interface BenchmarkTrainInput {
+  readonly state: EconomyTickBenchmarkState;
+  readonly train: TrainDef;
+  readonly runtime: Omit<TrainRuntimeSnapshot, 'trainId'>;
+}
+
+export const makeEconomyTickBenchmarkFixture =
+(): EconomyTickBenchmarkFixture => {
+  const world = createEmptyWorld(
+    'Economy tick benchmark',
+    'economy-tick-benchmark-v1',
+    'temperate',
+    makeStarterOpportunity('economy-tick-benchmark-v1'),
+  );
+  world.id = 'economy-tick-benchmark-world';
+  world.metadata = {
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  };
+  world.tracks = [{
+    geometryVersion: 1,
+    uuid: BENCHMARK_TRACK_ID,
+    p0: { x: -1_200, y: 0 },
+    p1: { x: -400, y: 0 },
+    p2: { x: 400, y: 0 },
+    p3: { x: 1_200, y: 0 },
+    verticalProfile: {
+      profileVersion: 1,
+      knots: [
+        { t: 0, elevation: 0 },
+        { t: 1, elevation: 0 },
+      ],
+    },
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 0,
+      endElevation: 0,
+    }],
+    paidBuildCost: 50_000,
+  }];
+
+  const facilityPositions: ReadonlyArray<readonly [string, number]> = [
+    ['managed-forest', -900],
+    ['sawmill', -600],
+    ['quarry', -300],
+    ['cement-works', 0],
+    ['port-interchange', 300],
+    ['prefabrication-plant', 600],
+    ['town-construction-market', 900],
+  ];
+  world.economy.facilities = facilityPositions.map(([definitionId, x]) => {
+    const definition = getFacilityDefinition(definitionId);
+    if (!definition) {
+      throw new Error(`Missing benchmark facility ${definitionId}`);
+    }
+    return makeBenchmarkFacility(definition, x);
+  });
+
+  const forest = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'managed-forest',
+  );
+  const sawmill = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'sawmill',
+  );
+  const prefab = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'prefabrication-plant',
+  );
+  if (!forest || !sawmill || !prefab) {
+    throw new Error('Benchmark freight facilities are missing');
+  }
+  forest.inventories.logs.quantity = 120;
+  sawmill.inventories.logs.quantity = 0;
+  sawmill.inventories['structural-timber'].quantity = 10;
+  prefab.inventories['structural-timber'].quantity =
+    prefab.inventories['structural-timber'].capacity;
+  prefab.inventories.cement.quantity = 0;
+  prefab.inventories.steel.quantity = 0;
+
+  const stopped = (
+    trackT: number,
+    x: number,
+  ): Omit<TrainRuntimeSnapshot, 'trainId'> => ({
+    trackUUID: BENCHMARK_TRACK_ID,
+    trackT,
+    facing: 1,
+    x,
+    y: 0,
+    speedWorldUnitsPerSecond: 0,
+    throttle: 0,
+    derailed: false,
+  });
+  const logs = (
+    units: number,
+  ): TrainDef['cargo'] => ({
+    productId: 'logs',
+    units,
+    loadedUnits: 60,
+    originFacilityId: forest.id,
+  });
+  const structuralTimber = (): TrainDef['cargo'] => ({
+    productId: 'structural-timber',
+    units: 20,
+    loadedUnits: 60,
+    originFacilityId: sawmill.id,
+  });
+  const inputs: BenchmarkTrainInput[] = [
+    {
+      state: 'loading',
+      train: makeBenchmarkTrain('loading-a', 0.125, null),
+      runtime: stopped(0.125, forest.x),
+    },
+    {
+      state: 'loading',
+      train: makeBenchmarkTrain('loading-b', 0.125, null),
+      runtime: stopped(0.125, forest.x),
+    },
+    {
+      state: 'transit',
+      train: makeBenchmarkTrain('transit-a', 0.42, logs(40)),
+      runtime: {
+        ...stopped(0.42, -192),
+        speedWorldUnitsPerSecond: 18,
+        throttle: 1,
+      },
+    },
+    {
+      state: 'transit',
+      train: makeBenchmarkTrain('transit-b', 0.46, logs(40)),
+      runtime: {
+        ...stopped(0.46, -96),
+        speedWorldUnitsPerSecond: 18,
+        throttle: 1,
+      },
+    },
+    {
+      state: 'unloading',
+      train: makeBenchmarkTrain('unloading-a', 0.25, logs(30)),
+      runtime: stopped(0.25, sawmill.x),
+    },
+    {
+      state: 'unloading',
+      train: makeBenchmarkTrain('unloading-b', 0.25, logs(30)),
+      runtime: stopped(0.25, sawmill.x),
+    },
+    {
+      state: 'idle',
+      train: makeBenchmarkTrain('idle-a', 1, null),
+      runtime: stopped(1, 1_200),
+    },
+    {
+      state: 'idle',
+      train: makeBenchmarkTrain('idle-b', 1, null),
+      runtime: stopped(1, 1_200),
+    },
+    {
+      state: 'full-destination',
+      train: makeBenchmarkTrain('full-destination-a', 0.75, structuralTimber()),
+      runtime: stopped(0.75, prefab.x),
+    },
+    {
+      state: 'full-destination',
+      train: makeBenchmarkTrain('full-destination-b', 0.75, structuralTimber()),
+      runtime: stopped(0.75, prefab.x),
+    },
+    {
+      state: 'contention',
+      train: makeBenchmarkTrain('contention-a', 0.25, null),
+      runtime: stopped(0.25, sawmill.x),
+    },
+    {
+      state: 'contention',
+      train: makeBenchmarkTrain('contention-b', 0.25, null),
+      runtime: stopped(0.25, sawmill.x),
+    },
+  ];
+  world.trains = inputs.map(({ train }) => clonePlainData(train));
+
+  return {
+    world,
+    runtime: inputs.map(({ train, runtime }) => Object.freeze({
+      trainId: train.id,
+      ...runtime,
+    })),
+    stateByTrainId: Object.freeze(Object.fromEntries(
+      inputs.map(({ state, train }) => [train.id, state]),
+    )),
+  };
+};
 
 const constructionAnchor = (
   snap: SnapResult,
