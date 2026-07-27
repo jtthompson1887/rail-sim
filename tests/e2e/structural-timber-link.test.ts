@@ -97,14 +97,59 @@ const findCanvasDragOrigin = async (
   coverage: Readonly<Record<string, number>>;
 }> => page.evaluate(({ points, dragOffset }) => {
   const coverage: Record<string, number> = {};
+  const editorUI = window.__railSimGame.scene.getScene(
+    'EditorUIScene',
+  ) as unknown as {
+    containsScreenPoint(x: number, y: number): boolean;
+  };
+  const phaserOverlays = window.__railSimGame.scene.getScenes(true)
+    .filter((scene) => scene.scene.key !== 'WorldScene')
+    .flatMap((scene) => scene.children.list.map((object) => ({
+      object: object as unknown as {
+        active?: boolean;
+        visible?: boolean;
+        input?: { enabled?: boolean } | null;
+        getBounds?: () => {
+          left: number;
+          right: number;
+          top: number;
+          bottom: number;
+        };
+      },
+      sceneKey: scene.scene.key,
+    })));
   for (const point of points) {
     let blocked = false;
     let blocker: Element | null = null;
+    let blockerLabel: string | null = null;
     for (let step = 0; step <= 8; step += 1) {
       const ratio = step / 8;
+      const x = point.x + dragOffset.x * ratio;
+      const y = point.y + dragOffset.y * ratio;
+      if (editorUI.containsScreenPoint(x, y)) {
+        blocked = true;
+        blockerLabel = 'editor-ui';
+        break;
+      }
+      const phaserOverlay = phaserOverlays.find(({ object }) => {
+        if (
+          object.active === false
+          || object.visible === false
+          || object.input?.enabled !== true
+          || typeof object.getBounds !== 'function'
+        ) return false;
+        const bounds = object.getBounds();
+        return x >= bounds.left && x <= bounds.right
+          && y >= bounds.top && y <= bounds.bottom;
+      });
+      if (phaserOverlay) {
+        blocked = true;
+        blockerLabel = `phaser:${phaserOverlay.sceneKey}`;
+        break;
+      }
       const element = document.elementFromPoint(
-        point.x + dragOffset.x * ratio,
-        point.y + dragOffset.y * ratio,
+        x,
+        y,
       );
       if (!(element instanceof HTMLCanvasElement)) {
         blocked = true;
@@ -113,6 +158,10 @@ const findCanvasDragOrigin = async (
       }
     }
     if (!blocked) return { origin: point, coverage };
+    if (blockerLabel) {
+      coverage[blockerLabel] = (coverage[blockerLabel] ?? 0) + 1;
+      continue;
+    }
     if (blocker === null) {
       coverage['outside-viewport'] =
         (coverage['outside-viewport'] ?? 0) + 1;
@@ -1367,10 +1416,16 @@ test('mobile pause owns the screen and can return from an open train inspector',
     if (message.type() === 'error') errors.push(message.text());
   });
 
-  await createFixedSeedWorld(page, 'first-route-browser-gamma', MOBILE);
+  await createFixedSeedWorld(
+    page,
+    'first-route-browser-gamma',
+    DESKTOP,
+  );
   await buildCheapestStarter(page);
   await purchaseFlatbedAtForest(page);
   await enterOperateThroughCanvas(page);
+  await page.setViewportSize(MOBILE);
+  await waitForRenderedFrame(page);
   await expect(page.locator('[data-testid="freight-objective"]'))
     .toBeVisible();
   for (const selector of [
@@ -1412,6 +1467,8 @@ test('mobile pause owns the screen and can return from an open train inspector',
   await expect(page.locator('[data-testid="company-save-state"]'))
     .toHaveText('Saved');
   const beforeReload = await snapshot(page);
+  await page.setViewportSize(DESKTOP);
+  await waitForRenderedFrame(page);
   await quitToMenuThroughPause(page);
   await openOnlySavedWorld(page);
   const reloaded = await snapshot(page);
