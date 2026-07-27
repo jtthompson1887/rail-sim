@@ -367,6 +367,7 @@ describe('Integration: first profitable timber freight route', () => {
     const completedForest = facility(harness, 'managed-forest');
     const completedSawmill = facility(harness, 'sawmill');
     const deliveryRevenue = categoryTotal(harness, 'delivery-revenue');
+    const contractBonuses = categoryTotal(harness, 'contract-bonus');
     const runningCost = categoryTotal(harness, 'train-running-cost');
     const vehicleCapex = categoryTotal(harness, 'vehicle-capex');
     const forestProduction = completedForest.inventories.logs.recentInflow;
@@ -391,6 +392,17 @@ describe('Integration: first profitable timber freight route', () => {
       .toBeGreaterThan(completedTrain.operations.lastTripRunningCost);
     expect(completed.freightProgress.profitableLogDeliveryCompleted)
       .toBe(true);
+    expect(completed.freightProgress.developmentGrantAwarded).toBe(true);
+    expect(completed.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([
+      expect.objectContaining({
+        ledgerClass: 'revenue',
+        amount: 250_000,
+        referenceId: 'regional-development-grant:v1',
+      }),
+    ]);
+    expect(contractBonuses).toBe(250_000);
     expect(processingEvidence.map(
       ({ tick }) => tick - deliveryStartTick,
     )).toEqual([1, 2, 3, 4, 5, 6]);
@@ -445,7 +457,8 @@ describe('Integration: first profitable timber freight route', () => {
       - constructionCapex
       - vehicleCapex
       - runningCost
-      + deliveryRevenue,
+      + deliveryRevenue
+      + contractBonuses,
     );
   });
 

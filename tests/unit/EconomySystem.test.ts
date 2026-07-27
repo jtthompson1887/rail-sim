@@ -255,10 +255,13 @@ describe('EconomySystem', () => {
     train.cargo = {
       productId: 'logs',
       units: 10,
-      loadedUnits: 10,
+      loadedUnits: 60,
       originFacilityId: 'managed-forest',
     };
+    train.operations.currentTripRevenue = 5_000;
     train.operations.currentTripRunningCost = 40;
+    train.operations.lifetimeDeliveredUnits = 50;
+    train.operations.lifetimeRevenue = 5_000;
     train.operations.lifetimeRunningCost = 40;
     const sawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
@@ -281,15 +284,37 @@ describe('EconomySystem', () => {
     expect(delivery.completedDeliveries).toEqual([expect.objectContaining({
       trainId: train.id,
       productId: 'logs',
-      units: 10,
+      units: 60,
       destinationFacilityId: 'sawmill',
       tick: 1,
       runningCost: 40,
     })]);
-    expect(world.company.ledger.at(-1)).toEqual(expect.objectContaining({
+    expect(delivery.completedDeliveries[0].revenue).toBeGreaterThan(5_000);
+    expect(delivery.completedDeliveries[0].operatingProfit).toBe(
+      delivery.completedDeliveries[0].revenue - 40,
+    );
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toEqual([]);
+    expect(world.company.ledger).toEqual(expect.arrayContaining([
+      expect.objectContaining({
       category: 'delivery-revenue',
       tick: 1,
-    }));
+      }),
+      expect.objectContaining({
+        category: 'contract-bonus',
+        ledgerClass: 'revenue',
+        amount: 250_000,
+        tick: 1,
+        referenceId: 'regional-development-grant:v1',
+      }),
+    ]));
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: true,
+      developmentGrantAwarded: true,
+      profitableStructuralTimberDeliveryCompleted: false,
+    });
     const committedSawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
     )!;

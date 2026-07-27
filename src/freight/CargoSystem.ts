@@ -7,7 +7,14 @@ import type {
   CompanyStateDef,
   FacilityEconomyDef,
 } from '../economy/EconomyData';
-import { postLedgerEntry } from '../economy/FinanceLedger';
+import {
+  postLedgerEntry,
+  validateCompanyState,
+} from '../economy/FinanceLedger';
+import {
+  REGIONAL_DEVELOPMENT_GRANT,
+  REGIONAL_DEVELOPMENT_GRANT_REFERENCE,
+} from '../config/FreightProgression';
 import { quoteLocalProduct } from '../economy/MarketSystem';
 import { getProduct } from '../economy/ProductCatalog';
 import { clonePlainData } from '../utils/PlainData';
@@ -23,6 +30,7 @@ import {
   potentialLoadProducts,
 } from './FacilityCargoRules';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
+import { countForwardRegionalDevelopmentGrants } from './FreightProgress';
 
 export type CargoBlockerCode =
   | 'not-operating'
@@ -372,6 +380,19 @@ const safeSum = (...values: number[]): number | null => {
   return Number.isSafeInteger(total) ? total : null;
 };
 
+const isValidFreightProgress = (
+  value: FreightProgressDef,
+): boolean => value.progressVersion === 1
+  && typeof value.profitableLogDeliveryCompleted === 'boolean'
+  && typeof value.developmentGrantAwarded === 'boolean'
+  && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
+
+const hasConsistentDevelopmentGrant = (
+  company: CompanyStateDef,
+  progress: FreightProgressDef,
+): boolean => countForwardRegionalDevelopmentGrants(company)
+  === (progress.developmentGrantAwarded ? 1 : 0);
+
 const loadBatch = (
   train: TrainDef,
   productId: string,
@@ -483,14 +504,41 @@ const unloadBatch = (
   const runningCost = train.operations.currentTripRunningCost;
   const operatingProfit = tripRevenue - runningCost;
   if (!Number.isSafeInteger(operatingProfit)) return null;
-  const posted = postLedgerEntry(company, {
+  const deliveryPost = postLedgerEntry(company, {
     category: 'delivery-revenue',
     magnitude: batchRevenue,
     tick: economy.tick,
     referenceId: `${train.id}:${economy.tick}:${facility.id}`,
     direction: 'forward',
   });
-  if (posted.ok === false) return null;
+  if (deliveryPost.ok === false) return null;
+
+  const completesDelivery = cargo.units === accepted;
+  const profitable = operatingProfit > 0;
+  const fullConsignment = cargo.loadedUnits === capacityUnits;
+  const completesProfitableFullLogs = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'logs'
+    && facility.definitionId === 'sawmill';
+  const completesProfitableFullStructuralTimber = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'structural-timber'
+    && facility.definitionId === 'prefabrication-plant';
+  let postedCompany = deliveryPost.company;
+  if (completesProfitableFullLogs
+    && !progress.developmentGrantAwarded) {
+    const grantPost = postLedgerEntry(postedCompany, {
+      category: 'contract-bonus',
+      magnitude: REGIONAL_DEVELOPMENT_GRANT,
+      tick: economy.tick,
+      referenceId: REGIONAL_DEVELOPMENT_GRANT_REFERENCE,
+      direction: 'forward',
+    });
+    if (grantPost.ok === false) return null;
+    postedCompany = grantPost.company;
+  }
 
   slot.quantity = destinationQuantity;
   slot.recentInflow = recentInflow;
@@ -501,7 +549,6 @@ const unloadBatch = (
 
   let completedDelivery: FreightDeliveryEvent | null = null;
   if (cargo.units === 0) {
-    const profitable = tripRevenue > runningCost;
     train.operations.lastTripRevenue = tripRevenue;
     train.operations.lastTripRunningCost = runningCost;
     train.operations.currentTripRevenue = 0;
@@ -517,14 +564,17 @@ const unloadBatch = (
       runningCost,
       operatingProfit,
     };
-    if (cargo.productId === 'logs'
-      && facility.definitionId === 'sawmill') {
-      progress.profitableLogDeliveryCompleted ||= profitable;
+    if (completesProfitableFullLogs) {
+      progress.profitableLogDeliveryCompleted = true;
+      progress.developmentGrantAwarded = true;
+    }
+    if (completesProfitableFullStructuralTimber) {
+      progress.profitableStructuralTimberDeliveryCompleted = true;
     }
   }
 
   return {
-    company: posted.company,
+    company: postedCompany,
     completedDelivery,
     status: status(train, capacityUnits, {
       facilityId: facility.id,
@@ -550,6 +600,20 @@ export function proposeCargoTick(input: CargoTickInput): CargoTickProposal {
   const statuses: CargoTransferStatus[] = [];
   const completedDeliveries: FreightDeliveryEvent[] = [];
   let changed = false;
+
+  if (validateCompanyState(company).valid === false
+    || !isValidFreightProgress(freightProgress)
+    || !hasConsistentDevelopmentGrant(company, freightProgress)) {
+    return deepFreeze({
+      company,
+      economy,
+      trains,
+      freightProgress,
+      statuses,
+      completedDeliveries,
+      changed,
+    });
+  }
 
   trainsById.forEach((train) => {
     const runtime = runtimeByTrainId.get(train.id);

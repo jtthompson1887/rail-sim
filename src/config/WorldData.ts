@@ -25,6 +25,7 @@ import {
   capacityForProduct,
   getFreightSet,
 } from '../freight/FreightSetCatalog';
+import { countForwardRegionalDevelopmentGrants } from '../freight/FreightProgress';
 import {
   createCompanyState,
   validateCompanyState,
@@ -848,6 +849,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   }
 
   const company = raw.company;
+  const freightProgress = raw.freightProgress;
   const metadata = raw.metadata;
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
@@ -863,12 +865,22 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
     || validateCompanyState(company).valid === false
     || !isEconomyState(raw.economy)
-    || !isFreightProgress(raw.freightProgress)
+    || !isFreightProgress(freightProgress)
     || !isStarterOpportunity(raw.starterOpportunity)
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
     return incompatible(raw, 'data does not match schema version 8.');
+  }
+  const forwardGrantCount = countForwardRegionalDevelopmentGrants(
+    company as CompanyStateDef,
+  );
+  if (forwardGrantCount
+    !== (freightProgress.developmentGrantAwarded ? 1 : 0)) {
+    return incompatible(
+      raw,
+      'development grant progress does not match the company ledger.',
+    );
   }
 
   const trackIds = new Set(

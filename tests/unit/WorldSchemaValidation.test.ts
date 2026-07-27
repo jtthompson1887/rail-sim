@@ -9,7 +9,10 @@ import {
 } from '../../src/config/WorldData';
 import { GameConfig } from '../../src/config/GameConfig';
 import { SaveService } from '../../src/services/SaveService';
-import { createCompanyState } from '../../src/economy/FinanceLedger';
+import {
+  createCompanyState,
+  postLedgerEntry,
+} from '../../src/economy/FinanceLedger';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -401,6 +404,113 @@ describe('world schema validation', () => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw).compatible).toBe(false);
+  });
+
+  it('requires the awarded grant latch to have exactly one canonical forward ledger entry', () => {
+    const raw = currentWorld();
+    raw.freightProgress.profitableLogDeliveryCompleted = true;
+    raw.freightProgress.developmentGrantAwarded = true;
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+
+    const posted = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 7,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (posted.ok === false) throw new Error(posted.code);
+    raw.company = JSON.parse(JSON.stringify(posted.company));
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+
+    const reversal = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 8,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'reversal',
+      reversalOf: posted.entry.id,
+    });
+    if (reversal.ok === false) throw new Error(reversal.code);
+    raw.company = JSON.parse(JSON.stringify(reversal.company));
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+
+    const duplicate = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 9,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (duplicate.ok === false) throw new Error(duplicate.code);
+    raw.company = JSON.parse(JSON.stringify(duplicate.company));
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
+  it('rejects a canonical grant entry while the awarded latch is false', () => {
+    const raw = currentWorld();
+    const posted = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 7,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (posted.ok === false) throw new Error(posted.code);
+    raw.company = JSON.parse(JSON.stringify(posted.company));
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
+  it('does not count unrelated contract bonuses as the development grant', () => {
+    let company = currentWorld().company;
+    for (const request of [
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 249_999,
+        referenceId: 'regional-development-grant:v1',
+      },
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 250_000,
+        referenceId: 'regional-development-grant:v2',
+      },
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 250_000,
+        referenceId: 'town-contract:v1',
+      },
+      {
+        category: 'delivery-revenue' as const,
+        magnitude: 250_000,
+        referenceId: 'regional-development-grant:v1',
+      },
+    ]) {
+      const posted = postLedgerEntry(company, {
+        tick: 7,
+        direction: 'forward',
+        ...request,
+      });
+      if (posted.ok === false) throw new Error(posted.code);
+      company = JSON.parse(JSON.stringify(posted.company));
+    }
+    const raw = currentWorld();
+    raw.company = company;
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
   });
 
   it.each([

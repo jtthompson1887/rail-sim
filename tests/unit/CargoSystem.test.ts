@@ -12,6 +12,10 @@ import { advanceFacilityRecipe } from '../../src/economy/IndustrySystem';
 import { quoteLocalProduct } from '../../src/economy/MarketSystem';
 import * as ProductCatalog from '../../src/economy/ProductCatalog';
 import {
+  createCompanyState,
+  postLedgerEntry,
+} from '../../src/economy/FinanceLedger';
+import {
   proposeCargoTick,
   type CargoTickProposal,
 } from '../../src/freight/CargoSystem';
@@ -1129,6 +1133,29 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     return input;
   };
 
+  const deliverRemainingCargo = (
+    initial: ReturnType<typeof makeInput>,
+  ): CargoTickProposal => {
+    let input = initial;
+    let final: CargoTickProposal | null = null;
+    for (let batch = 0; batch < 6; batch += 1) {
+      final = proposeCargoTick(input);
+      if (final.trains[0].cargo === null) break;
+      input = {
+        operating: true,
+        company: final.company,
+        economy: final.economy,
+        trains: final.trains,
+        freightProgress: final.freightProgress,
+        runtime: initial.runtime,
+      };
+    }
+    if (!final || final.trains[0].cargo !== null) {
+      throw new Error('Full consignment did not unload within six batches');
+    }
+    return final;
+  };
+
   it('moves produced structural timber through the same flatbed and conserves both products', () => {
     const input = loadedAtSawmill(10);
     const prefabDefinition = ProductCatalog.getFacilityDefinition(
@@ -1237,7 +1264,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     );
     expect(
       timberDelivery.freightProgress.profitableLogDeliveryCompleted,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       timberDelivery.freightProgress
         .profitableStructuralTimberDeliveryCompleted,
@@ -1459,6 +1486,253 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     }]);
   });
 
+  it('awards one canonical development grant for a profitable full logs delivery', () => {
+    const input = loadedAtSawmill(60, {
+      currentTripRunningCost: 5_000,
+    });
+    const initialCash = input.company.cash;
+
+    const result = deliverRemainingCargo(input);
+    const grantEntries = result.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    );
+
+    expect(result.completedDeliveries).toEqual([
+      expect.objectContaining({
+        productId: 'logs',
+        units: 60,
+        destinationFacilityId: 'sawmill',
+        operatingProfit: expect.any(Number),
+      }),
+    ]);
+    expect(result.completedDeliveries[0].operatingProfit)
+      .toBeGreaterThan(0);
+    expect(result.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: true,
+      developmentGrantAwarded: true,
+      profitableStructuralTimberDeliveryCompleted: false,
+    });
+    expect(grantEntries).toEqual([{
+      id: 8,
+      tick: input.economy.tick,
+      category: 'contract-bonus',
+      ledgerClass: 'revenue',
+      amount: 250_000,
+      referenceId: 'regional-development-grant:v1',
+    }]);
+    expect(result.company.cash).toBe(
+      initialCash
+      + result.completedDeliveries[0].revenue
+      + 250_000,
+    );
+  });
+
+  it('does not award progress or a grant for a profitable partial logs consignment', () => {
+    const input = loadedAtSawmill(10);
+
+    const result = proposeCargoTick(input);
+
+    expect(result.completedDeliveries).toEqual([
+      expect.objectContaining({
+        productId: 'logs',
+        units: 10,
+        destinationFacilityId: 'sawmill',
+      }),
+    ]);
+    expect(result.completedDeliveries[0].operatingProfit)
+      .toBeGreaterThan(0);
+    expect(result.freightProgress).toEqual(input.freightProgress);
+    expect(result.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([]);
+  });
+
+  it('does not award progress or a grant for an unprofitable full logs delivery', () => {
+    const input = loadedAtSawmill(60, {
+      currentTripRunningCost: 100_000,
+    });
+
+    const result = deliverRemainingCargo(input);
+
+    expect(result.completedDeliveries[0]).toEqual(expect.objectContaining({
+      productId: 'logs',
+      units: 60,
+      destinationFacilityId: 'sawmill',
+    }));
+    expect(result.completedDeliveries[0].operatingProfit)
+      .toBeLessThan(0);
+    expect(result.freightProgress).toEqual(input.freightProgress);
+    expect(result.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([]);
+  });
+
+  it('latches a profitable full structural-timber delivery only at the Prefabrication Plant', () => {
+    const input = makeInput();
+    const prefabDefinition = ProductCatalog.getFacilityDefinition(
+      'prefabrication-plant',
+    );
+    if (!prefabDefinition) {
+      throw new Error('Prefabrication Plant definition is missing');
+    }
+    const prefab = makeFacility(prefabDefinition, 900);
+    input.economy.facilities.push(prefab);
+    input.trains = [makeFreightTrainDef({
+      cargo: {
+        productId: 'structural-timber',
+        units: 10,
+        loadedUnits: 60,
+        originFacilityId: 'sawmill',
+      },
+      operations: {
+        ...makeFreightTrainDef().operations,
+        currentTripRevenue: 5_000,
+        currentTripRunningCost: 1_000,
+      },
+    })];
+    input.runtime = [makeRuntime('train-1', { x: 900 })];
+
+    const result = proposeCargoTick(input);
+
+    expect(result.completedDeliveries).toEqual([
+      expect.objectContaining({
+        productId: 'structural-timber',
+        units: 60,
+        destinationFacilityId: prefab.id,
+        operatingProfit: expect.any(Number),
+      }),
+    ]);
+    expect(result.completedDeliveries[0].operatingProfit)
+      .toBeGreaterThan(0);
+    expect(result.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: true,
+    });
+    expect(result.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([]);
+  });
+
+  it('does not award the log grant for a full profitable delivery to a non-sawmill definition', () => {
+    const input = loadedAtSawmill(10, {
+      currentTripRevenue: 5_000,
+      currentTripRunningCost: 1_000,
+    });
+    input.trains[0].cargo!.loadedUnits = 60;
+    const sawmillDefinition = ProductCatalog.getFacilityDefinition('sawmill');
+    if (!sawmillDefinition) throw new Error('Sawmill definition is missing');
+    const otherSawmillDefinition: FacilityDefinition = {
+      ...sawmillDefinition,
+      id: 'other-sawmill',
+      displayName: 'Other Sawmill',
+    };
+    const originalGetFacilityDefinition =
+      ProductCatalog.getFacilityDefinition;
+    jest.spyOn(ProductCatalog, 'getFacilityDefinition')
+      .mockImplementation((definitionId) =>
+        definitionId === otherSawmillDefinition.id
+          ? otherSawmillDefinition
+          : originalGetFacilityDefinition(definitionId));
+    input.economy.facilities = input.economy.facilities.map(
+      (candidate) => candidate.definitionId === 'sawmill'
+        ? makeFacility(otherSawmillDefinition, 500)
+        : candidate,
+    );
+
+    const result = proposeCargoTick(input);
+
+    expect(result.completedDeliveries).toEqual([
+      expect.objectContaining({
+        productId: 'logs',
+        units: 60,
+        destinationFacilityId: 'other-sawmill',
+      }),
+    ]);
+    expect(result.freightProgress).toEqual(input.freightProgress);
+    expect(result.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([]);
+  });
+
+  it('never posts a second development grant after the awarded state is reloaded', () => {
+    const input = loadedAtSawmill(10, {
+      currentTripRevenue: 5_000,
+      currentTripRunningCost: 1_000,
+    });
+    input.trains[0].cargo!.loadedUnits = 60;
+    const awarded = postLedgerEntry(input.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 4,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (awarded.ok === false) throw new Error(awarded.code);
+    input.company = JSON.parse(JSON.stringify(awarded.company));
+    input.freightProgress = {
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: true,
+      developmentGrantAwarded: true,
+      profitableStructuralTimberDeliveryCompleted: false,
+    };
+
+    const result = proposeCargoTick(input);
+
+    expect(result.freightProgress).toEqual(input.freightProgress);
+    expect(result.company.ledger.filter(
+      ({ referenceId }) =>
+        referenceId === 'regional-development-grant:v1',
+    )).toHaveLength(1);
+  });
+
+  it('rejects the whole final delivery when the grant would overflow cash', () => {
+    const quoteInput = loadedAtSawmill(10, {
+      currentTripRevenue: 5_000,
+      currentTripRunningCost: 1_000,
+    });
+    const sawmill = facility(quoteInput.economy, 'sawmill');
+    const quote = quoteLocalProduct(
+      'logs',
+      quoteInput.economy.market,
+      { ...sawmill.inventories.logs },
+    );
+    if (quote.ok === false) throw new Error(quote.code);
+    quoteInput.trains[0].cargo!.loadedUnits = 60;
+    quoteInput.company = createCompanyState(
+      Number.MAX_SAFE_INTEGER - quote.unitPrice * 10,
+    );
+    const before = JSON.parse(JSON.stringify(quoteInput));
+
+    const result = proposeCargoTick(quoteInput);
+
+    expect(result.changed).toBe(false);
+    expect(result.company).toEqual(before.company);
+    expect(result.economy).toEqual(before.economy);
+    expect(result.trains).toEqual(before.trains);
+    expect(result.freightProgress).toEqual(before.freightProgress);
+    expect(result.completedDeliveries).toEqual([]);
+  });
+
+  it('rejects the whole proposal when persisted freight progress is invalid', () => {
+    const input = loadedAtSawmill(10);
+    input.trains[0].cargo!.loadedUnits = 60;
+    (input.freightProgress as any).developmentGrantAwarded =
+      Number.MAX_SAFE_INTEGER;
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result.changed).toBe(false);
+    expect(result.company).toEqual(before.company);
+    expect(result.economy).toEqual(before.economy);
+    expect(result.trains).toEqual(before.trains);
+    expect(result.freightProgress).toEqual(before.freightProgress);
+    expect(result.completedDeliveries).toEqual([]);
+  });
+
   it.each([
     {
       name: 'lower validated construction factor',
@@ -1502,7 +1776,7 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
           quote.unitPrice * 10,
         );
         expect(proposal.company.ledger).toHaveLength(
-          input.company.ledger.length + 1,
+          input.company.ledger.length + (batch === 5 ? 2 : 1),
         );
         expect(proposal.completedDeliveries).toHaveLength(
           batch === 5 ? 1 : 0,
@@ -1526,8 +1800,10 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       );
       expect(expectedPrices).toHaveLength(6);
       expect(new Set(expectedPrices).size).toBeGreaterThan(1);
-      expect(final.company.ledger).toHaveLength(7);
-      expect(final.company.cash).toBe(initialCash + totalRevenue);
+      expect(final.company.ledger).toHaveLength(8);
+      expect(final.company.cash).toBe(
+        initialCash + totalRevenue + 250_000,
+      );
       expect(final.trains[0].cargo).toBeNull();
       expect(final.trains[0].operations).toEqual({
         currentTripRevenue: 0,
@@ -1541,6 +1817,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       expect(
         final.freightProgress.profitableLogDeliveryCompleted,
       ).toBe(totalRevenue > 5_000);
+      expect(final.freightProgress.developmentGrantAwarded)
+        .toBe(totalRevenue > 5_000);
       expect(final.completedDeliveries).toEqual([{
         trainId: 'train-1',
         productId: 'logs',
@@ -1560,10 +1838,19 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     const input = loadedAtSawmill(10, {
       currentTripRunningCost: 100_000,
     });
+    const awarded = postLedgerEntry(input.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 4,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (awarded.ok === false) throw new Error(awarded.code);
+    input.company = awarded.company;
     input.freightProgress = {
       progressVersion: 1,
       profitableLogDeliveryCompleted: true,
-      developmentGrantAwarded: false,
+      developmentGrantAwarded: true,
       profitableStructuralTimberDeliveryCompleted: false,
     };
 
