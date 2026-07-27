@@ -445,13 +445,36 @@ async function buildCheapestStarter(
     await panWorldPointToCentre(page, {
       x: (segment.geometry.p0.x + segment.geometry.p3.x) / 2,
       y: (segment.geometry.p0.y + segment.geometry.p3.y) / 2,
-    }, { x: 0.5, y: 0.4 });
+    }, { x: 0.5, y: mobile ? 0.57 : 0.4 });
     await page.keyboard.press('p');
     const current = await snapshot(page);
+    const startScreen = await toPagePoint(
+      page,
+      segment.geometry.p0,
+      current,
+    );
+    const endScreen = await toPagePoint(
+      page,
+      segment.geometry.p3,
+      current,
+    );
+    if (mobile) {
+      const dragStart = await findCanvasDragOrigin(
+        page,
+        [startScreen],
+        { x: 0, y: 0 },
+      );
+      expect(
+        dragStart.origin,
+        `construction pointer-down must clear mobile UI; coverage ${
+          JSON.stringify(dragStart.coverage)
+        }`,
+      ).toEqual(startScreen);
+    }
     await dragTrack(
       page,
-      await toPagePoint(page, segment.geometry.p0, current),
-      await toPagePoint(page, segment.geometry.p3, current),
+      startScreen,
+      endScreen,
     );
     const confirm = page.locator('[data-testid="construction-confirm"]');
     if (mobile) {
@@ -1545,7 +1568,7 @@ test.describe('real structural-timber browser journey', () => {
     test(`${seedCase.seed} completes the structural-timber link`, async ({
       page,
     }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(seedCase.viewport.width <= 720 ? 720_000 : 600_000);
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       page.on('console', (message) => {
