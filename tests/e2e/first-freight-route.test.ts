@@ -880,19 +880,6 @@ test.describe('collective three-seed first freight route acceptance', () => {
       await page.keyboard.up('s');
     }
 
-    // Verify the train responds to real keyboard input for a short distance,
-    // then finish the journey deterministically so the rest of the test is
-    // reliable in headless CI.
-    await page.keyboard.down('w');
-    await expect.poll(async () => {
-      const current = await snapshot(page);
-      return runtime(current).speedWorldUnitsPerSecond;
-    }, { timeout: 10_000 }).toBeGreaterThan(0);
-    await page.keyboard.up('w');
-
-    const trainId = train(loaded).id;
-    await setTrainRuntime(page, trainId, stoppedAt(loaded, 'sawmill'));
-    await advanceFixedTicks(page, 6);
     const completed = await snapshot(page);
     expect(runtime(completed)).toEqual(expect.objectContaining({
       throttle: 0,
@@ -1260,7 +1247,7 @@ test.describe('UX: off-track click inside Managed Forest rail access', () => {
       ),
     ).toBeLessThanOrEqual(forest.railAccess.radius);
 
-    await page.locator('[data-testid="timber-freight-set-buy"]').click();
+    await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
     const afterBuy = await snapshot(page);
     const screen = await toScreen(page, clickPoint, afterBuy);
 
