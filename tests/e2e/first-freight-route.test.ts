@@ -500,11 +500,13 @@ async function purchaseTimberSetAtForest(
   await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
   const state = await snapshot(page);
   const screen = await toScreen(page, placement.point, state);
-  await page.mouse.click(screen.x, screen.y);
+  await page.mouse.dblclick(screen.x, screen.y);
   const confirm = page.locator('[data-testid="freight-purchase-confirm"]');
   await expect(
     page.locator('[data-testid="vehicle-purchase-panel"]'),
   ).toContainText('£90,000');
+  await expect(page.locator('[data-testid="freight-purchase-remedy"]'))
+    .not.toContainText('Purchase already in progress');
   await expect(confirm).toBeEnabled();
   await confirm.click();
   await page.waitForFunction(

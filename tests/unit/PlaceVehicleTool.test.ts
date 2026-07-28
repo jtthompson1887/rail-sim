@@ -168,28 +168,35 @@ describe('PlaceVehicleTool selected freight-set purchase gesture', () => {
     EventBus.off('ui:freight-purchase-state', state);
   });
 
-  it('holds one in-flight gesture until a result and reports the exact duplicate remedy', () => {
+  it('replaces a pending placement quote when the player clicks the track again', () => {
     trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const firstQuote = Object.freeze(makeQuote());
+    const replacementQuote = Object.freeze({
+      ...makeQuote(),
+      trackT: 1,
+    });
+    quote
+      .mockReturnValueOnce(firstQuote)
+      .mockReturnValueOnce(replacementQuote);
     const state = jest.fn();
     EventBus.on('ui:freight-purchase-state', state);
 
     tool.onPointerDown(-500, 0, { button: 0 } as any);
-    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    tool.onPointerDown(500, 0, { button: 0 } as any);
 
-    expect(quote).toHaveBeenCalledTimes(1);
     expect(state).toHaveBeenLastCalledWith({
       freightSetId: 'flatbed-freight-set',
-      quote: null,
+      quote: replacementQuote,
       cash: WorldManager.world!.company.cash,
-      message: 'Purchase already in progress',
+      message: '',
     });
-
-    EventBus.emit('freight:purchase-result', {
-      ok: false,
-      blocker: 'live-spawn-failed',
-    });
-    tool.onPointerDown(-500, 0, { button: 0 } as any);
-    expect(quote).toHaveBeenCalledTimes(2);
+    expect(tool.canConfirmQuote(firstQuote)).toBe(false);
+    expect(tool.canConfirmQuote(replacementQuote)).toBe(true);
+    expect(state.mock.calls).not.toContainEqual([
+      expect.objectContaining({
+        message: 'Purchase already in progress',
+      }),
+    ]);
     EventBus.off('ui:freight-purchase-state', state);
   });
 

@@ -33,7 +33,6 @@ export class PlaceVehicleTool implements IEditorTool {
   private readonly SNAP_THRESHOLD = 80;
   private freightSetId: FreightPurchaseSetId =
     FLATBED_FREIGHT_SET_ID;
-  private purchaseInFlight = false;
   private currentQuote: FreightPurchaseQuote | null = null;
   private lastPlacement: Omit<FreightPurchaseQuoteInput, 'topology'> | null =
     null;
@@ -67,8 +66,7 @@ export class PlaceVehicleTool implements IEditorTool {
   }
 
   canConfirmQuote(quote: FreightPurchaseQuote): boolean {
-    return this.purchaseInFlight
-      && this.currentQuote === quote
+    return this.currentQuote === quote
       && quote.freightSetId === this.freightSetId
       && quote.valid
       && quote.blocker === null;
@@ -101,18 +99,10 @@ export class PlaceVehicleTool implements IEditorTool {
   ): void {
     if (!this.wantsPointerButton(pointer.button)) return;
 
-    if (this.purchaseInFlight) {
-      this.publishState(
-        null,
-        formatFreightPurchaseRemedy('duplicate-gesture', this.freightSetId),
-      );
-      return;
-    }
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
       this.lastPlacement = null;
       this.currentQuote = null;
-      this.purchaseInFlight = false;
       this.publishState(
         null,
         formatFreightPurchaseRemedy('no-track', this.freightSetId),
@@ -131,7 +121,6 @@ export class PlaceVehicleTool implements IEditorTool {
     const quote = this.quoteService?.quote(input);
     if (!quote) {
       this.currentQuote = null;
-      this.purchaseInFlight = false;
       this.publishState(
         null,
         formatFreightPurchaseRemedy('no-track', this.freightSetId),
@@ -143,12 +132,6 @@ export class PlaceVehicleTool implements IEditorTool {
       ? formatFreightPurchaseRemedy(detached.blocker, this.freightSetId)
       : '';
     this.currentQuote = detached;
-    this.purchaseInFlight = false;
-    if (detached.valid
-      && detached.blocker === null
-      && detached.freightSetId === this.freightSetId) {
-      this.purchaseInFlight = true;
-    }
     this.publishState(detached, message);
   }
 
@@ -282,11 +265,9 @@ export class PlaceVehicleTool implements IEditorTool {
   }
 
   private clearPendingPurchase(): boolean {
-    const cleared = this.purchaseInFlight
-      || this.currentQuote !== null
+    const cleared = this.currentQuote !== null
       || this.lastPlacement !== null;
     this.ghostGraphics.clear();
-    this.purchaseInFlight = false;
     this.currentQuote = null;
     this.lastPlacement = null;
     return cleared;
@@ -295,7 +276,6 @@ export class PlaceVehicleTool implements IEditorTool {
   private readonly purchaseResultHandler = (
     result: FreightPurchaseResult,
   ): void => {
-    this.purchaseInFlight = false;
     if (result.ok === false && result.blocker === 'stale-revision') {
       if (!this.lastPlacement || !this.quoteService) {
         this.currentQuote = null;
@@ -310,9 +290,6 @@ export class PlaceVehicleTool implements IEditorTool {
         topology: this.trackManager.captureTopology(),
       }));
       this.currentQuote = freshQuote;
-      this.purchaseInFlight = freshQuote.valid
-        && freshQuote.blocker === null
-        && freshQuote.freightSetId === this.freightSetId;
       this.publishState(
         freshQuote,
         'Freight state changed · review and retry purchase',
