@@ -112,7 +112,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
 
   it.each([
     [
-      'outside-forest-access',
+      'outside-source-access',
       'Place inside Managed Forest rail access',
     ],
     [
