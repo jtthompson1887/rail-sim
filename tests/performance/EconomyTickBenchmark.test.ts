@@ -11,6 +11,7 @@ import {
   type EconomyWorldPort,
   type EconomyUpdateResult,
 } from '../../src/economy/EconomySystem';
+import { potentialAcceptedProduct } from '../../src/freight/FacilityCargoRules';
 import type { OperationsDraft } from '../../src/managers/WorldManager';
 import {
   clonePlainData,
@@ -24,6 +25,11 @@ import {
 const WARMUP_TICKS = 100;
 const MEASURED_TICKS = 500;
 const P95_BUDGET_MS = 16;
+const BENCHMARK_FREIGHT_SET_IDS = [
+  'flatbed-freight-set',
+  'aggregate-hopper-set',
+  'covered-cement-set',
+] as const;
 const collectingCoverage = (
   globalThis as typeof globalThis & {
     readonly __RAIL_SIM_COLLECT_COVERAGE__: boolean;
@@ -198,6 +204,25 @@ describe('EconomySystem multi-train tick budget', () => {
         contention: 0,
       } satisfies Record<EconomyTickBenchmarkState, number>,
     );
+    const freightSetCounts = Object.fromEntries(
+      BENCHMARK_FREIGHT_SET_IDS.map((freightSetId) => [
+        freightSetId,
+        first.fixture.world.trains.filter(
+          (train) => train.freightSetId === freightSetId,
+        ).length,
+      ]),
+    );
+    const stateSetCounts = Object.fromEntries(
+      Object.keys(stateCounts).map((state) => [
+        state,
+        Object.fromEntries(BENCHMARK_FREIGHT_SET_IDS.map((freightSetId) => [
+          freightSetId,
+          first.fixture.world.trains.filter((train) =>
+            first.fixture.stateByTrainId[train.id] === state
+              && train.freightSetId === freightSetId).length,
+        ])),
+      ]),
+    );
     const p95 = percentile95(first.durations);
     const firstStatusByTrainId = Object.fromEntries(
       first.firstTick!.cargoStatuses.map((status) => [
@@ -209,6 +234,70 @@ describe('EconomySystem multi-train tick budget', () => {
     expect(validateWorldData(first.fixture.world).compatible).toBe(true);
     expect(first.fixture.world.economy.facilities).toHaveLength(7);
     expect(first.fixture.world.trains).toHaveLength(12);
+    const initialFullDestinationTrains = first.fixture.world.trains.filter(
+      (train) =>
+        first.fixture.stateByTrainId[train.id] === 'full-destination',
+    );
+    expect(initialFullDestinationTrains).toHaveLength(2);
+    initialFullDestinationTrains.forEach((train) => {
+      const runtime = first.fixture.runtime.find(
+        (candidate) => candidate.trainId === train.id,
+      );
+      const productId = train.cargo?.productId;
+      expect(runtime).toBeDefined();
+      expect(productId).toBeDefined();
+      const compatibleDestinations =
+        first.fixture.world.economy.facilities.filter((facility) =>
+          runtime !== undefined
+          && productId !== undefined
+          && Math.hypot(
+            runtime.x - facility.railAccess.x,
+            runtime.y - facility.railAccess.y,
+          ) <= facility.railAccess.radius
+          && potentialAcceptedProduct(facility, productId) !== null);
+      expect(compatibleDestinations).toHaveLength(1);
+      const destination = compatibleDestinations[0];
+      const slot = destination?.inventories[productId!];
+      expect(slot).toBeDefined();
+      expect(slot!.quantity).toBe(slot!.capacity);
+    });
+    expect(freightSetCounts).toEqual({
+      'flatbed-freight-set': 4,
+      'aggregate-hopper-set': 4,
+      'covered-cement-set': 4,
+    });
+    expect(stateSetCounts).toEqual({
+      loading: {
+        'flatbed-freight-set': 1,
+        'aggregate-hopper-set': 1,
+        'covered-cement-set': 0,
+      },
+      transit: {
+        'flatbed-freight-set': 1,
+        'aggregate-hopper-set': 1,
+        'covered-cement-set': 0,
+      },
+      unloading: {
+        'flatbed-freight-set': 0,
+        'aggregate-hopper-set': 1,
+        'covered-cement-set': 1,
+      },
+      idle: {
+        'flatbed-freight-set': 0,
+        'aggregate-hopper-set': 1,
+        'covered-cement-set': 1,
+      },
+      'full-destination': {
+        'flatbed-freight-set': 2,
+        'aggregate-hopper-set': 0,
+        'covered-cement-set': 0,
+      },
+      contention: {
+        'flatbed-freight-set': 0,
+        'aggregate-hopper-set': 0,
+        'covered-cement-set': 2,
+      },
+    });
     expect(stateCounts).toEqual({
       loading: 2,
       transit: 2,
@@ -241,7 +330,7 @@ describe('EconomySystem multi-train tick budget', () => {
     expect(first.world.economy.tick).toBe(600);
     expect(first.world.operationsRevision).toBe(600);
     expect(first.hash).toBe(second.hash);
-    expect(first.hash).toBe('0284c75e');
+    expect(first.hash).toBe('6b45cd75');
     expect(Number.isFinite(p95)).toBe(true);
     expect(p95).toBeGreaterThanOrEqual(0);
     if (!collectingCoverage) {

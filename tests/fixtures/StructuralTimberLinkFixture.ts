@@ -88,11 +88,12 @@ const makeBenchmarkFacility = (
 
 const makeBenchmarkTrain = (
   id: string,
+  freightSetId: TrainDef['freightSetId'],
   trackT: number,
   cargo: TrainDef['cargo'],
 ): TrainDef => ({
   id,
-  freightSetId: 'flatbed-freight-set',
+  freightSetId,
   trackUUID: BENCHMARK_TRACK_ID,
   trackT,
   facing: 1,
@@ -174,18 +175,29 @@ export const makeEconomyTickBenchmarkFixture =
   const sawmill = world.economy.facilities.find(
     ({ definitionId }) => definitionId === 'sawmill',
   );
+  const quarry = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'quarry',
+  );
+  const cementWorks = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'cement-works',
+  );
   const prefab = world.economy.facilities.find(
     ({ definitionId }) => definitionId === 'prefabrication-plant',
   );
-  if (!forest || !sawmill || !prefab) {
+  if (!forest || !sawmill || !quarry || !cementWorks || !prefab) {
     throw new Error('Benchmark freight facilities are missing');
   }
   forest.inventories.logs.quantity = 120;
   sawmill.inventories.logs.quantity = 0;
   sawmill.inventories['structural-timber'].quantity = 10;
+  quarry.inventories['limestone-aggregate'].quantity = 120;
+  cementWorks.inventories['limestone-aggregate'].quantity =
+    cementWorks.inventories['limestone-aggregate'].capacity - 10;
+  cementWorks.inventories.cement.quantity = 10;
   prefab.inventories['structural-timber'].quantity =
     prefab.inventories['structural-timber'].capacity;
-  prefab.inventories.cement.quantity = 0;
+  prefab.inventories.cement.quantity =
+    prefab.inventories.cement.capacity - 10;
   prefab.inventories.steel.quantity = 0;
 
   const stopped = (
@@ -209,26 +221,57 @@ export const makeEconomyTickBenchmarkFixture =
     loadedUnits: 60,
     originFacilityId: forest.id,
   });
+  const limestoneAggregate = (
+    units: number,
+  ): TrainDef['cargo'] => ({
+    productId: 'limestone-aggregate',
+    units,
+    loadedUnits: 120,
+    originFacilityId: quarry.id,
+  });
   const structuralTimber = (): TrainDef['cargo'] => ({
     productId: 'structural-timber',
     units: 20,
     loadedUnits: 60,
     originFacilityId: sawmill.id,
   });
+  const cement = (
+    units: number,
+  ): TrainDef['cargo'] => ({
+    productId: 'cement',
+    units,
+    loadedUnits: 80,
+    originFacilityId: cementWorks.id,
+  });
   const inputs: BenchmarkTrainInput[] = [
     {
       state: 'loading',
-      train: makeBenchmarkTrain('loading-a', 0.125, null),
+      train: makeBenchmarkTrain(
+        'loading-a',
+        'flatbed-freight-set',
+        0.125,
+        null,
+      ),
       runtime: stopped(0.125, forest.x),
     },
     {
       state: 'loading',
-      train: makeBenchmarkTrain('loading-b', 0.125, null),
-      runtime: stopped(0.125, forest.x),
+      train: makeBenchmarkTrain(
+        'loading-b',
+        'aggregate-hopper-set',
+        0.375,
+        null,
+      ),
+      runtime: stopped(0.375, quarry.x),
     },
     {
       state: 'transit',
-      train: makeBenchmarkTrain('transit-a', 0.42, logs(40)),
+      train: makeBenchmarkTrain(
+        'transit-a',
+        'flatbed-freight-set',
+        0.42,
+        logs(40),
+      ),
       runtime: {
         ...stopped(0.42, -192),
         speedWorldUnitsPerSecond: 18,
@@ -237,7 +280,12 @@ export const makeEconomyTickBenchmarkFixture =
     },
     {
       state: 'transit',
-      train: makeBenchmarkTrain('transit-b', 0.46, logs(40)),
+      train: makeBenchmarkTrain(
+        'transit-b',
+        'aggregate-hopper-set',
+        0.46,
+        limestoneAggregate(40),
+      ),
       runtime: {
         ...stopped(0.46, -96),
         speedWorldUnitsPerSecond: 18,
@@ -246,43 +294,83 @@ export const makeEconomyTickBenchmarkFixture =
     },
     {
       state: 'unloading',
-      train: makeBenchmarkTrain('unloading-a', 0.25, logs(30)),
-      runtime: stopped(0.25, sawmill.x),
+      train: makeBenchmarkTrain(
+        'unloading-a',
+        'aggregate-hopper-set',
+        0.5,
+        limestoneAggregate(30),
+      ),
+      runtime: stopped(0.5, cementWorks.x),
     },
     {
       state: 'unloading',
-      train: makeBenchmarkTrain('unloading-b', 0.25, logs(30)),
-      runtime: stopped(0.25, sawmill.x),
+      train: makeBenchmarkTrain(
+        'unloading-b',
+        'covered-cement-set',
+        0.75,
+        cement(30),
+      ),
+      runtime: stopped(0.75, prefab.x),
     },
     {
       state: 'idle',
-      train: makeBenchmarkTrain('idle-a', 1, null),
+      train: makeBenchmarkTrain(
+        'idle-a',
+        'aggregate-hopper-set',
+        1,
+        null,
+      ),
       runtime: stopped(1, 1_200),
     },
     {
       state: 'idle',
-      train: makeBenchmarkTrain('idle-b', 1, null),
+      train: makeBenchmarkTrain(
+        'idle-b',
+        'covered-cement-set',
+        1,
+        null,
+      ),
       runtime: stopped(1, 1_200),
     },
     {
       state: 'full-destination',
-      train: makeBenchmarkTrain('full-destination-a', 0.75, structuralTimber()),
+      train: makeBenchmarkTrain(
+        'full-destination-a',
+        'flatbed-freight-set',
+        0.75,
+        structuralTimber(),
+      ),
       runtime: stopped(0.75, prefab.x),
     },
     {
       state: 'full-destination',
-      train: makeBenchmarkTrain('full-destination-b', 0.75, structuralTimber()),
+      train: makeBenchmarkTrain(
+        'full-destination-b',
+        'flatbed-freight-set',
+        0.75,
+        structuralTimber(),
+      ),
       runtime: stopped(0.75, prefab.x),
     },
     {
       state: 'contention',
-      train: makeBenchmarkTrain('contention-a', 0.25, null),
-      runtime: stopped(0.25, sawmill.x),
+      train: makeBenchmarkTrain(
+        'contention-a',
+        'covered-cement-set',
+        0.5,
+        null,
+      ),
+      runtime: stopped(0.5, cementWorks.x),
     },
     {
       state: 'contention',
-      train: makeBenchmarkTrain('contention-b', 0.25, null),
-      runtime: stopped(0.25, sawmill.x),
+      train: makeBenchmarkTrain(
+        'contention-b',
+        'covered-cement-set',
+        0.5,
+        null,
+      ),
+      runtime: stopped(0.5, cementWorks.x),
     },
   ];
   world.trains = inputs.map(({ train }) => clonePlainData(train));
