@@ -258,9 +258,9 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 8 with a generated economy and conserved opening balance', () => {
+    it('creates schema 9 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(8);
+      expect(w.schemaVersion).toBe(9);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.operationsRevision).toBe(0);
@@ -269,6 +269,8 @@ describe('WorldManager', () => {
         profitableLogDeliveryCompleted: false,
         developmentGrantAwarded: false,
         profitableStructuralTimberDeliveryCompleted: false,
+        profitableLimestoneDeliveryCompleted: false,
+        profitableCementDeliveryCompleted: false,
       });
       expect(w).not.toHaveProperty('firstRouteProgress');
       expect(w.generationConfig).toEqual({
@@ -718,6 +720,8 @@ describe('WorldManager', () => {
           draft.economy.facilities[0].name += ' upgraded';
           draft.trains.push(makeFreightTrainDef());
           draft.freightProgress.profitableLogDeliveryCompleted = true;
+          draft.freightProgress.profitableLimestoneDeliveryCompleted = true;
+          draft.freightProgress.profitableCementDeliveryCompleted = true;
           return true;
         },
       )).toBe(true);
@@ -731,6 +735,10 @@ describe('WorldManager', () => {
       expect(world.economy.facilities[0].name).toContain('upgraded');
       expect(world.trains).toEqual([makeFreightTrainDef()]);
       expect(world.freightProgress.profitableLogDeliveryCompleted).toBe(true);
+      expect(world.freightProgress.profitableLimestoneDeliveryCompleted)
+        .toBe(true);
+      expect(world.freightProgress.profitableCementDeliveryCompleted)
+        .toBe(true);
       expect(world.revision).toBe(rootBefore + 1);
       expect(world.constructionRevision).toBe(constructionBefore);
       expect(world.operationsRevision).toBe(operationsBefore + 1);
@@ -743,6 +751,8 @@ describe('WorldManager', () => {
       escaped.economy.tick += 1;
       escaped.trains[0].trackT = 0.9;
       escaped.freightProgress.profitableLogDeliveryCompleted = false;
+      escaped.freightProgress.profitableLimestoneDeliveryCompleted = false;
+      escaped.freightProgress.profitableCementDeliveryCompleted = false;
       expect(JSON.stringify(world)).toBe(installed);
     });
 

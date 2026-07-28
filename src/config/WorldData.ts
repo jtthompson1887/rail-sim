@@ -194,11 +194,13 @@ export interface FreightProgressDef {
   profitableLogDeliveryCompleted: boolean;
   developmentGrantAwarded: boolean;
   profitableStructuralTimberDeliveryCompleted: boolean;
+  profitableLimestoneDeliveryCompleted: boolean;
+  profitableCementDeliveryCompleted: boolean;
 }
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 8;
+  schemaVersion: 9;
   revision: number;
   constructionRevision: number;
   operationsRevision: number;
@@ -232,7 +234,7 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -253,6 +255,8 @@ export function createEmptyWorld(
       profitableLogDeliveryCompleted: false,
       developmentGrantAwarded: false,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     },
     starterOpportunity: clonePlainData(starterOpportunity),
     tracks: [],
@@ -405,7 +409,7 @@ function isTrack(value: unknown): value is TrackDef {
     && isStructureSequence(value.structures)
     && structureElevationsMatchProfile(value.structures, value.verticalProfile)
     && Number.isSafeInteger(value.paidBuildCost)
-    && value.paidBuildCost >= 0
+    && (value.paidBuildCost as number) >= 0
     && !('isTunnel' in value)
     && !('elevation' in value);
 }
@@ -644,10 +648,10 @@ function isTrain(
     || typeof value.cargo.originFacilityId !== 'string'
     || !facilityIds.has(value.cargo.originFacilityId)
     || !Number.isSafeInteger(value.cargo.units)
-    || value.cargo.units <= 0
+    || (value.cargo.units as number) <= 0
     || !Number.isSafeInteger(value.cargo.loadedUnits)
-    || value.cargo.loadedUnits <= 0
-    || value.cargo.units > value.cargo.loadedUnits) {
+    || (value.cargo.loadedUnits as number) <= 0
+    || (value.cargo.units as number) > (value.cargo.loadedUnits as number)) {
     return false;
   }
   const product = getProduct(value.cargo.productId);
@@ -655,17 +659,20 @@ function isTrain(
   return product !== undefined
     && capacity !== undefined
     && capacity.ok
-    && value.cargo.loadedUnits <= capacity.capacityUnits;
+    && (value.cargo.loadedUnits as number) <= capacity.capacityUnits;
 }
 
 function isFreightProgress(
   value: unknown,
 ): value is FreightProgressDef {
   return isRecord(value)
+    && Object.keys(value).length === 6
     && value.progressVersion === 1
     && typeof value.profitableLogDeliveryCompleted === 'boolean'
     && typeof value.developmentGrantAwarded === 'boolean'
-    && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
+    && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean'
+    && typeof value.profitableLimestoneDeliveryCompleted === 'boolean'
+    && typeof value.profitableCementDeliveryCompleted === 'boolean';
 }
 
 function isScenery(value: unknown): value is SceneryObjectDef {
@@ -826,7 +833,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 8) {
+  if (raw.schemaVersion !== 9) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -870,7 +877,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 8.');
+    return incompatible(raw, 'data does not match schema version 9.');
   }
   const forwardGrantCount = countForwardRegionalDevelopmentGrants(
     company as CompanyStateDef,

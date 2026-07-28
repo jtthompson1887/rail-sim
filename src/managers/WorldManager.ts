@@ -268,8 +268,8 @@ class WorldManagerClass {
               || !Number.isInteger(
                 economyResult.diagnostics.candidatesEvaluated,
               )
-              || economyResult.diagnostics.candidatesEvaluated < 5
-              || economyResult.diagnostics.candidatesEvaluated
+              || (economyResult.diagnostics.candidatesEvaluated as number) < 5
+              || (economyResult.diagnostics.candidatesEvaluated as number)
                 > MAX_ECONOMY_SITE_CANDIDATES
               || !validateGeneratedEconomy(
                 economyResult.economy,

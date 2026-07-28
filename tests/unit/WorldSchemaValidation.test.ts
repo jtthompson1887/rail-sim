@@ -61,7 +61,7 @@ function currentWorld() {
     'alpine',
     undefined as any,
   ) as any;
-  world.schemaVersion = 8;
+  world.schemaVersion = 9;
   world.revision = 0;
   world.constructionRevision = 0;
   world.operationsRevision = 0;
@@ -71,6 +71,8 @@ function currentWorld() {
     profitableLogDeliveryCompleted: false,
     developmentGrantAwarded: false,
     profitableStructuralTimberDeliveryCompleted: false,
+    profitableLimestoneDeliveryCompleted: false,
+    profitableCementDeliveryCompleted: false,
   };
   delete world.firstRouteProgress;
   world.company = JSON.parse(JSON.stringify(createCompanyState(1_000_000)));
@@ -222,7 +224,7 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('creates the exact empty schema-8 freight progress authority', () => {
+  it('creates the exact empty schema-9 freight progress authority', () => {
     const world = createEmptyWorld(
       'Freight',
       'seed',
@@ -231,7 +233,7 @@ describe('world schema validation', () => {
     ) as any;
 
     expect(world).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       constructionRevision: 0,
       operationsRevision: 0,
@@ -241,6 +243,8 @@ describe('world schema validation', () => {
         profitableLogDeliveryCompleted: false,
         developmentGrantAwarded: false,
         profitableStructuralTimberDeliveryCompleted: false,
+        profitableLimestoneDeliveryCompleted: false,
+        profitableCementDeliveryCompleted: false,
       },
     });
     expect(world.freightProgress).toEqual({
@@ -248,11 +252,13 @@ describe('world schema validation', () => {
       profitableLogDeliveryCompleted: false,
       developmentGrantAwarded: false,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     });
     expect(world).not.toHaveProperty('firstRouteProgress');
   });
 
-  it('round-trips schema 8 with exact construction and operations revisions', () => {
+  it('round-trips schema 9 with exact construction and operations revisions', () => {
     const world = currentWorld();
     world.revision = 7;
     world.constructionRevision = 3;
@@ -271,7 +277,8 @@ describe('world schema validation', () => {
     ['schema-five', 5],
     ['schema-six', 6],
     ['schema-seven', 7],
-    ['unsupported', 9],
+    ['schema-eight', 8],
+    ['unsupported', 10],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -291,7 +298,7 @@ describe('world schema validation', () => {
     }));
   });
 
-  it('rejects the deprecated firstRouteProgress authority on schema 8', () => {
+  it('rejects the deprecated firstRouteProgress authority on schema 9', () => {
     const raw = currentWorld();
     raw.firstRouteProgress = {
       objectiveVersion: 1,
@@ -527,7 +534,16 @@ describe('world schema validation', () => {
     ['non-boolean structural-timber latch', (world: any) => {
       world.freightProgress.profitableStructuralTimberDeliveryCompleted = 0;
     }],
-  ])('rejects schema 8 with %s', (_label, mutate) => {
+    ['non-boolean limestone latch', (world: any) => {
+      world.freightProgress.profitableLimestoneDeliveryCompleted = 0;
+    }],
+    ['non-boolean cement latch', (world: any) => {
+      world.freightProgress.profitableCementDeliveryCompleted = 0;
+    }],
+    ['unexpected progress key', (world: any) => {
+      world.freightProgress.speculativeProgress = false;
+    }],
+  ])('rejects schema 9 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -997,7 +1013,7 @@ describe('world schema validation', () => {
   });
 
   it('preserves incompatible saves as structured picker results without loading them', () => {
-    const incompatible = { ...currentWorld(), schemaVersion: 9 };
+    const incompatible = { ...currentWorld(), schemaVersion: 8 };
     localStorage.setItem(
       GameConfig.WORLD.WORLDS_SAVE_KEY,
       JSON.stringify({ [incompatible.id]: incompatible }),
@@ -1038,7 +1054,7 @@ describe('world schema validation', () => {
   });
 
   it('refuses to import or persist incompatible input', () => {
-    const incompatible = { ...currentWorld(), schemaVersion: 9 };
+    const incompatible = { ...currentWorld(), schemaVersion: 8 };
     expect(SaveService.importWorld(JSON.stringify(incompatible))).toBeNull();
     expect(SaveService.loadAllWorlds()).toEqual({});
   });

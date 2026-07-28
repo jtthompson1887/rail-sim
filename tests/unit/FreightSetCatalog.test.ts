@@ -1,7 +1,9 @@
 import type { ProductDefinition } from '../../src/economy/EconomyData';
 import { getProduct } from '../../src/economy/ProductCatalog';
 import {
+  AGGREGATE_HOPPER_SET_ID,
   capacityForProduct,
+  COVERED_CEMENT_SET_ID,
   FreightSetDefinition,
   FLATBED_FREIGHT_SET_ID,
   FLATBED_TRAIN_PURCHASE_PRICE,
@@ -31,43 +33,81 @@ const cloneFlatbedSet = (): MutableFreightSetDefinition => ({
 const logs = (): ProductDefinition => getProduct('logs')!;
 const structuralTimber = (): ProductDefinition =>
   getProduct('structural-timber')!;
+const limestoneAggregate = (): ProductDefinition =>
+  getProduct('limestone-aggregate')!;
+const cement = (): ProductDefinition => getProduct('cement')!;
 
-describe('flatbed freight set catalogue', () => {
-  it('contains exactly the approved general flatbed set and reserves', () => {
+describe('freight set catalogue', () => {
+  it('contains exactly the three approved cargo-class-specific sets', () => {
     expect(FLATBED_FREIGHT_SET_ID).toBe('flatbed-freight-set');
+    expect(AGGREGATE_HOPPER_SET_ID).toBe('aggregate-hopper-set');
+    expect(COVERED_CEMENT_SET_ID).toBe('covered-cement-set');
     expect(FLATBED_TRAIN_PURCHASE_PRICE).toBe(90_000);
     expect(OPERATING_RESERVE).toBe(20_000);
     expect(STARTER_ROUTE_RESERVE).toBe(110_000);
-    expect(FREIGHT_SETS).toEqual([{
-      id: 'flatbed-freight-set',
-      displayName: 'General Flatbed Set',
-      compatibleProductIds: ['logs', 'structural-timber'],
-      payloadMassKg: 60_000,
-      payloadVolumeLitres: 96_000,
-      purchasePrice: 90_000,
-      runningCostPerActiveTick: 20,
-    }]);
+    expect(FREIGHT_SETS).toEqual([
+      {
+        id: 'flatbed-freight-set',
+        displayName: 'General Flatbed Set',
+        cargoClass: 'flatbed',
+        compatibleProductIds: ['logs', 'structural-timber'],
+        payloadMassKg: 60_000,
+        payloadVolumeLitres: 96_000,
+        purchasePrice: 90_000,
+        runningCostPerActiveTick: 20,
+      },
+      {
+        id: 'aggregate-hopper-set',
+        displayName: 'Aggregate Hopper Set',
+        cargoClass: 'bulk',
+        compatibleProductIds: ['limestone-aggregate'],
+        payloadMassKg: 120_000,
+        payloadVolumeLitres: 75_000,
+        purchasePrice: 110_000,
+        runningCostPerActiveTick: 20,
+      },
+      {
+        id: 'covered-cement-set',
+        displayName: 'Covered Cement Set',
+        cargoClass: 'covered',
+        compatibleProductIds: ['cement'],
+        payloadMassKg: 80_000,
+        payloadVolumeLitres: 64_000,
+        purchasePrice: 105_000,
+        runningCostPerActiveTick: 22,
+      },
+    ]);
   });
 
   it.each([
-    ['logs', logs],
-    ['structural timber', structuralTimber],
-  ])('derives the exact 60-unit %s capacity from mass and volume', (
+    ['flatbed-freight-set', 'logs', logs, 60],
+    ['flatbed-freight-set', 'structural timber', structuralTimber, 60],
+    ['aggregate-hopper-set', 'limestone aggregate', limestoneAggregate, 120],
+    ['covered-cement-set', 'cement', cement, 80],
+  ])('derives the exact %s %s capacity from mass and volume', (
+    freightSetId,
     _description,
     product,
+    expectedCapacity,
   ) => {
     expect(capacityForProduct(
-      getFreightSet('flatbed-freight-set')!,
+      getFreightSet(freightSetId)!,
       product(),
-    )).toEqual({ ok: true, capacityUnits: 60 });
+    )).toEqual({ ok: true, capacityUnits: expectedCapacity });
   });
 
-  it('returns the same immutable definition on repeated lookup', () => {
-    const first = getFreightSet(FLATBED_FREIGHT_SET_ID)!;
-    const second = getFreightSet(FLATBED_FREIGHT_SET_ID)!;
+  it.each([
+    FLATBED_FREIGHT_SET_ID,
+    AGGREGATE_HOPPER_SET_ID,
+    COVERED_CEMENT_SET_ID,
+  ])('returns the same immutable %s definition on repeated lookup', (
+    freightSetId,
+  ) => {
+    const first = getFreightSet(freightSetId)!;
+    const second = getFreightSet(freightSetId)!;
 
     expect(first).toBe(second);
-    expect(first).toBe(FREIGHT_SETS[0]);
+    expect(FREIGHT_SETS).toContain(first);
     expect(Object.isFrozen(FREIGHT_SETS)).toBe(true);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.compatibleProductIds)).toBe(true);
@@ -89,11 +129,25 @@ describe('flatbed freight set catalogue', () => {
 });
 
 describe('validateFreightSetContent', () => {
-  it('accepts the general flatbed set catalogue', () => {
+  it('accepts the complete cargo-class-matched catalogue', () => {
     expect(validateFreightSetContent(
       FREIGHT_SETS,
-      [logs(), structuralTimber()],
+      [logs(), structuralTimber(), limestoneAggregate(), cement()],
     )).toEqual({ valid: true });
+  });
+
+  it('rejects a compatible product from a different cargo class', () => {
+    const set = cloneFlatbedSet();
+    set.compatibleProductIds = ['limestone-aggregate'];
+
+    expect(validateFreightSetContent(
+      [set],
+      [limestoneAggregate()],
+    )).toEqual({
+      valid: false,
+      code: 'cargo-class-mismatch',
+      referenceId: 'limestone-aggregate',
+    });
   });
 
   it('rejects duplicate freight set IDs', () => {

@@ -199,6 +199,43 @@ describe('LevelData', () => {
 });
 
 describe('WorldData current-schema validation', () => {
+  it('creates schema 9 with the exact mineral freight progress authority', () => {
+    const world = createEmptyWorld(
+      'Mineral freight',
+      'mineral-seed',
+      'temperate',
+      makeStarterOpportunity('mineral-seed'),
+    );
+
+    expect(world.schemaVersion).toBe(9);
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
+    });
+  });
+
+  it('rejects schema 8 without converting it', () => {
+    const world = {
+      ...createEmptyWorld(
+        'Old freight world',
+        'schema-eight-seed',
+        'temperate',
+        makeStarterOpportunity('schema-eight-seed'),
+      ),
+      schemaVersion: 8,
+    } as any;
+
+    expect(validateWorldData(world)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+    expect(world.schemaVersion).toBe(8);
+  });
+
   it('rejects legacy passenger keys instead of backfilling freight authority', () => {
     const world = createEmptyWorld(
       'Current world',
