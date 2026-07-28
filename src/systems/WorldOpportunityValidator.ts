@@ -1,7 +1,5 @@
-import {
-  ENDPOINT_CONNECTION_COST,
-  STANDARD_STARTING_CASH,
-} from '../config/ConstructionConfig';
+import { ENDPOINT_CONNECTION_COST } from '../config/ConstructionConfig';
+import { MAX_STARTER_CORRIDOR_COST } from '../config/FreightProgression';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   WorldGenerationConfig,
@@ -12,7 +10,6 @@ import type {
   WorldGenerationConfigDef,
 } from '../config/WorldData';
 import { validateStarterOpportunityData } from '../config/WorldData';
-import { STARTER_ROUTE_RESERVE } from '../freight/FreightSetCatalog';
 import {
   ConstructionAnalyzer,
   type ConstructionAnalysisDetail,
@@ -23,8 +20,7 @@ import {
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
 
-export const MAX_STARTER_CORRIDOR_COST =
-  STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE;
+export { MAX_STARTER_CORRIDOR_COST } from '../config/FreightProgression';
 
 export type OpportunityValidationResult =
   | { valid: true }

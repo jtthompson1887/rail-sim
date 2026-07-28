@@ -2,6 +2,8 @@ import { WorldOpportunityGenerator } from '../../src/systems/WorldOpportunityGen
 import { WorldOpportunityValidator } from '../../src/systems/WorldOpportunityValidator';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
 import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import { MAX_STARTER_CORRIDOR_COST } from '../../src/config/FreightProgression';
+import { MAX_OPPORTUNITY_ATTEMPTS } from '../../src/config/WorldGeneration';
 
 const terrain = {
   getHeightAt(x: number, y: number): number {
@@ -87,7 +89,7 @@ describe('WorldOpportunityValidator', () => {
       value.sites[0].x = 9000;
     }],
     ['attempt above the fixed cap', (value: StarterOpportunityDef) => {
-      value.resolvedAttempt = 13;
+      value.resolvedAttempt = MAX_OPPORTUNITY_ATTEMPTS + 1;
     }],
     ['invalid camera', (value: StarterOpportunityDef) => {
       value.recommendedCamera.zoom = Number.NaN;
@@ -124,8 +126,10 @@ describe('WorldOpportunityValidator', () => {
     expect(validator.validate(opportunity(), config).valid).toBe(false);
   });
 
-  it('accepts a cheapest corridor costing exactly £890,000', () => {
-    const fixture = opportunityWithCheapestCorridorCost(890_000);
+  it('accepts a cheapest corridor costing exactly £400,000', () => {
+    const fixture = opportunityWithCheapestCorridorCost(
+      MAX_STARTER_CORRIDOR_COST,
+    );
 
     expect(new WorldOpportunityValidator(terrain, fixture.analyzer).validate(
       fixture.value,
@@ -133,8 +137,10 @@ describe('WorldOpportunityValidator', () => {
     )).toEqual({ valid: true });
   });
 
-  it('rejects a £890,001 cheapest corridor with the reserve reason', () => {
-    const fixture = opportunityWithCheapestCorridorCost(890_001);
+  it('rejects a £400,001 cheapest corridor with the reserve reason', () => {
+    const fixture = opportunityWithCheapestCorridorCost(
+      MAX_STARTER_CORRIDOR_COST + 1,
+    );
 
     expect(new WorldOpportunityValidator(terrain, fixture.analyzer).validate(
       fixture.value,

@@ -18,6 +18,7 @@ import type {
 } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
 import {
+  MAX_CEMENT_SUPPLY_PAIR_ANALYSES,
   WorldEconomyGenerator,
   type EconomyGenerationResult,
   validateGeneratedEconomy,
@@ -87,6 +88,16 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasValidEconomyAnalysisCounts(value: UnknownRecord): boolean {
+  return Number.isInteger(value.prefabAnalyses)
+    && (value.prefabAnalyses as number) >= 0
+    && (value.prefabAnalyses as number) <= MAX_ECONOMY_SITE_CANDIDATES
+    && Number.isInteger(value.mineralPairAnalyses)
+    && (value.mineralPairAnalyses as number) >= 0
+    && (value.mineralPairAnalyses as number)
+      <= MAX_CEMENT_SUPPLY_PAIR_ANALYSES;
+}
+
 function isOpportunityFailure(
   value: unknown,
   seed: string,
@@ -115,6 +126,7 @@ function isEconomyFailure(
   return error.code === 'economy-exhausted'
     && error.seed === seed
     && error.candidatesEvaluated === MAX_ECONOMY_SITE_CANDIDATES
+    && hasValidEconomyAnalysisCounts(error)
     && Number.isInteger(error.facilitiesPlaced)
     && (error.facilitiesPlaced as number) >= 0
     && (error.facilitiesPlaced as number) < 5;
@@ -271,6 +283,7 @@ class WorldManagerClass {
               || (economyResult.diagnostics.candidatesEvaluated as number) < 5
               || (economyResult.diagnostics.candidatesEvaluated as number)
                 > MAX_ECONOMY_SITE_CANDIDATES
+              || !hasValidEconomyAnalysisCounts(economyResult.diagnostics)
               || !validateGeneratedEconomy(
                 economyResult.economy,
                 opportunity,
@@ -349,6 +362,7 @@ class WorldManagerClass {
       || (generatedEconomy.diagnostics.candidatesEvaluated as number) < 5
       || (generatedEconomy.diagnostics.candidatesEvaluated as number)
         > MAX_ECONOMY_SITE_CANDIDATES
+      || !hasValidEconomyAnalysisCounts(generatedEconomy.diagnostics)
       || !validateGeneratedEconomy(
         generatedEconomy.economy,
         generatedOpportunity,

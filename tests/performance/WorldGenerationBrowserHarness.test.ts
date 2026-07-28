@@ -4,13 +4,26 @@
 import {
   MAX_ECONOMY_SITE_CANDIDATES,
 } from '../../src/config/WorldGeneration';
-import './world-generation-browser-entry';
+import {
+  DEFAULT_WORLD_GENERATION_AUDIT_RANGE,
+} from './world-generation-browser-entry';
 
 describe('world generation browser harness', () => {
   it('measures opportunity and bounded economy generation together', () => {
-    const measurement = window.__runWorldGenerationBenchmark!();
+    expect(DEFAULT_WORLD_GENERATION_AUDIT_RANGE).toEqual({
+      start: 601,
+      end: 884,
+    });
+    const measurement = window.__runWorldGenerationBenchmark!({
+      start: 633,
+      end: 633,
+    });
 
-    expect(measurement.jointAudit.seedsEvaluated).toBe(284);
+    expect(measurement.jointAudit.seedsEvaluated).toBe(1);
+    expect(measurement.jointAudit.range).toEqual({
+      startSeed: 'playtest-633',
+      endSeed: 'playtest-633',
+    });
     expect(measurement.seed)
       .toBe(measurement.jointAudit.firstWorstSeed);
     expect(
@@ -31,6 +44,15 @@ describe('world generation browser harness', () => {
       .toBeLessThanOrEqual(MAX_ECONOMY_SITE_CANDIDATES);
     expect(measurement.prefabWitnessCost).not.toBeNull();
     expect(measurement.prefabWitnessCost).toBeLessThanOrEqual(194_000);
+    expect(measurement.starterCorridorCost)
+      .toBeLessThanOrEqual(measurement.starterCorridorCostCap);
+    expect(measurement.cementSupplyWitnessCost).not.toBeNull();
+    expect(measurement.cementSupplyWitnessCost)
+      .toBeLessThanOrEqual(measurement.cementSupplyLinkCostCap);
+    expect(measurement.totalMineralPairAnalyses)
+      .toBeLessThanOrEqual(
+        measurement.economyEvaluations * measurement.mineralPairAnalysesCap,
+      );
     expect(measurement.economyEvaluations).toBeGreaterThanOrEqual(1);
     expect(measurement.totalEconomyCandidatesEvaluated)
       .toBeGreaterThanOrEqual(

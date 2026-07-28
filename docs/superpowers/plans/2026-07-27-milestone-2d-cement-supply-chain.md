@@ -251,6 +251,21 @@ Run focused generation tests, then the 284-seed browser audit. If a permanent
 seed proves £400k/£180k infeasible under bounded work, adjust only the smallest
 measured cap necessary and record the seed; do not add cash or change prices.
 
+**Measured generation addendum (2026-07-28):** The production-browser audit
+uses the real Phaser terrain RNG and is authoritative over the lighter Jest
+Phaser mock. The clipped, axis-aligned 16 x 16 economy pool half-span changed
+from 2,400 to 3,200 units while retaining the fixed 256-candidate budget. At
+the original 12-attempt bound, the measured 3,200-unit pool resolved 281/284
+audited seeds and left only `playtest-650`, `playtest-783`, and `playtest-825`
+exhausted. After that measured span change, only the opportunity bound was
+increased. `playtest-825` remained exhausted through attempt 24 and first
+produced a valid unchanged-budget opportunity at attempt 26. Therefore
+`MAX_OPPORTUNITY_ATTEMPTS` is 26. The terrain, relief, separation, clearance,
+starter and mineral-link price caps, candidate count, 256 mineral-pair
+analyses, and split site/market RNG rules remain unchanged. Two stable Chromium
+audits resolved 284/284 seeds; the slower run peaked at 1,708 ms per seed, with
+deterministic blank-world replay.
+
 ```powershell
 npx jest tests/unit/WorldOpportunityValidator.test.ts tests/unit/CementSupplyOpportunity.test.ts tests/unit/WorldEconomyGenerator.test.ts tests/integration/GeneratedWorldStart.test.ts --runInBand --coverage=false
 npm run benchmark:world-generation
@@ -384,4 +399,3 @@ steel-import leg and only the minimum global-market behavior needed to make
 import pricing, port handling, and exposure to world demand meaningful. Do not
 implement module delivery or a generic contract market until steel completes
 the first three-input processing chain.
-

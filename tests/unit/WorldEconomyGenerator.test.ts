@@ -7,6 +7,7 @@ import type {
   WorldGenerationConfigDef,
 } from '../../src/config/WorldData';
 import {
+  MAX_CEMENT_SUPPLY_PAIR_ANALYSES,
   WorldEconomyGenerator,
   validateGeneratedEconomy,
 } from '../../src/economy/WorldEconomyGenerator';
@@ -23,10 +24,13 @@ import {
 } from '../../src/config/FreightProgression';
 import {
   ConstructionAnalyzer,
-  type ConstructionProposal,
 } from '../../src/systems/ConstructionAnalyzer';
 import { canonicalizeConstructionGridPoint } from '../../src/systems/ConstructionGrid';
 import { GameConfig } from '../../src/config/GameConfig';
+import {
+  analyzeCementSupplyOpportunity,
+} from '../../src/economy/CementSupplyOpportunity';
+import { MAX_CEMENT_SUPPLY_LINK_COST } from '../../src/config/FreightProgression';
 
 const terrain = {
   getHeightAt(x: number, y: number): number {
@@ -94,6 +98,43 @@ function expectAffordablePrefab(
       + PREFAB_ACCESS_LINK_ALLOWANCE
       + PREFAB_EXTENSION_OPERATING_RESERVE,
   ).toBeLessThanOrEqual(REGIONAL_DEVELOPMENT_GRANT);
+  return witness!.totalCost;
+}
+
+function expectAffordableCementSupply(
+  result: ReturnType<typeof generate>,
+  opportunity: StarterOpportunityDef,
+  sourceTerrain = terrain,
+): number {
+  expect(result.ok).toBe(true);
+  if (!result.ok) return Number.NaN;
+  const facility = (id: string) => result.economy.facilities.find(
+    (candidate) => candidate.id === id,
+  )!;
+  const extensionStart = resolvePrefabricationExtensionStart(opportunity);
+  const analyzer = new ConstructionAnalyzer(sourceTerrain);
+  const prefabWitness = analyzePrefabricationExtension(
+    analyzer,
+    extensionStart!,
+    facility('prefabrication-plant').railAccess,
+  );
+  expect(prefabWitness).not.toBeNull();
+  const witness = analyzeCementSupplyOpportunity(
+    analyzer,
+    opportunity,
+    prefabWitness!,
+    {
+      quarry: facility('quarry').railAccess,
+      cementWorks: facility('cement-works').railAccess,
+      prefabricationPlant: facility('prefabrication-plant').railAccess,
+    },
+  );
+  expect(witness).not.toBeNull();
+  expect(witness!.totalCost).toBeLessThanOrEqual(
+    MAX_CEMENT_SUPPLY_LINK_COST,
+  );
+  expect(result.diagnostics.mineralPairAnalyses)
+    .toBeLessThanOrEqual(MAX_CEMENT_SUPPLY_PAIR_ANALYSES);
   return witness!.totalCost;
 }
 
@@ -276,6 +317,23 @@ describe('WorldEconomyGenerator', () => {
     },
   );
 
+  it('places a bounded terrain-valid cement supply pair for a representative seed', () => {
+    const opportunity = makeStarterOpportunity(config.seed);
+    const result = generate(config, opportunity);
+
+    expectAffordableCementSupply(result, opportunity);
+  });
+
+  it('bounds heavy Prefab analyses by ranking forward-compatible sites first', () => {
+    const generationConfig = { ...config, seed: 'economy-beta' };
+    const opportunity = makeStarterOpportunity(generationConfig.seed);
+    const result = generate(generationConfig, opportunity);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.diagnostics.prefabAnalyses).toBeLessThanOrEqual(48);
+  });
+
   it('keeps a separately named 25-seed prefab affordability sweep deterministic and bounded', () => {
     const seeds = Array.from(
       { length: 25 },
@@ -330,6 +388,31 @@ describe('WorldEconomyGenerator', () => {
     expect(validateGeneratedEconomy(hostile, opportunity, terrain)).toBe(false);
   });
 
+  it('replays mineral clearance and rejects position tampering that remains schema-valid', () => {
+    const opportunity = makeStarterOpportunity(config.seed);
+    const result = generate(config, opportunity);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const hostile = JSON.parse(JSON.stringify(result.economy));
+    const quarry = hostile.facilities.find(
+      ({ id }: { id: string }) => id === 'quarry',
+    );
+    const port = hostile.facilities.find(
+      ({ id }: { id: string }) => id === 'port-interchange',
+    );
+    const quarryPosition = { x: quarry.x, y: quarry.y };
+    quarry.x = port.x;
+    quarry.y = port.y;
+    quarry.railAccess.x = port.x;
+    quarry.railAccess.y = port.y;
+    port.x = quarryPosition.x;
+    port.y = quarryPosition.y;
+    port.railAccess.x = quarryPosition.x;
+    port.railAccess.y = quarryPosition.y;
+
+    expect(validateGeneratedEconomy(hostile, opportunity, terrain)).toBe(false);
+  });
+
   it('keeps every regional demand factor bounded and varies generated state by seed', () => {
     const first = generate(config);
     const differentConfig = { ...config, seed: 'economy-beta' };
@@ -373,6 +456,8 @@ describe('WorldEconomyGenerator', () => {
         code: 'economy-exhausted',
         seed: config.seed,
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+        prefabAnalyses: 0,
+        mineralPairAnalyses: 0,
         facilitiesPlaced: 0,
       },
     });
@@ -392,12 +477,14 @@ describe('WorldEconomyGenerator', () => {
         code: 'economy-exhausted',
         seed: config.seed,
         candidatesEvaluated: 0,
+        prefabAnalyses: 0,
+        mineralPairAnalyses: 0,
         facilitiesPlaced: 0,
       },
     });
   });
 
-  it('counts an accepted Prefab first when later placement exhausts', () => {
+  it('does not accept a lone Prefab before the mineral pair resolves', () => {
     const plateauTerrain = {
       getHeightAt(x: number, y: number): number {
         if (x >= -7_200 && x <= -5_500 && y >= -7_300 && y <= -6_700) {
@@ -434,63 +521,33 @@ describe('WorldEconomyGenerator', () => {
         code: 'economy-exhausted',
         seed: config.seed,
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
-        facilitiesPlaced: 1,
+        prefabAnalyses: expect.any(Number),
+        mineralPairAnalyses: 0,
+        facilitiesPlaced: 0,
       },
     });
     expect('economy' in result).toBe(false);
   });
 
-  it('reuses deferred candidates in raw stream order after reserving a separated Prefab site', () => {
-    const analyzedEnds: Array<{ x: number; y: number }> = [];
-    const analyze = jest.spyOn(
-      ConstructionAnalyzer.prototype,
-      'analyze',
-    ).mockImplementation((geometry) => {
-      analyzedEnds.push({ ...geometry.p3 });
-      return {
-        geometry,
-        valid: analyzedEnds.length >= 10,
-        costs: {
-          track: 1_000,
-          earthworks: 0,
-          bridge: 0,
-          tunnel: 0,
-          total: 1_000,
-        },
-      } as ConstructionProposal;
-    });
+  it('keeps market RNG independent from site rejection work', () => {
     const flatTerrain = { getHeightAt: () => 0 };
-    const result = new WorldEconomyGenerator(flatTerrain).generate(
+    const flatResult = new WorldEconomyGenerator(flatTerrain).generate(
       config,
       makeStarterOpportunity(config.seed),
     );
-    analyze.mockRestore();
+    const variedResult = generate();
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const prefab = result.economy.facilities.find(
-      ({ id }) => id === 'prefabrication-plant',
-    )!;
-    const quarry = result.economy.facilities.find(
-      ({ id }) => id === 'quarry',
-    )!;
-    expect(prefab.railAccess).toEqual(expect.objectContaining(analyzedEnds[9]));
-    const firstSeparatedDeferred = analyzedEnds.slice(0, 9).find(
-      (candidate) => Math.hypot(
-        prefab.x - candidate.x,
-        prefab.y - candidate.y,
-      ) >= WorldGenerationConfig.MIN_FACILITY_SEPARATION,
+    expect(flatResult.ok).toBe(true);
+    expect(variedResult.ok).toBe(true);
+    if (!flatResult.ok || !variedResult.ok) return;
+    expect(flatResult.economy.market.regionalDemandBpsByProduct).toEqual(
+      variedResult.economy.market.regionalDemandBpsByProduct,
     );
-    expect(firstSeparatedDeferred).toBeDefined();
-    expect(quarry.railAccess).toEqual(
-      expect.objectContaining(firstSeparatedDeferred!),
-    );
-    expect(Math.hypot(prefab.x - quarry.x, prefab.y - quarry.y))
-      .toBeGreaterThanOrEqual(
-        WorldGenerationConfig.MIN_FACILITY_SEPARATION,
-      );
-    expect(result.diagnostics.candidatesEvaluated)
-      .toBeGreaterThan(analyzedEnds.length);
+    expect(flatResult.economy.facilities.slice(2).map(
+      ({ x, y }) => ({ x, y }),
+    )).not.toEqual(variedResult.economy.facilities.slice(2).map(
+      ({ x, y }) => ({ x, y }),
+    ));
   });
 
   it.each([
@@ -508,10 +565,12 @@ describe('WorldEconomyGenerator', () => {
     expect(result).toEqual({
       ok: false,
       error: {
-        code: 'economy-exhausted',
-        seed: config.seed,
-        candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
-        facilitiesPlaced: 0,
+          code: 'economy-exhausted',
+          seed: config.seed,
+          candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+          prefabAnalyses: 0,
+          mineralPairAnalyses: 0,
+          facilitiesPlaced: 0,
       },
     });
   });

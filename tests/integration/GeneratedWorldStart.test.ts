@@ -5,7 +5,10 @@ import {
   ENDPOINT_CONNECTION_COST,
   STANDARD_STARTING_CASH,
 } from '../../src/config/ConstructionConfig';
-import type { WorldGenerationConfigDef } from '../../src/config/WorldData';
+import type {
+  WorldData,
+  WorldGenerationConfigDef,
+} from '../../src/config/WorldData';
 import {
   type EconomyGeneratorPort,
   type OpportunityGeneratorPort,
@@ -21,10 +24,14 @@ import {
 import { GameConfig } from '../../src/config/GameConfig';
 import type { StarterOpportunityDef } from '../../src/config/WorldData';
 import {
+  MAX_ECONOMY_SITE_CANDIDATES,
+  MAX_OPPORTUNITY_ATTEMPTS,
+  MAX_SITE_CANDIDATES_PER_ATTEMPT,
   OPPORTUNITY_CAMERA_PADDING,
   WorldGenerationConfig,
 } from '../../src/config/WorldGeneration';
 import {
+  MAX_CEMENT_SUPPLY_PAIR_ANALYSES,
   type EconomyGenerationResult,
   WorldEconomyGenerator,
 } from '../../src/economy/WorldEconomyGenerator';
@@ -42,7 +49,11 @@ import {
   PREFAB_ACCESS_LINK_ALLOWANCE,
   PREFAB_EXTENSION_OPERATING_RESERVE,
   REGIONAL_DEVELOPMENT_GRANT,
+  MAX_CEMENT_SUPPLY_LINK_COST,
 } from '../../src/config/FreightProgression';
+import {
+  analyzeCementSupplyOpportunity,
+} from '../../src/economy/CementSupplyOpportunity';
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -64,6 +75,37 @@ function expectSurveyFitsRecommendedCamera(
     expect(Math.abs(site.y - y) + site.footprintRadius + OPPORTUNITY_CAMERA_PADDING)
       .toBeLessThanOrEqual(halfHeight);
   }
+}
+
+function expectAffordableCementSupply(seed: string, world: WorldData): void {
+  const facility = (id: string) => world.economy.facilities.find(
+    (candidate) => candidate.id === id,
+  )!;
+  const analyzer = new ConstructionAnalyzer(new TerrainGenerator(seed));
+  const extensionStart = resolvePrefabricationExtensionStart(
+    world.starterOpportunity,
+  );
+  const prefabWitness = analyzePrefabricationExtension(
+    analyzer,
+    extensionStart!,
+    facility('prefabrication-plant').railAccess,
+  );
+  expect(extensionStart).not.toBeNull();
+  expect(prefabWitness).not.toBeNull();
+  const witness = analyzeCementSupplyOpportunity(
+    analyzer,
+    world.starterOpportunity,
+    prefabWitness!,
+    {
+      quarry: facility('quarry').railAccess,
+      cementWorks: facility('cement-works').railAccess,
+      prefabricationPlant: facility('prefabrication-plant').railAccess,
+    },
+  );
+  expect(witness).not.toBeNull();
+  expect(witness!.totalCost).toBeLessThanOrEqual(
+    MAX_CEMENT_SUPPLY_LINK_COST,
+  );
 }
 
 function findSchemaValidUnaffordablePrefabPosition(
@@ -190,6 +232,25 @@ function economyPortWith(
     }),
   };
 }
+
+const INVALID_ANALYSIS_DIAGNOSTICS = [
+  ['omitted prefabAnalyses', 'prefabAnalyses', undefined],
+  ['negative prefabAnalyses', 'prefabAnalyses', -1],
+  ['non-integer prefabAnalyses', 'prefabAnalyses', 0.5],
+  [
+    'over-cap prefabAnalyses',
+    'prefabAnalyses',
+    MAX_ECONOMY_SITE_CANDIDATES + 1,
+  ],
+  ['omitted mineralPairAnalyses', 'mineralPairAnalyses', undefined],
+  ['negative mineralPairAnalyses', 'mineralPairAnalyses', -1],
+  ['non-integer mineralPairAnalyses', 'mineralPairAnalyses', 0.5],
+  [
+    'over-cap mineralPairAnalyses',
+    'mineralPairAnalyses',
+    MAX_CEMENT_SUPPLY_PAIR_ANALYSES + 1,
+  ],
+] as const;
 
 function spendCompanyCashTo(targetCash: number): void {
   const world = WorldManager.world!;
@@ -320,7 +381,9 @@ describe('generated blank-world start', () => {
         error: {
           code: 'economy-exhausted',
           seed: 'economy-failed-seed',
-          candidatesEvaluated: 256,
+          candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+          prefabAnalyses: 0,
+          mineralPairAnalyses: 0,
           facilitiesPlaced: 2,
         },
       }),
@@ -340,7 +403,9 @@ describe('generated blank-world start', () => {
       error: {
         code: 'economy-exhausted',
         seed: 'economy-failed-seed',
-        candidatesEvaluated: 256,
+        candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+        prefabAnalyses: 0,
+        mineralPairAnalyses: 0,
         facilitiesPlaced: 2,
       },
     });
@@ -368,7 +433,9 @@ describe('generated blank-world start', () => {
         error: {
           code: 'economy-exhausted',
           seed: 'replacement-economy-failed',
-          candidatesEvaluated: 256,
+          candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+          prefabAnalyses: 0,
+          mineralPairAnalyses: 0,
           facilitiesPlaced: 4,
         },
       }),
@@ -389,6 +456,77 @@ describe('generated blank-world start', () => {
     expect(SaveService.listWorlds().map((world) => world.id))
       .toEqual([prior.world.id]);
   });
+
+  it.each(INVALID_ANALYSIS_DIAGNOSTICS)(
+    'rejects a successful economy port with %s',
+    (_label, field, value) => {
+      const seed = 'invalid-success-diagnostics-seed';
+      const economyGenerator = economyPortWith((result) => {
+        if (value === undefined) {
+          delete (result.diagnostics as any)[field];
+        } else {
+          (result.diagnostics as any)[field] = value;
+        }
+      });
+      const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.tryCreateNew(
+        'Invalid success diagnostics',
+        seed,
+        'temperate',
+        successfulPort(),
+        economyGenerator,
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        error: { code: 'world-validation-failed', seed },
+      });
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(WorldManager.world).toBeNull();
+      expect(SaveService.listWorlds()).toEqual([]);
+    },
+  );
+
+  it.each(INVALID_ANALYSIS_DIAGNOSTICS)(
+    'rejects a failed economy port with %s',
+    (_label, field, value) => {
+      const seed = 'invalid-failure-diagnostics-seed';
+      const error: Record<string, unknown> = {
+        code: 'economy-exhausted',
+        seed,
+        candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+        prefabAnalyses: 0,
+        mineralPairAnalyses: 0,
+        facilitiesPlaced: 4,
+      };
+      if (value === undefined) {
+        delete error[field];
+      } else {
+        error[field] = value;
+      }
+      const economyGenerator = {
+        generate: jest.fn().mockReturnValue({ ok: false, error }),
+      } as EconomyGeneratorPort;
+      const saveSpy = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.tryCreateNew(
+        'Invalid failure diagnostics',
+        seed,
+        'temperate',
+        successfulPort(),
+        economyGenerator,
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        error: { code: 'world-validation-failed', seed },
+      });
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(WorldManager.world).toBeNull();
+      expect(SaveService.listWorlds()).toEqual([]);
+    },
+  );
 
   it('validates the detached generated world before attempting its single save', () => {
     const invalidEconomyGenerator: EconomyGeneratorPort = {
@@ -764,8 +902,8 @@ describe('generated blank-world start', () => {
         error: {
           code: 'opportunity-exhausted',
           seed: 'failed-seed',
-          attemptsEvaluated: 12,
-          maxSiteCandidatesEvaluated: 256,
+          attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+          maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
         },
       }),
     };
@@ -783,8 +921,8 @@ describe('generated blank-world start', () => {
       error: {
         code: 'opportunity-exhausted',
         seed: 'failed-seed',
-        attemptsEvaluated: 12,
-        maxSiteCandidatesEvaluated: 256,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
       },
     });
     expect(saveSpy).not.toHaveBeenCalled();
@@ -827,8 +965,8 @@ describe('generated blank-world start', () => {
         error: {
           code: 'opportunity-exhausted',
           seed: 'replacement-failed',
-          attemptsEvaluated: 12,
-          maxSiteCandidatesEvaluated: 256,
+          attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+          maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
         },
       }),
     };
@@ -958,6 +1096,7 @@ describe('generated blank-world start', () => {
       expect(extensionStart).not.toBeNull();
       expect(witness).not.toBeNull();
       expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
+      expectAffordableCementSupply(seed, result.world);
       expect(result.world.tracks).toEqual([]);
       expect(result.world.junctions).toEqual([]);
       expect(result.world.stations).toEqual([]);
@@ -989,6 +1128,7 @@ describe('generated blank-world start', () => {
       expect(extensionStart).not.toBeNull();
       expect(witness).not.toBeNull();
       expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
+      expectAffordableCementSupply(seed, result.world);
       expect(result.world.tracks).toEqual([]);
       expect(result.world.junctions).toEqual([]);
       expect(result.world.stations).toEqual([]);

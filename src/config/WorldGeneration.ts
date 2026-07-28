@@ -1,6 +1,6 @@
 import { GameConfig } from './GameConfig';
 
-export const MAX_OPPORTUNITY_ATTEMPTS = 12;
+export const MAX_OPPORTUNITY_ATTEMPTS = 26;
 export const MAX_SITE_CANDIDATES_PER_ATTEMPT = 256;
 export const MAX_ECONOMY_SITE_CANDIDATES = 256;
 export const OPPORTUNITY_CAMERA_PADDING = 160;
