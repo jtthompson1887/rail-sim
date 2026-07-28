@@ -68,6 +68,8 @@ const makeInput = (
       profitableStructuralTimberDeliveryCompleted: boolean;
       profitableLimestoneDeliveryCompleted: boolean;
       profitableCementDeliveryCompleted: boolean;
+      profitableSteelDeliveryCompleted: boolean;
+      profitableBuildingModuleDeliveryCompleted: boolean;
     };
     runtime: readonly TrainRuntimeSnapshot[];
   }> = {},
@@ -1470,6 +1472,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
   it.each([
     'profitableLimestoneDeliveryCompleted',
     'profitableCementDeliveryCompleted',
+    'profitableSteelDeliveryCompleted',
+    'profitableBuildingModuleDeliveryCompleted',
   ] as const)('fails closed for nonboolean %s', (field) => {
     const input = mineralDeliveryInput(
       'aggregate-hopper-set',
@@ -1969,6 +1973,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(grantEntries).toEqual([{
       id: 8,
@@ -2069,6 +2075,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: true,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(result.company.ledger.filter(
       ({ category }) => category === 'contract-bonus',
@@ -2138,6 +2146,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);
@@ -2248,9 +2258,25 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.completedDeliveries).toEqual([]);
   });
 
+  it('accepts exact schema-10 freight progress at the proposal boundary', () => {
+    const input = makeInput({ operating: false }) as any;
+    input.freightProgress.profitableSteelDeliveryCompleted = false;
+    input.freightProgress.profitableBuildingModuleDeliveryCompleted = false;
+
+    expect(proposeCargoTick(input).statuses).toEqual([
+      expect.objectContaining({
+        trainId: 'train-1',
+        kind: 'idle',
+        blocker: 'not-operating',
+      }),
+    ]);
+  });
+
   it.each([
     'profitableLimestoneDeliveryCompleted',
     'profitableCementDeliveryCompleted',
+    'profitableSteelDeliveryCompleted',
+    'profitableBuildingModuleDeliveryCompleted',
   ] as const)('rejects progress missing %s', (field) => {
     const input = loadedAtSawmill(10);
     input.trains[0].cargo!.loadedUnits = 60;
@@ -2419,6 +2445,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);

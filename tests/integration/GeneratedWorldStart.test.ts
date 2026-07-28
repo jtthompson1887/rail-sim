@@ -321,7 +321,7 @@ describe('generated blank-world start', () => {
       },
       successfulResult('atomic-seed').opportunity,
     );
-    expect(result.world.schemaVersion).toBe(9);
+    expect(result.world.schemaVersion).toBe(10);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(

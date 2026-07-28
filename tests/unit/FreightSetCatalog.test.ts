@@ -30,12 +30,21 @@ const cloneFlatbedSet = (): MutableFreightSetDefinition => ({
   ],
 });
 
-const logs = (): ProductDefinition => getProduct('logs')!;
+const requireProduct = (id: string): ProductDefinition => {
+  const product = getProduct(id);
+  if (!product) throw new Error(`Missing product ${id}`);
+  return product;
+};
+
+const logs = (): ProductDefinition => requireProduct('logs');
 const structuralTimber = (): ProductDefinition =>
-  getProduct('structural-timber')!;
+  requireProduct('structural-timber');
 const limestoneAggregate = (): ProductDefinition =>
-  getProduct('limestone-aggregate')!;
-const cement = (): ProductDefinition => getProduct('cement')!;
+  requireProduct('limestone-aggregate');
+const cement = (): ProductDefinition => requireProduct('cement');
+const steel = (): ProductDefinition => requireProduct('steel');
+const buildingModules = (): ProductDefinition =>
+  requireProduct('building-modules');
 
 describe('freight set catalogue', () => {
   it('contains exactly the three approved cargo-class-specific sets', () => {
@@ -50,9 +59,14 @@ describe('freight set catalogue', () => {
         id: 'flatbed-freight-set',
         displayName: 'General Flatbed Set',
         cargoClass: 'flatbed',
-        compatibleProductIds: ['logs', 'structural-timber'],
+        compatibleProductIds: [
+          'logs',
+          'structural-timber',
+          'steel',
+          'building-modules',
+        ],
         payloadMassKg: 60_000,
-        payloadVolumeLitres: 96_000,
+        payloadVolumeLitres: 100_000,
         purchasePrice: 90_000,
         runningCostPerActiveTick: 20,
       },
@@ -82,6 +96,8 @@ describe('freight set catalogue', () => {
   it.each([
     ['flatbed-freight-set', 'logs', logs, 60],
     ['flatbed-freight-set', 'structural timber', structuralTimber, 60],
+    ['flatbed-freight-set', 'steel', steel, 60],
+    ['flatbed-freight-set', 'building modules', buildingModules, 4],
     ['aggregate-hopper-set', 'limestone aggregate', limestoneAggregate, 120],
     ['covered-cement-set', 'cement', cement, 80],
   ])('derives the exact %s %s capacity from mass and volume', (
@@ -132,7 +148,14 @@ describe('validateFreightSetContent', () => {
   it('accepts the complete cargo-class-matched catalogue', () => {
     expect(validateFreightSetContent(
       FREIGHT_SETS,
-      [logs(), structuralTimber(), limestoneAggregate(), cement()],
+      [
+        logs(),
+        structuralTimber(),
+        steel(),
+        buildingModules(),
+        limestoneAggregate(),
+        cement(),
+      ],
     )).toEqual({ valid: true });
   });
 
@@ -155,7 +178,7 @@ describe('validateFreightSetContent', () => {
 
     expect(validateFreightSetContent(
       [cloneFlatbedSet(), duplicate],
-      [logs(), structuralTimber()],
+      [logs(), structuralTimber(), steel(), buildingModules()],
     )).toMatchObject({
       valid: false,
       referenceId: FLATBED_FREIGHT_SET_ID,
@@ -168,7 +191,7 @@ describe('validateFreightSetContent', () => {
 
     expect(validateFreightSetContent(
       [set],
-      [logs(), structuralTimber()],
+      [logs(), structuralTimber(), steel(), buildingModules()],
     )).toMatchObject({
       valid: false,
       referenceId: 'logs',

@@ -277,9 +277,9 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 9 with a generated economy and conserved opening balance', () => {
+    it('creates schema 10 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(9);
+      expect(w.schemaVersion).toBe(10);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.operationsRevision).toBe(0);
@@ -290,6 +290,8 @@ describe('WorldManager', () => {
         profitableStructuralTimberDeliveryCompleted: false,
         profitableLimestoneDeliveryCompleted: false,
         profitableCementDeliveryCompleted: false,
+        profitableSteelDeliveryCompleted: false,
+        profitableBuildingModuleDeliveryCompleted: false,
       });
       expect(w).not.toHaveProperty('firstRouteProgress');
       expect(w.generationConfig).toEqual({
@@ -741,6 +743,9 @@ describe('WorldManager', () => {
           draft.freightProgress.profitableLogDeliveryCompleted = true;
           draft.freightProgress.profitableLimestoneDeliveryCompleted = true;
           draft.freightProgress.profitableCementDeliveryCompleted = true;
+          draft.freightProgress.profitableSteelDeliveryCompleted = true;
+          draft.freightProgress.profitableBuildingModuleDeliveryCompleted =
+            true;
           return true;
         },
       )).toBe(true);
@@ -758,6 +763,10 @@ describe('WorldManager', () => {
         .toBe(true);
       expect(world.freightProgress.profitableCementDeliveryCompleted)
         .toBe(true);
+      expect(world.freightProgress.profitableSteelDeliveryCompleted).toBe(true);
+      expect(
+        world.freightProgress.profitableBuildingModuleDeliveryCompleted,
+      ).toBe(true);
       expect(world.revision).toBe(rootBefore + 1);
       expect(world.constructionRevision).toBe(constructionBefore);
       expect(world.operationsRevision).toBe(operationsBefore + 1);
@@ -772,6 +781,9 @@ describe('WorldManager', () => {
       escaped.freightProgress.profitableLogDeliveryCompleted = false;
       escaped.freightProgress.profitableLimestoneDeliveryCompleted = false;
       escaped.freightProgress.profitableCementDeliveryCompleted = false;
+      escaped.freightProgress.profitableSteelDeliveryCompleted = false;
+      escaped.freightProgress.profitableBuildingModuleDeliveryCompleted =
+        false;
       expect(JSON.stringify(world)).toBe(installed);
     });
 
@@ -835,6 +847,8 @@ describe('WorldManager', () => {
     it.each([
       'profitableLimestoneDeliveryCompleted',
       'profitableCementDeliveryCompleted',
+      'profitableSteelDeliveryCompleted',
+      'profitableBuildingModuleDeliveryCompleted',
     ] as const)('rejects a draft missing %s with exact rollback', (field) => {
       const world = WorldManager.createNew(
         'Invalid mineral progress',

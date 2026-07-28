@@ -196,11 +196,13 @@ export interface FreightProgressDef {
   profitableStructuralTimberDeliveryCompleted: boolean;
   profitableLimestoneDeliveryCompleted: boolean;
   profitableCementDeliveryCompleted: boolean;
+  profitableSteelDeliveryCompleted: boolean;
+  profitableBuildingModuleDeliveryCompleted: boolean;
 }
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 9;
+  schemaVersion: 10;
   revision: number;
   constructionRevision: number;
   operationsRevision: number;
@@ -234,7 +236,7 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -257,6 +259,8 @@ export function createEmptyWorld(
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     },
     starterOpportunity: clonePlainData(starterOpportunity),
     tracks: [],
@@ -666,13 +670,15 @@ function isFreightProgress(
   value: unknown,
 ): value is FreightProgressDef {
   return isRecord(value)
-    && Object.keys(value).length === 6
+    && Object.keys(value).length === 8
     && value.progressVersion === 1
     && typeof value.profitableLogDeliveryCompleted === 'boolean'
     && typeof value.developmentGrantAwarded === 'boolean'
     && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean'
     && typeof value.profitableLimestoneDeliveryCompleted === 'boolean'
-    && typeof value.profitableCementDeliveryCompleted === 'boolean';
+    && typeof value.profitableCementDeliveryCompleted === 'boolean'
+    && typeof value.profitableSteelDeliveryCompleted === 'boolean'
+    && typeof value.profitableBuildingModuleDeliveryCompleted === 'boolean';
 }
 
 function isScenery(value: unknown): value is SceneryObjectDef {
@@ -833,7 +839,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 9) {
+  if (raw.schemaVersion !== 10) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -877,7 +883,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 9.');
+    return incompatible(raw, 'data does not match schema version 10.');
   }
   const forwardGrantCount = countForwardRegionalDevelopmentGrants(
     company as CompanyStateDef,

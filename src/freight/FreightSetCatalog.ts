@@ -56,9 +56,14 @@ export const FREIGHT_SETS: readonly FreightSetDefinition[] =
     id: FLATBED_FREIGHT_SET_ID,
     displayName: 'General Flatbed Set',
     cargoClass: 'flatbed',
-    compatibleProductIds: ['logs', 'structural-timber'],
+    compatibleProductIds: [
+      'logs',
+      'structural-timber',
+      'steel',
+      'building-modules',
+    ],
     payloadMassKg: 60_000,
-    payloadVolumeLitres: 96_000,
+    payloadVolumeLitres: 100_000,
     purchasePrice: FLATBED_TRAIN_PURCHASE_PRICE,
     runningCostPerActiveTick: 20,
   }, {

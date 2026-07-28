@@ -79,7 +79,7 @@ describe('Integration: generated structural timber link', () => {
     const harness = createStructuralTimberLinkHarness('playtest-753');
     try {
       expect(harness.world).toMatchObject({
-        schemaVersion: 9,
+        schemaVersion: 10,
         tracks: [],
         junctions: [],
         stations: [],
@@ -407,6 +407,8 @@ describe('Integration: generated structural timber link', () => {
         profitableStructuralTimberDeliveryCompleted: true,
         profitableLimestoneDeliveryCompleted: false,
         profitableCementDeliveryCompleted: false,
+        profitableSteelDeliveryCompleted: false,
+        profitableBuildingModuleDeliveryCompleted: false,
       });
       expect(achievedTrain.operations).toMatchObject({
         lifetimeDeliveredUnits: 180,

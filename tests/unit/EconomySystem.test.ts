@@ -367,6 +367,8 @@ describe('EconomySystem', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     const committedSawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
@@ -440,6 +442,8 @@ describe('EconomySystem', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: true,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(world.trains[0]).toMatchObject({
       cargo: null,

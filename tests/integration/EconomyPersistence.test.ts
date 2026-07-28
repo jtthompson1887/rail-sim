@@ -216,6 +216,8 @@ describe('Integration: persisted fixed-tick economy', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: true,
       profitableCementDeliveryCompleted: true,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(world.trains.every(({ cargo }) => cargo === null)).toBe(true);
     const expected = clonePlainData({
