@@ -18,7 +18,7 @@ describe('production web shell', () => {
     const webpackConfig = webpackConfigFactory({}, { mode: 'production' });
 
     expect(webpackConfig.output.path).toBe(
-      path.resolve(__dirname, '../../dist/client'),
+      path.resolve(__dirname, '../../dist'),
     );
   });
 });

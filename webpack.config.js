@@ -56,8 +56,8 @@ module.exports = (env = {}) => ({
         new CopyPlugin({
             patterns: [
                 { from: 'src/assets', to: 'assets' },
-                { from: 'src/hosting/worker.js', to: '../server/index.js' },
-                { from: '.openai/hosting.json', to: '../.openai/hosting.json' },
+                { from: 'src/hosting/worker.js', to: 'server/index.js' },
+                { from: '.openai/hosting.json', to: '.openai/hosting.json' },
             ],
         })
     ],

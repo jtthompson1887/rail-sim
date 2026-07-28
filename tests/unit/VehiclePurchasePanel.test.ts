@@ -7,10 +7,11 @@ import { FreightPurchaseService } from '../../src/freight/FreightPurchaseService
 import { WorldManager } from '../../src/managers/WorldManager';
 import { makeFirstFreightRouteWorld } from '../fixtures/FirstFreightRouteFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
+import { isGameplayInputFocused } from '../../src/systems/InputManager';
 
 const quote = () => ({
   expectedRevision: 4,
-  freightSetId: 'timber-freight-set' as const,
+  freightSetId: 'flatbed-freight-set' as const,
   trackUUID: 'forest-sawmill-track',
   trackT: 0.1,
   facing: 1 as const,
@@ -37,7 +38,7 @@ describe('VehiclePurchasePanel', () => {
     jest.restoreAllMocks();
   });
 
-  it('contains exactly one timber SKU and emits purchase mode then its frozen quote', () => {
+  it('contains exactly one flatbed SKU and emits purchase mode then its frozen quote', () => {
     const mode = jest.fn();
     const confirmed = jest.fn();
     EventBus.on('freight:purchase-mode-requested', mode);
@@ -52,25 +53,25 @@ describe('VehiclePurchasePanel', () => {
     const root = document.querySelector(
       '[data-testid="vehicle-purchase-panel"]',
     ) as HTMLElement;
-    expect(root.textContent).toContain('Timber Freight Set');
+    expect(root.textContent).toContain('General Flatbed Set');
     expect(root.textContent).toContain('£90,000');
     expect(root.textContent).toContain('60 tonnes');
-    expect(root.textContent).toContain('Logs');
+    expect(root.textContent).toContain('Logs · Structural Timber');
     expect(root.textContent).toContain('£20 / active tick');
     expect(root.textContent).toContain('Cash after £110,000');
     expect(root.querySelectorAll(
-      '[data-testid="timber-freight-set-buy"]',
+      '[data-testid="flatbed-freight-set-buy"]',
     )).toHaveLength(1);
 
     (root.querySelector(
-      '[data-testid="timber-freight-set-buy"]',
+      '[data-testid="flatbed-freight-set-buy"]',
     ) as HTMLButtonElement).click();
     (root.querySelector(
       '[data-testid="freight-purchase-confirm"]',
     ) as HTMLButtonElement).click();
 
     expect(mode).toHaveBeenCalledWith({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
     expect(confirmed).toHaveBeenCalledTimes(1);
     const emittedQuote = confirmed.mock.calls[0][0].quote;
@@ -101,7 +102,7 @@ describe('VehiclePurchasePanel', () => {
     );
     jest.spyOn(WorldManager, 'save').mockReturnValue(true);
     const issued = service.quote({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-sawmill-track',
       trackT: 0,
       x: -500,
@@ -140,6 +141,37 @@ describe('VehiclePurchasePanel', () => {
     EventBus.off('freight:purchase-confirmed', listener);
   });
 
+  it('releases confirm focus after submitting a valid purchase', () => {
+    panel.setState({
+      quote: quote(),
+      cash: 200_000,
+      message: '',
+    });
+    const confirm = document.querySelector(
+      '[data-testid="freight-purchase-confirm"]',
+    ) as HTMLButtonElement;
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(true);
+
+    confirm.click();
+    EventBus.emit('freight:purchase-result', {
+      ok: false,
+      blocker: 'stale-revision',
+    });
+    expect(document.activeElement).toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(true);
+    EventBus.emit('freight:purchase-result', {
+      ok: true,
+      trainId: 'focus-release-train',
+      saved: true,
+      saveState: 'saved',
+    });
+
+    expect(document.activeElement).not.toBe(confirm);
+    expect(isGameplayInputFocused()).toBe(false);
+  });
+
   it('shows the exact remedy, affordability, and bounded mobile layout', () => {
     Object.defineProperty(window, 'innerWidth', {
       value: 375,
@@ -159,7 +191,7 @@ describe('VehiclePurchasePanel', () => {
         blocker: 'insufficient-cash',
       },
       cash: 80_000,
-      message: 'Insufficient cash for Timber Freight Set',
+      message: 'Insufficient cash for General Flatbed Set',
     });
     const root = document.querySelector(
       '[data-testid="vehicle-purchase-panel"]',
@@ -173,9 +205,21 @@ describe('VehiclePurchasePanel', () => {
     expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).not.toBe('');
     expect(root.textContent).toContain(
-      'Insufficient cash for Timber Freight Set',
+      'Insufficient cash for General Flatbed Set',
     );
     expect(confirm.disabled).toBe(true);
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
   });
 
   it('blocks pointer propagation, participates in hit testing, and removes listeners on destroy', () => {

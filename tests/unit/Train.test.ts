@@ -223,10 +223,10 @@ describe('Train', () => {
         0,
         0,
         'freight-train',
-        'timber-freight-set',
+        'flatbed-freight-set',
       );
 
-      expect(train.freightSetId).toBe('timber-freight-set');
+      expect(train.freightSetId).toBe('flatbed-freight-set');
       expect(train).not.toHaveProperty('cargo');
       expect(train).not.toHaveProperty('operations');
     });
@@ -240,7 +240,7 @@ describe('Train', () => {
         12,
         34,
         'freight-train',
-        'timber-freight-set',
+        'flatbed-freight-set',
       );
       const track = {
         getUUID: jest.fn().mockReturnValue('track-b'),

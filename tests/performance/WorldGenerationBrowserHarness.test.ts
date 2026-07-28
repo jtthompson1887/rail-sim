@@ -10,11 +10,17 @@ describe('world generation browser harness', () => {
   it('measures opportunity and bounded economy generation together', () => {
     const measurement = window.__runWorldGenerationBenchmark!();
 
-    expect(measurement.opportunityAudit.seedsEvaluated).toBe(284);
+    expect(measurement.jointAudit.seedsEvaluated).toBe(284);
     expect(measurement.seed)
-      .toBe(measurement.opportunityAudit.firstWorstSeed);
-    expect(measurement.opportunityResult.opportunity.resolvedAttempt)
-      .toBe(measurement.opportunityAudit.maxResolvedAttempt);
+      .toBe(measurement.jointAudit.firstWorstSeed);
+    expect(
+      measurement.opportunityResult.opportunity.resolvedAttempt
+        * measurement.candidatesCap
+        + measurement.totalEconomyCandidatesEvaluated,
+    ).toBe(measurement.jointAudit.maxJointWorkUnits);
+    expect(Number.isFinite(
+      measurement.jointAudit.maxGenerationDurationMs,
+    )).toBe(true);
     expect(measurement.economyCandidatesCap)
       .toBe(MAX_ECONOMY_SITE_CANDIDATES);
     expect(measurement.opportunityResult.ok).toBe(true);
@@ -23,6 +29,14 @@ describe('world generation browser harness', () => {
     expect(measurement.economyResult.economy.facilities).toHaveLength(7);
     expect(measurement.economyResult.diagnostics.candidatesEvaluated)
       .toBeLessThanOrEqual(MAX_ECONOMY_SITE_CANDIDATES);
+    expect(measurement.prefabWitnessCost).not.toBeNull();
+    expect(measurement.prefabWitnessCost).toBeLessThanOrEqual(194_000);
+    expect(measurement.economyEvaluations).toBeGreaterThanOrEqual(1);
+    expect(measurement.totalEconomyCandidatesEvaluated)
+      .toBeGreaterThanOrEqual(
+        measurement.economyResult.diagnostics.candidatesEvaluated,
+      );
+    expect(measurement.blankInfrastructure).toBe(true);
     expect(measurement.deterministicReplay).toBe(true);
   });
 });

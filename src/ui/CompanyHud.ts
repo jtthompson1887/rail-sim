@@ -28,7 +28,9 @@ export class CompanyHud {
   private readonly saveState = document.createElement('span');
   private readonly economyTime = document.createElement('span');
   private readonly constructionIndex = document.createElement('span');
+  private readonly operatingPeriod = document.createElement('span');
   private readonly deliveryRevenue = document.createElement('span');
+  private readonly contractBonuses = document.createElement('span');
   private readonly runningExpenses = document.createElement('span');
   private readonly operatingProfit = document.createElement('strong');
   private readonly capitalExpenditure = document.createElement('span');
@@ -75,7 +77,9 @@ export class CompanyHud {
     this.economyTime.style.cssText = 'color:#bad3e2';
     this.constructionIndex.dataset.testid = 'company-construction-index';
     this.constructionIndex.style.cssText = 'color:#9feaff';
+    this.operatingPeriod.dataset.testid = 'company-operating-period';
     this.deliveryRevenue.dataset.testid = 'company-delivery-revenue';
+    this.contractBonuses.dataset.testid = 'company-contract-bonuses';
     this.runningExpenses.dataset.testid = 'company-running-expenses';
     this.operatingProfit.dataset.testid = 'company-operating-profit';
     this.operatingProfit.style.cssText = 'color:#9af0b6';
@@ -88,7 +92,9 @@ export class CompanyHud {
       this.saveState,
       this.economyTime,
       this.constructionIndex,
+      this.operatingPeriod,
       this.deliveryRevenue,
+      this.contractBonuses,
       this.runningExpenses,
       this.operatingProfit,
       this.capitalExpenditure,
@@ -114,12 +120,15 @@ export class CompanyHud {
     const day = Math.floor(state.economyTick / ECONOMY_TICKS_PER_DAY) + 1;
     this.economyTime.textContent = `Day ${day.toLocaleString('en-GB')} · Tick ${state.economyTick.toLocaleString('en-GB')}`;
     this.constructionIndex.textContent = `Construction index ${(state.constructionIndexBps / 100).toFixed(1)}`;
+    this.operatingPeriod.textContent = 'Last 24 ticks';
     this.deliveryRevenue.textContent =
-      `Revenue ${CASH.format(state.operatingSummary.deliveryRevenue)}`;
+      `Deliveries ${CASH.format(state.operatingSummary.deliveryRevenue)}`;
+    this.contractBonuses.textContent =
+      `Development ${CASH.format(state.operatingSummary.contractBonuses)}`;
     this.runningExpenses.textContent =
       `Running ${CASH.format(state.operatingSummary.runningExpenses)}`;
     this.operatingProfit.textContent =
-      `Operating profit ${formatSignedCash(state.operatingSummary.operatingProfit)}`;
+      `Rail profit ${formatSignedCash(state.operatingSummary.operatingProfit)}`;
     this.capitalExpenditure.textContent =
       `Capex ${CASH.format(state.operatingSummary.capitalExpenditure)}`;
     this.cashFlow.textContent =

@@ -31,9 +31,13 @@ import {
   type CreateTool,
 } from '../ui/EditorToolbar';
 import { GameConfig } from '../config/GameConfig';
+import { REGIONAL_DEVELOPMENT_GRANT } from '../config/FreightProgression';
 import EditorUIScene from './EditorUIScene';
 import { isMobileWidth, scalePx } from '../utils/responsive';
-import type { IEditorTool } from '../systems/tools/IEditorTool';
+import type {
+  IEditorTool,
+  InputLockOwner,
+} from '../systems/tools/IEditorTool';
 import { SelectTool } from '../systems/tools/SelectTool';
 import { PlaceVehicleTool } from '../systems/tools/PlaceVehicleTool';
 import { PlaceTrackTool } from '../systems/tools/PlaceTrackTool';
@@ -49,11 +53,15 @@ import {
   type TrainRuntimeSnapshot,
 } from '../freight/TrainRuntime';
 import type {
-  CargoBlocker,
+  CargoBlockerCode,
   CargoTransferStatus,
   FreightDeliveryEvent,
 } from '../freight/CargoSystem';
-import { getFreightSet } from '../freight/FreightSetCatalog';
+import {
+  capacityForProduct,
+  FLATBED_FREIGHT_SET_ID,
+  getFreightSet,
+} from '../freight/FreightSetCatalog';
 import {
   queryRailAccessConnectivity,
   type RailAccessConnectivityResult,
@@ -89,10 +97,11 @@ import {
   buildTrainInspection,
 } from '../freight/FreightPresentation';
 import {
-  deriveFirstRouteObjective,
-  firstRouteCelebrationSession,
-  type FirstRouteObjectiveDto,
-} from '../freight/FirstRouteObjective';
+  deriveFreightObjective,
+  freightObjectiveCelebrationSession,
+  type FreightObjectiveDto,
+} from '../freight/FreightObjective';
+import { getProduct } from '../economy/ProductCatalog';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -112,7 +121,12 @@ export interface FirstRouteBrowserSnapshot {
   readonly world: WorldData;
   readonly runtime: readonly TrainRuntimeSnapshot[];
   readonly saveState: 'saved' | 'unsaved' | 'saving';
-  readonly objective: FirstRouteObjectiveDto;
+  readonly objective: FreightObjectiveDto;
+  readonly construction: {
+    readonly phase: ConstructionToolPhase;
+    readonly preview: ConstructionPreviewModel | null;
+    readonly topology: TrackTopologySnapshot;
+  };
   readonly camera: {
     readonly scrollX: number;
     readonly scrollY: number;
@@ -126,6 +140,11 @@ export interface FirstRouteBrowserHarness {
   snapshot(): FirstRouteBrowserSnapshot;
   setMode(mode: 'create' | 'play'): void;
   advanceFixedTicks(count: number): void;
+  advanceFixedFrames(
+    count: number,
+    deltaMs: number,
+    keys?: { readonly w?: boolean; readonly s?: boolean },
+  ): FirstRouteBrowserSnapshot;
   setTrainRuntime(
     trainId: string,
     runtime: Pick<
@@ -258,6 +277,12 @@ export default class WorldScene extends Phaser.Scene {
   private toolRegistry!: Map<CreateTool, IEditorTool>;
   private activeEditorTool: IEditorTool | null = null;
 
+  private inputLockOwnerForTool(tool: CreateTool): InputLockOwner {
+    return ['none', 'pan', 'terrain-view'].indexOf(tool) === -1
+      ? 'editor-tool'
+      : 'camera';
+  }
+
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
@@ -293,10 +318,9 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.activate();
     this.updateToolCursor(tool);
     // Set input lock owner: camera owns for free-pan tools, editor-tool owns for editing tools
-    const freePanTools: CreateTool[] = ['none', 'pan', 'terrain-view'];
-    const lockOwner: import('../systems/tools/IEditorTool').InputLockOwner =
-      freePanTools.indexOf(tool) === -1 ? 'editor-tool' : 'camera';
-    this.cameraController.setInputLockOwner(lockOwner);
+    this.cameraController.setInputLockOwner(
+      this.inputLockOwnerForTool(tool),
+    );
   };
 
   private readonly undoHandler = () => {
@@ -428,7 +452,7 @@ export default class WorldScene extends Phaser.Scene {
   private readonly freightPurchaseModeRequestedHandler = ({
     freightSetId,
   }: {
-    freightSetId: 'timber-freight-set';
+    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   }) => {
     if (GameStateManager.worldMode !== 'create') return;
     const tool = this.toolRegistry.get(
@@ -465,7 +489,7 @@ export default class WorldScene extends Phaser.Scene {
       const train = this.trainManager.trains.find(
         (candidate) => candidate.getUUID() === purchaseResult.trainId,
       );
-      if (train) this.trainManager.selectTrain(train);
+      if (train) this.trainManager.selectTrain(train.getUUID());
       this.clearFacilitySelection();
       this.reportSaveState(purchaseResult.saveState);
       if (!purchaseResult.saved) {
@@ -484,6 +508,8 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   init(data: { worldId?: string; mode?: 'create' | 'play' }): void {
+    this.activeTool = 'none';
+    this.activeEditorTool = null;
     this.worldLoadFailed = false;
     this.lastReportedSaveState = 'saved';
     this.pendingStartupSaveError = null;
@@ -647,6 +673,8 @@ export default class WorldScene extends Phaser.Scene {
         snapshot: () => this.captureFirstRouteBrowserSnapshot(),
         setMode: (mode) => this.setFirstRouteBrowserMode(mode),
         advanceFixedTicks: (count) => this.advanceFirstRouteFixedTicks(count),
+        advanceFixedFrames: (count, deltaMs, keys) =>
+          this.advanceFirstRouteFixedFrames(count, deltaMs, keys),
         setTrainRuntime: (trainId, runtime) => {
           this.setFirstRouteTrainRuntime(trainId, runtime);
         },
@@ -717,6 +745,7 @@ export default class WorldScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ESC', () => {
       if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
         GameStateManager.pause();
+        EventBus.emit('ui:pause-visible', { visible: true });
         this.scene.launch('PauseScene');
         this.scene.pause();
       }
@@ -746,6 +775,7 @@ export default class WorldScene extends Phaser.Scene {
           fromTick: 0,
           throughTick: 0,
           deliveryRevenue: 0,
+          contractBonuses: 0,
           runningExpenses: 0,
           operatingProfit: 0,
           capitalExpenditure: 0,
@@ -762,7 +792,7 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:freight-purchase-state', {
       quote: null,
       cash: world?.company.cash ?? 0,
-      message: 'Click on player track to place the Timber Freight Set',
+      message: 'Click on player track to place the General Flatbed Set',
     });
     this.publishFreightPresentation(
       (this.trainManager?.trains ?? []).map(
@@ -1114,14 +1144,22 @@ export default class WorldScene extends Phaser.Scene {
     if (!world) throw new Error('No world is loaded');
     const camera = this.cameras.main;
     const runtime = this.trainManager.trains.map(captureTrainRuntime);
+    const placeTrack = this.toolRegistry.get(
+      'place-track',
+    ) as PlaceTrackTool | undefined;
     return deepFreezePlainData(clonePlainData({
       world,
       runtime,
       saveState: this.lastReportedSaveState,
-      objective: deriveFirstRouteObjective(
+      objective: deriveFreightObjective(
         world,
         this.trackManager.captureTopology(),
       ),
+      construction: {
+        phase: placeTrack?.phase ?? 'idle',
+        preview: placeTrack?.previewModel ?? null,
+        topology: this.trackManager.captureTopology(),
+      },
       camera: {
         scrollX: camera.scrollX,
         scrollY: camera.scrollY,
@@ -1168,8 +1206,95 @@ export default class WorldScene extends Phaser.Scene {
     this.publishHUDState();
   }
 
+  private advanceFirstRouteFixedFrames(
+    count: number,
+    deltaMs: number,
+    keys?: { readonly w?: boolean; readonly s?: boolean },
+  ): FirstRouteBrowserSnapshot {
+    if (!Number.isSafeInteger(count) || count < 0 || count > 10_000) {
+      throw new RangeError('Fixed frame count must be between 0 and 10,000');
+    }
+    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+      throw new RangeError('Fixed frame delta must be a positive number');
+    }
+    if (GameStateManager.worldMode !== 'play'
+      || GameStateManager.state !== 'playing') {
+      throw new Error('Fixed frames require play mode');
+    }
+
+    const previousHarness = this.firstRouteHarnessControlsRuntime;
+    this.firstRouteHarnessControlsRuntime = true;
+    const previousKeys = this.inputManager.getThrottleKeyState();
+    if (keys) {
+      this.inputManager.setThrottleKeys(
+        keys.w === true,
+        keys.s === true,
+      );
+    }
+
+    const matterWorld = this.matter.world as unknown as {
+      autoUpdate: boolean;
+      step(delta: number): void;
+    };
+    matterWorld.autoUpdate = false;
+
+    try {
+      let time = this.game.loop.time;
+      const delta = deltaMs;
+      for (let index = 0; index < count; index += 1) {
+        this.inputManager.handleTrainMovement(
+          this.trainManager.selectedTrain,
+          this.operationsLockedTrainIds,
+        );
+        this.trainManager.update(
+          time,
+          delta,
+          this.operationsLockedTrainIds,
+        );
+
+        matterWorld.step(delta);
+
+        if (this.operationsLockedTrainIds.size > 0) {
+          this.trainManager.stopFreightTrains(
+            Array.from(this.operationsLockedTrainIds).sort(),
+          );
+        }
+
+        const runtime = this.trainManager.trains.map(captureTrainRuntime);
+        const economyResult = this.economySystem.update(delta, true, runtime);
+        if (economyResult) {
+          this.applyEconomyUpdateResult(economyResult);
+        }
+
+        this.contentLoader.stations.forEach((station) => station.update(delta));
+        GameStateManager.tick(delta / 1_000);
+        if (index % 10 === 0) {
+          this.publishHUDState();
+          this.publishFreightPresentation(runtime);
+        }
+
+        time += delta;
+      }
+
+      this.publishHUDState();
+      this.publishFreightPresentation(
+        this.trainManager.trains.map(captureTrainRuntime),
+      );
+      return this.captureFirstRouteBrowserSnapshot();
+    } finally {
+      this.inputManager.setThrottleKeys(previousKeys.w, previousKeys.s);
+      this.firstRouteHarnessControlsRuntime = previousHarness;
+    }
+  }
+
   private releaseFirstRouteTrainControl(): void {
     this.firstRouteHarnessControlsRuntime = false;
+    const matterWorld = this.matter.world as unknown as {
+      autoUpdate: boolean;
+    };
+    if (matterWorld) {
+      matterWorld.autoUpdate = true;
+    }
   }
 
   private setFirstRouteTrainRuntime(
@@ -1292,7 +1417,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private mergeRunningCostBlockers(
-    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+    blockerByTrainId: Readonly<Record<string, CargoBlockerCode | null>>,
   ): void {
     Object.keys(blockerByTrainId).forEach((trainId) => {
       const blocker = blockerByTrainId[trainId];
@@ -1303,9 +1428,12 @@ export default class WorldScene extends Phaser.Scene {
 
   private setTrainOperationBlocker(
     trainId: string,
-    blocker: CargoBlocker,
+    blocker: CargoBlockerCode,
   ): void {
     const existing = this.cargoStatusByTrainId.get(trainId);
+    if (existing?.blocker !== null && existing?.blocker !== undefined) {
+      return;
+    }
     const cargoUnits = WorldManager.world?.trains.find(
       ({ id }) => id === trainId,
     )?.cargo?.units ?? 0;
@@ -1318,6 +1446,7 @@ export default class WorldScene extends Phaser.Scene {
       : {
         trainId,
         facilityId: null,
+        productId: null,
         kind: 'blocked',
         blocker,
         batchUnits: 0,
@@ -1331,14 +1460,14 @@ export default class WorldScene extends Phaser.Scene {
     this.operationsLockedTrainIds.forEach((trainId) => {
       this.setTrainOperationBlocker(
         trainId,
-        'Insufficient cash for running costs',
+        'insufficient-running-cash',
       );
     });
   }
 
   private canUnlockOperationsTrains(
     lockedTrainIds: ReadonlySet<string>,
-    blockerByTrainId: Readonly<Record<string, CargoBlocker | null>>,
+    blockerByTrainId: Readonly<Record<string, CargoBlockerCode | null>>,
   ): boolean {
     const world = WorldManager.world;
     if (!world) return false;
@@ -1360,11 +1489,45 @@ export default class WorldScene extends Phaser.Scene {
     EventBus.emit('ui:freight-delivery-completed', Object.freeze({
       ...event,
     }));
-    EventBus.emit('ui:toast', {
-      message:
-        `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
-      type: 'success',
-    });
+    const world = WorldManager.world;
+    const destination = world?.economy.facilities.find(
+      ({ id }) => id === event.destinationFacilityId,
+    );
+    const product = getProduct(event.productId);
+    const train = world?.trains.find(({ id }) => id === event.trainId);
+    const freightSet = train
+      ? getFreightSet(train.freightSetId)
+      : undefined;
+    const capacity = freightSet && product
+      ? capacityForProduct(freightSet, product)
+      : null;
+    const completesStructuralObjective = event.productId === 'structural-timber'
+      && destination?.definitionId === 'prefabrication-plant'
+      && event.operatingProfit > 0
+      && capacity?.ok === true
+      && event.units === capacity.capacityUnits
+      && world?.freightProgress
+        .profitableStructuralTimberDeliveryCompleted === true;
+    const celebrateStructuralObjective = world
+      && completesStructuralObjective
+      && freightObjectiveCelebrationSession.consume(
+        world.id,
+        'structural-timber-link',
+        true,
+      );
+    EventBus.emit('ui:toast', celebrateStructuralObjective
+      ? {
+        message:
+          `${product!.displayName} delivered to ${destination!.name}`
+          + ` · +£${event.revenue.toLocaleString('en-GB')}`
+          + ` · trip profit £${event.operatingProfit.toLocaleString('en-GB')}`,
+        type: 'success',
+      }
+      : {
+        message:
+          `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
+        type: 'success',
+      });
     EventBus.emit('ui:cash-pulse', { amount: event.revenue });
   }
 
@@ -1387,6 +1550,9 @@ export default class WorldScene extends Phaser.Scene {
       train.enginePower = 0;
     }
     this.cameraController.stopFollow();
+    this.cameraController.setInputLockOwner(
+      this.inputLockOwnerForTool(this.activeTool),
+    );
     if (this.activeTool === 'place-track') this.clearFacilitySelection();
     this.updateFacilitySelectionAvailability();
     EventBus.emit('ui:toolbar-visible', { visible: true });
@@ -1477,13 +1643,14 @@ export default class WorldScene extends Phaser.Scene {
     this.activeEditorTool?.cancel();
     this.selectionManager.clearSelection();
     for (const view of this.facilityViews) view.setSelectionEnabled(true);
+    this.cameraController.setInputLockOwner('camera');
     this.inputManager.setupClickHandling(this.trainManager);
     EventBus.emit('ui:toolbar-visible', { visible: false });
     // Auto-follow the first available train
     const trains = this.trainManager.trains;
     if (trains.length > 0) {
       this.clearFacilitySelection();
-      this.trainManager.selectTrain(trains[0]);
+      this.trainManager.selectTrain(trains[0].getUUID());
     }
   }
 
@@ -1551,6 +1718,7 @@ export default class WorldScene extends Phaser.Scene {
           fromTick: 0,
           throughTick: 0,
           deliveryRevenue: 0,
+          contractBonuses: 0,
           runningExpenses: 0,
           operatingProfit: 0,
           capitalExpenditure: 0,
@@ -1567,14 +1735,21 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.emit('ui:train-inspection', { inspection: null });
       return;
     }
-    const objective = deriveFirstRouteObjective(
+    const objective = deriveFreightObjective(
       world,
       this.trackManager.captureTopology(),
     );
-    EventBus.emit('ui:first-route-objective', objective);
-    if (firstRouteCelebrationSession.consume(world.id, objective)) {
+    EventBus.emit('ui:freight-objective', objective);
+    if (freightObjectiveCelebrationSession.consume(
+      world.id,
+      'first-profitable-route',
+      world.freightProgress.profitableLogDeliveryCompleted,
+    )) {
       EventBus.emit('ui:toast', {
-        message: 'First freight route complete',
+        message:
+          'First freight route complete · Regional Development Grant +£'
+          + REGIONAL_DEVELOPMENT_GRANT.toLocaleString('en-GB')
+          + ' · Next: Extend the timber chain',
         type: 'success',
       });
     }
@@ -1588,14 +1763,26 @@ export default class WorldScene extends Phaser.Scene {
       return;
     }
     const train = world.trains.find(({ id }) => id === selectedId);
+    const fallbackFreightSet = train
+      ? getFreightSet(train.freightSetId)
+      : undefined;
+    const fallbackProduct = train?.cargo
+      ? getProduct(train.cargo.productId)
+      : undefined;
+    const fallbackCapacity = fallbackFreightSet && fallbackProduct
+      ? capacityForProduct(fallbackFreightSet, fallbackProduct)
+      : null;
     const transfer = this.cargoStatusByTrainId.get(selectedId) ?? {
       trainId: selectedId,
       facilityId: null,
+      productId: null,
       kind: 'idle' as const,
       blocker: null,
       batchUnits: 0,
       cargoUnits: train?.cargo?.units ?? 0,
-      capacityUnits: 60,
+      capacityUnits: fallbackCapacity?.ok
+        ? fallbackCapacity.capacityUnits
+        : 0,
       batchRevenue: 0,
     };
     EventBus.emit('ui:train-inspection', {

@@ -1,16 +1,35 @@
-import type { WorldData } from '../config/WorldData';
+import type { TrainDef, WorldData } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
 import { summariseProfitAndLoss } from '../economy/FinanceLedger';
+import { getProduct } from '../economy/ProductCatalog';
 import type {
+  CargoBlockerCode,
   CargoTransferStatus,
 } from './CargoSystem';
-import type { FreightPurchaseQuote } from './FreightPurchaseService';
+import {
+  canContinueConsignment,
+  potentialAcceptedProduct,
+  potentialLoadProducts,
+} from './FacilityCargoRules';
+import {
+  capacityForProduct,
+  FLATBED_FREIGHT_SET_ID,
+  getFreightSet,
+} from './FreightSetCatalog';
+import type {
+  FreightSetDefinition,
+} from './FreightSetCatalog';
+import type {
+  FreightPurchaseBlocker,
+  FreightPurchaseQuote,
+} from './FreightPurchaseService';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
 
 export interface OperatingSummaryDto {
   readonly fromTick: number;
   readonly throughTick: number;
   readonly deliveryRevenue: number;
+  readonly contractBonuses: number;
   readonly runningExpenses: number;
   readonly operatingProfit: number;
   readonly capitalExpenditure: number;
@@ -18,12 +37,12 @@ export interface OperatingSummaryDto {
 }
 
 export interface FreightPurchaseDto {
-  readonly freightSetId: 'timber-freight-set';
-  readonly displayName: 'Timber Freight Set';
-  readonly price: 90_000;
-  readonly compatibleCargoLabel: 'Logs';
-  readonly capacityLabel: '60 tonnes';
-  readonly runningCostLabel: '£20 / active tick';
+  readonly freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+  readonly displayName: string;
+  readonly price: number;
+  readonly compatibleCargoLabel: string;
+  readonly capacityLabel: string;
+  readonly runningCostLabel: string;
   readonly cashAfter: number;
   readonly affordable: boolean;
   readonly validPlacement: boolean;
@@ -32,18 +51,20 @@ export interface FreightPurchaseDto {
 
 export interface TrainInspectionDto {
   readonly trainId: string;
-  readonly displayName: 'Timber Freight Set';
+  readonly displayName: string;
   readonly direction: 'forward' | 'neutral' | 'reverse';
   readonly throttle: -1 | 0 | 1;
   readonly movementState: 'stopped' | 'moving' | 'derailed';
   readonly cargo: {
-    readonly productLabel: 'Logs' | 'Empty';
+    readonly productLabel: string;
+    readonly unitLabel: string;
     readonly units: number;
-    readonly capacityUnits: 60;
+    readonly capacityUnits: number;
     readonly text: string;
   };
   readonly nearestEligibleFacility: string | null;
   readonly transfer: CargoTransferStatus;
+  readonly transferRemedy: string;
   readonly currentTrip: {
     readonly revenue: number;
     readonly runningCost: number;
@@ -62,13 +83,15 @@ export interface TrainInspectionDto {
   };
 }
 
-const PURCHASE_REMEDIES = {
-  'no-track': 'Click on player track to place the Timber Freight Set',
+const PURCHASE_REMEDIES: Readonly<
+Partial<Record<FreightPurchaseBlocker, string>>
+> = Object.freeze({
+  'no-track': 'Click on player track to place the General Flatbed Set',
   'outside-forest-access': 'Place inside Managed Forest rail access',
   'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for Timber Freight Set',
+  'insufficient-cash': 'Insufficient cash for General Flatbed Set',
   'duplicate-gesture': 'Purchase already in progress',
-} as const;
+});
 
 const deepFreeze = <T>(value: T): T => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -79,6 +102,63 @@ const deepFreeze = <T>(value: T): T => {
   return value;
 };
 
+const pluralUnit = (unitLabel: string, units: number): string =>
+  units === 1 ? unitLabel : `${unitLabel}s`;
+
+const compactUnit = (unitLabel: string): string =>
+  unitLabel === 'tonne' ? 't' : pluralUnit(unitLabel, 2);
+
+const capacityFor = (
+  freightSet: FreightSetDefinition | undefined,
+  productId: string | null,
+): number => {
+  if (!freightSet || !productId) return 0;
+  const product = getProduct(productId);
+  if (!product) return 0;
+  const capacity = capacityForProduct(freightSet, product);
+  return capacity.ok ? capacity.capacityUnits : 0;
+};
+
+export function formatFreightPurchaseRemedy(
+  blocker: FreightPurchaseBlocker,
+): string {
+  return PURCHASE_REMEDIES[blocker]
+    ?? 'General Flatbed Set purchase could not be completed';
+}
+
+export function formatCargoRemedy(
+  world: WorldData,
+  freightSetId: string,
+  transfer: CargoTransferStatus,
+): string {
+  const blocker = transfer.blocker;
+  if (!blocker) return '';
+  const freightSet = getFreightSet(freightSetId);
+  const product = transfer.productId
+    ? getProduct(transfer.productId)
+    : undefined;
+  const facility = transfer.facilityId
+    ? world.economy.facilities.find(({ id }) => id === transfer.facilityId)
+    : undefined;
+  const setName = freightSet?.displayName ?? 'This train';
+  const productName = product?.displayName ?? 'this cargo';
+  const facilityName = facility?.name ?? 'the eligible facility';
+  const remedies: Record<CargoBlockerCode, string> = {
+    'not-operating': 'Resume the game to transfer cargo',
+    derailed: 'Rerail the train to transfer cargo',
+    'train-moving': 'Stop the train to transfer cargo',
+    'unknown-freight-set': 'This train has no recognised freight set',
+    'incompatible-product': `${setName} cannot carry ${productName}`,
+    'outside-eligible-facility': `Move inside ${facilityName} rail access`,
+    'source-empty': `${facilityName} has no ${productName} available`,
+    'train-full': `${setName} is full of ${productName}`,
+    'destination-full': `${facilityName} ${productName} storage is full`,
+    'product-not-accepted': `${facilityName} does not accept ${productName}`,
+    'insufficient-running-cash': 'Add cash to cover train running costs',
+  };
+  return remedies[blocker];
+}
+
 export function buildOperatingSummary(
   company: CompanyStateDef,
   economyTick: number,
@@ -88,9 +168,10 @@ export function buildOperatingSummary(
   return Object.freeze({
     fromTick,
     throughTick: economyTick,
-    deliveryRevenue: summary.revenue,
+    deliveryRevenue: summary.deliveryRevenue,
+    contractBonuses: summary.contractBonuses,
     runningExpenses: summary.operatingExpenses,
-    operatingProfit: summary.operatingProfit,
+    operatingProfit: summary.railwayOperatingProfit,
     capitalExpenditure: summary.capitalExpenditure,
     cashFlow: summary.cashFlow,
   });
@@ -100,16 +181,36 @@ const relevantFacilityName = (
   world: WorldData,
   runtime: TrainRuntimeSnapshot,
   transfer: CargoTransferStatus,
-  cargoUnits: number,
+  freightSet: FreightSetDefinition | undefined,
+  train: TrainDef,
 ): string | null => {
-  const explicit = transfer.facilityId
-    ? world.economy.facilities.find(({ id }) => id === transfer.facilityId)
-    : undefined;
-  if (explicit) return explicit.name;
+  if (transfer.facilityId) {
+    return world.economy.facilities.find(
+      ({ id }) => id === transfer.facilityId,
+    )?.name ?? 'Unknown facility';
+  }
+  if (!freightSet) return null;
 
-  const definitionId = cargoUnits > 0 ? 'sawmill' : 'managed-forest';
+  const cargoProductId = train.cargo?.productId ?? null;
+  const contextProductId = cargoProductId ?? transfer.productId;
   const candidates = world.economy.facilities
-    .filter((facility) => facility.definitionId === definitionId)
+    .filter((facility) => {
+      if (cargoProductId) {
+        const source = potentialLoadProducts(facility, freightSet)
+          .some(({ productId }) => productId === cargoProductId)
+          && canContinueConsignment(
+            train,
+            facility,
+            capacityFor(freightSet, cargoProductId),
+          );
+        return source
+          || potentialAcceptedProduct(facility, cargoProductId) !== null;
+      }
+      const products = potentialLoadProducts(facility, freightSet);
+      return contextProductId
+        ? products.some(({ productId }) => productId === contextProductId)
+        : products.length > 0;
+    })
     .map((facility) => ({
       facility,
       distance: Math.hypot(
@@ -128,17 +229,40 @@ export function buildTrainInspection(
   transfer: CargoTransferStatus,
 ): TrainInspectionDto | null {
   const train = world.trains.find(({ id }) => id === runtime.trainId);
-  if (!train || train.freightSetId !== 'timber-freight-set'
-    || transfer.trainId !== runtime.trainId) return null;
+  if (!train || transfer.trainId !== runtime.trainId) return null;
 
+  const freightSet = getFreightSet(train.freightSetId);
   const units = train.cargo?.units ?? 0;
-  const productLabel = train.cargo?.productId === 'logs'
-    ? 'Logs' as const
-    : 'Empty' as const;
+  const contextProductId = train.cargo?.productId ?? transfer.productId;
+  const fallbackProductId = freightSet?.compatibleProductIds.find(
+    (productId) => capacityFor(freightSet, productId) > 0,
+  ) ?? null;
+  const presentationProductId = contextProductId ?? fallbackProductId;
+  const product = presentationProductId
+    ? getProduct(presentationProductId)
+    : undefined;
+  const capacityUnits = capacityFor(freightSet, presentationProductId);
+  const productLabel = train.cargo
+    ? product?.displayName ?? 'Unknown cargo'
+    : 'Empty';
+  const unitLabel = product
+    ? pluralUnit(product.unitLabel, capacityUnits)
+    : 'units';
+  const shortUnit = product ? compactUnit(product.unitLabel) : 'units';
+  const transferFacilityKnown = !transfer.facilityId
+    || world.economy.facilities.some(({ id }) => id === transfer.facilityId);
+  const transferProductKnown = !transfer.productId
+    || getProduct(transfer.productId) !== undefined;
+  const presentedTransfer: CargoTransferStatus = {
+    ...transfer,
+    facilityId: transferFacilityKnown ? transfer.facilityId : null,
+    productId: transferProductKnown ? transfer.productId : null,
+    capacityUnits: transferProductKnown ? transfer.capacityUnits : 0,
+  };
   const operations = train.operations;
   return deepFreeze({
     trainId: train.id,
-    displayName: 'Timber Freight Set' as const,
+    displayName: freightSet?.displayName ?? 'Unknown freight set',
     direction: runtime.throttle > 0
       ? 'forward' as const
       : runtime.throttle < 0
@@ -152,19 +276,25 @@ export function buildTrainInspection(
         : 'moving' as const,
     cargo: {
       productLabel,
+      unitLabel,
       units,
-      capacityUnits: 60 as const,
-      text: productLabel === 'Logs'
-        ? `Logs ${units.toLocaleString('en-GB')} / 60 t`
-        : 'Empty 0 / 60 t',
+      capacityUnits,
+      text: `${productLabel} ${units.toLocaleString('en-GB')} / `
+        + `${capacityUnits.toLocaleString('en-GB')} ${shortUnit}`,
     },
     nearestEligibleFacility: relevantFacilityName(
       world,
       runtime,
       transfer,
-      units,
+      freightSet,
+      train,
     ),
-    transfer: { ...transfer },
+    transfer: presentedTransfer,
+    transferRemedy: formatCargoRemedy(
+      world,
+      train.freightSetId,
+      transfer,
+    ),
     currentTrip: {
       revenue: operations.currentTripRevenue,
       runningCost: operations.currentTripRunningCost,
@@ -191,21 +321,38 @@ export function buildFreightPurchasePresentation(
   quote: FreightPurchaseQuote | null,
   cash: number,
 ): FreightPurchaseDto {
+  const freightSet = getFreightSet(FLATBED_FREIGHT_SET_ID);
+  if (!freightSet) {
+    throw new Error('Approved flatbed freight set is missing');
+  }
+  const products = freightSet.compatibleProductIds
+    .map((productId) => getProduct(productId))
+    .filter((product) => product !== undefined);
+  const firstProduct = products[0];
+  const firstCapacity = firstProduct
+    ? capacityForProduct(freightSet, firstProduct)
+    : null;
+  const capacityUnits = firstCapacity?.ok
+    ? firstCapacity.capacityUnits
+    : 0;
   const blocker = quote?.blocker ?? 'no-track';
   return Object.freeze({
-    freightSetId: 'timber-freight-set',
-    displayName: 'Timber Freight Set',
-    price: 90_000,
-    compatibleCargoLabel: 'Logs',
-    capacityLabel: '60 tonnes',
-    runningCostLabel: '£20 / active tick',
-    cashAfter: quote?.cashAfter ?? cash - 90_000,
-    affordable: quote?.affordable ?? cash >= 90_000,
+    freightSetId: FLATBED_FREIGHT_SET_ID,
+    displayName: freightSet.displayName,
+    price: freightSet.purchasePrice,
+    compatibleCargoLabel: products
+      .map(({ displayName }) => displayName)
+      .join(' · '),
+    capacityLabel: firstProduct
+      ? `${capacityUnits.toLocaleString('en-GB')} `
+        + pluralUnit(firstProduct.unitLabel, capacityUnits)
+      : 'Capacity unavailable',
+    runningCostLabel:
+      `£${freightSet.runningCostPerActiveTick.toLocaleString('en-GB')} `
+      + '/ active tick',
+    cashAfter: quote?.cashAfter ?? cash - freightSet.purchasePrice,
+    affordable: quote?.affordable ?? cash >= freightSet.purchasePrice,
     validPlacement: quote?.valid ?? false,
-    remedy: blocker === null
-      ? ''
-      : PURCHASE_REMEDIES[
-        blocker as keyof typeof PURCHASE_REMEDIES
-      ] ?? 'Timber Freight Set purchase could not be completed',
+    remedy: blocker === null ? '' : formatFreightPurchaseRemedy(blocker),
   });
 }

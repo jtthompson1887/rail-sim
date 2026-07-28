@@ -6,7 +6,7 @@ import {
 } from '../config/WorldData';
 import type {
   EconomyStateDef,
-  FirstRouteProgressDef,
+  FreightProgressDef,
   WorldData,
   TrackDef,
   JunctionDef,
@@ -55,7 +55,7 @@ export interface OperationsDraft {
   company: CompanyStateDef;
   economy: EconomyStateDef;
   trains: TrainDef[];
-  firstRouteProgress: FirstRouteProgressDef;
+  freightProgress: FreightProgressDef;
 }
 
 export interface OpportunityGeneratorPort {
@@ -238,8 +238,59 @@ class WorldManagerClass {
       error: { code: 'world-validation-failed', seed },
     };
     const terrain = new TerrainGenerator(seed);
+    const jointlyGenerateDefaults = opportunityGenerator === undefined
+      && economyGenerator === undefined;
+    let acceptedDefaultGeneration: {
+      opportunity: WorldData['starterOpportunity'];
+      economy: Extract<EconomyGenerationResult, { ok: true }>;
+    } | null = null;
+    const defaultEconomyGenerator = jointlyGenerateDefaults
+      ? new WorldEconomyGenerator(terrain)
+      : null;
     const generator = opportunityGenerator
-      ?? new WorldOpportunityGenerator(terrain);
+      ?? new WorldOpportunityGenerator(
+        terrain,
+        jointlyGenerateDefaults
+          ? (opportunity) => {
+            acceptedDefaultGeneration = null;
+            const detachedOpportunity = clonePlainData(opportunity);
+            const economyResult: unknown = defaultEconomyGenerator!.generate(
+              generationConfig,
+              detachedOpportunity,
+            );
+            if (isEconomyFailure(economyResult, seed)) {
+              return false;
+            }
+            if (!isRecord(economyResult)
+              || economyResult.ok !== true
+              || !equalPlainData(detachedOpportunity, opportunity)
+              || !isRecord(economyResult.diagnostics)
+              || !Number.isInteger(
+                economyResult.diagnostics.candidatesEvaluated,
+              )
+              || economyResult.diagnostics.candidatesEvaluated < 5
+              || economyResult.diagnostics.candidatesEvaluated
+                > MAX_ECONOMY_SITE_CANDIDATES
+              || !validateGeneratedEconomy(
+                economyResult.economy,
+                opportunity,
+                terrain,
+              )) {
+              throw new Error('Invalid default economy generation result');
+            }
+            acceptedDefaultGeneration = {
+              opportunity: clonePlainData(opportunity),
+              economy: clonePlainData(
+                economyResult as Extract<
+                  EconomyGenerationResult,
+                  { ok: true }
+                >,
+              ),
+            };
+            return true;
+          }
+          : undefined,
+      );
     let generated: unknown;
     try {
       generated = generator.generate(generationConfig);
@@ -265,17 +316,28 @@ class WorldManagerClass {
       return validationFailure;
     }
     const generatedOpportunity = clonePlainData(generated.opportunity);
-    const economyPortOpportunity = clonePlainData(generatedOpportunity);
     let generatedEconomy: unknown;
-    try {
-      generatedEconomy = (
-        economyGenerator ?? new WorldEconomyGenerator(terrain)
-      ).generate(generationConfig, economyPortOpportunity);
-    } catch {
-      return validationFailure;
-    }
-    if (!equalPlainData(economyPortOpportunity, generatedOpportunity)) {
-      return validationFailure;
+    if (jointlyGenerateDefaults) {
+      if (acceptedDefaultGeneration === null
+        || !equalPlainData(
+          acceptedDefaultGeneration.opportunity,
+          generatedOpportunity,
+        )) {
+        return validationFailure;
+      }
+      generatedEconomy = acceptedDefaultGeneration.economy;
+    } else {
+      const economyPortOpportunity = clonePlainData(generatedOpportunity);
+      try {
+        generatedEconomy = (
+          economyGenerator ?? new WorldEconomyGenerator(terrain)
+        ).generate(generationConfig, economyPortOpportunity);
+      } catch {
+        return validationFailure;
+      }
+      if (!equalPlainData(economyPortOpportunity, generatedOpportunity)) {
+        return validationFailure;
+      }
     }
     if (isEconomyFailure(generatedEconomy, seed)) {
       return { ok: false, error: generatedEconomy.error };
@@ -478,7 +540,7 @@ class WorldManagerClass {
       company: clonePlainData(world.company),
       economy: clonePlainData(world.economy),
       trains: clonePlainData(world.trains),
-      firstRouteProgress: clonePlainData(world.firstRouteProgress),
+      freightProgress: clonePlainData(world.freightProgress),
     };
     this.batchInProgress = true;
     try {
@@ -495,8 +557,8 @@ class WorldManagerClass {
           && equalPlainData(draft.economy, snapshot.economy)
           && equalPlainData(draft.trains, snapshot.trains)
           && equalPlainData(
-            draft.firstRouteProgress,
-            snapshot.firstRouteProgress,
+            draft.freightProgress,
+            snapshot.freightProgress,
           ))) {
         return this.restoreBatchSnapshot(world, snapshot);
       }
@@ -508,7 +570,7 @@ class WorldManagerClass {
         company: draft.company,
         economy: draft.economy,
         trains: draft.trains,
-        firstRouteProgress: draft.firstRouteProgress,
+        freightProgress: draft.freightProgress,
       };
       if (!validateWorldData(candidate).compatible) {
         return this.restoreBatchSnapshot(world, snapshot);
@@ -518,8 +580,8 @@ class WorldManagerClass {
         world.company = clonePlainData(candidate.company);
         world.economy = clonePlainData(candidate.economy);
         world.trains = clonePlainData(candidate.trains);
-        world.firstRouteProgress = clonePlainData(
-          candidate.firstRouteProgress,
+        world.freightProgress = clonePlainData(
+          candidate.freightProgress,
         );
         world.revision = candidate.revision;
         world.operationsRevision = candidate.operationsRevision;

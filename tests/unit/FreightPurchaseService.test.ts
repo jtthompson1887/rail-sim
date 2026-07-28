@@ -90,7 +90,7 @@ function connectedInput(
   overrides: Partial<FreightPurchaseQuoteInput> = {},
 ): FreightPurchaseQuoteInput {
   return {
-    freightSetId: 'timber-freight-set',
+    freightSetId: 'flatbed-freight-set',
     trackUUID: 'forest-sawmill-track',
     trackT: 0,
     x: -500,
@@ -140,7 +140,7 @@ describe('FreightPurchaseService', () => {
 
     expect(quote).toEqual({
       expectedRevision: before.revision,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-sawmill-track',
       trackT: 0,
       facing: 1,
@@ -161,7 +161,7 @@ describe('FreightPurchaseService', () => {
     expect(runtime.live.size).toBe(1);
     expect(world.trains).toEqual([{
       id: 'purchased-train',
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-sawmill-track',
       trackT: 0,
       facing: 1,
@@ -184,7 +184,7 @@ describe('FreightPurchaseService', () => {
       category: 'vehicle-capex',
       ledgerClass: 'capital-expenditure',
       amount: -90_000,
-      referenceId: 'purchased-train',
+      referenceId: 'flatbed-freight-set',
     });
     expect(world.revision).toBe(before.revision + 1);
     expect(world.operationsRevision).toBe(before.operationsRevision + 1);
@@ -210,8 +210,8 @@ describe('FreightPurchaseService', () => {
       id,
       freightSetId,
     }))).toEqual([
-      { id: 'timber-a', freightSetId: 'timber-freight-set' },
-      { id: 'timber-b', freightSetId: 'timber-freight-set' },
+      { id: 'timber-a', freightSetId: 'flatbed-freight-set' },
+      { id: 'timber-b', freightSetId: 'flatbed-freight-set' },
     ]);
     expect(world.company.ledger.filter(
       ({ category }) => category === 'vehicle-capex',
@@ -731,7 +731,7 @@ describe('FreightPurchaseService', () => {
       ({ category, amount, referenceId }) => (
         category === 'vehicle-capex'
         && amount === -90_000
-        && referenceId === 'unsaved-train'
+        && referenceId === 'flatbed-freight-set'
       ),
     )).toHaveLength(1);
     expect(runtime.port.remove).not.toHaveBeenCalled();

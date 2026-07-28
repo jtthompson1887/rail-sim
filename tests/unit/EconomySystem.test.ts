@@ -44,7 +44,7 @@ const installFirstRoute = (): WorldData => {
   world.tracks = clonePlainData(fixture.tracks);
   world.economy = clonePlainData(fixture.economy);
   world.trains = clonePlainData(fixture.trains);
-  world.firstRouteProgress = clonePlainData(fixture.firstRouteProgress);
+  world.freightProgress = clonePlainData(fixture.freightProgress);
   return world;
 };
 
@@ -52,6 +52,12 @@ const facilitySnapshot = (world: WorldData, facilityId: string) =>
   clonePlainData(
     world.economy.facilities.find((facility) => facility.id === facilityId),
   );
+
+const isDeepFrozen = (value: unknown): boolean => {
+  if (value === null || typeof value !== 'object') return true;
+  if (!Object.isFrozen(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(isDeepFrozen);
+};
 
 const updateInGroups = (groups: number[]) => {
   const system = new EconomySystem();
@@ -249,9 +255,13 @@ describe('EconomySystem', () => {
     train.cargo = {
       productId: 'logs',
       units: 10,
+      loadedUnits: 60,
       originFacilityId: 'managed-forest',
     };
+    train.operations.currentTripRevenue = 5_000;
     train.operations.currentTripRunningCost = 40;
+    train.operations.lifetimeDeliveredUnits = 50;
+    train.operations.lifetimeRevenue = 5_000;
     train.operations.lifetimeRunningCost = 40;
     const sawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
@@ -273,14 +283,38 @@ describe('EconomySystem', () => {
     expect(delivery.commitRejected).toBe(false);
     expect(delivery.completedDeliveries).toEqual([expect.objectContaining({
       trainId: train.id,
+      productId: 'logs',
+      units: 60,
       destinationFacilityId: 'sawmill',
       tick: 1,
       runningCost: 40,
     })]);
-    expect(world.company.ledger.at(-1)).toEqual(expect.objectContaining({
+    expect(delivery.completedDeliveries[0].revenue).toBeGreaterThan(5_000);
+    expect(delivery.completedDeliveries[0].operatingProfit).toBe(
+      delivery.completedDeliveries[0].revenue - 40,
+    );
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toEqual([]);
+    expect(world.company.ledger).toEqual(expect.arrayContaining([
+      expect.objectContaining({
       category: 'delivery-revenue',
       tick: 1,
-    }));
+      }),
+      expect.objectContaining({
+        category: 'contract-bonus',
+        ledgerClass: 'revenue',
+        amount: 250_000,
+        tick: 1,
+        referenceId: 'regional-development-grant:v1',
+      }),
+    ]));
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: true,
+      developmentGrantAwarded: true,
+      profitableStructuralTimberDeliveryCompleted: false,
+    });
     const committedSawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',
     )!;
@@ -348,7 +382,7 @@ describe('EconomySystem', () => {
     );
     expect(summariseProfitAndLoss(world.company, 1, 24)).toMatchObject({
       operatingExpenses: 480,
-      operatingProfit: -480,
+      railwayOperatingProfit: -480,
       cashFlow: -480,
     });
     expect(world.revision).toBe(24);
@@ -387,6 +421,7 @@ describe('EconomySystem', () => {
     deliveryWorld.trains[0].cargo = {
       productId: 'logs',
       units: 10,
+      loadedUnits: 10,
       originFacilityId: 'managed-forest',
     };
     const deliveryResult = new EconomySystem().update(4_000, true, [
@@ -414,7 +449,7 @@ describe('EconomySystem', () => {
 
     expect(blockedResult.ticksAdvanced).toBe(4);
     expect(blockedResult.runningCostBlockerByTrainId).toEqual({
-      [trainId]: 'Insufficient cash for running costs',
+      [trainId]: 'insufficient-running-cash',
     });
     expect(blockedResult.stopTrainIds).toEqual([trainId]);
     expect(blockedWorld.company.ledger).toHaveLength(1);
@@ -422,7 +457,17 @@ describe('EconomySystem', () => {
 
   it('retains a rejected cargo tick without exposing its events or duplicating its retry', () => {
     const world = installFirstRoute();
-    const runtime = [stoppedRuntime(world.trains[0].id)];
+    world.trains[0].cargo = {
+      productId: 'logs',
+      units: 10,
+      loadedUnits: 10,
+      originFacilityId: 'managed-forest',
+    };
+    const runtime = [stoppedRuntime(world.trains[0].id, {
+      trackT: 0.9,
+      facing: -1,
+      x: 500,
+    })];
     const before = clonePlainData(world);
     let rejectNext = true;
     const rejectingPort = {
@@ -439,10 +484,13 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
-          expect(detachedDraft.trains[0].cargo?.units).toBe(10);
+          expect(detachedDraft.trains[0].cargo).toBeNull();
+          expect(detachedDraft.company.cash).toBeGreaterThan(
+            world.company.cash,
+          );
           return false;
         }
         return WorldManager.applyOperationsBatch(
@@ -469,7 +517,21 @@ describe('EconomySystem', () => {
 
     expect(retry.ticksAdvanced).toBe(1);
     expect(retry.commitRejected).toBe(false);
-    expect(world.trains[0].cargo?.units).toBe(10);
+    expect(retry.cargoStatuses).toEqual([expect.objectContaining({
+      trainId: world.trains[0].id,
+      facilityId: 'sawmill',
+      productId: 'logs',
+      kind: 'unloading',
+      batchUnits: 10,
+    })]);
+    expect(retry.completedDeliveries).toEqual([expect.objectContaining({
+      trainId: world.trains[0].id,
+      productId: 'logs',
+      units: 10,
+      destinationFacilityId: 'sawmill',
+    })]);
+    expect(isDeepFrozen(retry)).toBe(true);
+    expect(world.trains[0].cargo).toBeNull();
     expect(world.economy.tick).toBe(1);
     expect(world.operationsRevision).toBe(1);
   });
@@ -492,7 +554,7 @@ describe('EconomySystem', () => {
           company: world.company,
           economy: world.economy,
           trains: world.trains,
-          firstRouteProgress: world.firstRouteProgress,
+          freightProgress: world.freightProgress,
         });
         expect(mutate(detachedDraft)).toBe(true);
         expect(detachedDraft.economy).not.toEqual(world.economy);
@@ -562,7 +624,7 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
           return false;
@@ -606,7 +668,7 @@ describe('EconomySystem', () => {
             company: world.company,
             economy: world.economy,
             trains: world.trains,
-            firstRouteProgress: world.firstRouteProgress,
+            freightProgress: world.freightProgress,
           });
           expect(mutate(detachedDraft)).toBe(true);
           return false;

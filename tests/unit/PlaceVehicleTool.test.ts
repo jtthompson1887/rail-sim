@@ -34,7 +34,7 @@ function makeQuote(
 ): FreightPurchaseQuote {
   return {
     expectedRevision,
-    freightSetId: 'timber-freight-set',
+    freightSetId: 'flatbed-freight-set',
     trackUUID: 'forest-route',
     trackT: 0,
     facing: 1,
@@ -46,7 +46,7 @@ function makeQuote(
   };
 }
 
-describe('PlaceVehicleTool timber purchase gesture', () => {
+describe('PlaceVehicleTool flatbed purchase gesture', () => {
   let scene: any;
   let trackManager: any;
   let trainManager: any;
@@ -104,7 +104,7 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     expect(state).toHaveBeenCalledWith({
       quote: null,
       cash: WorldManager.world!.company.cash,
-      message: 'Click on player track to place the Timber Freight Set',
+      message: 'Click on player track to place the General Flatbed Set',
     });
     expect(quote).not.toHaveBeenCalled();
     EventBus.off('ui:freight-purchase-state', state);
@@ -121,7 +121,7 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     ],
     [
       'insufficient-cash',
-      'Insufficient cash for Timber Freight Set',
+      'Insufficient cash for General Flatbed Set',
     ],
   ] as const)('reports the exact %s remedy', (blocker, message) => {
     const track = makeTrack(scene);
@@ -152,7 +152,7 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
 
     const payload = state.mock.calls[0][0];
     expect(quote).toHaveBeenCalledWith({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-route',
       trackT: expect.any(Number),
       x: expect.any(Number),
@@ -247,7 +247,7 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
 
     expect(quote).toHaveBeenCalledTimes(1);
     expect(quote.mock.calls[0][0]).toEqual(expect.objectContaining({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-route',
     }));
   });
@@ -296,8 +296,8 @@ describe('PlaceVehicleTool timber purchase gesture', () => {
     EventBus.off('ui:freight-purchase-state', state);
   });
 
-  it('supports only the timber freight-set mode', () => {
-    expect(() => tool.setFreightSetId('timber-freight-set')).not.toThrow();
+  it('supports only the general flatbed freight-set mode', () => {
+    expect(() => tool.setFreightSetId('flatbed-freight-set')).not.toThrow();
   });
 
   it('clears its result listener on destroy', () => {

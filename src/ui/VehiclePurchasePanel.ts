@@ -1,5 +1,7 @@
 import type { FreightPurchaseQuote } from '../freight/FreightPurchaseService';
+import type { FreightPurchaseResult } from '../freight/FreightPurchaseService';
 import { buildFreightPurchasePresentation } from '../freight/FreightPresentation';
+import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 import { EventBus } from '../services/EventBus';
 
 const CURRENCY = new Intl.NumberFormat('en-GB', {
@@ -24,6 +26,11 @@ export class VehiclePurchasePanel {
     cash: number;
     message: string;
   }) => this.setState(state);
+  private readonly purchaseResultHandler = (
+    result: FreightPurchaseResult,
+  ) => {
+    if (result.ok) this.confirm.blur();
+  };
   private readonly facilityInspectionHandler = () => {
     this.facilityInspectionActive = true;
     this.syncVisibility();
@@ -65,8 +72,8 @@ export class VehiclePurchasePanel {
     this.remedy.style.cssText =
       'margin-top:8px;padding:7px 8px;border-radius:4px;background:#102c42;color:#ffe39a';
     this.buy.type = 'button';
-    this.buy.dataset.testid = 'timber-freight-set-buy';
-    this.buy.textContent = 'Place Timber Freight Set';
+    this.buy.dataset.testid = 'flatbed-freight-set-buy';
+    this.buy.textContent = 'Place General Flatbed Set';
     this.confirm.type = 'button';
     this.confirm.dataset.testid = 'freight-purchase-confirm';
     this.confirm.textContent = 'Confirm purchase';
@@ -85,7 +92,7 @@ export class VehiclePurchasePanel {
     }
     this.buy.addEventListener('click', () => {
       EventBus.emit('freight:purchase-mode-requested', {
-        freightSetId: 'timber-freight-set',
+        freightSetId: FLATBED_FREIGHT_SET_ID,
       });
     });
     this.confirm.addEventListener('click', () => {
@@ -108,6 +115,7 @@ export class VehiclePurchasePanel {
     this.applyLayout();
     this.setState({ quote: null, cash: 0, message: '' });
     EventBus.on('ui:freight-purchase-state', this.stateHandler);
+    EventBus.on('freight:purchase-result', this.purchaseResultHandler);
     EventBus.on('facility:inspection', this.facilityInspectionHandler);
     EventBus.on('facility:deselected', this.facilityDeselectedHandler);
     window.addEventListener('resize', this.resizeHandler);
@@ -157,6 +165,7 @@ export class VehiclePurchasePanel {
 
   destroy(): void {
     EventBus.off('ui:freight-purchase-state', this.stateHandler);
+    EventBus.off('freight:purchase-result', this.purchaseResultHandler);
     EventBus.off('facility:inspection', this.facilityInspectionHandler);
     EventBus.off('facility:deselected', this.facilityDeselectedHandler);
     window.removeEventListener('resize', this.resizeHandler);
@@ -171,9 +180,12 @@ export class VehiclePurchasePanel {
 
   private applyLayout(): void {
     const mobile = window.innerWidth <= 720;
+    const shortWide = mobile && window.innerWidth > window.innerHeight;
     this.root.dataset.layout = mobile ? 'mobile' : 'desktop';
     if (mobile) {
-      this.root.style.left = '56px';
+      this.root.style.left = shortWide
+        ? 'calc(50vw + 28px)'
+        : '56px';
       this.root.style.right = '8px';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';

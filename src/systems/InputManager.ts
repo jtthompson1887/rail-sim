@@ -11,7 +11,7 @@ const GAMEPLAY_INPUT_PANELS = [
   '[data-testid="facility-inspector"]',
   '[data-testid="vehicle-purchase-panel"]',
   '[data-testid="train-inspector"]',
-  '[data-testid="first-route-objective"]',
+  '[data-testid="freight-objective"]',
 ].join(',');
 
 export function isGameplayInputFocused(
@@ -157,5 +157,14 @@ export class InputManager {
     } else {
       selectedTrain.enginePower = 0;
     }
+  }
+
+  getThrottleKeyState(): { w: boolean; s: boolean } {
+    return { w: this.wKey.isDown, s: this.sKey.isDown };
+  }
+
+  setThrottleKeys(w: boolean, s: boolean): void {
+    this.wKey.isDown = w;
+    this.sKey.isDown = s;
   }
 }

@@ -22,4 +22,15 @@ describe('lossless plain-data authority helpers', () => {
     expect(equalPlainData({ value: NaN }, { value: NaN })).toBe(true);
     expect(equalPlainData({ value: -0 }, { value: 0 })).toBe(false);
   });
+
+  it('compares own keys independently of insertion order', () => {
+    expect(equalPlainData(
+      { first: 1, second: { left: true, right: false } },
+      { second: { right: false, left: true }, first: 1 },
+    )).toBe(true);
+    expect(equalPlainData(
+      { first: 1, second: 2 },
+      { first: 1, third: 2 },
+    )).toBe(false);
+  });
 });

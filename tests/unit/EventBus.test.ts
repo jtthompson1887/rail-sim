@@ -8,7 +8,7 @@ import type {
   OperatingSummaryDto,
   TrainInspectionDto,
 } from '../../src/freight/FreightPresentation';
-import type { FirstRouteObjectiveDto } from '../../src/freight/FirstRouteObjective';
+import type { FreightObjectiveDto } from '../../src/freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../../src/freight/CargoSystem';
 
 // Re-import to reset singleton state between tests via module re-evaluation
@@ -146,7 +146,7 @@ describe('EventBus', () => {
   it('round-trips the typed frozen freight quote and purchase result payloads', () => {
     const quote: FreightPurchaseQuote = Object.freeze({
       expectedRevision: 7,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: 'forest-route',
       trackT: 0.125,
       facing: -1,
@@ -190,16 +190,16 @@ describe('EventBus', () => {
     EventBus.off('freight:purchase-result', resultListener);
   });
 
-  it('round-trips the timber-only purchase mode request', () => {
+  it('round-trips the flatbed purchase mode request', () => {
     const listener = jest.fn();
     EventBus.on('freight:purchase-mode-requested', listener);
 
     EventBus.emit('freight:purchase-mode-requested', {
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
 
     expect(listener).toHaveBeenCalledWith({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     });
     EventBus.off('freight:purchase-mode-requested', listener);
   });
@@ -208,6 +208,7 @@ describe('EventBus', () => {
     const transfer = Object.freeze({
       trainId: 'train-1',
       facilityId: 'sawmill',
+      productId: 'logs',
       kind: 'unloading' as const,
       blocker: null,
       batchUnits: 4,
@@ -217,18 +218,20 @@ describe('EventBus', () => {
     });
     const inspection: TrainInspectionDto = Object.freeze({
       trainId: 'train-1',
-      displayName: 'Timber Freight Set',
+      displayName: 'General Flatbed Set',
       direction: 'forward',
       throttle: 1,
       movementState: 'stopped',
       cargo: Object.freeze({
         productLabel: 'Logs',
+        unitLabel: 'tonnes',
         units: 40,
         capacityUnits: 60,
         text: 'Logs 40 / 60 t',
       }),
       nearestEligibleFacility: 'Sawmill',
       transfer,
+      transferRemedy: '',
       currentTrip: Object.freeze({
         revenue: 500,
         runningCost: 100,
@@ -246,8 +249,11 @@ describe('EventBus', () => {
         operatingProfit: 750,
       }),
     });
-    const objective: FirstRouteObjectiveDto = Object.freeze({
+    const objective: FreightObjectiveDto = Object.freeze({
       objectiveVersion: 1,
+      id: 'first-profitable-route',
+      title: 'First freight route',
+      status: 'Complete the timber service',
       achieved: false,
       steps: Object.freeze([Object.freeze({
         id: 'connect-route',
@@ -259,6 +265,7 @@ describe('EventBus', () => {
       fromTick: 1,
       throughTick: 24,
       deliveryRevenue: 1_000,
+      contractBonuses: 0,
       runningExpenses: 250,
       operatingProfit: 750,
       capitalExpenditure: 0,
@@ -266,6 +273,8 @@ describe('EventBus', () => {
     });
     const delivery: FreightDeliveryEvent = Object.freeze({
       trainId: 'train-1',
+      productId: 'logs',
+      units: 60,
       destinationFacilityId: 'sawmill',
       tick: 24,
       revenue: 1_000,
@@ -273,10 +282,10 @@ describe('EventBus', () => {
       operatingProfit: 750,
     });
     const purchase: FreightPurchaseDto = Object.freeze({
-      freightSetId: 'timber-freight-set',
-      displayName: 'Timber Freight Set',
+      freightSetId: 'flatbed-freight-set',
+      displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs',
+      compatibleCargoLabel: 'Logs · Structural Timber',
       capacityLabel: '60 tonnes',
       runningCostLabel: '£20 / active tick',
       cashAfter: 10_000,
@@ -291,12 +300,12 @@ describe('EventBus', () => {
     const companyListener = jest.fn();
     const deliveryListener = jest.fn();
     EventBus.on('ui:train-inspection', trainListener);
-    EventBus.on('ui:first-route-objective', objectiveListener);
+    EventBus.on('ui:freight-objective', objectiveListener);
     EventBus.on('ui:company-state', companyListener);
     EventBus.on('ui:freight-delivery-completed', deliveryListener);
 
     EventBus.emit('ui:train-inspection', { inspection });
-    EventBus.emit('ui:first-route-objective', objective);
+    EventBus.emit('ui:freight-objective', objective);
     EventBus.emit('ui:company-state', {
       cash: 100_000,
       saveState: 'saved',
@@ -314,7 +323,7 @@ describe('EventBus', () => {
     expect(deliveryListener).toHaveBeenCalledWith(delivery);
 
     EventBus.off('ui:train-inspection', trainListener);
-    EventBus.off('ui:first-route-objective', objectiveListener);
+    EventBus.off('ui:freight-objective', objectiveListener);
     EventBus.off('ui:company-state', companyListener);
     EventBus.off('ui:freight-delivery-completed', deliveryListener);
   });

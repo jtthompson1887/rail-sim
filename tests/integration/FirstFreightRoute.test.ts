@@ -27,6 +27,9 @@ import {
   getRecipe,
 } from '../../src/economy/ProductCatalog';
 import { clonePlainData } from '../../src/utils/PlainData';
+import {
+  countForwardRegionalDevelopmentGrants,
+} from '../../src/freight/FreightProgress';
 
 const facility = (
   harness: FirstRouteHarness,
@@ -125,7 +128,7 @@ const phaseSnapshot = (
     trackUUID: authoritativeTrain.trackUUID,
     trackT: authoritativeTrain.trackT,
     facing: authoritativeTrain.facing,
-    progress: world.firstRouteProgress,
+    progress: world.freightProgress,
   });
 };
 
@@ -163,7 +166,7 @@ const purchaseInput = (
   ))[0];
   if (!access) throw new Error('No forest endpoint for purchase');
   return {
-    freightSetId: 'timber-freight-set',
+    freightSetId: 'flatbed-freight-set',
     trackUUID: access.track.uuid,
     trackT: access.trackT,
     x: access.point.x,
@@ -289,7 +292,7 @@ describe('Integration: first profitable timber freight route', () => {
       outputs: [{ productId: 'structural-timber', quantity: 8 }],
     });
 
-    expect(opening.schemaVersion).toBe(7);
+    expect(opening.schemaVersion).toBe(8);
     expect(opening.tracks).toEqual([]);
     expect(opening.junctions).toEqual([]);
     expect(opening.stations).toEqual([]);
@@ -317,6 +320,7 @@ describe('Integration: first profitable timber freight route', () => {
     expect(train(harness, trainId).cargo).toEqual({
       productId: 'logs',
       units: 60,
+      loadedUnits: 60,
       originFacilityId: facility(harness, 'managed-forest').id,
     });
 
@@ -366,6 +370,7 @@ describe('Integration: first profitable timber freight route', () => {
     const completedForest = facility(harness, 'managed-forest');
     const completedSawmill = facility(harness, 'sawmill');
     const deliveryRevenue = categoryTotal(harness, 'delivery-revenue');
+    const contractBonuses = categoryTotal(harness, 'contract-bonus');
     const runningCost = categoryTotal(harness, 'train-running-cost');
     const vehicleCapex = categoryTotal(harness, 'vehicle-capex');
     const forestProduction = completedForest.inventories.logs.recentInflow;
@@ -388,8 +393,19 @@ describe('Integration: first profitable timber freight route', () => {
     expect(completedTrain.cargo).toBeNull();
     expect(completedTrain.operations.lastTripRevenue)
       .toBeGreaterThan(completedTrain.operations.lastTripRunningCost);
-    expect(completed.firstRouteProgress.profitableDeliveryCompleted)
+    expect(completed.freightProgress.profitableLogDeliveryCompleted)
       .toBe(true);
+    expect(completed.freightProgress.developmentGrantAwarded).toBe(true);
+    expect(completed.company.ledger.filter(
+      ({ category }) => category === 'contract-bonus',
+    )).toEqual([
+      expect.objectContaining({
+        ledgerClass: 'revenue',
+        amount: 250_000,
+        referenceId: 'regional-development-grant:v1',
+      }),
+    ]);
+    expect(contractBonuses).toBe(250_000);
     expect(processingEvidence.map(
       ({ tick }) => tick - deliveryStartTick,
     )).toEqual([1, 2, 3, 4, 5, 6]);
@@ -444,7 +460,8 @@ describe('Integration: first profitable timber freight route', () => {
       - constructionCapex
       - vehicleCapex
       - runningCost
-      + deliveryRevenue,
+      + deliveryRevenue
+      + contractBonuses,
     );
   });
 
@@ -492,7 +509,7 @@ describe('Integration: first profitable timber freight route', () => {
 
     harness.advanceTicks(3);
     expect(train(harness, trainId).cargo).toBeNull();
-    expect(harness.world.firstRouteProgress.profitableDeliveryCompleted)
+    expect(harness.world.freightProgress.profitableLogDeliveryCompleted)
       .toBe(true);
     expected = phaseSnapshot(harness, trainId);
     harness.saveReload();
@@ -526,6 +543,11 @@ describe('Integration: first profitable timber freight route', () => {
     let priorLifetimeRevenue = 0;
 
     for (let cycle = 1; cycle <= 3; cycle += 1) {
+      harness.setRuntime(trainId, {
+        ...midpointRuntime(harness),
+        speedWorldUnitsPerSecond: 0,
+        throttle: 0,
+      });
       let replenishmentTicks = 0;
       while (facility(
         harness,
@@ -598,6 +620,8 @@ describe('Integration: first profitable timber freight route', () => {
     )).size).toBe(18);
     expect(train(harness, trainId).operations.lifetimeDeliveredUnits)
       .toBe(180);
+    expect(countForwardRegionalDevelopmentGrants(world.company)).toBe(1);
+    expect(world.freightProgress.developmentGrantAwarded).toBe(true);
   });
 
   it('rejects stale, duplicate-ID, live, and install purchase failures atomically', () => {
@@ -624,7 +648,7 @@ describe('Integration: first profitable timber freight route', () => {
     if (first.ok === false) throw new Error(first.blocker);
     expect(serviceProbe.spawnCalls).toEqual([{
       trainId: first.trainId,
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     }]);
     expect(serviceProbe.placeCalls).toEqual([{
       trainId: first.trainId,
@@ -682,7 +706,7 @@ describe('Integration: first profitable timber freight route', () => {
       });
       expect(probe.spawnCalls).toEqual([{
         trainId,
-        freightSetId: 'timber-freight-set',
+        freightSetId: 'flatbed-freight-set',
       }]);
       expect(probe.placeCalls).toEqual(index === 0 ? [] : [{
         trainId,
@@ -712,7 +736,7 @@ describe('Integration: first profitable timber freight route', () => {
     apply.mockRestore();
     expect(installProbe.spawnCalls).toEqual([{
       trainId: 'install-failure',
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
     }]);
     expect(installProbe.placeCalls).toEqual([{
       trainId: 'install-failure',
@@ -855,7 +879,7 @@ describe('Integration: first profitable timber freight route', () => {
     expect(moving.cargoStatuses).toEqual([
       expect.objectContaining({
         kind: 'blocked',
-        blocker: 'Stop the train to transfer cargo',
+        blocker: 'train-moving',
         batchUnits: 0,
       }),
     ]);
@@ -876,7 +900,7 @@ describe('Integration: first profitable timber freight route', () => {
     ]);
     expect(derailed.cargoStatuses).toEqual([
       expect.objectContaining({
-        blocker: 'Re-rail the train before operating',
+        blocker: 'derailed',
         batchUnits: 0,
       }),
     ]);
@@ -916,7 +940,7 @@ describe('Integration: first profitable timber freight route', () => {
     ]);
 
     expect(result.runningCostBlockerByTrainId).toEqual({
-      'train-1': 'Insufficient cash for running costs',
+      'train-1': 'insufficient-running-cash',
     });
     expect(result.stopTrainIds).toEqual(['train-1']);
     expect({

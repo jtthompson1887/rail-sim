@@ -20,8 +20,17 @@ import {
   INITIAL_FACILITY_DEFINITIONS,
   INITIAL_PRODUCTS,
 } from './InitialEconomyContent';
-import type { TerrainHeightSource } from '../systems/ConstructionAnalyzer';
+import {
+  ConstructionAnalyzer,
+  type TerrainHeightSource,
+} from '../systems/ConstructionAnalyzer';
 import { createSeededRandom } from '../utils/SeededRandom';
+import {
+  analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
+} from './PrefabricationOpportunity';
+import { canonicalizeConstructionGridPoint } from '../systems/ConstructionGrid';
+import { GameConfig } from '../config/GameConfig';
 
 export interface EconomyGenerationDiagnostics {
   candidatesEvaluated: number;
@@ -48,13 +57,15 @@ interface FacilityPosition {
   y: number;
 }
 
-const SECONDARY_FACILITY_IDS = [
+const SECONDARY_PLACEMENT_ORDER = [
+  'prefabrication-plant',
   'quarry',
   'cement-works',
   'port-interchange',
-  'prefabrication-plant',
   'town-construction-market',
 ] as const;
+
+const PREFAB_SEARCH_HALF_SPAN = 2_400;
 
 function footprintRelief(
   terrain: TerrainHeightSource,
@@ -168,10 +179,21 @@ export function validateGeneratedEconomy(
 
   const forest = value.facilities[0];
   const sawmill = value.facilities[1];
+  const prefabricationPlant = value.facilities.find(
+    ({ id }) => id === 'prefabrication-plant',
+  );
+  const extensionStart = resolvePrefabricationExtensionStart(opportunity);
   return forest.x === opportunity.sites[0].x
     && forest.y === opportunity.sites[0].y
     && sawmill.x === opportunity.sites[1].x
-    && sawmill.y === opportunity.sites[1].y;
+    && sawmill.y === opportunity.sites[1].y
+    && prefabricationPlant !== undefined
+    && extensionStart !== null
+    && analyzePrefabricationExtension(
+      new ConstructionAnalyzer(terrain),
+      extensionStart,
+      prefabricationPlant.railAccess,
+    ) !== null;
 }
 
 export class WorldEconomyGenerator {
@@ -182,32 +204,76 @@ export class WorldEconomyGenerator {
     opportunity: StarterOpportunityDef,
   ): EconomyGenerationResult {
     const random = createSeededRandom(`${config.seed}:economy`);
+    const analyzer = new ConstructionAnalyzer(this.terrain);
+    const extensionStart = resolvePrefabricationExtensionStart(opportunity);
+    if (!extensionStart) {
+      return {
+        ok: false,
+        error: {
+          code: 'economy-exhausted',
+          seed: config.seed,
+          candidatesEvaluated: 0,
+          facilitiesPlaced: 0,
+        },
+      };
+    }
     const positions: FacilityPosition[] = opportunity.sites.map(
       ({ x, y }) => ({ x, y }),
     );
-    const secondaryPositions: FacilityPosition[] = [];
+    const positionByDefinition = new Map<string, FacilityPosition>([
+      ['managed-forest', positions[0]],
+      ['sawmill', positions[1]],
+    ]);
+    const canonicalCandidates = new Set<string>();
+    const deferredFacilityCandidates: FacilityPosition[] = [];
+    let facilitiesPlaced = 0;
     const gridSize = Math.sqrt(MAX_ECONOMY_SITE_CANDIDATES);
     const xLimit = WorldGenerationConfig.WORLD_HALF_WIDTH
       - WorldGenerationConfig.SITE_SEARCH_MARGIN;
     const yLimit = WorldGenerationConfig.WORLD_HALF_HEIGHT
       - WorldGenerationConfig.SITE_SEARCH_MARGIN;
-    const cellWidth = xLimit * 2 / gridSize;
-    const cellHeight = yLimit * 2 / gridSize;
+    const searchMinX = Math.max(
+      -xLimit,
+      positions[1].x - PREFAB_SEARCH_HALF_SPAN,
+    );
+    const searchMaxX = Math.min(
+      xLimit,
+      positions[1].x + PREFAB_SEARCH_HALF_SPAN,
+    );
+    const searchMinY = Math.max(
+      -yLimit,
+      positions[1].y - PREFAB_SEARCH_HALF_SPAN,
+    );
+    const searchMaxY = Math.min(
+      yLimit,
+      positions[1].y + PREFAB_SEARCH_HALF_SPAN,
+    );
+    const cellWidth = (searchMaxX - searchMinX) / gridSize;
+    const cellHeight = (searchMaxY - searchMinY) / gridSize;
     let candidatesEvaluated = 0;
 
     for (
       let index = 0;
       index < MAX_ECONOMY_SITE_CANDIDATES
-        && secondaryPositions.length < SECONDARY_FACILITY_IDS.length;
+        && facilitiesPlaced < SECONDARY_PLACEMENT_ORDER.length;
       index++
     ) {
       const row = Math.floor(index / gridSize);
       const column = index % gridSize;
-      const candidate = {
-        x: -xLimit + (column + 0.2 + random() * 0.6) * cellWidth,
-        y: -yLimit + (row + 0.2 + random() * 0.6) * cellHeight,
+      const rawCandidate = {
+        x: searchMinX + (column + 0.2 + random() * 0.6) * cellWidth,
+        y: searchMinY + (row + 0.2 + random() * 0.6) * cellHeight,
       };
       candidatesEvaluated += 1;
+      const canonical = canonicalizeConstructionGridPoint(
+        rawCandidate.x,
+        rawCandidate.y,
+        GameConfig.WORLD.SNAP_GRID_SIZE,
+      );
+      const candidate = { x: canonical.x, y: canonical.y };
+      const candidateKey = `${candidate.x}:${candidate.y}`;
+      if (canonicalCandidates.has(candidateKey)) continue;
+      canonicalCandidates.add(candidateKey);
       const relief = footprintRelief(this.terrain, candidate);
       if (relief === null || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
         continue;
@@ -218,29 +284,52 @@ export class WorldEconomyGenerator {
       ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
         continue;
       }
+      const facilityId = SECONDARY_PLACEMENT_ORDER[facilitiesPlaced];
+      if (facilityId === 'prefabrication-plant') {
+        if (analyzePrefabricationExtension(
+          analyzer,
+          extensionStart,
+          candidate,
+        ) === null) {
+          deferredFacilityCandidates.push(candidate);
+          continue;
+        }
+        positions.push(candidate);
+        positionByDefinition.set(facilityId, candidate);
+        facilitiesPlaced += 1;
+        for (const deferred of deferredFacilityCandidates) {
+          if (positions.some((position) => Math.hypot(
+            deferred.x - position.x,
+            deferred.y - position.y,
+          ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
+            continue;
+          }
+          const deferredFacilityId =
+            SECONDARY_PLACEMENT_ORDER[facilitiesPlaced];
+          positions.push(deferred);
+          positionByDefinition.set(deferredFacilityId, deferred);
+          facilitiesPlaced += 1;
+          if (facilitiesPlaced === SECONDARY_PLACEMENT_ORDER.length) break;
+        }
+        continue;
+      }
       positions.push(candidate);
-      secondaryPositions.push(candidate);
+      positionByDefinition.set(facilityId, candidate);
+      facilitiesPlaced += 1;
     }
 
-    if (secondaryPositions.length < SECONDARY_FACILITY_IDS.length) {
+    if (facilitiesPlaced < SECONDARY_PLACEMENT_ORDER.length) {
       return {
         ok: false,
         error: {
           code: 'economy-exhausted',
           seed: config.seed,
           candidatesEvaluated,
-          facilitiesPlaced: secondaryPositions.length,
+          facilitiesPlaced,
         },
       };
     }
 
-    const positionByDefinition = new Map<string, FacilityPosition>([
-      ['managed-forest', positions[0]],
-      ['sawmill', positions[1]],
-    ]);
-    SECONDARY_FACILITY_IDS.forEach((id, index) => {
-      positionByDefinition.set(id, secondaryPositions[index]);
-    });
     const facilities = INITIAL_FACILITY_DEFINITIONS.map((definition) => (
       instantiateFacility(definition, positionByDefinition.get(definition.id)!)
     ));

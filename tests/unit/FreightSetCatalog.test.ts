@@ -3,12 +3,12 @@ import { getProduct } from '../../src/economy/ProductCatalog';
 import {
   capacityForProduct,
   FreightSetDefinition,
+  FLATBED_FREIGHT_SET_ID,
+  FLATBED_TRAIN_PURCHASE_PRICE,
+  FREIGHT_SETS,
   getFreightSet,
   OPERATING_RESERVE,
   STARTER_ROUTE_RESERVE,
-  TIMBER_FREIGHT_SET_ID,
-  TIMBER_FREIGHT_SETS,
-  TIMBER_TRAIN_PURCHASE_PRICE,
   validateFreightSetContent,
 } from '../../src/freight/FreightSetCatalog';
 
@@ -21,25 +21,27 @@ type MutableFreightSetDefinition =
     compatibleProductIds: string[];
   };
 
-const cloneTimberSet = (): MutableFreightSetDefinition => ({
-  ...TIMBER_FREIGHT_SETS[0],
+const cloneFlatbedSet = (): MutableFreightSetDefinition => ({
+  ...FREIGHT_SETS[0],
   compatibleProductIds: [
-    ...TIMBER_FREIGHT_SETS[0].compatibleProductIds,
+    ...FREIGHT_SETS[0].compatibleProductIds,
   ],
 });
 
 const logs = (): ProductDefinition => getProduct('logs')!;
+const structuralTimber = (): ProductDefinition =>
+  getProduct('structural-timber')!;
 
-describe('timber freight set catalogue', () => {
-  it('contains exactly the approved timber freight set and reserves', () => {
-    expect(TIMBER_FREIGHT_SET_ID).toBe('timber-freight-set');
-    expect(TIMBER_TRAIN_PURCHASE_PRICE).toBe(90_000);
+describe('flatbed freight set catalogue', () => {
+  it('contains exactly the approved general flatbed set and reserves', () => {
+    expect(FLATBED_FREIGHT_SET_ID).toBe('flatbed-freight-set');
+    expect(FLATBED_TRAIN_PURCHASE_PRICE).toBe(90_000);
     expect(OPERATING_RESERVE).toBe(20_000);
     expect(STARTER_ROUTE_RESERVE).toBe(110_000);
-    expect(TIMBER_FREIGHT_SETS).toEqual([{
-      id: 'timber-freight-set',
-      displayName: 'Timber Freight Set',
-      compatibleProductIds: ['logs'],
+    expect(FREIGHT_SETS).toEqual([{
+      id: 'flatbed-freight-set',
+      displayName: 'General Flatbed Set',
+      compatibleProductIds: ['logs', 'structural-timber'],
       payloadMassKg: 60_000,
       payloadVolumeLitres: 96_000,
       purchasePrice: 90_000,
@@ -47,20 +49,26 @@ describe('timber freight set catalogue', () => {
     }]);
   });
 
-  it('derives the exact log capacity from mass and volume', () => {
+  it.each([
+    ['logs', logs],
+    ['structural timber', structuralTimber],
+  ])('derives the exact 60-unit %s capacity from mass and volume', (
+    _description,
+    product,
+  ) => {
     expect(capacityForProduct(
-      getFreightSet('timber-freight-set')!,
-      logs(),
+      getFreightSet('flatbed-freight-set')!,
+      product(),
     )).toEqual({ ok: true, capacityUnits: 60 });
   });
 
   it('returns the same immutable definition on repeated lookup', () => {
-    const first = getFreightSet(TIMBER_FREIGHT_SET_ID)!;
-    const second = getFreightSet(TIMBER_FREIGHT_SET_ID)!;
+    const first = getFreightSet(FLATBED_FREIGHT_SET_ID)!;
+    const second = getFreightSet(FLATBED_FREIGHT_SET_ID)!;
 
     expect(first).toBe(second);
-    expect(first).toBe(TIMBER_FREIGHT_SETS[0]);
-    expect(Object.isFrozen(TIMBER_FREIGHT_SETS)).toBe(true);
+    expect(first).toBe(FREIGHT_SETS[0]);
+    expect(Object.isFrozen(FREIGHT_SETS)).toBe(true);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.compatibleProductIds)).toBe(true);
     expect(() => {
@@ -74,44 +82,47 @@ describe('timber freight set catalogue', () => {
 
   it('rejects products outside the explicit compatibility list', () => {
     expect(capacityForProduct(
-      getFreightSet(TIMBER_FREIGHT_SET_ID)!,
-      getProduct('structural-timber')!,
+      getFreightSet(FLATBED_FREIGHT_SET_ID)!,
+      getProduct('cement')!,
     )).toEqual({ ok: false, code: 'incompatible-product' });
   });
 });
 
 describe('validateFreightSetContent', () => {
-  it('accepts the timber freight set catalogue', () => {
+  it('accepts the general flatbed set catalogue', () => {
     expect(validateFreightSetContent(
-      TIMBER_FREIGHT_SETS,
-      [logs()],
+      FREIGHT_SETS,
+      [logs(), structuralTimber()],
     )).toEqual({ valid: true });
   });
 
   it('rejects duplicate freight set IDs', () => {
-    const duplicate = cloneTimberSet();
+    const duplicate = cloneFlatbedSet();
 
     expect(validateFreightSetContent(
-      [cloneTimberSet(), duplicate],
-      [logs()],
+      [cloneFlatbedSet(), duplicate],
+      [logs(), structuralTimber()],
     )).toMatchObject({
       valid: false,
-      referenceId: TIMBER_FREIGHT_SET_ID,
+      referenceId: FLATBED_FREIGHT_SET_ID,
     });
   });
 
   it('rejects duplicate compatible product IDs', () => {
-    const set = cloneTimberSet();
+    const set = cloneFlatbedSet();
     set.compatibleProductIds.push('logs');
 
-    expect(validateFreightSetContent([set], [logs()])).toMatchObject({
+    expect(validateFreightSetContent(
+      [set],
+      [logs(), structuralTimber()],
+    )).toMatchObject({
       valid: false,
       referenceId: 'logs',
     });
   });
 
   it('rejects unknown compatible product IDs', () => {
-    const set = cloneTimberSet();
+    const set = cloneFlatbedSet();
     set.compatibleProductIds = ['unknown-product'];
 
     expect(validateFreightSetContent([set], [logs()])).toMatchObject({
@@ -128,7 +139,7 @@ describe('validateFreightSetContent', () => {
       set.compatibleProductIds = [''];
     }],
   ])('rejects an empty %s', (_description, mutate) => {
-    const set = cloneTimberSet();
+    const set = cloneFlatbedSet();
     mutate(set);
 
     expect(validateFreightSetContent([set], [logs()])).toMatchObject({
@@ -162,12 +173,12 @@ describe('validateFreightSetContent', () => {
       set.runningCostPerActiveTick = Number.MAX_SAFE_INTEGER + 1;
     }],
   ])('rejects %s', (_description, mutate) => {
-    const set = cloneTimberSet();
+    const set = cloneFlatbedSet();
     mutate(set);
 
     expect(validateFreightSetContent([set], [logs()])).toMatchObject({
       valid: false,
-      referenceId: TIMBER_FREIGHT_SET_ID,
+      referenceId: FLATBED_FREIGHT_SET_ID,
     });
   });
 });

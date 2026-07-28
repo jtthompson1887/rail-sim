@@ -11,6 +11,17 @@ import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
 import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
+import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import {
+  analyzePrefabricationExtension,
+  resolvePrefabricationExtensionStart,
+} from '../../src/economy/PrefabricationOpportunity';
+import {
+  WorldEconomyGenerator,
+  type EconomyGenerationResult,
+} from '../../src/economy/WorldEconomyGenerator';
+import { MAX_ECONOMY_SITE_CANDIDATES } from '../../src/config/WorldGeneration';
 
 function makeTrackDef(
   uuid: string,
@@ -48,6 +59,146 @@ describe('WorldManager', () => {
   });
 
   describe('createNew()', () => {
+    it('continues default opportunity search and persists the exact accepted economy', () => {
+      const originalGenerate = WorldEconomyGenerator.prototype.generate;
+      const accepted: Array<{
+        opportunity: Parameters<typeof originalGenerate>[1];
+        result: Extract<EconomyGenerationResult, { ok: true }>;
+      }> = [];
+      let calls = 0;
+      const generate = jest.spyOn(
+        WorldEconomyGenerator.prototype,
+        'generate',
+      ).mockImplementation(function generateForAcceptedOpportunity(
+        generationConfig,
+        opportunity,
+      ) {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            ok: false,
+            error: {
+              code: 'economy-exhausted',
+              seed: generationConfig.seed,
+              candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+              facilitiesPlaced: 0,
+            },
+          };
+        }
+        const result = originalGenerate.call(
+          this,
+          generationConfig,
+          opportunity,
+        );
+        if (result.ok) {
+          accepted.push({
+            opportunity: clonePlainData(opportunity),
+            result: clonePlainData(result),
+          });
+        }
+        return result;
+      });
+
+      const result = WorldManager.tryCreateNew(
+        'Retried default generation',
+        'real-terrain-alpha',
+      );
+
+      expect(result.ok).toBe(true);
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(accepted).toHaveLength(1);
+      if (!result.ok) return;
+      expect(result.world.starterOpportunity).toEqual(
+        accepted[0].opportunity,
+      );
+      expect(result.world.economy).toEqual(accepted[0].result.economy);
+      generate.mockRestore();
+    });
+
+    it.each([
+      ['thrown', () => {
+        throw new Error('default economy failure');
+      }],
+      ['malformed', () => ({ ok: true })],
+    ] as const)(
+      'aborts default joint generation on a %s economy result',
+      (_label, implementation) => {
+        const generate = jest.spyOn(
+          WorldEconomyGenerator.prototype,
+          'generate',
+        ).mockImplementation(implementation as any);
+        const save = jest.spyOn(SaveService, 'saveWorld');
+
+        const result = WorldManager.tryCreateNew(
+          'Invalid default economy',
+          'default-economy-fatal',
+        );
+
+        const generateCalls = generate.mock.calls.length;
+        const saveCalls = save.mock.calls.length;
+        generate.mockRestore();
+        save.mockRestore();
+        expect(result).toEqual({
+          ok: false,
+          error: {
+            code: 'world-validation-failed',
+            seed: 'default-economy-fatal',
+          },
+        });
+        expect(generateCalls).toBe(1);
+        expect(saveCalls).toBe(0);
+        expect(WorldManager.world).toBeNull();
+      },
+    );
+
+    it('aborts default joint generation on an independently invalid economy', () => {
+      const originalGenerate = WorldEconomyGenerator.prototype.generate;
+      const generate = jest.spyOn(
+        WorldEconomyGenerator.prototype,
+        'generate',
+      ).mockImplementation(function generateInvalidEconomy(
+        generationConfig,
+        opportunity,
+      ) {
+        const result = originalGenerate.call(
+          this,
+          generationConfig,
+          opportunity,
+        );
+        if (!result.ok) return result;
+        const invalid = clonePlainData(result);
+        const prefab = invalid.economy.facilities.find(
+          ({ id }) => id === 'prefabrication-plant',
+        )!;
+        prefab.x = 7_000;
+        prefab.y = 7_000;
+        prefab.railAccess.x = 7_000;
+        prefab.railAccess.y = 7_000;
+        return invalid;
+      });
+      const save = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.tryCreateNew(
+        'Invalid default economy',
+        'real-terrain-alpha',
+      );
+
+      const generateCalls = generate.mock.calls.length;
+      const saveCalls = save.mock.calls.length;
+      generate.mockRestore();
+      save.mockRestore();
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'world-validation-failed',
+          seed: 'real-terrain-alpha',
+        },
+      });
+      expect(generateCalls).toBe(1);
+      expect(saveCalls).toBe(0);
+      expect(WorldManager.world).toBeNull();
+    });
+
     it('creates a world with the given name', () => {
       const world = WorldManager.createNew('Test World', 'real-terrain-alpha');
       expect(world.name).toBe('Test World');
@@ -71,6 +222,35 @@ describe('WorldManager', () => {
       expect(w.junctions).toHaveLength(0);
       expect(w.stations).toHaveLength(0);
       expect(w.trains).toHaveLength(0);
+      expect(w).not.toHaveProperty('services');
+    });
+
+    it('installs only a world with a recomputable affordable Prefab extension', () => {
+      const seed = 'real-terrain-alpha';
+      const world = WorldManager.createNew('Affordable', seed);
+      const sawmill = world.economy.facilities.find(
+        ({ id }) => id === 'sawmill',
+      )!;
+      const prefab = world.economy.facilities.find(
+        ({ id }) => id === 'prefabrication-plant',
+      )!;
+      const start = resolvePrefabricationExtensionStart(
+        world.starterOpportunity,
+      );
+
+      const witness = analyzePrefabricationExtension(
+        new ConstructionAnalyzer(new TerrainGenerator(seed)),
+        start!,
+        prefab.railAccess,
+      );
+
+      expect(start).not.toBeNull();
+      expect(start?.point).toEqual({
+        x: sawmill.railAccess.x,
+        y: sawmill.railAccess.y,
+      });
+      expect(witness).not.toBeNull();
+      expect(witness!.totalCost).toBeLessThanOrEqual(194_000);
     });
 
     it('accepts a custom seed', () => {
@@ -78,16 +258,19 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 7 with a generated economy and conserved opening balance', () => {
+    it('creates schema 8 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(7);
+      expect(w.schemaVersion).toBe(8);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.operationsRevision).toBe(0);
-      expect(w.firstRouteProgress).toEqual({
-        objectiveVersion: 1,
-        profitableDeliveryCompleted: false,
+      expect(w.freightProgress).toEqual({
+        progressVersion: 1,
+        profitableLogDeliveryCompleted: false,
+        developmentGrantAwarded: false,
+        profitableStructuralTimberDeliveryCompleted: false,
       });
+      expect(w).not.toHaveProperty('firstRouteProgress');
       expect(w.generationConfig).toEqual({
         generationConfigVersion: 1,
         seed: 'seed-v1',
@@ -534,7 +717,7 @@ describe('WorldManager', () => {
           draft.company.nextLedgerId += 1;
           draft.economy.facilities[0].name += ' upgraded';
           draft.trains.push(makeFreightTrainDef());
-          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          draft.freightProgress.profitableLogDeliveryCompleted = true;
           return true;
         },
       )).toBe(true);
@@ -547,7 +730,7 @@ describe('WorldManager', () => {
       }));
       expect(world.economy.facilities[0].name).toContain('upgraded');
       expect(world.trains).toEqual([makeFreightTrainDef()]);
-      expect(world.firstRouteProgress.profitableDeliveryCompleted).toBe(true);
+      expect(world.freightProgress.profitableLogDeliveryCompleted).toBe(true);
       expect(world.revision).toBe(rootBefore + 1);
       expect(world.constructionRevision).toBe(constructionBefore);
       expect(world.operationsRevision).toBe(operationsBefore + 1);
@@ -559,7 +742,7 @@ describe('WorldManager', () => {
       escaped.company.cash = 0;
       escaped.economy.tick += 1;
       escaped.trains[0].trackT = 0.9;
-      escaped.firstRouteProgress.profitableDeliveryCompleted = false;
+      escaped.freightProgress.profitableLogDeliveryCompleted = false;
       expect(JSON.stringify(world)).toBe(installed);
     });
 
@@ -675,7 +858,7 @@ describe('WorldManager', () => {
           });
           draft.company.nextLedgerId += 1;
           draft.economy.tick += 1;
-          draft.firstRouteProgress.profitableDeliveryCompleted = true;
+          draft.freightProgress.profitableLogDeliveryCompleted = true;
           return true;
         },
       )).toBe(false);

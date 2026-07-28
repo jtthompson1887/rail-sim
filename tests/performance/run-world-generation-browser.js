@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
 const workspace = path.resolve(__dirname, '../..');
 const outputPath = path.join(workspace, 'test-results', 'world-generation-benchmark');
 const bundleName = 'world-generation-browser.js';
-const targetMs = process.env.CI ? 5_000 : 2_000;
+const targetMs = 2_000;
 
 function buildHarness() {
   return new Promise((resolve, reject) => {
@@ -77,36 +77,49 @@ function startHarnessServer() {
     const record = {
       ...measurement,
       targetMs,
-      target: process.env.CI ? 'ci-smoke' : 'local',
+      target: 'exact-2s',
       platform: `${process.platform}-${process.arch}`,
       cpu: os.cpus()[0]?.model ?? 'unknown',
       browser: `Chromium ${await browser.version()}`,
     };
     process.stdout.write(`[world-generation-browser] ${JSON.stringify(record)}\n`);
 
-    const audit = measurement.opportunityAudit;
-    const exactOpportunityAudit = audit !== undefined
+    const audit = measurement.jointAudit;
+    const exactJointAudit = audit !== undefined
       && audit.range.startSeed === 'playtest-601'
       && audit.range.endSeed === 'playtest-884'
       && audit.seedsEvaluated === 284
       && audit.seedsResolved === 284
       && audit.seedsExhausted === 0
-      && audit.maxResolvedAttempt === 11
-      && audit.firstWorstSeed === 'playtest-753'
+      && audit.maxResolvedAttempt === 3
+      && audit.maxEconomyEvaluations === 5
+      && audit.maxTotalEconomyCandidatesEvaluated === 1_155
+      && audit.maxJointWorkUnits === 1_762
+      && audit.firstWorstSeed === 'playtest-666'
+      && Number.isFinite(audit.maxGenerationDurationMs)
+      && audit.maxGenerationDurationMs < targetMs
       && Number.isFinite(audit.durationMs)
       && audit.durationMs > 0;
-    const exactObservedWorstCase = exactOpportunityAudit
+    const exactObservedWorstCase = exactJointAudit
       && measurement.seed === audit.firstWorstSeed
       && measurement.opportunityResult.ok === true
-      && measurement.opportunityResult.opportunity.resolvedAttempt
-        === audit.maxResolvedAttempt
       && measurement.opportunityResult.diagnostics.attemptsEvaluated
-        === audit.maxResolvedAttempt
+        === measurement.opportunityResult.opportunity.resolvedAttempt
       && measurement.opportunityResult.diagnostics.maxSiteCandidatesEvaluated === 256
       && measurement.economyResult.ok === true
       && measurement.economyResult.economy.facilities.length === 7
       && measurement.economyResult.diagnostics.candidatesEvaluated
-        <= measurement.economyCandidatesCap;
+        <= measurement.economyCandidatesCap
+      && measurement.economyEvaluations === 4
+      && measurement.totalEconomyCandidatesEvaluated === 994
+      && measurement.opportunityResult.opportunity.resolvedAttempt
+        * measurement.candidatesCap
+        + measurement.totalEconomyCandidatesEvaluated
+        === audit.maxJointWorkUnits
+      && measurement.totalEconomyCandidatesEvaluated
+        <= measurement.economyEvaluations * measurement.economyCandidatesCap
+      && measurement.prefabWitnessCost <= 194_000
+      && measurement.blankInfrastructure === true;
     if (!exactObservedWorstCase
       || measurement.attemptsCap !== 12
       || measurement.candidatesCap !== 256

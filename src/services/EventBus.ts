@@ -14,8 +14,9 @@ import type {
   OperatingSummaryDto,
   TrainInspectionDto,
 } from '../freight/FreightPresentation';
-import type { FirstRouteObjectiveDto } from '../freight/FirstRouteObjective';
+import type { FreightObjectiveDto } from '../freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../freight/CargoSystem';
+import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -69,6 +70,7 @@ interface EventMap {
   'ui:toolbar-undo-state': { canUndo: boolean; canRedo: boolean };
   'ui:toolbar-save-state': { state: 'saved' | 'unsaved' | 'saving' };
   'ui:toolbar-visible': { visible: boolean };
+  'ui:pause-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
   'editor:delete-tracks': DeleteTracksIntent;
   'ui:delete-request': DeleteReviewRequest;
@@ -86,7 +88,7 @@ interface EventMap {
   };
   'ui:cash-pulse': { amount: number };
   'freight:purchase-mode-requested': {
-    freightSetId: 'timber-freight-set';
+    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
   };
   'ui:freight-purchase-state': {
     quote: FreightPurchaseQuote | null;
@@ -100,7 +102,7 @@ interface EventMap {
   'ui:train-inspection': {
     inspection: TrainInspectionDto | null;
   };
-  'ui:first-route-objective': FirstRouteObjectiveDto;
+  'ui:freight-objective': FreightObjectiveDto;
   'ui:freight-delivery-completed': FreightDeliveryEvent;
 }
 
