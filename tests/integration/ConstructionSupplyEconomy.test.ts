@@ -432,9 +432,10 @@ describe('Integration: complete construction-supply economy', () => {
     )).toBe(finalCompany.cash);
     expect(finalCompany.cash).toBe(480_900);
     expect(summariseProfitAndLoss(finalCompany, 1, 3)).toEqual({
-      revenue: 1_200,
+      deliveryRevenue: 1_200,
+      contractBonuses: 0,
       operatingExpenses: 300,
-      operatingProfit: 900,
+      railwayOperatingProfit: 900,
       capitalExpenditure: 20_000,
       cashFlow: -19_100,
     });

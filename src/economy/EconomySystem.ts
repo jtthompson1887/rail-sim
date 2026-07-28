@@ -12,7 +12,7 @@ import { advanceMarketTick } from './MarketSystem';
 import { getRecipe } from './ProductCatalog';
 import {
   proposeCargoTick,
-  type CargoBlocker,
+  type CargoBlockerCode,
   type CargoTransferStatus,
   type FreightDeliveryEvent,
 } from '../freight/CargoSystem';
@@ -29,7 +29,7 @@ export interface EconomyUpdateResult {
   readonly cargoStatuses: readonly CargoTransferStatus[];
   readonly completedDeliveries: readonly FreightDeliveryEvent[];
   readonly runningCostBlockerByTrainId:
-    Readonly<Record<string, CargoBlocker | null>>;
+    Readonly<Record<string, CargoBlockerCode | null>>;
   readonly stopTrainIds: readonly string[];
   readonly commitRejected: boolean;
   readonly authoritativeChanged: boolean;
@@ -43,7 +43,16 @@ export interface EconomyWorldPort {
   ): boolean;
 }
 
-const emptyResult = (): EconomyUpdateResult => ({
+const deepFreeze = <T>(value: T): T => {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    const record = value as unknown as Record<string, unknown>;
+    Object.keys(record).forEach((key) => deepFreeze(record[key]));
+    Object.freeze(value);
+  }
+  return value;
+};
+
+const emptyResult = (): EconomyUpdateResult => deepFreeze({
   ticksAdvanced: 0,
   changedFacilityIds: [],
   cargoStatuses: [],
@@ -92,7 +101,7 @@ export class EconomySystem {
     const cargoStatusByTrainId = new Map<string, CargoTransferStatus>();
     const completedDeliveries: FreightDeliveryEvent[] = [];
     const runningCostBlockerByTrainId =
-      new Map<string, CargoBlocker | null>();
+      new Map<string, CargoBlockerCode | null>();
     const stopTrainIds = new Set<string>();
     let ticksAdvanced = 0;
     let commitRejected = false;
@@ -106,7 +115,7 @@ export class EconomySystem {
       const runtimeByTrainId = new Map(
         runtime.map((snapshot) => [
           snapshot.trainId,
-          clonePlainData(snapshot),
+          snapshot,
         ]),
       );
       const tickRuntime = Array.from(runtimeByTrainId.values()).sort(
@@ -116,7 +125,7 @@ export class EconomySystem {
       let tickCargoStatuses: readonly CargoTransferStatus[] = [];
       let tickCompletedDeliveries: readonly FreightDeliveryEvent[] = [];
       let tickRunningCostBlockerByTrainId:
-        Readonly<Record<string, CargoBlocker | null>> = {};
+        Readonly<Record<string, CargoBlockerCode | null>> = {};
       let tickStopTrainIds: readonly string[] = [];
       const committed = this.worldPort.applyOperationsBatch(
         expectedRevision,
@@ -124,16 +133,14 @@ export class EconomySystem {
           if (draft.economy.tick >= Number.MAX_SAFE_INTEGER) return false;
           const operationTick = draft.economy.tick + 1;
           draft.economy.tick = operationTick;
-          const facilitiesBefore = clonePlainData(
-            draft.economy.facilities,
-          );
+          const facilitiesBefore = draft.economy.facilities;
 
           draft.trains = draft.trains.map((authoritative) => {
             const snapshot = runtimeByTrainId.get(authoritative.id);
             const merged = snapshot
               ? TrainSerializer.mergeRuntime(authoritative, snapshot)
               : null;
-            return clonePlainData(merged ?? authoritative);
+            return merged ?? authoritative;
           });
 
           const cargo = proposeCargoTick({
@@ -141,15 +148,13 @@ export class EconomySystem {
             company: draft.company,
             economy: draft.economy,
             trains: draft.trains,
-            firstRouteProgress: draft.firstRouteProgress,
+            freightProgress: draft.freightProgress,
             runtime: tickRuntime,
           });
-          draft.company = clonePlainData(cargo.company);
+          draft.company = cargo.company;
           draft.economy = clonePlainData(cargo.economy);
-          draft.firstRouteProgress = clonePlainData(
-            cargo.firstRouteProgress,
-          );
-          draft.trains = cargo.trains.map(clonePlainData);
+          draft.freightProgress = cargo.freightProgress;
+          draft.trains = Array.from(cargo.trains);
 
           const costs = proposeRunningCosts({
             tick: operationTick,
@@ -157,8 +162,8 @@ export class EconomySystem {
             trains: draft.trains,
             runtime: tickRuntime,
           });
-          draft.company = clonePlainData(costs.company);
-          draft.trains = costs.trains.map(clonePlainData);
+          draft.company = costs.company;
+          draft.trains = Array.from(costs.trains);
 
           const orderedFacilities = draft.economy.facilities
             .map((facility, index) => ({ facility, index }))
@@ -234,13 +239,14 @@ export class EconomySystem {
       tickStopTrainIds.forEach((trainId) => stopTrainIds.add(trainId));
     }
 
-    const runningCostBlockers: Record<string, CargoBlocker | null> = {};
+    const runningCostBlockers:
+      Record<string, CargoBlockerCode | null> = {};
     Array.from(runningCostBlockerByTrainId.entries())
       .sort(([left], [right]) => left.localeCompare(right))
       .forEach(([trainId, blocker]) => {
         runningCostBlockers[trainId] = blocker;
       });
-    return {
+    return deepFreeze({
       ticksAdvanced,
       changedFacilityIds: Array.from(changedFacilityIds).sort(),
       cargoStatuses: Array.from(cargoStatusByTrainId.values())
@@ -250,6 +256,6 @@ export class EconomySystem {
       stopTrainIds: Array.from(stopTrainIds).sort(),
       commitRejected,
       authoritativeChanged: ticksAdvanced > 0,
-    };
+    });
   }
 }

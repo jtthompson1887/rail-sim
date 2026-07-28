@@ -15,6 +15,7 @@ describe('TrainSerializer', () => {
         cargo: {
           productId: 'logs',
           units: 17,
+          loadedUnits: 17,
           originFacilityId: 'managed-forest',
         },
         operations: {

@@ -36,23 +36,43 @@ describe('Facility presentation', () => {
       status: { code: 'waiting-input', label: 'Needs logs' },
       produces: ['structural-timber'],
       needs: ['logs'],
+      inputRows: [{
+        productId: 'logs',
+        displayName: 'Logs',
+        unitLabel: 'tonne',
+        requiredQuantity: 10,
+        availableQuantity: 0,
+        missingQuantity: 10,
+      }],
+      outputRows: [{
+        productId: 'structural-timber',
+        displayName: 'Structural Timber',
+        unitLabel: 'tonne',
+        cycleQuantity: 8,
+      }],
       railConnected: false,
     });
     expect(dto.inventories).toEqual([
       {
         productId: 'logs',
         displayName: 'Logs',
+        unitLabel: 'tonne',
         quantity: 0,
         capacity: 200,
       },
       {
         productId: 'structural-timber',
         displayName: 'Structural Timber',
+        unitLabel: 'tonne',
         quantity: 0,
         capacity: 160,
       },
     ]);
     expect(dto.quotes).toHaveLength(2);
+    expect(dto.quotes[0]).toEqual(expect.objectContaining({
+      displayName: 'Logs',
+      unitLabel: 'tonne',
+    }));
     expect(dto.quotes.every((quote) => quote.factors.length === 3)).toBe(true);
     expect(Object.isFrozen(dto)).toBe(true);
     expect(Object.isFrozen(dto.status)).toBe(true);
@@ -106,6 +126,58 @@ describe('Facility presentation', () => {
     expect(buildFacilityInspection(created.world, 'sawmill', true)?.status)
       .toEqual({ code: 'working', label: 'Working' });
   });
+
+  it('keeps every remaining prefab input blocker in recipe order after timber arrives', () => {
+    const created = WorldManager.tryCreateNew(
+      'Prefab inputs',
+      'facility-prefab-inputs-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const prefab = created.world.economy.facilities.find(
+      ({ id }) => id === 'prefabrication-plant',
+    );
+    if (!prefab) throw new Error('prefab missing');
+    prefab.inventories['structural-timber'].quantity = 8;
+
+    const dto = buildFacilityInspection(
+      created.world,
+      'prefabrication-plant',
+      true,
+    );
+
+    expect(dto?.status).toEqual({
+      code: 'waiting-input',
+      label: 'Needs cement and steel',
+    });
+    expect(dto?.inputRows).toEqual([
+      {
+        productId: 'structural-timber',
+        displayName: 'Structural Timber',
+        unitLabel: 'tonne',
+        requiredQuantity: 8,
+        availableQuantity: 8,
+        missingQuantity: 0,
+      },
+      {
+        productId: 'cement',
+        displayName: 'Cement',
+        unitLabel: 'tonne',
+        requiredQuantity: 8,
+        availableQuantity: 0,
+        missingQuantity: 8,
+      },
+      {
+        productId: 'steel',
+        displayName: 'Steel',
+        unitLabel: 'tonne',
+        requiredQuantity: 6,
+        availableQuantity: 0,
+        missingQuantity: 6,
+      },
+    ]);
+  });
 });
 
 describe('FacilityInspector', () => {
@@ -139,8 +211,12 @@ describe('FacilityInspector', () => {
       .toContain('Produces Structural Timber');
     expect(root.querySelector('[data-testid="facility-products"]')?.textContent)
       .toContain('Needs Logs');
+    expect(root.querySelector('[data-testid="facility-products"]')?.textContent)
+      .toContain('Logs needs 10 tonnes');
     expect(root.querySelector('[data-testid="facility-inventories"]')?.textContent)
       .toContain('Logs 0 / 200');
+    expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
+      .toMatch(/Logs · £[\d,]+ \/ tonne/);
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
       .toContain('Global construction');
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
@@ -149,6 +225,38 @@ describe('FacilityInspector', () => {
       .toContain('Inventory pressure');
     expect(root.querySelector('[data-testid="facility-rail"]')?.textContent)
       .toBe('Rail access: not connected');
+  });
+
+  it('shows received timber and every remaining prefab blocker in recipe order', () => {
+    const created = WorldManager.tryCreateNew(
+      'Prefab inspector',
+      'facility-prefab-inspector-seed',
+      'temperate',
+    );
+    if (!created.ok) throw new Error('fixture generation failed');
+    const prefab = created.world.economy.facilities.find(
+      ({ id }) => id === 'prefabrication-plant',
+    );
+    if (!prefab) throw new Error('prefab missing');
+    prefab.inventories['structural-timber'].quantity = 8;
+    const dto = buildFacilityInspection(
+      created.world,
+      'prefabrication-plant',
+      true,
+    );
+    if (!dto) throw new Error('prefab inspection missing');
+
+    EventBus.emit('facility:inspection', dto);
+
+    const text = document.querySelector(
+      '[data-testid="facility-products"]',
+    )?.textContent ?? '';
+    expect(text).toContain('Structural Timber received 8 / 8 tonnes');
+    expect(text).toContain('Cement needs 8 tonnes');
+    expect(text).toContain('Steel needs 6 tonnes');
+    expect(text.indexOf('Cement needs')).toBeLessThan(
+      text.indexOf('Steel needs'),
+    );
   });
 
   it('clears stale content and screen hit bounds when selection is cleared', () => {
@@ -173,6 +281,23 @@ describe('FacilityInspector', () => {
     expect(inspector.containsScreenPoint(100, 100)).toBe(false);
   });
 
+  it('restores the same inspection after a temporary visibility change', () => {
+    EventBus.emit('facility:inspection', sawmillInspection());
+    const root = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+
+    inspector.setVisible(false);
+    expect(root.getAttribute('aria-hidden')).toBe('true');
+    expect(root.querySelector('[data-testid="facility-name"]')?.textContent)
+      .toBe('Sawmill');
+
+    inspector.setVisible(true);
+    expect(root.getAttribute('aria-hidden')).toBe('false');
+    expect(root.querySelector('[data-testid="facility-name"]')?.textContent)
+      .toBe('Sawmill');
+  });
+
   it('keeps the blocker readable and the world edge visible at 375x667', () => {
     Object.defineProperty(window, 'innerWidth', {
       value: 375,
@@ -192,6 +317,19 @@ describe('FacilityInspector', () => {
     expect(root.style.left).toBe('56px');
     expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
       .toBe('Needs logs');
+    expect(root.style.maxHeight).toBe('calc(75vh - 208px)');
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).toBe('58vh');
   });
 });

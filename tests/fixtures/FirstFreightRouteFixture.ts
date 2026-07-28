@@ -65,7 +65,7 @@ export const makeFreightTrainDef = (
   overrides: Partial<TrainDef> = {},
 ): TrainDef => ({
   id: 'train-1',
-  freightSetId: 'timber-freight-set',
+  freightSetId: 'flatbed-freight-set',
   trackUUID: 'forest-sawmill-track',
   trackT: 0.1,
   facing: 1,
@@ -161,6 +161,7 @@ export const installFirstFreightRoutePhase = (
     world.trains[0].cargo = {
       productId: 'logs',
       units: options.cargoUnits,
+      loadedUnits: options.cargoUnits,
       originFacilityId: forest.id,
     };
   }
@@ -390,7 +391,7 @@ class FirstRouteHarnessImpl implements FirstRouteHarness {
     const access = endpoints[0];
     if (!access) throw new Error('Harness route has no forest endpoint');
     const quote = this.purchase.quote({
-      freightSetId: 'timber-freight-set',
+      freightSetId: 'flatbed-freight-set',
       trackUUID: access.track.uuid,
       trackT: access.trackT,
       x: access.point.x,
@@ -399,7 +400,7 @@ class FirstRouteHarnessImpl implements FirstRouteHarness {
     });
     const result = this.purchase.purchase(quote);
     if (result.ok === false) {
-      throw new Error(`Timber purchase failed: ${result.blocker}`);
+      throw new Error(`Flatbed purchase failed: ${result.blocker}`);
     }
     return result.trainId;
   }

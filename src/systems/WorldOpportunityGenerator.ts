@@ -34,6 +34,7 @@ import {
   MAX_STARTER_CORRIDOR_COST,
   WorldOpportunityValidator,
 } from './WorldOpportunityValidator';
+import { clonePlainData } from '../utils/PlainData';
 
 export interface OpportunityGenerationDiagnostics {
   attemptsEvaluated: number;
@@ -55,6 +56,10 @@ export type OpportunityGenerationResult =
       maxSiteCandidatesEvaluated: number;
     };
   };
+
+export type OpportunityAcceptancePredicate = (
+  opportunity: Readonly<StarterOpportunityDef>,
+) => boolean;
 
 interface Candidate {
   x: number;
@@ -140,7 +145,11 @@ export class WorldOpportunityGenerator {
   private readonly analyzer: ConstructionAnalyzer;
   private readonly validator: WorldOpportunityValidator;
 
-  constructor(private readonly terrain: TerrainHeightSource) {
+  constructor(
+    private readonly terrain: TerrainHeightSource,
+    private readonly acceptsOpportunity: OpportunityAcceptancePredicate =
+      () => true,
+  ) {
     this.analyzer = new ConstructionAnalyzer(terrain);
     this.validator = new WorldOpportunityValidator(terrain, this.analyzer);
   }
@@ -218,10 +227,13 @@ export class WorldOpportunityGenerator {
   ): StarterOpportunityDef | null {
     if (candidates.length < 2) return null;
     const pairKeys = new Set<string>();
+    let evaluations = 0;
     for (
-      let evaluation = 0;
-      evaluation < WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
-      evaluation++
+      let draw = 0;
+      draw < MAX_SITE_CANDIDATES_PER_ATTEMPT
+        && evaluations
+          < WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
+      draw++
     ) {
       const firstIndex = Math.floor(random() * candidates.length);
       const secondIndex = Math.floor(random() * candidates.length);
@@ -233,8 +245,20 @@ export class WorldOpportunityGenerator {
       pairKeys.add(key);
       const first = candidates[firstIndex];
       const second = candidates[secondIndex];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      if (distance < WorldGenerationConfig.MIN_SITE_SEPARATION
+        || distance > WorldGenerationConfig.MAX_SITE_SEPARATION
+        || Math.abs(second.elevation - first.elevation)
+          < WorldGenerationConfig.MIN_SITE_ELEVATION_DIFFERENCE) {
+        continue;
+      }
+      evaluations += 1;
       const opportunity = this.buildOpportunity(config, attempt, first, second);
-      if (opportunity) return opportunity;
+      if (opportunity && this.acceptsOpportunity(
+        clonePlainData(opportunity),
+      )) {
+        return opportunity;
+      }
     }
     return null;
   }

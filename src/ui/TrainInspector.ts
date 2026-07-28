@@ -22,6 +22,9 @@ export class TrainInspector {
   private readonly batchText = document.createElement('div');
   private readonly batch = document.createElement('progress');
   private readonly figures = document.createElement('div');
+  private readonly currentTripProfit = document.createElement('span');
+  private readonly lastDeliveryProfit = document.createElement('span');
+  private readonly lifetimeProfit = document.createElement('span');
   private readonly controls = document.createElement('div');
   private enabled = true;
   private current: TrainInspectionDto | null = null;
@@ -72,6 +75,9 @@ export class TrainInspector {
       'display:block;width:100%;height:8px;accent-color:#69df9a';
     this.figures.style.cssText =
       'white-space:pre-line;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12)';
+    this.currentTripProfit.dataset.testid = 'train-current-trip-profit';
+    this.lastDeliveryProfit.dataset.testid = 'train-last-delivery-profit';
+    this.lifetimeProfit.dataset.testid = 'train-lifetime-profit';
     this.controls.setAttribute('aria-label', 'Train throttle');
     this.controls.style.cssText =
       'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px';
@@ -83,6 +89,7 @@ export class TrainInspector {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.throttle = String(value);
+      button.setAttribute('aria-pressed', 'false');
       button.textContent = label;
       button.style.cssText =
         'padding:8px 4px;border:1px solid #4ad5ff;border-radius:4px;background:#123c55;color:#fff';
@@ -121,6 +128,14 @@ export class TrainInspector {
       this.syncVisibility();
       return;
     }
+    this.controls.querySelectorAll<HTMLButtonElement>('[data-throttle]')
+      .forEach((button) => {
+        const selected = Number(button.dataset.throttle) === dto.throttle;
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        button.style.backgroundColor = selected ? '#4ad5ff' : '#123c55';
+        button.style.color = selected ? '#06131f' : '#fff';
+        button.style.fontWeight = selected ? '700' : '400';
+      });
     this.heading.textContent = dto.displayName;
     this.movement.textContent =
       `${titleCase(dto.direction)} · ${dto.movementState}`;
@@ -129,24 +144,63 @@ export class TrainInspector {
     this.cargo.value = dto.cargo.units;
     this.cargo.setAttribute(
       'aria-label',
-      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of ${dto.cargo.capacityUnits} tonnes`,
+      `Cargo ${dto.cargo.productLabel} ${dto.cargo.units} of `
+      + `${dto.cargo.capacityUnits} ${dto.cargo.unitLabel}`,
     );
     this.nearest.textContent = dto.nearestEligibleFacility
       ? `Nearest eligible: ${dto.nearestEligibleFacility}`
       : 'Nearest eligible: none';
-    this.status.textContent = dto.transfer.blocker
-      ?? titleCase(dto.transfer.kind);
-    this.batchText.textContent = `Batch ${dto.transfer.batchUnits} / 10 t`;
+    this.status.textContent = dto.transferRemedy
+      || titleCase(dto.transfer.kind);
+    const compactUnit = dto.cargo.unitLabel === 'tonnes' ? 't' : 'units';
+    this.batchText.textContent =
+      `Batch ${dto.transfer.batchUnits} / 10 ${compactUnit}`;
     this.batch.value = dto.transfer.batchUnits;
     this.batch.setAttribute(
       'aria-label',
-      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 tonnes`,
+      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 `
+      + dto.cargo.unitLabel,
     );
-    this.figures.textContent = [
-      `Current trip · revenue ${CURRENCY.format(dto.currentTrip.revenue)} · running ${CURRENCY.format(dto.currentTrip.runningCost)} · ${CURRENCY.format(dto.currentTrip.operatingProfit)}`,
-      `Last delivery · revenue ${CURRENCY.format(dto.lastDelivery.revenue)} · running ${CURRENCY.format(dto.lastDelivery.runningCost)} · ${CURRENCY.format(dto.lastDelivery.operatingProfit)}`,
-      `Lifetime · ${dto.lifetime.deliveredUnits} t · revenue ${CURRENCY.format(dto.lifetime.revenue)} · running ${CURRENCY.format(dto.lifetime.runningCost)} · ${CURRENCY.format(dto.lifetime.operatingProfit)}`,
-    ].join('\n');
+    this.currentTripProfit.textContent =
+      CURRENCY.format(dto.currentTrip.operatingProfit);
+    this.lastDeliveryProfit.textContent =
+      CURRENCY.format(dto.lastDelivery.operatingProfit);
+    this.lifetimeProfit.textContent =
+      CURRENCY.format(dto.lifetime.operatingProfit);
+    const line = (
+      label: string,
+      revenue: number,
+      runningCost: number,
+      profit: HTMLElement,
+    ): HTMLDivElement => {
+      const row = document.createElement('div');
+      row.append(
+        `${label} · revenue ${CURRENCY.format(revenue)} · running `
+        + `${CURRENCY.format(runningCost)} · profit `,
+        profit,
+      );
+      return row;
+    };
+    this.figures.replaceChildren(
+      line(
+        'Current trip',
+        dto.currentTrip.revenue,
+        dto.currentTrip.runningCost,
+        this.currentTripProfit,
+      ),
+      line(
+        'Last delivery',
+        dto.lastDelivery.revenue,
+        dto.lastDelivery.runningCost,
+        this.lastDeliveryProfit,
+      ),
+      line(
+        `Lifetime · ${dto.lifetime.deliveredUnits} ${compactUnit}`,
+        dto.lifetime.revenue,
+        dto.lifetime.runningCost,
+        this.lifetimeProfit,
+      ),
+    );
     this.syncVisibility();
   }
 
@@ -176,14 +230,22 @@ export class TrainInspector {
 
   private applyLayout(): void {
     const mobile = window.innerWidth <= 720;
+    const shortWide = mobile && window.innerWidth > window.innerHeight;
     this.root.dataset.layout = mobile ? 'mobile' : 'desktop';
     if (mobile) {
-      this.root.style.left = '56px';
+      this.root.style.left = shortWide
+        ? 'calc(50vw + 28px)'
+        : '56px';
       this.root.style.right = '8px';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';
       this.root.style.width = 'auto';
       this.root.style.maxHeight = '48vh';
+      this.controls.style.position = 'sticky';
+      this.controls.style.bottom = '0px';
+      this.controls.style.zIndex = '1';
+      this.controls.style.paddingTop = '8px';
+      this.controls.style.background = 'rgba(6, 19, 31, 0.98)';
     } else {
       this.root.style.left = 'auto';
       this.root.style.right = '14px';
@@ -191,6 +253,11 @@ export class TrainInspector {
       this.root.style.bottom = 'auto';
       this.root.style.width = '320px';
       this.root.style.maxHeight = 'calc(100vh - 76px)';
+      this.controls.style.position = 'static';
+      this.controls.style.bottom = 'auto';
+      this.controls.style.zIndex = 'auto';
+      this.controls.style.paddingTop = '0px';
+      this.controls.style.background = 'transparent';
     }
   }
 }

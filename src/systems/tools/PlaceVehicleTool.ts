@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
 import type RailTrack from '../../entities/RailTrack';
 import type {
-  FreightPurchaseBlocker,
   FreightPurchaseQuote,
   FreightPurchaseQuoteInput,
   FreightPurchaseResult,
   FreightPurchaseService,
 } from '../../freight/FreightPurchaseService';
+import { formatFreightPurchaseRemedy } from '../../freight/FreightPresentation';
+import { FLATBED_FREIGHT_SET_ID } from '../../freight/FreightSetCatalog';
 import type TrackManager from '../../managers/TrackManager';
 import type { TrainManager } from '../../managers/TrainManager';
 import { WorldManager } from '../../managers/WorldManager';
@@ -15,26 +16,19 @@ import type { CommandStack } from '../CommandStack';
 import type { IEditorTool } from './IEditorTool';
 import type { VehicleType } from '../../config/VehicleTypes';
 
-const PURCHASE_REMEDIES: Partial<Record<FreightPurchaseBlocker, string>> = {
-  'no-track': 'Click on player track to place the Timber Freight Set',
-  'outside-forest-access': 'Place inside Managed Forest rail access',
-  'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for Timber Freight Set',
-  'duplicate-gesture': 'Purchase already in progress',
-};
-
 const freezeQuote = (
   quote: FreightPurchaseQuote,
 ): FreightPurchaseQuote => Object.freeze(quote);
 
 /**
- * Quotes one timber freight-set purchase gesture from a snapped player track.
+ * Quotes one flatbed freight-set purchase gesture from a snapped player track.
  * Live creation is owned by FreightPurchaseService after typed confirmation.
  */
 export class PlaceVehicleTool implements IEditorTool {
   private readonly ghostGraphics: Phaser.GameObjects.Graphics;
   private readonly SNAP_THRESHOLD = 80;
-  private freightSetId: 'timber-freight-set' = 'timber-freight-set';
+  private freightSetId: typeof FLATBED_FREIGHT_SET_ID =
+    FLATBED_FREIGHT_SET_ID;
   private purchaseInFlight = false;
   private lastPlacement: Omit<FreightPurchaseQuoteInput, 'topology'> | null =
     null;
@@ -54,7 +48,7 @@ export class PlaceVehicleTool implements IEditorTool {
     void type;
   }
 
-  setFreightSetId(freightSetId: 'timber-freight-set'): void {
+  setFreightSetId(freightSetId: typeof FLATBED_FREIGHT_SET_ID): void {
     this.freightSetId = freightSetId;
   }
 
@@ -84,13 +78,16 @@ export class PlaceVehicleTool implements IEditorTool {
     if (!this.wantsPointerButton(pointer.button)) return;
 
     if (this.purchaseInFlight) {
-      this.publishState(null, PURCHASE_REMEDIES['duplicate-gesture']!);
+      this.publishState(
+        null,
+        formatFreightPurchaseRemedy('duplicate-gesture'),
+      );
       return;
     }
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
       this.lastPlacement = null;
-      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
+      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
       return;
     }
 
@@ -104,12 +101,12 @@ export class PlaceVehicleTool implements IEditorTool {
     };
     const quote = this.quoteService?.quote(input);
     if (!quote) {
-      this.publishState(null, PURCHASE_REMEDIES['no-track']!);
+      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
       return;
     }
     const detached = freezeQuote(quote);
     const message = detached.blocker
-      ? this.remedyFor(detached.blocker)
+      ? formatFreightPurchaseRemedy(detached.blocker)
       : '';
     if (detached.valid) this.purchaseInFlight = true;
     this.publishState(detached, message);
@@ -252,11 +249,6 @@ export class PlaceVehicleTool implements IEditorTool {
       cash: WorldManager.world?.company.cash ?? 0,
       message,
     }));
-  }
-
-  private remedyFor(blocker: FreightPurchaseBlocker): string {
-    return PURCHASE_REMEDIES[blocker]
-      ?? 'Timber Freight Set purchase could not be completed';
   }
 
   private drawInvalid(x: number, y: number): void {

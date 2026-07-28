@@ -25,14 +25,31 @@ export interface FacilityInspectionDto {
   };
   produces: ProductId[];
   needs: ProductId[];
+  inputRows: Array<{
+    productId: ProductId;
+    displayName: string;
+    unitLabel: string;
+    requiredQuantity: number;
+    availableQuantity: number;
+    missingQuantity: number;
+  }>;
+  outputRows: Array<{
+    productId: ProductId;
+    displayName: string;
+    unitLabel: string;
+    cycleQuantity: number;
+  }>;
   inventories: Array<{
     productId: ProductId;
     displayName: string;
+    unitLabel: string;
     quantity: number;
     capacity: number;
   }>;
   quotes: Array<{
     productId: ProductId;
+    displayName: string;
+    unitLabel: string;
     unitPrice: number;
     factors: Array<{ id: string; basisPoints: number }>;
   }>;
@@ -49,15 +66,25 @@ function waitingInputLabel(
   const recipe = facility?.activeRecipeId
     ? getRecipe(facility.activeRecipeId)
     : undefined;
-  const missing = recipe?.inputs.find((amount) => {
+  const missingNames = recipe?.inputs.reduce<string[]>((names, amount) => {
     const slot = facility?.inventories[amount.productId];
-    return !slot
-      || slot.quantity - slot.reservedQuantity < amount.quantity;
-  });
-  const product = missing ? getProduct(missing.productId) : undefined;
-  return product
-    ? `Needs ${product.displayName.toLocaleLowerCase('en-GB')}`
-    : 'Needs inputs';
+    if (slot
+      && slot.quantity - slot.reservedQuantity >= amount.quantity) {
+      return names;
+    }
+    const product = getProduct(amount.productId);
+    if (product) {
+      names.push(product.displayName.toLocaleLowerCase('en-GB'));
+    }
+    return names;
+  }, []) ?? [];
+  if (missingNames.length === 0) return 'Needs inputs';
+  if (missingNames.length === 1) return `Needs ${missingNames[0]}`;
+  if (missingNames.length === 2) {
+    return `Needs ${missingNames[0]} and ${missingNames[1]}`;
+  }
+  return `Needs ${missingNames.slice(0, -1).join(', ')}, and `
+    + missingNames[missingNames.length - 1];
 }
 
 function buildStatus(
@@ -101,6 +128,10 @@ function freezeInspection(
   });
   Object.freeze(dto.produces);
   Object.freeze(dto.needs);
+  dto.inputRows.forEach(Object.freeze);
+  dto.outputRows.forEach(Object.freeze);
+  Object.freeze(dto.inputRows);
+  Object.freeze(dto.outputRows);
   Object.freeze(dto.inventories);
   Object.freeze(dto.quotes);
   return Object.freeze(dto);
@@ -125,12 +156,55 @@ export function buildFacilityInspection(
   const produces = recipe
     ? Array.from(new Set(recipe.outputs.map(({ productId }) => productId)))
     : [];
+  const inputRows = recipe
+    ? recipe.inputs.reduce<FacilityInspectionDto['inputRows']>(
+      (rows, input) => {
+        const product = getProduct(input.productId);
+        const slot = facility.inventories[input.productId];
+        if (!product || !slot) return rows;
+        const availableQuantity = Math.max(
+          0,
+          slot.quantity - slot.reservedQuantity,
+        );
+        rows.push({
+          productId: input.productId,
+          displayName: product.displayName,
+          unitLabel: product.unitLabel,
+          requiredQuantity: input.quantity,
+          availableQuantity,
+          missingQuantity: Math.max(
+            0,
+            input.quantity - availableQuantity,
+          ),
+        });
+        return rows;
+      },
+      [],
+    )
+    : [];
+  const outputRows = recipe
+    ? recipe.outputs.reduce<FacilityInspectionDto['outputRows']>(
+      (rows, output) => {
+        const product = getProduct(output.productId);
+        if (!product) return rows;
+        rows.push({
+          productId: output.productId,
+          displayName: product.displayName,
+          unitLabel: product.unitLabel,
+          cycleQuantity: output.quantity,
+        });
+        return rows;
+      },
+      [],
+    )
+    : [];
   const slots = Object.keys(facility.inventories).map(
     (productId) => facility.inventories[productId],
   );
   const inventories = slots.map((slot) => ({
     productId: slot.productId,
-    displayName: getProduct(slot.productId)?.displayName ?? slot.productId,
+    displayName: getProduct(slot.productId)?.displayName ?? 'Unknown product',
+    unitLabel: getProduct(slot.productId)?.unitLabel ?? 'unit',
     quantity: slot.quantity,
     capacity: slot.capacity,
   }));
@@ -142,6 +216,9 @@ export function buildFacilityInspection(
     );
     if (quote.ok) all.push({
       productId: quote.productId,
+      displayName:
+        getProduct(quote.productId)?.displayName ?? 'Unknown product',
+      unitLabel: getProduct(quote.productId)?.unitLabel ?? 'unit',
       unitPrice: quote.unitPrice,
       factors: quote.factors.map((factor) => ({ ...factor })),
     });
@@ -153,6 +230,8 @@ export function buildFacilityInspection(
     status: buildStatus(world, facility.id, railConnected),
     produces,
     needs,
+    inputRows,
+    outputRows,
     inventories,
     quotes,
     railConnected,

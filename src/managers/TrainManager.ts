@@ -143,13 +143,7 @@ export class TrainManager {
 
   handleTrainClick(train: Train, pointer: Phaser.Input.Pointer): void {
     if (pointer.button !== 0) return;
-    if (this._selectedTrain && this._selectedTrain !== train) {
-      this._selectedTrain.selected = false;
-    }
-    train.selected = true;
-    this._selectedTrain = train;
-    EventBus.emit('train:selected', { trainId: train.getUUID() });
-    this.cameraController.startFollow(train.getMatterBody());
+    this.selectTrain(train.getUUID());
   }
 
   /**
@@ -157,27 +151,42 @@ export class TrainManager {
    * Unlike handleTrainClick this does not require a pointer event, so it
    * can be called when entering play mode to auto-follow the first train.
    */
-  selectTrain(train: Train): void {
-    if (this._selectedTrain && this._selectedTrain !== train) {
-      this._selectedTrain.selected = false;
+  selectTrain(trainId: string | null): void {
+    const train = trainId === null
+      ? null
+      : this.trains.find((candidate) => candidate.getUUID() === trainId)
+        ?? null;
+    if (train === this._selectedTrain) return;
+
+    const releasedSelection = this._selectedTrain !== null;
+    if (releasedSelection) this.releaseSelectedTrain();
+
+    if (train) {
+      train.selected = true;
+      this._selectedTrain = train;
+      this.cameraController.startFollow(train.getMatterBody());
+      EventBus.emit('train:selected', { trainId: train.getUUID() });
+    } else if (releasedSelection) {
+      EventBus.emit('train:deselected', {});
     }
-    train.selected = true;
-    this._selectedTrain = train;
-    EventBus.emit('train:selected', { trainId: train.getUUID() });
-    this.cameraController.startFollow(train.getMatterBody());
   }
 
   deselectTrain(): void {
-    if (this._selectedTrain) {
-      this._selectedTrain.selected = false;
-      this._selectedTrain = null;
-      EventBus.emit('train:deselected', {});
-      this.cameraController.stopFollow();
-    }
+    if (!this._selectedTrain) return;
+    this.releaseSelectedTrain();
+    EventBus.emit('train:deselected', {});
   }
 
   get selectedTrain(): Train | null {
     return this._selectedTrain;
+  }
+
+  private releaseSelectedTrain(): void {
+    if (!this._selectedTrain) return;
+    this._selectedTrain.enginePower = 0;
+    this._selectedTrain.selected = false;
+    this._selectedTrain = null;
+    this.cameraController.stopFollow();
   }
 
   tryRecoverDerailedTrain(follower: ITrackFollower): boolean {

@@ -9,7 +9,10 @@ import {
 } from '../../src/config/WorldData';
 import { GameConfig } from '../../src/config/GameConfig';
 import { SaveService } from '../../src/services/SaveService';
-import { createCompanyState } from '../../src/economy/FinanceLedger';
+import {
+  createCompanyState,
+  postLedgerEntry,
+} from '../../src/economy/FinanceLedger';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -58,15 +61,18 @@ function currentWorld() {
     'alpine',
     undefined as any,
   ) as any;
-  world.schemaVersion = 7;
+  world.schemaVersion = 8;
   world.revision = 0;
   world.constructionRevision = 0;
   world.operationsRevision = 0;
   delete world.economyRevision;
-  world.firstRouteProgress = {
-    objectiveVersion: 1,
-    profitableDeliveryCompleted: false,
+  world.freightProgress = {
+    progressVersion: 1,
+    profitableLogDeliveryCompleted: false,
+    developmentGrantAwarded: false,
+    profitableStructuralTimberDeliveryCompleted: false,
   };
+  delete world.firstRouteProgress;
   world.company = JSON.parse(JSON.stringify(createCompanyState(1_000_000)));
   world.economy = {
     economyVersion: 1,
@@ -216,26 +222,37 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('creates the exact empty schema-7 authority roots', () => {
-    expect(createEmptyWorld(
+  it('creates the exact empty schema-8 freight progress authority', () => {
+    const world = createEmptyWorld(
       'Freight',
       'seed',
       'temperate',
       currentWorld().starterOpportunity,
-    )).toMatchObject({
-      schemaVersion: 7,
+    ) as any;
+
+    expect(world).toMatchObject({
+      schemaVersion: 8,
       revision: 0,
       constructionRevision: 0,
       operationsRevision: 0,
       trains: [],
-      firstRouteProgress: {
-        objectiveVersion: 1,
-        profitableDeliveryCompleted: false,
+      freightProgress: {
+        progressVersion: 1,
+        profitableLogDeliveryCompleted: false,
+        developmentGrantAwarded: false,
+        profitableStructuralTimberDeliveryCompleted: false,
       },
     });
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+    });
+    expect(world).not.toHaveProperty('firstRouteProgress');
   });
 
-  it('round-trips schema 7 with exact construction and operations revisions', () => {
+  it('round-trips schema 8 with exact construction and operations revisions', () => {
     const world = currentWorld();
     world.revision = 7;
     world.constructionRevision = 3;
@@ -253,7 +270,8 @@ describe('world schema validation', () => {
     ['opportunity-only', 4],
     ['schema-five', 5],
     ['schema-six', 6],
-    ['unsupported', 8],
+    ['schema-seven', 7],
+    ['unsupported', 9],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -266,6 +284,19 @@ describe('world schema validation', () => {
   it('rejects an own deprecated economyRevision authority', () => {
     const raw = currentWorld();
     raw.economyRevision = 0;
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: INCOMPATIBLE_WORLD_ACTION,
+    }));
+  });
+
+  it('rejects the deprecated firstRouteProgress authority on schema 8', () => {
+    const raw = currentWorld();
+    raw.firstRouteProgress = {
+      objectiveVersion: 1,
+      profitableDeliveryCompleted: false,
+    };
 
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
       compatible: false,
@@ -319,7 +350,7 @@ describe('world schema validation', () => {
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
     }],
-  ])('rejects schema 7 with %s', (_label, mutate) => {
+  ])('rejects schema 8 with %s', (_label, mutate) => {
     const raw = currentWorld();
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -369,21 +400,134 @@ describe('world schema validation', () => {
       world.constructionRevision = Number.MAX_SAFE_INTEGER;
       world.operationsRevision = 1;
     }],
-  ])('rejects schema 7 with %s', (_label, mutate) => {
+  ])('rejects schema 8 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw).compatible).toBe(false);
   });
 
+  it('requires the awarded grant latch to have exactly one canonical forward ledger entry', () => {
+    const raw = currentWorld();
+    raw.freightProgress.profitableLogDeliveryCompleted = true;
+    raw.freightProgress.developmentGrantAwarded = true;
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+
+    const posted = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 7,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (posted.ok === false) throw new Error(posted.code);
+    raw.company = JSON.parse(JSON.stringify(posted.company));
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+
+    const reversal = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 8,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'reversal',
+      reversalOf: posted.entry.id,
+    });
+    if (reversal.ok === false) throw new Error(reversal.code);
+    raw.company = JSON.parse(JSON.stringify(reversal.company));
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+
+    const duplicate = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 9,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (duplicate.ok === false) throw new Error(duplicate.code);
+    raw.company = JSON.parse(JSON.stringify(duplicate.company));
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
+  it('rejects a canonical grant entry while the awarded latch is false', () => {
+    const raw = currentWorld();
+    const posted = postLedgerEntry(raw.company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 7,
+      referenceId: 'regional-development-grant:v1',
+      direction: 'forward',
+    });
+    if (posted.ok === false) throw new Error(posted.code);
+    raw.company = JSON.parse(JSON.stringify(posted.company));
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
+  it('does not count unrelated contract bonuses as the development grant', () => {
+    let company = currentWorld().company;
+    for (const request of [
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 249_999,
+        referenceId: 'regional-development-grant:v1',
+      },
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 250_000,
+        referenceId: 'regional-development-grant:v2',
+      },
+      {
+        category: 'contract-bonus' as const,
+        magnitude: 250_000,
+        referenceId: 'town-contract:v1',
+      },
+      {
+        category: 'delivery-revenue' as const,
+        magnitude: 250_000,
+        referenceId: 'regional-development-grant:v1',
+      },
+    ]) {
+      const posted = postLedgerEntry(company, {
+        tick: 7,
+        direction: 'forward',
+        ...request,
+      });
+      if (posted.ok === false) throw new Error(posted.code);
+      company = JSON.parse(JSON.stringify(posted.company));
+    }
+    const raw = currentWorld();
+    raw.company = company;
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+  });
+
   it.each([
-    ['missing progress', (world: any) => { delete world.firstRouteProgress; }],
-    ['wrong objective version', (world: any) => {
-      world.firstRouteProgress.objectiveVersion = 2;
+    ['missing progress', (world: any) => { delete world.freightProgress; }],
+    ['wrong progress version', (world: any) => {
+      world.freightProgress.progressVersion = 2;
     }],
-    ['non-boolean latch', (world: any) => {
-      world.firstRouteProgress.profitableDeliveryCompleted = 0;
+    ['non-boolean log-delivery latch', (world: any) => {
+      world.freightProgress.profitableLogDeliveryCompleted = 0;
     }],
-  ])('rejects schema 7 with %s', (_label, mutate) => {
+    ['non-boolean grant latch', (world: any) => {
+      world.freightProgress.developmentGrantAwarded = 0;
+    }],
+    ['non-boolean structural-timber latch', (world: any) => {
+      world.freightProgress.profitableStructuralTimberDeliveryCompleted = 0;
+    }],
+  ])('rejects schema 8 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -404,6 +548,7 @@ describe('world schema validation', () => {
     raw.trains[0].cargo = {
       productId: 'logs',
       units: 60,
+      loadedUnits: 60,
       originFacilityId: 'managed-forest',
     };
 
@@ -446,7 +591,7 @@ describe('world schema validation', () => {
   it.each([
     ['unknown product', (cargo: any) => { cargo.productId = 'mystery'; }],
     ['incompatible product', (cargo: any) => {
-      cargo.productId = 'structural-timber';
+      cargo.productId = 'cement';
     }],
     ['unknown origin facility', (cargo: any) => {
       cargo.originFacilityId = 'missing-facility';
@@ -458,11 +603,29 @@ describe('world schema validation', () => {
       cargo.units = Number.MAX_SAFE_INTEGER + 1;
     }],
     ['units above derived capacity', (cargo: any) => { cargo.units = 61; }],
+    ['missing loaded units', (cargo: any) => {
+      delete cargo.loadedUnits;
+    }],
+    ['zero loaded units', (cargo: any) => { cargo.loadedUnits = 0; }],
+    ['fractional loaded units', (cargo: any) => {
+      cargo.loadedUnits = 1.5;
+    }],
+    ['unsafe loaded units', (cargo: any) => {
+      cargo.loadedUnits = Number.MAX_SAFE_INTEGER + 1;
+    }],
+    ['loaded units below remaining units', (cargo: any) => {
+      cargo.units = 2;
+      cargo.loadedUnits = 1;
+    }],
+    ['loaded units above derived capacity', (cargo: any) => {
+      cargo.loadedUnits = 61;
+    }],
   ])('rejects freight cargo with %s', (_label, mutate) => {
     const raw = worldWithTrain();
     const cargo = {
       productId: 'logs',
       units: 1,
+      loadedUnits: 1,
       originFacilityId: 'managed-forest',
     };
     mutate(cargo);
@@ -604,7 +767,7 @@ describe('world schema validation', () => {
     ['regional factor above its bound', (world: any) => {
       world.economy.market.regionalDemandBpsByProduct.logs = 12_001;
     }],
-  ])('rejects schema 7 with %s', (_label, mutate) => {
+  ])('rejects schema 8 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -664,7 +827,7 @@ describe('world schema validation', () => {
     ['ledger cash mismatch', (world: any) => {
       world.company.cash -= 1;
     }],
-  ])('rejects schema 7 company state with %s', (_label, mutate) => {
+  ])('rejects schema 8 company state with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -679,7 +842,7 @@ describe('world schema validation', () => {
     expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
   });
 
-  it('rejects scenarios as removed schema-7 state', () => {
+  it('rejects scenarios as removed schema-8 state', () => {
     const raw = currentWorld() as any;
     raw.scenarios = [];
     expect(validateWorldData(raw).compatible).toBe(false);
@@ -721,7 +884,7 @@ describe('world schema validation', () => {
     ['verticalProfile'],
     ['structures'],
     ['paidBuildCost'],
-  ])('rejects a schema-7 track missing required %s', (field) => {
+  ])('rejects a schema-8 track missing required %s', (field) => {
     const raw = currentWorld() as any;
     const track: any = {
       geometryVersion: 1,

@@ -618,13 +618,19 @@ describe('postLedgerEntry', () => {
 });
 
 describe('summariseProfitAndLoss', () => {
-  it('uses inclusive bounds, excludes capex from profit, and includes it in cash flow', () => {
+  it('separates contract bonuses from railway operating profit and includes every entry in cash flow', () => {
     let company = createCompanyState(5_000);
     company = requireAccepted(post(company, {
       category: 'delivery-revenue',
-      magnitude: 1_200,
-      tick: 2,
+      magnitude: 1_000,
+      tick: 1,
       referenceId: 'delivery-1',
+    })).company;
+    company = requireAccepted(post(company, {
+      category: 'contract-bonus',
+      magnitude: 250_000,
+      tick: 2,
+      referenceId: 'contract-1',
     })).company;
     company = requireAccepted(post(company, {
       category: 'train-running-cost',
@@ -633,24 +639,19 @@ describe('summariseProfitAndLoss', () => {
       referenceId: 'train-1',
     })).company;
     company = requireAccepted(post(company, {
-      category: 'vehicle-capex',
-      magnitude: 500,
-      tick: 4,
-      referenceId: 'locomotive-1',
-    })).company;
-    company = requireAccepted(post(company, {
-      category: 'contract-bonus',
-      magnitude: 700,
-      tick: 5,
-      referenceId: 'contract-1',
+      category: 'construction-capex',
+      magnitude: 2_000,
+      tick: 24,
+      referenceId: 'track-1',
     })).company;
 
-    expect(summariseProfitAndLoss(company, 2, 4)).toEqual({
-      revenue: 1_200,
+    expect(summariseProfitAndLoss(company, 1, 24)).toEqual({
+      deliveryRevenue: 1_000,
+      contractBonuses: 250_000,
       operatingExpenses: 300,
-      operatingProfit: 900,
-      capitalExpenditure: 500,
-      cashFlow: 400,
+      railwayOperatingProfit: 700,
+      capitalExpenditure: 2_000,
+      cashFlow: 248_700,
     });
   });
 
@@ -659,9 +660,10 @@ describe('summariseProfitAndLoss', () => {
 
     expect(summariseProfitAndLoss(company, 1, 1).cashFlow).toBe(0);
     expect(summariseProfitAndLoss(company, 0, 0)).toEqual({
-      revenue: 0,
+      deliveryRevenue: 0,
+      contractBonuses: 0,
       operatingExpenses: 0,
-      operatingProfit: 0,
+      railwayOperatingProfit: 0,
       capitalExpenditure: 0,
       cashFlow: 5_000,
     });
@@ -701,9 +703,10 @@ describe('summariseProfitAndLoss', () => {
     })).company;
 
     expect(summariseProfitAndLoss(company, 1, 2)).toEqual({
-      revenue: 0,
+      deliveryRevenue: 0,
+      contractBonuses: 0,
       operatingExpenses: 0,
-      operatingProfit: 0,
+      railwayOperatingProfit: 0,
       capitalExpenditure: 0,
       cashFlow: 0,
     });

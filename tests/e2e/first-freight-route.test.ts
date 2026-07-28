@@ -6,6 +6,9 @@ const MOBILE = { width: 375, height: 667 };
 const REAL_TIME_SEED = 'real-terrain-alpha';
 const CONTROLLED_SEED = 'first-route-browser-beta';
 const MOBILE_SEED = 'first-route-browser-gamma';
+const DEVELOPMENT_GRANT = 250_000;
+const DEVELOPMENT_GRANT_REFERENCE =
+  'regional-development-grant:v1';
 
 interface Point {
   readonly x: number;
@@ -82,8 +85,11 @@ interface FirstRouteWorld {
       readonly regionalDemandBpsByProduct: Record<string, number>;
     };
   };
-  readonly firstRouteProgress: {
-    readonly profitableDeliveryCompleted: boolean;
+  readonly freightProgress: {
+    readonly progressVersion: 1;
+    readonly profitableLogDeliveryCompleted: boolean;
+    readonly developmentGrantAwarded: boolean;
+    readonly profitableStructuralTimberDeliveryCompleted: boolean;
   };
   readonly starterOpportunity: {
     readonly corridors: readonly {
@@ -139,6 +145,11 @@ interface FirstRouteBrowserHarness {
   snapshot(): FirstRouteBrowserSnapshot;
   setMode(mode: 'create' | 'play'): void;
   advanceFixedTicks(count: number): void;
+  advanceFixedFrames(
+    count: number,
+    deltaMs: number,
+    keys?: { readonly w?: boolean; readonly s?: boolean },
+  ): FirstRouteBrowserSnapshot;
   setTrainRuntime(
     trainId: string,
     runtime: Pick<
@@ -242,10 +253,11 @@ async function createFixedSeedWorld(
     }
   });
   await page.goto('/');
+  // Generated menu preview initialization is outside timed gameplay.
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
     undefined,
-    { timeout: 25_000 },
+    { timeout: 40_000 },
   );
   await page.keyboard.press('Enter');
   await page.locator('canvas').click({
@@ -350,6 +362,11 @@ async function buildWitnessCorridor(
       page.locator('[data-testid="company-save-state"]'),
     ).toHaveText('Saved');
   }
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('h');
+  await expect(page.locator('canvas')).toHaveCSS('cursor', 'grab');
+  await expect(page.locator('[data-testid="vehicle-purchase-panel"]'))
+    .toBeVisible();
 
   const built = await snapshot(page);
   expect(
@@ -452,7 +469,7 @@ async function purchaseTimberSetAtForest(
     ),
   ).toBeLessThanOrEqual(forest.railAccess.radius);
 
-  await page.locator('[data-testid="timber-freight-set-buy"]').click();
+  await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
   const state = await snapshot(page);
   const screen = await toScreen(page, placement.point, state);
   await page.mouse.click(screen.x, screen.y);
@@ -522,6 +539,23 @@ async function advanceFixedTicks(page: Page, count: number): Promise<void> {
   }, count);
 }
 
+async function advanceFixedFrames(
+  page: Page,
+  count: number,
+  deltaMs: number,
+  keys?: { readonly w?: boolean; readonly s?: boolean },
+): Promise<FirstRouteBrowserSnapshot> {
+  return page.evaluate((payload) => {
+    const harness = window.__railSimFirstRouteHarness;
+    if (!harness) throw new Error('First-route browser harness is not available');
+    return harness.advanceFixedFrames(
+      payload.count,
+      payload.deltaMs,
+      payload.keys,
+    );
+  }, { count, deltaMs, keys });
+}
+
 const stoppedAt = (
   state: FirstRouteBrowserSnapshot,
   definitionId: 'managed-forest' | 'sawmill',
@@ -550,17 +584,61 @@ const movingMidRoute = (state: FirstRouteBrowserSnapshot) => {
   };
 };
 
-const stoppedMidRoute = (state: FirstRouteBrowserSnapshot) => ({
-  ...movingMidRoute(state),
-  speedWorldUnitsPerSecond: 0,
-  throttle: 0 as const,
-});
+const stoppedOutsideFacilityAccess = (
+  state: FirstRouteBrowserSnapshot,
+) => {
+  const forestAccess = facility(state, 'managed-forest').railAccess;
+  const sawmillAccess = facility(state, 'sawmill').railAccess;
+  const candidates = state.world.tracks.flatMap((track) =>
+    Array.from({ length: 21 }, (_, index) => {
+      const trackT = index / 20;
+      const point = bezierPoint(track, trackT);
+      const forestDistance = Math.hypot(
+        point.x - forestAccess.x,
+        point.y - forestAccess.y,
+      );
+      const sawmillDistance = Math.hypot(
+        point.x - sawmillAccess.x,
+        point.y - sawmillAccess.y,
+      );
+      const clearance = Math.min(
+        ...state.world.economy.facilities.map(({ railAccess }) =>
+          Math.hypot(
+            point.x - railAccess.x,
+            point.y - railAccess.y,
+          ) - railAccess.radius),
+      );
+      return {
+        point,
+        clearance,
+        forestDistance,
+        sawmillDistance,
+        trackUUID: track.uuid,
+        trackT,
+      };
+    }),
+  ).filter(({ clearance, forestDistance, sawmillDistance }) =>
+    clearance > 0 && sawmillDistance < forestDistance)
+    .sort((left, right) => right.clearance - left.clearance
+      || left.trackUUID.localeCompare(right.trackUUID)
+      || left.trackT - right.trackT);
+  const selected = candidates[0];
+  if (!selected) {
+    throw new Error('No route point exists outside every facility access');
+  }
+  return {
+    ...selected.point,
+    speedWorldUnitsPerSecond: 0,
+    throttle: 0 as const,
+    derailed: false,
+  };
+};
 
 const persistedPhase = (state: FirstRouteBrowserSnapshot) => ({
   cash: state.world.company.cash,
   ledger: state.world.company.ledger,
   economy: state.world.economy,
-  progress: state.world.firstRouteProgress,
+  progress: state.world.freightProgress,
   trains: state.world.trains,
 });
 
@@ -597,30 +675,19 @@ test.describe('collective three-seed first freight route acceptance', () => {
     test.setTimeout(300_000);
     await createFixedSeedWorld(page, REAL_TIME_SEED);
     await buildWitnessCorridor(page);
-    const purchaseStarted = await page.evaluate(() => performance.now());
     await purchaseTimberSetAtForest(page);
     await setMode(page, 'play');
     await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
     // Advance 6 fixed economy ticks deterministically to load 60 units,
-    // then release harness control so real keyboard input can drive the train.
+    // then drive to the sawmill with the real keyboard input path exercised.
     await advanceFixedTicks(page, 6);
-    await page.evaluate(() => {
-      window.__railSimFirstRouteHarness?.releaseTrainControl();
-    });
     const loaded = await snapshot(page);
     expect(train(loaded).cargo).toEqual(expect.objectContaining({
       productId: 'logs',
       units: 60,
     }));
     const sawmill = facility(loaded, 'sawmill');
-    const selectedTrainScreen = await toScreen(
-      page,
-      { x: runtime(loaded).x, y: runtime(loaded).y },
-      loaded,
-    );
-    await page.mouse.click(selectedTrainScreen.x, selectedTrainScreen.y);
-    await expect(page.locator('[data-testid="train-inspector"]')).toBeVisible();
 
     // The purchase confirm button can remain focused, which suppresses W/S
     // gameplay input. Blur any active element so keyboard events reach the
@@ -630,20 +697,28 @@ test.describe('collective three-seed first freight route acceptance', () => {
       if (active && active !== document.body) active.blur();
     });
 
-    // Verify the train responds to real keyboard input for a short distance,
+    // Exercise the real keyboard input and physics paths for a short distance,
     // then finish the journey deterministically so the rest of the test is
     // reliable in headless CI.
-    await page.keyboard.down('w');
-    await expect.poll(async () => {
-      const current = await snapshot(page);
-      return runtime(current).speedWorldUnitsPerSecond;
-    }, { timeout: 10_000 }).toBeGreaterThan(0);
-    await page.keyboard.up('w');
-
+    const FRAME_DELTA_MS = 1_000 / 60;
     const trainId = train(loaded).id;
-    await setTrainRuntime(page, trainId, stoppedAt(loaded, 'sawmill'));
+    let afterDrive: FirstRouteBrowserSnapshot;
+    await page.keyboard.down('w');
+    try {
+      afterDrive = await advanceFixedFrames(page, 120, FRAME_DELTA_MS);
+      expect(runtime(afterDrive).throttle).toBe(1);
+      expect(runtime(afterDrive).speedWorldUnitsPerSecond).toBeGreaterThan(0);
+    } finally {
+      await page.keyboard.up('w');
+      await page.evaluate(() => {
+        window.__railSimFirstRouteHarness?.releaseTrainControl();
+      });
+    }
+
+    await setTrainRuntime(page, trainId, stoppedAt(afterDrive, 'sawmill'));
     await advanceFixedTicks(page, 6);
     const completed = await snapshot(page);
+
     expect(runtime(completed)).toEqual(expect.objectContaining({
       throttle: 0,
       derailed: false,
@@ -651,13 +726,25 @@ test.describe('collective three-seed first freight route acceptance', () => {
     expect(train(completed).operations.lastTripRevenue).toBeGreaterThan(
       train(completed).operations.lastTripRunningCost,
     );
-    expect(completed.objective.achieved).toBe(true);
-    await expect(page.locator('[data-testid="first-route-objective"]')).toContainText(
-      'Route profitable',
+    expect(completed.objective).toEqual(expect.objectContaining({
+      id: 'structural-timber-link',
+      achieved: false,
+    }));
+    const objective = page.locator('[data-testid="freight-objective"]');
+    await expect(objective).toHaveAttribute(
+      'data-objective',
+      'structural-timber-link',
     );
-    await expect(page.locator('[data-testid="company-operating-profit"]')).toContainText(
-      /Operating profit £[1-9]/,
-    );
+    await expect(objective).toContainText('Extend the timber chain');
+    await expect(
+      page.locator('[data-testid="company-delivery-revenue"]'),
+    ).toContainText(/Deliveries £[1-9]/);
+    await expect(
+      page.locator('[data-testid="company-contract-bonuses"]'),
+    ).toContainText('Development £250,000');
+    await expect(
+      page.locator('[data-testid="company-operating-profit"]'),
+    ).toContainText(/Rail profit £[1-9]/);
   });
 
   test('controlled seed proves exact transfers, four reload phases, and three cycles', async ({
@@ -716,7 +803,11 @@ test.describe('collective three-seed first freight route acceptance', () => {
     });
 
     await test.step('stopped outside Sawmill access does not transfer', async () => {
-      await setTrainRuntime(page, trainId, stoppedMidRoute(current));
+      await setTrainRuntime(
+        page,
+        trainId,
+        stoppedOutsideFacilityAccess(current),
+      );
       const beforeOutsideTick = await snapshot(page);
       const sawmillAccess = facility(beforeOutsideTick, 'sawmill').railAccess;
       expect(Math.hypot(
@@ -729,6 +820,21 @@ test.describe('collective three-seed first freight route acceptance', () => {
         derailed: false,
       }));
       expect(train(beforeOutsideTick).cargo?.units).toBe(30);
+      const forestAccess =
+        facility(beforeOutsideTick, 'managed-forest').railAccess;
+      expect(Math.hypot(
+        runtime(beforeOutsideTick).x - sawmillAccess.x,
+        runtime(beforeOutsideTick).y - sawmillAccess.y,
+      )).toBeLessThan(Math.hypot(
+        runtime(beforeOutsideTick).x - forestAccess.x,
+        runtime(beforeOutsideTick).y - forestAccess.y,
+      ));
+      for (const candidate of beforeOutsideTick.world.economy.facilities) {
+        expect(Math.hypot(
+          runtime(beforeOutsideTick).x - candidate.railAccess.x,
+          runtime(beforeOutsideTick).y - candidate.railAccess.y,
+        )).toBeGreaterThan(candidate.railAccess.radius);
+      }
       expect(
         facility(beforeOutsideTick, 'sawmill').inventories.logs.capacity
         - facility(beforeOutsideTick, 'sawmill').inventories.logs.quantity,
@@ -797,6 +903,10 @@ test.describe('collective three-seed first freight route acceptance', () => {
     const finalUnloadBefore = await snapshot(page);
     expect(train(finalUnloadBefore).cargo?.units).toBe(10);
     const expectedFinalRevenue = expectedLogBatchRevenue(finalUnloadBefore);
+    const bonusesBefore = categoryTotal(
+      finalUnloadBefore,
+      'contract-bonus',
+    );
     await advanceFixedTicks(page, 1);
     current = await snapshot(page);
     expect(train(current).cargo).toBeNull();
@@ -806,7 +916,14 @@ test.describe('collective three-seed first freight route acceptance', () => {
     ).toBe(expectedFinalRevenue);
     expect(
       current.world.company.cash - finalUnloadBefore.world.company.cash,
-    ).toBe(expectedFinalRevenue);
+    ).toBe(expectedFinalRevenue + DEVELOPMENT_GRANT);
+    expect(
+      categoryTotal(current, 'contract-bonus') - bonusesBefore,
+    ).toBe(DEVELOPMENT_GRANT);
+    expect(current.world.company.ledger.filter(
+      ({ referenceId }) =>
+        referenceId === DEVELOPMENT_GRANT_REFERENCE,
+    )).toHaveLength(1);
     expect(train(current).operations.lastTripRevenue).toBeGreaterThan(
       train(current).operations.lastTripRunningCost,
     );
@@ -820,10 +937,15 @@ test.describe('collective three-seed first freight route acceptance', () => {
     for (let cycle = 2; cycle <= 3; cycle += 1) {
       current = await snapshot(page);
       while (facility(current, 'managed-forest').inventories.logs.quantity < 60) {
-        await setTrainRuntime(page, trainId, stoppedAt(current, 'sawmill'));
+        await setTrainRuntime(
+          page,
+          trainId,
+          stoppedOutsideFacilityAccess(current),
+        );
         await advanceFixedTicks(page, 1);
         current = await snapshot(page);
       }
+      expect(train(current).cargo).toBeNull();
       await setTrainRuntime(page, trainId, stoppedAt(current, 'managed-forest'));
       await advanceFixedTicks(page, 6);
       current = await snapshot(page);
@@ -880,7 +1002,7 @@ test.describe('collective three-seed first freight route acceptance', () => {
 
     await page.setViewportSize(MOBILE);
     const inspector = page.locator('[data-testid="train-inspector"]');
-    const objective = page.locator('[data-testid="first-route-objective"]');
+    const objective = page.locator('[data-testid="freight-objective"]');
     const company = page.locator('[data-testid="company-hud"]');
     await expect(inspector).toHaveAttribute('data-layout', 'mobile');
     await expect(objective).toHaveAttribute('data-layout', 'mobile');
@@ -963,7 +1085,7 @@ test.describe('UX: off-track click inside Managed Forest rail access', () => {
       ),
     ).toBeLessThanOrEqual(forest.railAccess.radius);
 
-    await page.locator('[data-testid="timber-freight-set-buy"]').click();
+    await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
     const afterBuy = await snapshot(page);
     const screen = await toScreen(page, clickPoint, afterBuy);
 

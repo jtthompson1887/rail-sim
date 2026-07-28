@@ -1,21 +1,22 @@
 /**
  * @jest-environment jsdom
  */
-import type { CargoBlocker } from '../../src/freight/CargoSystem';
+import type { CargoBlockerCode } from '../../src/freight/CargoSystem';
 import type { TrainInspectionDto } from '../../src/freight/FreightPresentation';
 import { EventBus } from '../../src/services/EventBus';
 import { TrainInspector } from '../../src/ui/TrainInspector';
 
 const inspection = (
-  blocker: CargoBlocker | null = null,
+  blocker: CargoBlockerCode | null = null,
 ): TrainInspectionDto => Object.freeze({
   trainId: 'train-1',
-  displayName: 'Timber Freight Set',
+  displayName: 'General Flatbed Set',
   direction: 'forward',
   throttle: 1,
   movementState: 'stopped',
   cargo: Object.freeze({
     productLabel: 'Logs',
+    unitLabel: 'tonnes',
     units: 40,
     capacityUnits: 60,
     text: 'Logs 40 / 60 t',
@@ -24,6 +25,7 @@ const inspection = (
   transfer: Object.freeze({
     trainId: 'train-1',
     facilityId: 'sawmill',
+    productId: 'logs',
     kind: blocker ? 'blocked' : 'unloading',
     blocker,
     batchUnits: 6,
@@ -31,6 +33,11 @@ const inspection = (
     capacityUnits: 60,
     batchRevenue: 640,
   }),
+  transferRemedy: blocker === null
+    ? ''
+    : blocker === 'train-moving'
+      ? 'Stop the train to transfer cargo'
+      : `Remedy for ${blocker}`,
   currentTrip: Object.freeze({
     revenue: 900,
     runningCost: 140,
@@ -77,7 +84,7 @@ describe('TrainInspector', () => {
     ) as HTMLProgressElement;
 
     expect(root.getAttribute('aria-hidden')).toBe('false');
-    expect(root.textContent).toContain('Timber Freight Set');
+    expect(root.textContent).toContain('General Flatbed Set');
     expect(root.textContent).toContain('Forward · stopped');
     expect(root.textContent).toContain('Logs 40 / 60 t');
     expect(root.textContent).toContain('Nearest eligible: Sawmill');
@@ -86,6 +93,23 @@ describe('TrainInspector', () => {
     expect(root.textContent).toContain('£760');
     expect(root.textContent).toContain('Last delivery');
     expect(root.textContent).toContain('Lifetime');
+    expect(root.querySelector(
+      '[data-testid="train-current-trip-profit"]',
+    )?.textContent).toBe('£760');
+    expect(root.querySelector(
+      '[data-testid="train-last-delivery-profit"]',
+    )?.textContent).toBe('£880');
+    expect(root.querySelector(
+      '[data-testid="train-lifetime-profit"]',
+    )?.textContent).toBe('£2,780');
+    for (const testId of [
+      'train-current-trip-profit',
+      'train-last-delivery-profit',
+      'train-lifetime-profit',
+    ]) {
+      const profit = root.querySelector(`[data-testid="${testId}"]`);
+      expect(profit?.previousSibling?.textContent).toMatch(/profit $/);
+    }
     expect(cargo.value).toBe(40);
     expect(cargo.max).toBe(60);
     expect(cargo.getAttribute('aria-label')).toBe('Cargo Logs 40 of 60 tonnes');
@@ -97,20 +121,26 @@ describe('TrainInspector', () => {
   });
 
   it.each([
-    'Stop the train to transfer cargo',
-    'Move inside Managed Forest rail access',
-    'Move inside Sawmill rail access',
-    'Waiting for logs',
-    'Timber set is full',
-    'Sawmill input storage is full',
-    'Cargo is not accepted here',
-    'Insufficient cash for running costs',
-    'Re-rail the train before operating',
-  ] as const)('renders the exact blocker copy: %s', (blocker) => {
+    'not-operating',
+    'derailed',
+    'train-moving',
+    'unknown-freight-set',
+    'incompatible-product',
+    'outside-eligible-facility',
+    'source-empty',
+    'train-full',
+    'destination-full',
+    'product-not-accepted',
+    'insufficient-running-cash',
+  ] as const)('renders the centralised blocker remedy: %s', (blocker) => {
     panel.setState(inspection(blocker));
     expect(document.querySelector(
       '[data-testid="train-transfer-status"]',
-    )?.textContent).toBe(blocker);
+    )?.textContent).toBe(
+      blocker === 'train-moving'
+        ? 'Stop the train to transfer cargo'
+        : `Remedy for ${blocker}`,
+    );
   });
 
   it('emits safe mobile throttle controls and stops their pointer gestures', () => {
@@ -140,6 +170,35 @@ describe('TrainInspector', () => {
     document.body.removeEventListener('pointerdown', bubbled);
   });
 
+  it('moves the accessible and visual throttle selection with train state updates', () => {
+    const root = document.querySelector(
+      '[data-testid="train-inspector"]',
+    ) as HTMLElement;
+
+    for (const throttle of [1, 0, -1] as const) {
+      panel.setState(Object.freeze({
+        ...inspection(),
+        throttle,
+      }));
+      const selected = root.querySelectorAll(
+        '[data-throttle][aria-pressed="true"]',
+      );
+      const active = root.querySelector(
+        `[data-throttle="${throttle}"]`,
+      ) as HTMLButtonElement;
+      const inactive = root.querySelector(
+        `[data-throttle="${throttle === 1 ? 0 : 1}"]`,
+      ) as HTMLButtonElement;
+
+      expect(selected).toHaveLength(1);
+      expect(selected[0]).toBe(active);
+      expect(active.style.backgroundColor).toBe('rgb(74, 213, 255)');
+      expect(active.style.color).toBe('rgb(6, 19, 31)');
+      expect(inactive.getAttribute('aria-pressed')).toBe('false');
+      expect(inactive.style.backgroundColor).toBe('rgb(18, 60, 85)');
+    }
+  });
+
   it('keeps one throttle button alive across multiframe state updates and emits once on click', async () => {
     panel.setState(inspection());
     const values: number[] = [];
@@ -155,7 +214,7 @@ describe('TrainInspector', () => {
     pressed.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await Promise.resolve();
     EventBus.emit('ui:train-inspection', {
-      inspection: inspection('Stop the train to transfer cargo'),
+      inspection: inspection('train-moving'),
     });
     await Promise.resolve();
     EventBus.emit('ui:train-inspection', {
@@ -187,6 +246,23 @@ describe('TrainInspector', () => {
     expect(root.style.left).toBe('56px');
     expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).not.toBe('');
+    const throttle = root.querySelector(
+      '[aria-label="Train throttle"]',
+    ) as HTMLElement;
+    expect(throttle.style.position).toBe('sticky');
+    expect(throttle.style.bottom).toBe('0px');
+
+    Object.defineProperty(window, 'innerWidth', {
+      value: 667,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 375,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(root.style.left).toBe('calc(28px + 50vw)');
+    expect(root.style.right).toBe('8px');
 
     panel.destroy();
     EventBus.emit('ui:train-inspection', { inspection: inspection() });

@@ -18,8 +18,8 @@ export type FreightSetValidationResult =
   | { valid: true }
   | { valid: false; code: string; referenceId?: string };
 
-export const TIMBER_FREIGHT_SET_ID = 'timber-freight-set';
-export const TIMBER_TRAIN_PURCHASE_PRICE = 90_000;
+export const FLATBED_FREIGHT_SET_ID = 'flatbed-freight-set';
+export const FLATBED_TRAIN_PURCHASE_PRICE = 90_000;
 export const OPERATING_RESERVE = 20_000;
 export const STARTER_ROUTE_RESERVE = 110_000;
 
@@ -45,19 +45,19 @@ const freezeFreightSets = (
   })),
 );
 
-export const TIMBER_FREIGHT_SETS: readonly FreightSetDefinition[] =
+export const FREIGHT_SETS: readonly FreightSetDefinition[] =
   freezeFreightSets([{
-    id: TIMBER_FREIGHT_SET_ID,
-    displayName: 'Timber Freight Set',
-    compatibleProductIds: ['logs'],
+    id: FLATBED_FREIGHT_SET_ID,
+    displayName: 'General Flatbed Set',
+    compatibleProductIds: ['logs', 'structural-timber'],
     payloadMassKg: 60_000,
     payloadVolumeLitres: 96_000,
-    purchasePrice: TIMBER_TRAIN_PURCHASE_PRICE,
+    purchasePrice: FLATBED_TRAIN_PURCHASE_PRICE,
     runningCostPerActiveTick: 20,
   }]);
 
 const freightSetById = new Map(
-  TIMBER_FREIGHT_SETS.map((set) => [set.id, set]),
+  FREIGHT_SETS.map((set) => [set.id, set]),
 );
 
 export const getFreightSet = (
