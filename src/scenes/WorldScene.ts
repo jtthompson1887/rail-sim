@@ -1625,6 +1625,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
+    if (this.isPointerOverUI(pointer)) return;
     const world = this.inputManager.toWorldPoint(pointer);
     this.activeEditorTool?.onPointerMove(world.x, world.y, pointer);
   }

@@ -498,6 +498,52 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect((scene as any).inputManager.toWorldPoint).not.toHaveBeenCalled();
   });
 
+  it('does not leak an inspector or HUD hover into the active tool', () => {
+    const scene = new WorldScene();
+    const onPointerMove = jest.fn();
+    (scene as any).activeEditorTool = { onPointerMove };
+    (scene as any).inputManager = {
+      toWorldPoint: jest.fn().mockReturnValue({ x: 712, y: -84 }),
+    };
+    (scene as any).scene = {
+      get: jest.fn().mockReturnValue({
+        containsScreenPoint: jest.fn().mockReturnValue(true),
+      }),
+    };
+    const pointer = { x: 1800, y: 760 };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handlePointerMove(pointer);
+
+    expect(onPointerMove).not.toHaveBeenCalled();
+    expect((scene as any).inputManager.toWorldPoint).not.toHaveBeenCalled();
+  });
+
+  it('routes pointer moves on the world to the active tool in create mode', () => {
+    const scene = new WorldScene();
+    const onPointerMove = jest.fn();
+    (scene as any).activeEditorTool = { onPointerMove };
+    (scene as any).inputManager = {
+      toWorldPoint: jest.fn().mockReturnValue({ x: 712, y: -84 }),
+    };
+    (scene as any).scene = {
+      get: jest.fn().mockReturnValue({
+        containsScreenPoint: jest.fn().mockReturnValue(false),
+      }),
+    };
+    const pointer = { x: 400, y: 200 };
+    GameStateManager.enterCreate('test-world');
+
+    (scene as any).handlePointerMove(pointer);
+
+    expect((scene as any).inputManager.toWorldPoint).toHaveBeenCalledWith(pointer);
+    expect(onPointerMove).toHaveBeenCalledWith(712, -84, pointer);
+
+    GameStateManager.enterPlay('test-world');
+    (scene as any).handlePointerMove(pointer);
+    expect(onPointerMove).toHaveBeenCalledTimes(1);
+  });
+
   it('routes inspector intents only to the active authoritative Place tool', () => {
     const scene = new WorldScene();
     const tool = {
