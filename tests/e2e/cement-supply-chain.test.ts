@@ -1007,6 +1007,11 @@ async function establishCementObjective(
     id: 'structural-timber-link',
     achieved: false,
   });
+  expect(state.world.company.ledger.some(
+    ({ category, tick }) => category === 'contract-bonus'
+      && tick >= Math.max(0, state.world.economy.tick - 23),
+  )).toBe(true);
+  await expectOperatingSummary(page, state);
 
   await setMode(page, 'create');
   await buildGeneratedExtensions(page);
@@ -1150,9 +1155,7 @@ async function expectOperatingSummary(
       capitalExpenditure: 0,
       cashFlow: 0,
     });
-  const railProfit = summary.deliveryRevenue
-    + summary.contractBonuses
-    - summary.runningExpenses;
+  const railProfit = summary.deliveryRevenue - summary.runningExpenses;
   expect(state.world.company.cash).toBe(
     state.world.company.ledger.reduce(
       (cash, { amount }) => cash + amount,
