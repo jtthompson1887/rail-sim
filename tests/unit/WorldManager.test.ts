@@ -21,7 +21,14 @@ import {
   WorldEconomyGenerator,
   type EconomyGenerationResult,
 } from '../../src/economy/WorldEconomyGenerator';
-import { MAX_ECONOMY_SITE_CANDIDATES } from '../../src/config/WorldGeneration';
+import {
+  MAX_ECONOMY_SITE_CANDIDATES,
+  MAX_OPPORTUNITY_ATTEMPTS,
+  WorldGenerationConfig,
+} from '../../src/config/WorldGeneration';
+
+const MAX_JOINT_ECONOMY_EVALUATIONS = MAX_OPPORTUNITY_ATTEMPTS
+  * WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
 
 function makeTrackDef(
   uuid: string,
@@ -81,6 +88,8 @@ describe('WorldManager', () => {
               code: 'economy-exhausted',
               seed: generationConfig.seed,
               candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+              prefabAnalyses: 0,
+              mineralPairAnalyses: 0,
               facilitiesPlaced: 0,
             },
           };
@@ -104,15 +113,19 @@ describe('WorldManager', () => {
         'real-terrain-alpha',
       );
 
+      const generateCalls = generate.mock.calls.length;
+      generate.mockRestore();
       expect(result.ok).toBe(true);
-      expect(generate).toHaveBeenCalledTimes(2);
+      expect(generateCalls).toBeGreaterThan(1);
+      expect(generateCalls).toBeLessThanOrEqual(
+        MAX_JOINT_ECONOMY_EVALUATIONS,
+      );
       expect(accepted).toHaveLength(1);
       if (!result.ok) return;
       expect(result.world.starterOpportunity).toEqual(
         accepted[0].opportunity,
       );
       expect(result.world.economy).toEqual(accepted[0].result.economy);
-      generate.mockRestore();
     });
 
     it.each([
@@ -153,6 +166,7 @@ describe('WorldManager', () => {
 
     it('aborts default joint generation on an independently invalid economy', () => {
       const originalGenerate = WorldEconomyGenerator.prototype.generate;
+      let invalidEconomies = 0;
       const generate = jest.spyOn(
         WorldEconomyGenerator.prototype,
         'generate',
@@ -166,6 +180,7 @@ describe('WorldManager', () => {
           opportunity,
         );
         if (!result.ok) return result;
+        invalidEconomies += 1;
         const invalid = clonePlainData(result);
         const prefab = invalid.economy.facilities.find(
           ({ id }) => id === 'prefabrication-plant',
@@ -194,7 +209,11 @@ describe('WorldManager', () => {
           seed: 'real-terrain-alpha',
         },
       });
-      expect(generateCalls).toBe(1);
+      expect(generateCalls).toBeGreaterThanOrEqual(invalidEconomies);
+      expect(generateCalls).toBeLessThanOrEqual(
+        MAX_JOINT_ECONOMY_EVALUATIONS,
+      );
+      expect(invalidEconomies).toBe(1);
       expect(saveCalls).toBe(0);
       expect(WorldManager.world).toBeNull();
     });
