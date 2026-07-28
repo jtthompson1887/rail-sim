@@ -152,13 +152,17 @@ export class TrainInspector {
       : 'Nearest eligible: none';
     this.status.textContent = dto.transferRemedy
       || titleCase(dto.transfer.kind);
-    const compactUnit = dto.cargo.unitLabel === 'tonnes' ? 't' : 'units';
+    const compactUnit = dto.cargo.unitLabel === 'tonnes'
+      ? 't'
+      : dto.cargo.unitLabel;
+    const batchCapacity = Math.min(10, dto.cargo.capacityUnits);
     this.batchText.textContent =
-      `Batch ${dto.transfer.batchUnits} / 10 ${compactUnit}`;
+      `Batch ${dto.transfer.batchUnits} / ${batchCapacity} ${compactUnit}`;
+    this.batch.max = batchCapacity;
     this.batch.value = dto.transfer.batchUnits;
     this.batch.setAttribute(
       'aria-label',
-      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 `
+      `Cargo transfer batch ${dto.transfer.batchUnits} of ${batchCapacity} `
       + dto.cargo.unitLabel,
     );
     this.currentTripProfit.textContent =

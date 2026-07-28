@@ -100,6 +100,36 @@ const cementSteps = (
   },
 ];
 
+const regionalSteps = (
+  states: Array<'complete' | 'current' | 'pending'>,
+): FreightObjectiveStep[] => [
+  {
+    id: 'connect-port',
+    label: 'Connect Port Interchange',
+    state: states[0],
+  },
+  {
+    id: 'deliver-steel-profitably',
+    label: 'Deliver Steel profitably',
+    state: states[1],
+  },
+  {
+    id: 'assemble-building-modules',
+    label: 'Assemble Building Modules',
+    state: states[2],
+  },
+  {
+    id: 'connect-town',
+    label: 'Connect Town Construction Market',
+    state: states[3],
+  },
+  {
+    id: 'deliver-building-modules-profitably',
+    label: 'Deliver Building Modules profitably',
+    state: states[4],
+  },
+];
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -240,6 +270,39 @@ function cementWorld(): {
         next: null,
       },
     ],
+  };
+}
+
+function regionalWorld(): {
+  world: WorldData;
+  portTopology: TrackTopologySnapshot;
+} {
+  const { world } = cementWorld();
+  world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+  world.freightProgress.profitableCementDeliveryCompleted = true;
+  const prefab = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'prefabrication-plant',
+  )!;
+  prefab.x = 2_000;
+  prefab.railAccess.x = 2_000;
+  world.economy.facilities.push(
+    facility('port-interchange', 500),
+    facility('town-construction-market', 2_500),
+  );
+  const source = world.tracks[0];
+  world.tracks.push(
+    trackStub(source, 'port-prefab-track', 500, 2_000),
+    trackStub(source, 'prefab-town-track', 2_000, 2_500),
+  );
+  const portTopology: TrackTopologySnapshot = [{
+    kind: 'track',
+    uuid: 'port-prefab-track',
+    previous: null,
+    next: null,
+  }];
+  return {
+    world,
+    portTopology,
   };
 }
 
@@ -652,7 +715,7 @@ describe('deriveFreightObjective cement supply chain', () => {
     ).steps[3].state).toBe('complete');
   });
 
-  it('keeps the achieved cement objective selected and frozen after demolition', () => {
+  it('advances from durable cement achievement after demolition', () => {
     const { world } = cementWorld();
     world.freightProgress.profitableLimestoneDeliveryCompleted = true;
     world.freightProgress.profitableCementDeliveryCompleted = true;
@@ -671,18 +734,16 @@ describe('deriveFreightObjective cement supply chain', () => {
 
     expect(dto).toEqual({
       objectiveVersion: 1,
-      id: 'cement-supply-chain',
-      title: 'Cement supply chain',
-      status: 'Cement secured · Prefabrication awaits steel',
-      achieved: true,
-      steps: cementSteps([
-        'complete',
-        'complete',
-        'complete',
-        'complete',
-        'complete',
-        'complete',
-        'complete',
+      id: 'regional-construction-supply',
+      title: 'Regional construction supply',
+      status: 'Supply regional construction',
+      achieved: false,
+      steps: regionalSteps([
+        'current',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
       ]),
     });
     expect(world).toEqual(before);
@@ -697,6 +758,141 @@ describe('deriveFreightObjective cement supply chain', () => {
 
     expect(dto.steps.filter(({ state }) => state === 'current')).toHaveLength(1);
     expect(dto.steps.filter(({ state }) => state === 'complete')).toHaveLength(0);
+  });
+});
+
+describe('deriveFreightObjective regional construction supply', () => {
+  it('advances from cement into five ordered regional outcomes', () => {
+    const { world, portTopology } = regionalWorld();
+
+    expect(deriveFreightObjective(world, [])).toEqual({
+      objectiveVersion: 1,
+      id: 'regional-construction-supply',
+      title: 'Regional construction supply',
+      status: 'Supply regional construction',
+      achieved: false,
+      steps: regionalSteps([
+        'current',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+      ]),
+    });
+    expect(deriveFreightObjective(world, portTopology).steps).toEqual(
+      regionalSteps([
+        'complete',
+        'current',
+        'pending',
+        'pending',
+        'pending',
+      ]),
+    );
+  });
+
+  it('uses current module stock once and can complete steel and assembly together', () => {
+    const { world, portTopology } = regionalWorld();
+    const prefab = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'prefabrication-plant',
+    )!;
+    const town = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'town-construction-market',
+    )!;
+    world.trains = [{
+      ...trainWith({
+        productId: 'building-modules',
+        units: 1,
+        loadedUnits: 4,
+        originFacilityId: prefab.id,
+      }),
+      id: 'module-train',
+    }];
+    prefab.inventories['building-modules'].quantity = 1;
+    town.inventories['building-modules'].quantity = 1;
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+
+    expect(deriveFreightObjective(world, portTopology).steps).toEqual(
+      regionalSteps([
+        'complete',
+        'complete',
+        'current',
+        'pending',
+        'pending',
+      ]),
+    );
+
+    prefab.inventories['building-modules'].quantity = 2;
+    expect(deriveFreightObjective(world, portTopology).steps).toEqual(
+      regionalSteps([
+        'complete',
+        'complete',
+        'complete',
+        'current',
+        'pending',
+      ]),
+    );
+  });
+
+  it('accepts the durable module latch as assembly evidence', () => {
+    const { world, portTopology } = regionalWorld();
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+    world.freightProgress.profitableBuildingModuleDeliveryCompleted = true;
+
+    expect(deriveFreightObjective(world, portTopology).steps).toEqual(
+      regionalSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+      ]),
+    );
+  });
+
+  it('keeps exactly one step current before achievement', () => {
+    const { world, portTopology } = regionalWorld();
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+
+    const dto = deriveFreightObjective(world, portTopology);
+
+    expect(dto.steps.filter(({ state }) => state === 'current')).toHaveLength(1);
+    expect(dto.steps.filter(({ state }) => state === 'current')[0]?.id)
+      .toBe('assemble-building-modules');
+  });
+
+  it('keeps achieved progress complete, selected, detached, and frozen', () => {
+    const { world } = regionalWorld();
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+    world.freightProgress.profitableBuildingModuleDeliveryCompleted = true;
+    world.tracks = [];
+    world.trains = [];
+    world.economy.facilities.forEach((entry) => {
+      const modules = entry.inventories['building-modules'];
+      if (modules) modules.quantity = 0;
+    });
+    const before = clone(world);
+
+    const dto = deriveFreightObjective(world, []);
+
+    expect(dto).toEqual({
+      objectiveVersion: 1,
+      id: 'regional-construction-supply',
+      title: 'Regional construction supply',
+      status: 'Regional construction supplied · Network ready to automate',
+      achieved: true,
+      steps: regionalSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+      ]),
+    });
+    expect(dto.steps.filter(({ state }) => state === 'current')).toHaveLength(0);
+    expect(world).toEqual(before);
+    expect(Object.isFrozen(dto)).toBe(true);
+    expect(Object.isFrozen(dto.steps)).toBe(true);
+    dto.steps.forEach((step) => expect(Object.isFrozen(step)).toBe(true));
   });
 });
 
@@ -742,6 +938,16 @@ describe('FreightObjectiveCelebrationSession', () => {
     expect(session.consume(
       'world-a',
       'cement-supply-chain',
+      true,
+    )).toBe(false);
+    expect(session.consume(
+      'world-a',
+      'regional-construction-supply',
+      true,
+    )).toBe(true);
+    expect(session.consume(
+      'world-a',
+      'regional-construction-supply',
       true,
     )).toBe(false);
     expect(session.consume(

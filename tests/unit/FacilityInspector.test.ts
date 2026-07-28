@@ -43,6 +43,34 @@ function cementWorksInspection(): FacilityInspectionDto {
   return dto;
 }
 
+function boundaryInspections(): {
+  port: FacilityInspectionDto;
+  town: FacilityInspectionDto;
+} {
+  const created = WorldManager.tryCreateNew(
+    'Boundary inspection',
+    'boundary-inspector-seed',
+    'temperate',
+  );
+  if (!created.ok) throw new Error('fixture generation failed');
+  created.world.economy.market.constructionIndexBps = 10_000;
+  created.world.economy.market.regionalDemandBpsByProduct[
+    'building-modules'
+  ] = 10_000;
+  const port = buildFacilityInspection(
+    created.world,
+    'port-interchange',
+    true,
+  );
+  const town = buildFacilityInspection(
+    created.world,
+    'town-construction-market',
+    true,
+  );
+  if (!port || !town) throw new Error('boundary inspection missing');
+  return { port, town };
+}
+
 describe('Facility presentation', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -102,7 +130,7 @@ describe('Facility presentation', () => {
     expect(Object.isFrozen(dto.quotes[0].factors)).toBe(true);
   });
 
-  it('keeps production blockers ahead of rail state and reserves waiting-railway for idle sites', () => {
+  it('keeps production and boundary statuses ahead of rail state', () => {
     const created = WorldManager.tryCreateNew(
       'Statuses',
       'facility-status-seed',
@@ -118,14 +146,17 @@ describe('Facility presentation', () => {
       'port-interchange',
       false,
     )?.status).toEqual({
-      code: 'waiting-railway',
-      label: 'Waiting for railway',
+      code: 'idle',
+      label: 'Imported steel available',
     });
     expect(buildFacilityInspection(
       created.world,
       'port-interchange',
       true,
-    )?.status).toEqual({ code: 'idle', label: 'Idle' });
+    )?.status).toEqual({
+      code: 'idle',
+      label: 'Imported steel available',
+    });
     expect(buildFacilityInspection(created.world, 'missing', false)).toBeNull();
   });
 
@@ -309,6 +340,31 @@ describe('FacilityInspector', () => {
       .toContain('Receiving Limestone Aggregate · £45 / t');
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
       .toContain('Full 120 t at current rate · £5,400 gross');
+  });
+
+  it('renders boundary offers, demand, and module quote units from the DTO', () => {
+    const { port, town } = boundaryInspections();
+
+    EventBus.emit('facility:inspection', port);
+    const root = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+    expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
+      .toBe('Imported steel available');
+    expect(root.querySelector('[data-testid="facility-products"]')?.textContent)
+      .toContain('Offers Steel');
+    expect(root.querySelector('[data-testid="facility-inventories"]')?.textContent)
+      .toContain('Steel 120 / 240 tonnes');
+
+    EventBus.emit('facility:inspection', town);
+    expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
+      .toBe('Buying Building Modules');
+    expect(root.querySelector('[data-testid="facility-products"]')?.textContent)
+      .toContain('Buys Building Modules');
+    expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
+      .toMatch(/Receiving Building Modules · £[\d,]+ \/ module/);
+    expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
+      .toMatch(/Full 4 modules at current rate · £[\d,]+ gross/);
   });
 
   it('keeps pointer and touch input inside its scrollable mobile surface', () => {

@@ -365,6 +365,19 @@ export function buildFreightPurchasePresentation(
   const capacityUnits = routeCapacity?.ok
     ? routeCapacity.capacityUnits
     : 0;
+  const compatibleCapacityLabel = products.length > 1
+    ? products.map((product) => {
+      const productCapacity = capacityForProduct(freightSet, product);
+      const units = productCapacity.ok
+        ? productCapacity.capacityUnits
+        : 0;
+      const productName = product.unitLabel === 'module'
+        ? ''
+        : ` ${product.displayName}`;
+      return `${units.toLocaleString('en-GB')} `
+        + `${compactUnit(product.unitLabel)}${productName}`;
+    }).join(' · ')
+    : null;
   const blocker = activeQuote?.blocker ?? 'no-track';
   return Object.freeze({
     freightSetId,
@@ -373,10 +386,11 @@ export function buildFreightPurchasePresentation(
     compatibleCargoLabel: products
       .map(({ displayName }) => displayName)
       .join(' · '),
-    capacityLabel: routeProduct
-      ? `${capacityUnits.toLocaleString('en-GB')} `
-        + pluralUnit(routeProduct.unitLabel, capacityUnits)
-      : 'Capacity unavailable',
+    capacityLabel: compatibleCapacityLabel
+      ?? (routeProduct
+        ? `${capacityUnits.toLocaleString('en-GB')} `
+          + pluralUnit(routeProduct.unitLabel, capacityUnits)
+        : 'Capacity unavailable'),
     runningCostLabel:
       `£${freightSet.runningCostPerActiveTick.toLocaleString('en-GB')} `
       + '/ active tick',

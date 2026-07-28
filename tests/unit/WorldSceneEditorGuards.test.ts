@@ -1368,6 +1368,54 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
   });
 
+  it('enriches one exact profitable regional module delivery per world', () => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld('regional-objective-delivery');
+    const prefab = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'prefabrication-plant',
+    )!;
+    world.economy.facilities.push({
+      ...clonePlainData(prefab),
+      id: 'town-construction-market',
+      definitionId: 'town-construction-market',
+      name: 'Town Construction Market',
+    });
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+    world.freightProgress.profitableBuildingModuleDeliveryCompleted = true;
+    const event = Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'building-modules',
+      units: 4,
+      destinationFacilityId: 'town-construction-market',
+      tick: 44,
+      revenue: 21_216,
+      runningCost: 2_000,
+      operatingProfit: 19_216,
+    });
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(event);
+    scene.presentCompletedDelivery(event);
+
+    const toasts = emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload as any);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toEqual({
+      type: 'success',
+      message: expect.stringMatching(
+        /Building Modules.*Town Construction Market.*Revenue £21,216.*Trip profit £19,216.*Regional construction supplied.*Network ready to automate/i,
+      ),
+    });
+    expect(toasts[1]).toEqual({
+      message: 'Building Modules delivered to Town Construction Market'
+        + ' · Revenue £21,216 · Trip profit £19,216',
+      type: 'success',
+    });
+  });
+
   it.each([
     ['partial cargo', { units: 79 }, true, 'covered-cement-set'],
     ['zero-profit trip', { operatingProfit: 0 }, true, 'covered-cement-set'],

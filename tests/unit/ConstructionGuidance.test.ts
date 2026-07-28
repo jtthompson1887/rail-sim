@@ -116,19 +116,67 @@ describe('deriveConstructionGuidance', () => {
     });
   });
 
-  it('keeps only the operating reserve after achievement', () => {
+  it('reserves one unowned flatbed for the Port extension after cement', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains = [];
+    world.freightProgress.profitableLogDeliveryCompleted = true;
+    world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+
+    expect(deriveConstructionGuidance(world)).toEqual({
+      guidanceVersion: 1,
+      phase: 'steel',
+      objective: 'Extend the Quarry end to Port Interchange',
+      reserve: 110_000,
+      reservePurpose: 'a General Flatbed Set and operating reserve',
+      requiredFreightSetIds: ['flatbed-freight-set'],
+    });
+
+    ownedSet(world, 'flatbed-freight-set', 'regional-flatbed');
+    expect(deriveConstructionGuidance(world)).toEqual({
+      guidanceVersion: 1,
+      phase: 'steel',
+      objective: 'Extend the Quarry end to Port Interchange',
+      reserve: 20_000,
+      reservePurpose: 'operating reserve',
+      requiredFreightSetIds: [],
+    });
+  });
+
+  it('guides the Town extension after steel and keeps the owned flatbed', () => {
     const world = makeFirstFreightRouteWorld();
     world.freightProgress.profitableLogDeliveryCompleted = true;
     world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
     world.freightProgress.profitableLimestoneDeliveryCompleted = true;
     world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+
+    expect(deriveConstructionGuidance(world)).toEqual({
+      guidanceVersion: 1,
+      phase: 'modules',
+      objective: 'Extend the Forest end to Town Construction Market',
+      reserve: 20_000,
+      reservePurpose: 'operating reserve',
+      requiredFreightSetIds: [],
+    });
+  });
+
+  it('keeps only the operating reserve after regional achievement', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.freightProgress.profitableLogDeliveryCompleted = true;
+    world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.freightProgress.profitableSteelDeliveryCompleted = true;
+    world.freightProgress.profitableBuildingModuleDeliveryCompleted = true;
 
     const guidance = deriveConstructionGuidance(world);
 
     expect(guidance).toEqual({
       guidanceVersion: 1,
       phase: 'achieved',
-      objective: 'Cement secured · Prefabrication awaits steel.',
+      objective: 'Regional construction supplied · Network ready to automate',
       reserve: 20_000,
       reservePurpose: 'operating reserve',
       requiredFreightSetIds: [],
