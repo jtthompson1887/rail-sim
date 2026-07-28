@@ -590,6 +590,22 @@ describe('world schema validation', () => {
     }));
   });
 
+  it('rejects an inherited canonical progress key replacing an own key', () => {
+    const raw = currentWorld() as any;
+    const progress = Object.assign(
+      Object.create({ profitableSteelDeliveryCompleted: false }),
+      raw.freightProgress,
+    );
+    delete progress.profitableSteelDeliveryCompleted;
+    progress.speculativeProgress = false;
+    raw.freightProgress = progress;
+
+    expect(validateWorldData(raw)).toEqual(expect.objectContaining({
+      compatible: false,
+      action: 'Start a new world.',
+    }));
+  });
+
   it('accepts a referenced empty freight train without materialising cargo', () => {
     const raw = worldWithTrain();
 

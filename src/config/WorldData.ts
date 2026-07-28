@@ -671,6 +671,14 @@ function isFreightProgress(
 ): value is FreightProgressDef {
   return isRecord(value)
     && Object.keys(value).length === 8
+    && hasOwn(value, 'progressVersion')
+    && hasOwn(value, 'profitableLogDeliveryCompleted')
+    && hasOwn(value, 'developmentGrantAwarded')
+    && hasOwn(value, 'profitableStructuralTimberDeliveryCompleted')
+    && hasOwn(value, 'profitableLimestoneDeliveryCompleted')
+    && hasOwn(value, 'profitableCementDeliveryCompleted')
+    && hasOwn(value, 'profitableSteelDeliveryCompleted')
+    && hasOwn(value, 'profitableBuildingModuleDeliveryCompleted')
     && value.progressVersion === 1
     && typeof value.profitableLogDeliveryCompleted === 'boolean'
     && typeof value.developmentGrantAwarded === 'boolean'
