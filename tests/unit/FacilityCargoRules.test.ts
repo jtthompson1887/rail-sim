@@ -163,6 +163,47 @@ describe('eligibleLoadProducts', () => {
     expect(eligibleLoadProducts(forest, flatbed())).toEqual([]);
   });
 
+  it('sources only declared imported steel from the Port boundary', () => {
+    const port = cloneCatalogueFacility('port-interchange');
+    port.inventories.steel.quantity = 97;
+    port.inventories.steel.reservedQuantity = 7;
+
+    expect(potentialLoadProducts(port, flatbed())).toEqual([
+      { productId: 'steel', availableUnits: 90 },
+    ]);
+    expect(eligibleLoadProducts(port, flatbed())).toEqual([
+      { productId: 'steel', availableUnits: 90 },
+    ]);
+  });
+
+  it('keeps Port modules, incompatible sets, and an empty Port ineligible', () => {
+    const port = cloneCatalogueFacility('port-interchange');
+    const aggregateSet = getFreightSet('aggregate-hopper-set')!;
+
+    expect(potentialLoadProducts(port, aggregateSet)).toEqual([]);
+    expect(potentialLoadProducts(port, flatbed())).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ productId: 'building-modules' }),
+      ]),
+    );
+
+    port.inventories.steel.quantity = 12;
+    port.inventories.steel.reservedQuantity = 12;
+    expect(potentialLoadProducts(port, flatbed())).toEqual([
+      { productId: 'steel', availableUnits: 0 },
+    ]);
+    expect(eligibleLoadProducts(port, flatbed())).toEqual([]);
+  });
+
+  it('does not grant source authority to a recipe-less none boundary', () => {
+    const port = cloneCatalogueFacility('port-interchange');
+    const portDefinition = getFacilityDefinition('port-interchange')!;
+    jest.spyOn(ProductCatalog, 'getFacilityDefinition')
+      .mockReturnValue({ ...portDefinition, boundary: 'none' });
+
+    expect(potentialLoadProducts(port, flatbed())).toEqual([]);
+  });
+
   it.each([
     ['a null slot', (slot: any) => null],
     ['a non-object slot', (slot: any) => 7],
@@ -367,6 +408,45 @@ describe('facilityAcceptsProduct', () => {
       freeCapacityUnits: 0,
     });
     expect(facilityAcceptsProduct(sawmill, 'logs')).toBeNull();
+  });
+
+  it('accepts declared finished modules at the Town boundary', () => {
+    const town = cloneCatalogueFacility('town-construction-market');
+    town.inventories['building-modules'].quantity = 36;
+
+    expect(potentialAcceptedProduct(town, 'building-modules')).toEqual({
+      productId: 'building-modules',
+      freeCapacityUnits: 124,
+    });
+    expect(facilityAcceptsProduct(town, 'building-modules')).toEqual({
+      productId: 'building-modules',
+      freeCapacityUnits: 124,
+    });
+  });
+
+  it('keeps Town steel and a full Town ineligible', () => {
+    const town = cloneCatalogueFacility('town-construction-market');
+
+    expect(potentialAcceptedProduct(town, 'steel')).toBeNull();
+
+    town.inventories['building-modules'].quantity =
+      town.inventories['building-modules'].capacity;
+    expect(potentialAcceptedProduct(town, 'building-modules')).toEqual({
+      productId: 'building-modules',
+      freeCapacityUnits: 0,
+    });
+    expect(facilityAcceptsProduct(town, 'building-modules')).toBeNull();
+  });
+
+  it('does not grant sink authority to a recipe-less none boundary', () => {
+    const town = cloneCatalogueFacility('town-construction-market');
+    const townDefinition = getFacilityDefinition(
+      'town-construction-market',
+    )!;
+    jest.spyOn(ProductCatalog, 'getFacilityDefinition')
+      .mockReturnValue({ ...townDefinition, boundary: 'none' });
+
+    expect(potentialAcceptedProduct(town, 'building-modules')).toBeNull();
   });
 
   it('fails closed when the required inventory slot is missing', () => {
