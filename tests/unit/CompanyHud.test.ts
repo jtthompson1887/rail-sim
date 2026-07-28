@@ -107,6 +107,45 @@ describe('CompanyHud', () => {
     expect(root.style.width).toBe('auto');
   });
 
+  it('shows the saving state while preserving construction and time fields', () => {
+    EventBus.emit('ui:company-state', {
+      cash: 950_000,
+      saveState: 'saving',
+      economyTick: 12,
+      constructionIndexBps: 10_050,
+      operatingSummary,
+    });
+
+    expect(document.querySelector('[data-testid="company-save-state"]')?.textContent)
+      .toBe('Saving…');
+    const root = document.querySelector('[data-testid="company-hud"]') as HTMLElement;
+    expect(root.dataset.saveState).toBe('saving');
+    expect(document.querySelector('[data-testid="company-economy-time"]')?.textContent)
+      .toBe('Day 1 · Tick 12');
+  });
+
+  it('reports whether a screen point falls within its bounding box', () => {
+    const root = document.querySelector('[data-testid="company-hud"]') as HTMLElement;
+    jest.spyOn(root, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 20,
+      right: 300,
+      bottom: 80,
+      width: 200,
+      height: 60,
+      x: 100,
+      y: 20,
+      toJSON: () => {},
+    } as any);
+
+    expect(hud.containsScreenPoint(150, 50)).toBe(true);
+    expect(hud.containsScreenPoint(99, 50)).toBe(false);
+    expect(hud.containsScreenPoint(150, 81)).toBe(false);
+
+    hud.setVisible(false);
+    expect(hud.containsScreenPoint(150, 50)).toBe(false);
+  });
+
   it('shows the inclusive operating summary with stable selectors', () => {
     EventBus.emit('ui:company-state', {
       cash: 100_000,

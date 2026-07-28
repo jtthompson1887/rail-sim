@@ -47,6 +47,14 @@ export const GameConfig = {
   },
   AUDIO: { BGM_VOLUME: 0.5, SFX_VOLUME: 0.8 },
   SAVE_KEY: 'rail-sim-save',
+  /** 3-D cab view settings. */
+  CAB3D: {
+    ENABLED: true,
+    TOGGLE_KEY: 'C',
+    EYE_FORWARD_OFFSET_M: 8.5,
+    SPEED_SCALE: 1.0,
+    DETERMINISTIC: false,
+  },
   WORLD: {
     CHUNK_SIZE: 4096,
     MAX_UNDO_STEPS: 50,

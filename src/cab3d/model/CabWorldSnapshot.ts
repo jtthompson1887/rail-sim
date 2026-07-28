@@ -1,0 +1,108 @@
+import type { BiomeType, StructureType, SceneryObjectDef } from '../../config/WorldData';
+import type { ITerrainSampler } from '../contracts/ITerrainSampler';
+import type { CabWeatherState } from '../atmosphere/CabWeatherModel';
+
+export type { BiomeType, StructureType, SceneryObjectDef };
+
+export interface CabTrackSample {
+  /** World X coordinate in metres. */
+  x: number;
+  /** World Y coordinate in metres (game Y, positive downward). */
+  y: number;
+  /** Elevation above sea level in metres. */
+  elevation: number;
+  /** Heading in radians, 0 = +X, positive counter-clockwise. */
+  headingRad: number;
+  /** Signed curvature (1 / radius), positive for left turns. */
+  curvature: number;
+  /** Track structure at this sample. */
+  structure: StructureType;
+  /** Distance from the eye in metres (positive ahead, negative behind). */
+  distance: number;
+}
+
+export interface CabVehicleSnapshot {
+  /** Vehicle identifier. */
+  id: string;
+  /** World position in metres. */
+  x: number;
+  y: number;
+  /** Heading in radians. */
+  headingRad: number;
+  /** Speed in metres per second. */
+  speedMps: number;
+  /** Normalised throttle/brake [-1, 1]. */
+  throttle: number;
+  /** Whether the vehicle has derailed. */
+  derailed: boolean;
+  /** Whether the vehicle is currently aligned to a track. */
+  onTrack: boolean;
+}
+
+export interface CabWorldSnapshot {
+  /** False when no selected train is available or the world is not ready. */
+  readonly valid: boolean;
+  /** Seed used for deterministic effects (weather, scenery). */
+  readonly seed: string;
+  /** Current biome. */
+  readonly biome: BiomeType;
+  /** Snapshot of the followed vehicle. */
+  readonly vehicle: CabVehicleSnapshot | null;
+  /** Reparametrised track samples from {@link CabConfig.NEAR_DISTANCE_M}
+   *  to {@link CabConfig.FAR_DISTANCE_M}. */
+  readonly path: ReadonlyArray<CabTrackSample>;
+  /** Elapsed simulation time in seconds. */
+  readonly elapsedSecs: number;
+
+  /**
+   * Straight-line distance in metres to the nearest facility, or `null` when no
+   * facility is present.
+   */
+  readonly nearestFacilityDistanceM?: number | null;
+
+  /** Optional height sampler used by the terrain mesh builder. */
+  readonly terrain?: ITerrainSampler;
+
+  /** Instanced scenery definitions within the current draw radius. */
+  readonly scenery?: ReadonlyArray<SceneryObjectDef>;
+
+  /** When true, all random/animated rendering effects are disabled for determinism. */
+  readonly deterministic?: boolean;
+
+  /** When true, ride motion, grain, motion blur and DoF are reduced for accessibility. */
+  readonly reducedMotion?: boolean;
+
+  /** Deterministic weather state for the cab view, or `null` when invalid. */
+  readonly weather: CabWeatherState | null;
+
+  // Quality-tier settings (populated by {@link applyTier} in the renderer)
+  readonly tier?: 'low' | 'medium' | 'high' | 'ultra';
+  readonly hardwareScale?: number;
+  readonly sceneryRadiusM?: number;
+  readonly shadowCascades?: number;
+  readonly shadowMapSize?: number;
+  readonly farTerrainRing?: boolean;
+  readonly sleeperSpacingM?: number;
+  readonly bloomEnabled?: boolean;
+  readonly fxaaEnabled?: boolean;
+  readonly dofEnabled?: boolean;
+  readonly chromaticEnabled?: boolean;
+  readonly grainEnabled?: boolean;
+  readonly motionBlurEnabled?: boolean;
+  readonly weatherParticleCap?: number;
+}
+
+/** Sentinel returned when a snapshot cannot be produced. */
+export const INVALID_SNAPSHOT: Readonly<CabWorldSnapshot> = Object.freeze({
+  valid: false,
+  seed: '',
+  biome: 'temperate',
+  vehicle: null,
+  path: Object.freeze([]),
+  nearestFacilityDistanceM: null,
+  scenery: Object.freeze([]),
+  deterministic: false,
+  reducedMotion: false,
+  elapsedSecs: 0,
+  weather: null,
+});

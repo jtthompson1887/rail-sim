@@ -86,6 +86,7 @@ import {
   FacilityView,
   type FacilityViewPlacement,
 } from '../entities/FacilityView';
+import { CabViewHost, PhaserCabSnapshotSource } from '../cab3d';
 import {
   FreightPurchaseService,
   type FreightPurchaseQuote,
@@ -146,6 +147,7 @@ export interface FirstRouteBrowserHarness {
       'x' | 'y' | 'speedWorldUnitsPerSecond' | 'throttle' | 'derailed'
     >,
   ): void;
+  releaseTrainControl(): void;
   retrySave(): boolean;
 }
 
@@ -258,6 +260,7 @@ export default class WorldScene extends Phaser.Scene {
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
   private economySystem = new EconomySystem();
+  private cabViewHost: CabViewHost | null = null;
   private freightPurchaseService!: FreightPurchaseService;
   private readonly operationsLockedTrainIds = new Set<string>();
   private readonly cargoStatusByTrainId =
@@ -278,6 +281,12 @@ export default class WorldScene extends Phaser.Scene {
   private readonly modeChangedHandler = ({ mode }: { mode: 'create' | 'play' }) => {
     if (mode === 'create') this.activateCreateMode();
     else if (mode === 'play') this.activatePlayMode();
+  };
+
+  private readonly cabStateHandler = ({ active }: { active: boolean }) => {
+    this.cameraController.setInputLockOwner(active ? 'ui' : 'camera');
+    this.scene.setVisible(!active);
+    this.scene.setVisible(!active, EDITOR_UI_SCENE_KEY);
   };
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
@@ -546,6 +555,23 @@ export default class WorldScene extends Phaser.Scene {
     this.trainManager    = new TrainManager(this, this.trackManager, this.cameraController);
     this.inputManager    = new InputManager(this, this.cameraController);
     this.audioManager    = new AudioManager(this);
+
+    // ── 3-D cab view host ──────────────────────────────────────────────────
+    if (GameConfig.CAB3D.ENABLED) {
+      this.cabViewHost = new CabViewHost(
+        new PhaserCabSnapshotSource(
+          this,
+          this.trackManager,
+          this.trainManager,
+          this.terrainGenerator,
+          terrainSeed,
+          biome,
+          () => this.facilityViews.map((view) => view.placement),
+        ),
+      );
+    }
+    EventBus.on('cab:state', this.cabStateHandler);
+
     this.freightPurchaseService = new FreightPurchaseService(
       WorldManager,
       this.createFreightPurchaseRuntimePort(),
@@ -645,6 +671,7 @@ export default class WorldScene extends Phaser.Scene {
         setTrainRuntime: (trainId, runtime) => {
           this.setFirstRouteTrainRuntime(trainId, runtime);
         },
+        releaseTrainControl: () => this.releaseFirstRouteTrainControl(),
         retrySave: () => this.saveWorldAndReport(),
       };
     }
@@ -664,6 +691,9 @@ export default class WorldScene extends Phaser.Scene {
       EventBus.off('train:deselected', this.trainDeselectedHandler);
       EventBus.off('facility:selected', this.facilitySelectedHandler);
       EventBus.off('vehicle:type-changed', this.vehicleTypeChangedHandler);
+      EventBus.off('cab:state', this.cabStateHandler);
+      this.cabViewHost?.destroy();
+      this.cabViewHost = null;
       EventBus.off(
         'freight:purchase-mode-requested',
         this.freightPurchaseModeRequestedHandler,
@@ -1058,6 +1088,7 @@ export default class WorldScene extends Phaser.Scene {
         (train) => captureTrainRuntime(train),
       ),
     );
+    this.cabViewHost?.update(time, delta);
   }
 
   private applyEconomyUpdateResult(
@@ -1166,6 +1197,10 @@ export default class WorldScene extends Phaser.Scene {
       this.trainManager.trains.map(captureTrainRuntime),
     );
     this.publishHUDState();
+  }
+
+  private releaseFirstRouteTrainControl(): void {
+    this.firstRouteHarnessControlsRuntime = false;
   }
 
   private setFirstRouteTrainRuntime(
@@ -1683,6 +1718,7 @@ export default class WorldScene extends Phaser.Scene {
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (GameStateManager.worldMode !== 'create') return;
+    if (this.isPointerOverUI(pointer)) return;
     const world = this.inputManager.toWorldPoint(pointer);
     this.activeEditorTool?.onPointerMove(world.x, world.y, pointer);
   }
@@ -1704,6 +1740,14 @@ export default class WorldScene extends Phaser.Scene {
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (isGameplayInputFocused(event.target as Element | null)) return;
+
+    if (GameStateManager.worldMode === 'play' && GameConfig.CAB3D.ENABLED) {
+      if (event.code === `Key${GameConfig.CAB3D.TOGGLE_KEY}` && !event.ctrlKey && !event.altKey) {
+        EventBus.emit('cab:toggle', {});
+        return;
+      }
+    }
+
     if (GameStateManager.worldMode === 'create') {
       // Ctrl shortcuts
       if (event.ctrlKey) {

@@ -265,6 +265,8 @@ class WorldManagerClass {
               || economyResult.ok !== true
               || !equalPlainData(detachedOpportunity, opportunity)
               || !isRecord(economyResult.diagnostics)
+              || typeof economyResult.diagnostics.candidatesEvaluated
+                !== 'number'
               || !Number.isInteger(
                 economyResult.diagnostics.candidatesEvaluated,
               )

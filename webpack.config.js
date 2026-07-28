@@ -8,9 +8,16 @@ module.exports = (env = {}) => ({
     output: {
         filename: 'main.js',
         path: path.resolve(__dirname, 'dist/client'),
+        publicPath: 'auto',
+        chunkFilename: '[name].[contenthash].chunk.js',
     },
     resolve: {
         extensions: ['.tsx', '.ts', '.js'],
+    },
+    optimization: {
+        // Keep the lazy-loaded cab3d chunk together (Babylon + renderer) so
+        // main.js does not grow and the chunk is named cab3d.*.chunk.js.
+        splitChunks: false,
     },
     module: {
         rules: [

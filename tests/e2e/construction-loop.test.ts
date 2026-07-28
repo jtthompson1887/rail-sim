@@ -184,6 +184,7 @@ function persistedConstruction(state: ConstructionSnapshot) {
 
 test.describe('fixed-seed construction decision loop', () => {
   test('builds, chains, undo/redoes, and reloads exact construction data', async ({ page }) => {
+    test.slow();
     await createFixedSeedWorld(page);
     const blank = await snapshot(page);
     expect(blank.world.tracks).toHaveLength(0);

@@ -1,0 +1,203 @@
+import { CabViewHost } from '../../src/cab3d/CabViewHost';
+import { EventBus } from '../../src/services/EventBus';
+import type { ICabSnapshotSource } from '../../src/cab3d/contracts/ICabSnapshotSource';
+import type { ICabRenderer } from '../../src/cab3d/contracts/ICabRenderer';
+import { INVALID_SNAPSHOT, type CabWorldSnapshot } from '../../src/cab3d/model/CabWorldSnapshot';
+
+describe('CabViewHost', () => {
+  const createRenderer = (): jest.Mocked<ICabRenderer> => ({
+    isReady: jest.fn().mockReturnValue(true),
+    show: jest.fn(),
+    hide: jest.fn(),
+    render: jest.fn(),
+    destroy: jest.fn(),
+    setQualityTier: jest.fn(),
+  } as unknown as jest.Mocked<ICabRenderer>);
+
+  const createSource = (snapshot: CabWorldSnapshot = INVALID_SNAPSHOT): jest.Mocked<ICabSnapshotSource> => ({
+    capture: jest.fn().mockReturnValue(snapshot),
+  } as unknown as jest.Mocked<ICabSnapshotSource>);
+
+  let stateEvents: Array<{ active: boolean }> = [];
+  let stateHandler: (data: { active: boolean }) => void;
+  let hosts: CabViewHost[] = [];
+
+  const createHost = (
+    source: ICabSnapshotSource,
+    loader: () => Promise<ICabRenderer> = () => Promise.resolve(createRenderer()),
+  ): CabViewHost => {
+    const host = new CabViewHost(source, loader);
+    hosts.push(host);
+    return host;
+  };
+
+  beforeEach(() => {
+    stateEvents = [];
+    hosts = [];
+    stateHandler = (data) => stateEvents.push(data);
+    EventBus.on('cab:state', stateHandler);
+  });
+
+  afterEach(() => {
+    EventBus.off('cab:state', stateHandler);
+    hosts.forEach((host) => host.destroy());
+    hosts = [];
+  });
+
+  it('starts inactive and does not call the source or renderer', () => {
+    const source = createSource();
+    const host = createHost(source);
+
+    expect(host.isActive).toBe(false);
+    host.update(0, 16);
+    expect(source.capture).not.toHaveBeenCalled();
+  });
+
+  it('toggles active, loads the renderer, and emits cab:state', async () => {
+    const renderer = createRenderer();
+    const source = createSource();
+    const host = createHost(source, () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+
+    // Allow the async renderer loader to settle.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(host.isActive).toBe(true);
+    expect(renderer.show).toHaveBeenCalled();
+    expect(stateEvents).toContainEqual({ active: true });
+  });
+
+  it('renders valid snapshots only when active and ready', async () => {
+    const snapshot: CabWorldSnapshot = {
+      valid: true,
+      seed: 'test',
+      biome: 'temperate',
+      vehicle: null,
+      path: [],
+      elapsedSecs: 0,
+      weather: null,
+    };
+    const renderer = createRenderer();
+    const source = createSource(snapshot);
+    const host = createHost(source, () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    host.update(1000, 16);
+
+    expect(source.capture).toHaveBeenCalledWith(1000, 16);
+    expect(renderer.render).toHaveBeenCalledWith(snapshot, 16);
+  });
+
+  it('hides the renderer and emits inactive on second toggle', async () => {
+    const renderer = createRenderer();
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    EventBus.emit('cab:toggle', {});
+
+    expect(host.isActive).toBe(false);
+    expect(renderer.hide).toHaveBeenCalled();
+    expect(stateEvents).toContainEqual({ active: false });
+  });
+
+  it('destroys the renderer and unsubscribes from cab:toggle', async () => {
+    const renderer = createRenderer();
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    host.destroy();
+
+    expect(renderer.destroy).toHaveBeenCalled();
+
+    // After destroy, toggling should not change state.
+    const before = stateEvents.length;
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(stateEvents.length).toBe(before);
+  });
+
+  it('disposes a renderer that finishes loading after the host is destroyed', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+    const host = createHost(createSource(), loader);
+
+    EventBus.emit('cab:toggle', {});
+    await Promise.resolve();
+    host.destroy();
+    const eventsBeforeResolution = stateEvents.length;
+
+    resolveLoader(renderer);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(renderer.destroy).toHaveBeenCalledTimes(1);
+    expect(renderer.show).not.toHaveBeenCalled();
+    expect(host.isActive).toBe(false);
+    expect(stateEvents).toHaveLength(eventsBeforeResolution);
+  });
+
+  it('forwards cab:quality to the renderer', async () => {
+    const renderer = createRenderer();
+    const host = createHost(createSource(), () => Promise.resolve(renderer));
+
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    EventBus.emit('cab:quality', { tier: 'high' });
+    expect(renderer.setQualityTier).toHaveBeenCalledWith('high');
+
+    host.destroy();
+  });
+
+  it('queues a quality change before the renderer is loaded', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+
+    const host = createHost(createSource(), loader);
+    EventBus.emit('cab:toggle', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    EventBus.emit('cab:quality', { tier: 'ultra' });
+    expect(renderer.setQualityTier).not.toHaveBeenCalled();
+
+    resolveLoader(renderer);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(renderer.setQualityTier).toHaveBeenCalledWith('ultra');
+    host.destroy();
+  });
+
+  it('honours a second toggle while the renderer is still loading', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+    const host = createHost(createSource(), loader);
+
+    EventBus.emit('cab:toggle', {});
+    await Promise.resolve();
+    EventBus.emit('cab:toggle', {});
+    resolveLoader(renderer);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.isActive).toBe(false);
+    expect(renderer.show).not.toHaveBeenCalled();
+    expect(stateEvents).not.toContainEqual({ active: true });
+  });
+});

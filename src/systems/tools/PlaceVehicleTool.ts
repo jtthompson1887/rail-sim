@@ -62,6 +62,8 @@ export class PlaceVehicleTool implements IEditorTool {
 
   cancel(): void {
     this.ghostGraphics.clear();
+    this.purchaseInFlight = false;
+    this.lastPlacement = null;
   }
 
   wantsPointerButton(button: number): boolean {
@@ -196,8 +198,29 @@ export class PlaceVehicleTool implements IEditorTool {
   private findNearestTrack(wx: number, wy: number): RailTrack | null {
     return this.trackManager.getClosestTrack(
       { x: wx, y: wy },
-      this.SNAP_THRESHOLD,
+      this.resolveSnapThreshold(wx, wy),
     );
+  }
+
+  /**
+   * When the pointer is already inside the Managed Forest rail access, relax
+   * the snap distance to the access radius so the player can click anywhere
+   * inside the forest and still snap to the connecting track. Outside the
+   * access keep the tighter threshold to avoid snapping to distant tracks.
+   */
+  private resolveSnapThreshold(wx: number, wy: number): number {
+    const world = WorldManager.world;
+    const forest = world?.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'managed-forest',
+    );
+    if (!forest) return this.SNAP_THRESHOLD;
+    const distanceToAccess = Math.hypot(
+      wx - forest.railAccess.x,
+      wy - forest.railAccess.y,
+    );
+    return distanceToAccess <= forest.railAccess.radius
+      ? forest.railAccess.radius
+      : this.SNAP_THRESHOLD;
   }
 
   private buildQuoteInput(

@@ -404,6 +404,7 @@ function isTrack(value: unknown): value is TrackDef {
     && isVerticalProfile(value.verticalProfile)
     && isStructureSequence(value.structures)
     && structureElevationsMatchProfile(value.structures, value.verticalProfile)
+    && typeof value.paidBuildCost === 'number'
     && Number.isSafeInteger(value.paidBuildCost)
     && value.paidBuildCost >= 0
     && !('isTunnel' in value)
@@ -643,8 +644,10 @@ function isTrain(
     || typeof value.cargo.productId !== 'string'
     || typeof value.cargo.originFacilityId !== 'string'
     || !facilityIds.has(value.cargo.originFacilityId)
+    || typeof value.cargo.units !== 'number'
     || !Number.isSafeInteger(value.cargo.units)
     || value.cargo.units <= 0
+    || typeof value.cargo.loadedUnits !== 'number'
     || !Number.isSafeInteger(value.cargo.loadedUnits)
     || value.cargo.loadedUnits <= 0
     || value.cargo.units > value.cargo.loadedUnits) {

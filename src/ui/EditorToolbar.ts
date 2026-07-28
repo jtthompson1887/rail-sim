@@ -88,6 +88,7 @@ interface ButtonRef {
   labelText: Phaser.GameObjects.Text;
   shortcutText: Phaser.GameObjects.Text;
   activebar: Phaser.GameObjects.Rectangle;
+  disabled: boolean;
 }
 
 type ToolbarSaveState = 'saved' | 'unsaved' | 'saving';
@@ -229,6 +230,7 @@ export class EditorToolbar {
       for (const entry of TOOL_GROUPS[g]) {
         const bx = w / 2;
         const by = y + btnSize / 2;
+        const disabled = disabledConstructionToolReason(entry.tool) !== null;
 
         const activebar = this.scene.add.rectangle(2, by, 4, btnSize - 8, 0x2a8cff, 1)
           .setScrollFactor(0).setDepth(600).setAlpha(0);
@@ -237,12 +239,12 @@ export class EditorToolbar {
         const bg = this.scene.add.rectangle(bx, by, w - 4, btnSize - 4, 0x1a3a5c, 0.85)
           .setStrokeStyle(1, 0xffffff, 0.1)
           .setScrollFactor(0).setDepth(600)
-          .setInteractive({ useHandCursor: true })
+          .setInteractive({ useHandCursor: !disabled })
           .on('pointerover', () => {
-            if (this.activeTool !== entry.tool) bg.setFillStyle(0x1e4a6e, 0.95);
+            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x1e4a6e, 0.95);
           })
           .on('pointerout', () => {
-            if (this.activeTool !== entry.tool) bg.setFillStyle(0x1a3a5c, 0.85);
+            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x1a3a5c, 0.85);
           })
           .on('pointerdown', () => this.selectTool(entry.tool));
         this.allObjects.push(bg);
@@ -262,6 +264,13 @@ export class EditorToolbar {
         }).setOrigin(1, 0).setScrollFactor(0).setDepth(601);
         this.allObjects.push(shortcutText);
 
+        if (disabled) {
+          bg.setAlpha(0.45);
+          iconText.setAlpha(0.45);
+          labelText.setAlpha(0.45);
+          shortcutText.setAlpha(0.45);
+        }
+
         this.toolButtons.push({
           tool: entry.tool,
           bg,
@@ -269,6 +278,7 @@ export class EditorToolbar {
           labelText,
           shortcutText,
           activebar,
+          disabled,
         });
 
         y += btnSize;
