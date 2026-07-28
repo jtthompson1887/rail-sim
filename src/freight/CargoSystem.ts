@@ -19,7 +19,9 @@ import { quoteLocalProduct } from '../economy/MarketSystem';
 import { getProduct } from '../economy/ProductCatalog';
 import { clonePlainData } from '../utils/PlainData';
 import {
+  AGGREGATE_HOPPER_SET_ID,
   capacityForProduct,
+  COVERED_CEMENT_SET_ID,
   getFreightSet,
 } from './FreightSetCatalog';
 import type { FreightSetDefinition } from './FreightSetCatalog';
@@ -535,6 +537,18 @@ const unloadBatch = (
     && fullConsignment
     && cargo.productId === 'structural-timber'
     && facility.definitionId === 'prefabrication-plant';
+  const completesProfitableFullLimestone = completesDelivery
+    && profitable
+    && fullConsignment
+    && train.freightSetId === AGGREGATE_HOPPER_SET_ID
+    && cargo.productId === 'limestone-aggregate'
+    && facility.definitionId === 'cement-works';
+  const completesProfitableFullCement = completesDelivery
+    && profitable
+    && fullConsignment
+    && train.freightSetId === COVERED_CEMENT_SET_ID
+    && cargo.productId === 'cement'
+    && facility.definitionId === 'prefabrication-plant';
   let postedCompany = deliveryPost.company;
   if (completesProfitableFullLogs
     && !progress.developmentGrantAwarded) {
@@ -579,6 +593,12 @@ const unloadBatch = (
     }
     if (completesProfitableFullStructuralTimber) {
       progress.profitableStructuralTimberDeliveryCompleted = true;
+    }
+    if (completesProfitableFullLimestone) {
+      progress.profitableLimestoneDeliveryCompleted = true;
+    }
+    if (completesProfitableFullCement) {
+      progress.profitableCementDeliveryCompleted = true;
     }
   }
 

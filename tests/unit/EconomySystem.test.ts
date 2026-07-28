@@ -48,6 +48,57 @@ const installFirstRoute = (): WorldData => {
   return world;
 };
 
+const installMineralDelivery = (
+  productId: 'limestone-aggregate' | 'cement',
+): {
+  world: WorldData;
+  destinationId: string;
+  runtime: TrainRuntimeSnapshot[];
+} => {
+  const world = WorldManager.createNew(
+    `Orchestrated ${productId}`,
+    `orchestrated-${productId}`,
+  );
+  const fixture = makeFirstFreightRouteWorld();
+  world.tracks = clonePlainData(fixture.tracks);
+  const limestone = productId === 'limestone-aggregate';
+  const destinationDefinitionId = limestone
+    ? 'cement-works'
+    : 'prefabrication-plant';
+  const destination = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === destinationDefinitionId,
+  );
+  if (!destination) throw new Error(`Missing ${destinationDefinitionId}`);
+  world.trains = [makeFreightTrainDef({
+    id: `${productId}-train`,
+    freightSetId: limestone
+      ? 'aggregate-hopper-set'
+      : 'covered-cement-set',
+    cargo: {
+      productId,
+      units: 10,
+      loadedUnits: limestone ? 120 : 80,
+      originFacilityId: limestone ? 'quarry' : 'cement-works',
+    },
+    operations: {
+      ...makeFreightTrainDef().operations,
+      currentTripRevenue: 5_000,
+      currentTripRunningCost: 1_000,
+      lifetimeRevenue: 5_000,
+      lifetimeRunningCost: 1_000,
+    },
+  })];
+  return {
+    world,
+    destinationId: destination.id,
+    runtime: [stoppedRuntime(`${productId}-train`, {
+      x: destination.railAccess.x,
+      y: destination.railAccess.y,
+      trackT: 0.9,
+    })],
+  };
+};
+
 const facilitySnapshot = (world: WorldData, facilityId: string) =>
   clonePlainData(
     world.economy.facilities.find((facility) => facility.id === facilityId),
@@ -359,6 +410,59 @@ describe('EconomySystem', () => {
     expect(world.trains[0].operations.lifetimeRunningCost).toBe(60);
   });
 
+  it('commits and retains a profitable mineral completion across catch-up ticks', () => {
+    const {
+      world,
+      destinationId,
+      runtime,
+    } = installMineralDelivery('limestone-aggregate');
+    const beforeCash = world.company.cash;
+
+    const result = new EconomySystem().update(4_000, true, runtime);
+
+    expect(result.ticksAdvanced).toBe(4);
+    expect(result.commitRejected).toBe(false);
+    expect(result.completedDeliveries).toEqual([
+      expect.objectContaining({
+        trainId: 'limestone-aggregate-train',
+        productId: 'limestone-aggregate',
+        units: 120,
+        destinationFacilityId: destinationId,
+        tick: 1,
+        runningCost: 1_000,
+      }),
+    ]);
+    expect(result.completedDeliveries[0].operatingProfit).toBeGreaterThan(0);
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: true,
+      profitableCementDeliveryCompleted: false,
+    });
+    expect(world.trains[0]).toMatchObject({
+      cargo: null,
+      operations: {
+        currentTripRevenue: 0,
+        currentTripRunningCost: 0,
+        lastTripRunningCost: 1_000,
+      },
+    });
+    const deliveryEntries = world.company.ledger.filter(
+      ({ category }) => category === 'delivery-revenue',
+    );
+    expect(deliveryEntries).toHaveLength(1);
+    expect(world.company.cash).toBe(
+      beforeCash + deliveryEntries[0].amount,
+    );
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toEqual([]);
+    expect(world.economy.tick).toBe(4);
+    expect(world.operationsRevision).toBe(4);
+  });
+
   it('labels 24 active-tick costs 1 through 24 in the inclusive P&L window', () => {
     const world = installFirstRoute();
     const runtime = [
@@ -535,6 +639,68 @@ describe('EconomySystem', () => {
     expect(isDeepFrozen(retry)).toBe(true);
     expect(world.trains[0].cargo).toBeNull();
     expect(world.economy.tick).toBe(1);
+    expect(world.operationsRevision).toBe(1);
+  });
+
+  it('rejects a mineral latch atomically and commits it exactly once on retry', () => {
+    const { world, runtime } = installMineralDelivery('cement');
+    const before = clonePlainData(world);
+    let rejectNext = true;
+    const rejectingPort = {
+      get world(): WorldData {
+        return world;
+      },
+      applyOperationsBatch(
+        expectedRevision: number,
+        mutate: (draft: OperationsDraft) => boolean,
+      ): boolean {
+        if (rejectNext) {
+          rejectNext = false;
+          const detachedDraft: OperationsDraft = clonePlainData({
+            company: world.company,
+            economy: world.economy,
+            trains: world.trains,
+            freightProgress: world.freightProgress,
+          });
+          expect(mutate(detachedDraft)).toBe(true);
+          expect(
+            detachedDraft.freightProgress.profitableCementDeliveryCompleted,
+          ).toBe(true);
+          expect(detachedDraft.trains[0].cargo).toBeNull();
+          return false;
+        }
+        return WorldManager.applyOperationsBatch(expectedRevision, mutate);
+      },
+    };
+    const system = new EconomySystem(rejectingPort);
+
+    expect(system.update(1_000, true, runtime)).toEqual({
+      ticksAdvanced: 0,
+      changedFacilityIds: [],
+      cargoStatuses: [],
+      completedDeliveries: [],
+      runningCostBlockerByTrainId: {},
+      stopTrainIds: [],
+      commitRejected: true,
+      authoritativeChanged: false,
+    });
+    expect(world).toEqual(before);
+
+    const retry = system.update(0, true, runtime);
+
+    expect(retry.ticksAdvanced).toBe(1);
+    expect(retry.commitRejected).toBe(false);
+    expect(retry.completedDeliveries).toEqual([
+      expect.objectContaining({
+        productId: 'cement',
+        units: 80,
+      }),
+    ]);
+    expect(world.freightProgress.profitableCementDeliveryCompleted).toBe(true);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'delivery-revenue',
+    )).toHaveLength(1);
+    expect(world.trains[0].cargo).toBeNull();
     expect(world.operationsRevision).toBe(1);
   });
 

@@ -19,6 +19,7 @@ import {
   proposeCargoTick,
   type CargoTickProposal,
 } from '../../src/freight/CargoSystem';
+import * as FreightSetCatalog from '../../src/freight/FreightSetCatalog';
 import type { TrainRuntimeSnapshot } from '../../src/freight/TrainRuntime';
 import {
   makeFirstFreightRouteWorld,
@@ -1110,6 +1111,458 @@ describe('proposeCargoTick loading conservation and capacity', () => {
 });
 
 describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
+  const mineralDeliveryInput = (
+    freightSetId: string,
+    productId: 'limestone-aggregate' | 'cement',
+    destinationDefinitionId: 'cement-works' | 'prefabrication-plant',
+    loadedUnits: number,
+    units = 20,
+  ) => {
+    const input = makeInput();
+    const destinationDefinition = ProductCatalog.getFacilityDefinition(
+      destinationDefinitionId,
+    );
+    if (!destinationDefinition) {
+      throw new Error(`Missing ${destinationDefinitionId} definition`);
+    }
+    input.economy.facilities.push(makeFacility(destinationDefinition, 900));
+    input.trains = [makeFreightTrainDef({
+      freightSetId,
+      cargo: {
+        productId,
+        units,
+        loadedUnits,
+        originFacilityId: productId === 'cement'
+          ? 'cement-works'
+          : 'quarry',
+      },
+      operations: {
+        ...makeFreightTrainDef().operations,
+        currentTripRevenue: 5_000,
+        currentTripRunningCost: 1_000,
+      },
+    })];
+    input.runtime = [makeRuntime('train-1', { x: 900, trackT: 0.9 })];
+    return input;
+  };
+
+  it.each([
+    {
+      freightSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      destinationDefinitionId: 'cement-works' as const,
+      loadedUnits: 120,
+      progressField: 'profitableLimestoneDeliveryCompleted' as const,
+    },
+    {
+      freightSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 80,
+      progressField: 'profitableCementDeliveryCompleted' as const,
+    },
+  ])(
+    'latches a full profitable $productId delivery only on its final batch',
+    ({
+      freightSetId,
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      progressField,
+    }) => {
+      const input = mineralDeliveryInput(
+        freightSetId,
+        productId,
+        destinationDefinitionId,
+        loadedUnits,
+      );
+
+      const penultimate = proposeCargoTick(input);
+      expect(penultimate.trains[0].cargo?.units).toBe(10);
+      expect(penultimate.freightProgress[progressField]).toBe(false);
+      expect(penultimate.completedDeliveries).toEqual([]);
+
+      const final = proposeCargoTick({
+        ...input,
+        company: penultimate.company,
+        economy: penultimate.economy,
+        trains: penultimate.trains,
+        freightProgress: penultimate.freightProgress,
+      });
+
+      expect(final.trains[0].cargo).toBeNull();
+      expect(final.freightProgress[progressField]).toBe(true);
+      expect(final.completedDeliveries).toEqual([
+        expect.objectContaining({
+          productId,
+          units: loadedUnits,
+          destinationFacilityId: destinationDefinitionId,
+          operatingProfit: expect.any(Number),
+        }),
+      ]);
+      expect(final.completedDeliveries[0].operatingProfit).toBeGreaterThan(0);
+    },
+  );
+
+  it.each([
+    {
+      freightSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      destinationDefinitionId: 'cement-works' as const,
+      loadedUnits: 119,
+      progressField: 'profitableLimestoneDeliveryCompleted' as const,
+    },
+    {
+      freightSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 79,
+      progressField: 'profitableCementDeliveryCompleted' as const,
+    },
+  ])(
+    'does not latch a profitable partial $productId consignment',
+    ({
+      freightSetId,
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      progressField,
+    }) => {
+      const result = proposeCargoTick(mineralDeliveryInput(
+        freightSetId,
+        productId,
+        destinationDefinitionId,
+        loadedUnits,
+        10,
+      ));
+
+      expect(result.trains[0].cargo).toBeNull();
+      expect(result.completedDeliveries).toEqual([
+        expect.objectContaining({
+          productId,
+          units: loadedUnits,
+          operatingProfit: expect.any(Number),
+        }),
+      ]);
+      expect(result.completedDeliveries[0].operatingProfit).toBeGreaterThan(0);
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      canonicalSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      destinationDefinitionId: 'cement-works' as const,
+      loadedUnits: 120,
+      progressField: 'profitableLimestoneDeliveryCompleted' as const,
+    },
+    {
+      canonicalSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 80,
+      progressField: 'profitableCementDeliveryCompleted' as const,
+    },
+  ])(
+    'rejects profitable $productId progress from a compatible noncanonical set',
+    ({
+      canonicalSetId,
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      progressField,
+    }) => {
+      const canonical = FreightSetCatalog.getFreightSet(canonicalSetId);
+      if (!canonical) throw new Error(`Missing ${canonicalSetId}`);
+      const otherSetId = `other-${canonicalSetId}`;
+      const originalGetFreightSet = FreightSetCatalog.getFreightSet;
+      jest.spyOn(FreightSetCatalog, 'getFreightSet')
+        .mockImplementation((setId) => setId === otherSetId
+          ? { ...canonical, id: otherSetId }
+          : originalGetFreightSet(setId));
+      const result = proposeCargoTick(mineralDeliveryInput(
+        otherSetId,
+        productId,
+        destinationDefinitionId,
+        loadedUnits,
+        10,
+      ));
+
+      expect(result.trains[0].cargo).toBeNull();
+      expect(result.completedDeliveries).toHaveLength(1);
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      freightSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      canonicalDestinationId: 'cement-works' as const,
+      loadedUnits: 120,
+      progressField: 'profitableLimestoneDeliveryCompleted' as const,
+    },
+    {
+      freightSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      canonicalDestinationId: 'prefabrication-plant' as const,
+      loadedUnits: 80,
+      progressField: 'profitableCementDeliveryCompleted' as const,
+    },
+  ])(
+    'rejects profitable $productId progress at another accepting destination',
+    ({
+      freightSetId,
+      productId,
+      canonicalDestinationId,
+      loadedUnits,
+      progressField,
+    }) => {
+      const input = makeInput();
+      const canonicalDefinition = ProductCatalog.getFacilityDefinition(
+        canonicalDestinationId,
+      );
+      if (!canonicalDefinition) {
+        throw new Error(`Missing ${canonicalDestinationId}`);
+      }
+      const otherDefinition: FacilityDefinition = {
+        ...canonicalDefinition,
+        id: `other-${canonicalDestinationId}`,
+        displayName: `Other ${canonicalDefinition.displayName}`,
+      };
+      const originalGetFacilityDefinition =
+        ProductCatalog.getFacilityDefinition;
+      jest.spyOn(ProductCatalog, 'getFacilityDefinition')
+        .mockImplementation((definitionId) =>
+          definitionId === otherDefinition.id
+            ? otherDefinition
+            : originalGetFacilityDefinition(definitionId));
+      const destination = makeFacility(otherDefinition, 900);
+      input.economy.facilities.push(destination);
+      input.trains = [makeFreightTrainDef({
+        freightSetId,
+        cargo: {
+          productId,
+          units: 10,
+          loadedUnits,
+          originFacilityId: productId === 'cement'
+            ? 'cement-works'
+            : 'quarry',
+        },
+        operations: {
+          ...makeFreightTrainDef().operations,
+          currentTripRevenue: 5_000,
+          currentTripRunningCost: 1_000,
+        },
+      })];
+      input.runtime = [makeRuntime('train-1', { x: 900, trackT: 0.9 })];
+
+      const result = proposeCargoTick(input);
+
+      expect(result.completedDeliveries).toEqual([
+        expect.objectContaining({
+          productId,
+          destinationFacilityId: otherDefinition.id,
+        }),
+      ]);
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      name: 'zero-profit limestone',
+      freightSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      destinationDefinitionId: 'cement-works' as const,
+      loadedUnits: 120,
+      progressField: 'profitableLimestoneDeliveryCompleted' as const,
+      loss: 0,
+    },
+    {
+      name: 'loss-making cement',
+      freightSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 80,
+      progressField: 'profitableCementDeliveryCompleted' as const,
+      loss: 1,
+    },
+  ])('does not latch a $name trip', ({
+    freightSetId,
+    productId,
+    destinationDefinitionId,
+    loadedUnits,
+    progressField,
+    loss,
+  }) => {
+    const input = mineralDeliveryInput(
+      freightSetId,
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      10,
+    );
+    const destination = input.economy.facilities.find(
+      ({ definitionId }) => definitionId === destinationDefinitionId,
+    )!;
+    const quote = quoteLocalProduct(
+      productId,
+      input.economy.market,
+      { ...destination.inventories[productId] },
+    );
+    if (quote.ok === false) throw new Error(quote.code);
+    input.trains[0].operations.currentTripRunningCost =
+      input.trains[0].operations.currentTripRevenue
+      + quote.unitPrice * 10
+      + loss;
+
+    const result = proposeCargoTick(input);
+
+    expect(result.trains[0].cargo).toBeNull();
+    expect(result.completedDeliveries[0].operatingProfit).toBe(0 - loss);
+    expect(result.freightProgress[progressField]).toBe(false);
+  });
+
+  it.each([
+    {
+      freightSetId: 'aggregate-hopper-set',
+      productId: 'limestone-aggregate' as const,
+      destinationDefinitionId: 'cement-works' as const,
+      loadedUnits: 119,
+    },
+    {
+      freightSetId: 'covered-cement-set',
+      productId: 'cement' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 79,
+    },
+  ])(
+    'retains completed mineral latches through a partial $productId delivery',
+    ({
+      freightSetId,
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+    }) => {
+      const input = mineralDeliveryInput(
+        freightSetId,
+        productId,
+        destinationDefinitionId,
+        loadedUnits,
+        10,
+      );
+      input.freightProgress.profitableLogDeliveryCompleted = true;
+      input.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+      input.freightProgress.profitableLimestoneDeliveryCompleted = true;
+      input.freightProgress.profitableCementDeliveryCompleted = true;
+      const beforeProgress = JSON.parse(JSON.stringify(input.freightProgress));
+
+      const result = proposeCargoTick(input);
+
+      expect(result.trains[0].cargo).toBeNull();
+      expect(result.completedDeliveries).toHaveLength(1);
+      expect(result.freightProgress).toEqual(beforeProgress);
+    },
+  );
+
+  it.each([
+    'profitableLimestoneDeliveryCompleted',
+    'profitableCementDeliveryCompleted',
+  ] as const)('fails closed for nonboolean %s', (field) => {
+    const input = mineralDeliveryInput(
+      'aggregate-hopper-set',
+      'limestone-aggregate',
+      'cement-works',
+      120,
+      10,
+    );
+    (input.freightProgress as any)[field] = 1;
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
+  });
+
+  it('fails closed for an extra persisted progress field', () => {
+    const input = mineralDeliveryInput(
+      'aggregate-hopper-set',
+      'limestone-aggregate',
+      'cement-works',
+      120,
+      10,
+    );
+    (input.freightProgress as any).unexpected = false;
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
+  });
+
+  it('rolls back an earlier mineral latch when a later train transfer is fatal', () => {
+    const input = mineralDeliveryInput(
+      'aggregate-hopper-set',
+      'limestone-aggregate',
+      'cement-works',
+      120,
+      10,
+    );
+    const mineralOnly = proposeCargoTick(input);
+    expect(
+      mineralOnly.freightProgress.profitableLimestoneDeliveryCompleted,
+    ).toBe(true);
+    expect(mineralOnly.trains[0].cargo).toBeNull();
+
+    const forest = facility(input.economy, 'managed-forest');
+    forest.inventories.logs.recentOutflow = Number.MAX_SAFE_INTEGER;
+    input.trains = [
+      {
+        ...input.trains[0],
+        id: 'a-mineral',
+      },
+      makeFreightTrainDef({
+        id: 'z-overflow',
+        cargo: null,
+      }),
+    ];
+    input.runtime = [
+      makeRuntime('a-mineral', { x: 900, trackT: 0.9 }),
+      makeRuntime('z-overflow', { x: -500, trackT: 0.1 }),
+    ];
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
+  });
+
   const loadedAtSawmill = (
     units: number,
     operationOverrides: Partial<TrainDef['operations']> = {},
