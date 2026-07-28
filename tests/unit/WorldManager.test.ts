@@ -844,6 +844,27 @@ describe('WorldManager', () => {
       expect(JSON.stringify(WorldManager.world)).toBe(before);
     });
 
+    it('rolls back both regional supply latches with a rejected operations transaction', () => {
+      const world = WorldManager.createNew(
+        'Rejected regional progress',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          draft.freightProgress.profitableSteelDeliveryCompleted = true;
+          draft.freightProgress
+            .profitableBuildingModuleDeliveryCompleted = true;
+          draft.company.cash = -1;
+          return true;
+        },
+      )).toBe(false);
+      expect(WorldManager.world).toBe(world);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
+
     it.each([
       'profitableLimestoneDeliveryCompleted',
       'profitableCementDeliveryCompleted',

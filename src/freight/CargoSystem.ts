@@ -551,6 +551,16 @@ const unloadBatch = (
     && train.freightSetId === COVERED_CEMENT_SET_ID
     && cargo.productId === 'cement'
     && facility.definitionId === 'prefabrication-plant';
+  const completesProfitableFullSteel = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'steel'
+    && facility.definitionId === 'prefabrication-plant';
+  const completesProfitableFullBuildingModules = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'building-modules'
+    && facility.definitionId === 'town-construction-market';
   let postedCompany = deliveryPost.company;
   if (completesProfitableFullLogs
     && !progress.developmentGrantAwarded) {
@@ -601,6 +611,12 @@ const unloadBatch = (
     }
     if (completesProfitableFullCement) {
       progress.profitableCementDeliveryCompleted = true;
+    }
+    if (completesProfitableFullSteel) {
+      progress.profitableSteelDeliveryCompleted = true;
+    }
+    if (completesProfitableFullBuildingModules) {
+      progress.profitableBuildingModuleDeliveryCompleted = true;
     }
   }
 

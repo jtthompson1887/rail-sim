@@ -244,4 +244,146 @@ describe('Integration: persisted fixed-tick economy', () => {
       operationsRevision: reloaded?.operationsRevision,
     }).toEqual(expected);
   });
+
+  it('reloads profitable steel and module latches with their atomic delivery state', () => {
+    const world = WorldManager.createNew(
+      'Persisted regional supply progress',
+      'economy-persistence-regional-supply',
+    );
+    const fixture = makeFirstFreightRouteWorld();
+    world.tracks = clonePlainData(fixture.tracks);
+    const prefab = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'prefabrication-plant',
+    );
+    const town = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'town-construction-market',
+    );
+    if (!prefab || !town) {
+      throw new Error('Regional supply destinations are missing');
+    }
+    world.economy.market.constructionIndexBps = 10_000;
+    world.economy.market.regionalDemandBpsByProduct.steel = 10_000;
+    world.economy.market.regionalDemandBpsByProduct['building-modules'] =
+      10_000;
+    prefab.inventories.steel.quantity = 0;
+    prefab.inventories.steel.recentInflow = 0;
+    prefab.inventories.steel.recentOutflow = 0;
+    town.inventories['building-modules'].quantity = 0;
+    town.inventories['building-modules'].recentInflow = 0;
+    town.inventories['building-modules'].recentOutflow = 0;
+    world.trains = [
+      makeFreightTrainDef({
+        id: 'steel-train',
+        cargo: {
+          productId: 'steel',
+          units: 10,
+          loadedUnits: 60,
+          originFacilityId: 'port-interchange',
+        },
+        operations: {
+          ...makeFreightTrainDef().operations,
+          currentTripRevenue: 250,
+          currentTripRunningCost: 100,
+          lifetimeRevenue: 250,
+          lifetimeRunningCost: 100,
+        },
+      }),
+      makeFreightTrainDef({
+        id: 'module-train',
+        cargo: {
+          productId: 'building-modules',
+          units: 4,
+          loadedUnits: 4,
+          originFacilityId: 'prefabrication-plant',
+        },
+        operations: {
+          ...makeFreightTrainDef().operations,
+          currentTripRevenue: 250,
+          currentTripRunningCost: 100,
+          lifetimeRevenue: 250,
+          lifetimeRunningCost: 100,
+        },
+      }),
+    ];
+    const stoppedAt = (
+      trainId: string,
+      x: number,
+      y: number,
+    ): TrainRuntimeSnapshot => ({
+      trainId,
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.9,
+      facing: 1,
+      x,
+      y,
+      speedWorldUnitsPerSecond: 0,
+      throttle: 0,
+      derailed: false,
+    });
+
+    const update = new EconomySystem().update(1_000, true, [
+      stoppedAt(
+        'steel-train',
+        prefab.railAccess.x,
+        prefab.railAccess.y,
+      ),
+      stoppedAt(
+        'module-train',
+        town.railAccess.x,
+        town.railAccess.y,
+      ),
+    ]);
+
+    expect(update.ticksAdvanced).toBe(1);
+    expect(update.completedDeliveries).toEqual([
+      expect.objectContaining({
+        trainId: 'module-train',
+        productId: 'building-modules',
+        units: 4,
+        destinationFacilityId: 'town-construction-market',
+        operatingProfit: 31_350,
+      }),
+      expect.objectContaining({
+        trainId: 'steel-train',
+        productId: 'steel',
+        units: 60,
+        destinationFacilityId: 'prefabrication-plant',
+        operatingProfit: 8_600,
+      }),
+    ]);
+    expect(world.freightProgress).toEqual({
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: true,
+      profitableBuildingModuleDeliveryCompleted: true,
+    });
+    expect(world.trains.every(({ cargo }) => cargo === null)).toBe(true);
+    const expected = clonePlainData({
+      company: world.company,
+      economy: world.economy,
+      trains: world.trains,
+      freightProgress: world.freightProgress,
+      revision: world.revision,
+      operationsRevision: world.operationsRevision,
+    });
+    expect(WorldManager.save()).toBe(true);
+    const worldId = world.id;
+    WorldManager.reset();
+
+    const reloaded = WorldManager.load(worldId);
+
+    expect(reloaded).not.toBeNull();
+    expect({
+      company: reloaded?.company,
+      economy: reloaded?.economy,
+      trains: reloaded?.trains,
+      freightProgress: reloaded?.freightProgress,
+      revision: reloaded?.revision,
+      operationsRevision: reloaded?.operationsRevision,
+    }).toEqual(expected);
+  });
 });
