@@ -7,6 +7,7 @@ import {
   REFERENCE_MANOEUVRE_TICKS,
   REFERENCE_SPEED_WORLD_UNITS_PER_TICK,
 } from '../../src/config/FreightProgression';
+import { WorldGenerationConfig } from '../../src/config/WorldGeneration';
 import type {
   OpportunityCorridorDef,
   StarterOpportunityDef,
@@ -70,7 +71,15 @@ function proposalWith(
   constructionCost = 1_000,
   valid = true,
 ): ConstructionProposal {
-  const sampled = realSampleConstructionCurve(trackGeometry);
+  const finiteGeometry = [
+    trackGeometry.p0,
+    trackGeometry.p1,
+    trackGeometry.p2,
+    trackGeometry.p3,
+  ].every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y));
+  const sampled = finiteGeometry
+    ? realSampleConstructionCurve(trackGeometry)
+    : { ok: false as const, lowerBoundLength: Number.NaN };
   const length = sampled.ok
     ? sampled.length
     : Math.hypot(
@@ -91,7 +100,13 @@ function proposalWith(
     maximumGradePercent: 0,
     maximumGradeT: 0,
     maximumGradeDistance: 0,
-    structures: [],
+    structures: [{
+      type: 'surface',
+      startT: 0,
+      endT: 1,
+      startElevation: 0,
+      endElevation: 0,
+    }],
     structureLengths: {
       surface: length,
       cut: 0,
@@ -116,7 +131,15 @@ function detailWith(
   trackGeometry: TrackGeometryDef,
   constructionCost = 1_000,
 ): ConstructionAnalysisDetail {
-  const sampled = realSampleConstructionCurve(trackGeometry);
+  const finiteGeometry = [
+    trackGeometry.p0,
+    trackGeometry.p1,
+    trackGeometry.p2,
+    trackGeometry.p3,
+  ].every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y));
+  const sampled = finiteGeometry
+    ? realSampleConstructionCurve(trackGeometry)
+    : { ok: false as const, lowerBoundLength: Number.NaN };
   const fallbackLength = Math.hypot(
     trackGeometry.p3.x - trackGeometry.p0.x,
     trackGeometry.p3.y - trackGeometry.p0.y,
@@ -141,9 +164,23 @@ function detailWith(
 
 function corridor(
   id: string,
-  estimatedCost: number,
   segmentGeometries: TrackGeometryDef[],
 ): OpportunityCorridorDef {
+  const segments = segmentGeometries.map((trackGeometry, index) => {
+    const proposal = proposalWith(trackGeometry);
+    return {
+      geometry: proposal.geometry,
+      verticalProfile: proposal.verticalProfile,
+      structures: proposal.structures,
+      costs: proposal.costs,
+      topologyCost: (index === 0 ? 0 : ENDPOINT_CONNECTION_COST) as
+        0 | typeof ENDPOINT_CONNECTION_COST,
+    };
+  });
+  const estimatedCost = segments.reduce(
+    (sum, segment) => sum + segment.costs.total + segment.topologyCost,
+    0,
+  );
   return {
     id,
     waypoints: [
@@ -154,16 +191,7 @@ function corridor(
     dominantTradeoff: id === 'a-selected' ? 'short-steep' : 'long-flat',
     feasibilityWitness: {
       witnessVersion: 1,
-      segments: segmentGeometries.map((trackGeometry, index) => {
-        const proposal = proposalWith(trackGeometry);
-        return {
-          geometry: proposal.geometry,
-          verticalProfile: proposal.verticalProfile,
-          structures: proposal.structures,
-          costs: proposal.costs,
-          topologyCost: index === 0 ? 0 : ENDPOINT_CONNECTION_COST,
-        };
-      }),
+      segments,
       totalCost: estimatedCost,
     },
   };
@@ -186,9 +214,19 @@ function regionalFixture(): RegionalFixture {
     SAWMILL,
     deriveTrackEndpointOutward(starterOne, 'end'),
   );
-  const alternate = geometry(
-    { x: 0, y: 500 },
-    { x: 2_000, y: 500 },
+  const alternateOne = geometry(
+    FOREST,
+    { x: 500, y: 500 },
+  );
+  const alternateTwo = geometry(
+    alternateOne.p3,
+    { x: 1_500, y: 500 },
+    deriveTrackEndpointOutward(alternateOne, 'end'),
+  );
+  const alternateThree = geometry(
+    alternateTwo.p3,
+    SAWMILL,
+    deriveTrackEndpointOutward(alternateTwo, 'end'),
   );
   const prefabGeometry = geometry(
     SAWMILL,
@@ -217,8 +255,11 @@ function regionalFixture(): RegionalFixture {
       footprintRadius: 192,
     }],
     corridors: [
-      corridor('z-alternate', 20_000, [alternate]),
-      corridor('a-selected', 10_000, [starterOne, starterTwo]),
+      corridor(
+        'z-alternate',
+        [alternateOne, alternateTwo, alternateThree],
+      ),
+      corridor('a-selected', [starterOne, starterTwo]),
     ],
     recommendedCamera: { x: 2_500, y: 0, zoom: 0.5 },
   };
@@ -313,7 +354,15 @@ function reversed(trackGeometry: TrackGeometryDef): TrackGeometryDef {
 function allowSyntheticCanonicalSampling(): void {
   jest.spyOn(ConstructionCurveSampler, 'sampleConstructionCurve')
     .mockImplementation((trackGeometry) => {
-      const sampled = realSampleConstructionCurve(trackGeometry);
+      const finiteGeometry = [
+        trackGeometry.p0,
+        trackGeometry.p1,
+        trackGeometry.p2,
+        trackGeometry.p3,
+      ].every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y));
+      const sampled = finiteGeometry
+        ? realSampleConstructionCurve(trackGeometry)
+        : { ok: false as const, lowerBoundLength: Number.NaN };
       if (sampled.ok) return sampled;
       const length = Math.hypot(
         trackGeometry.p3.x - trackGeometry.p0.x,
@@ -549,7 +598,8 @@ describe('createRegionalConstructionOpportunityAnalyzer', () => {
   });
 
   it.each([
-    ['starter track', 0],
+    ['starter track 0', 0],
+    ['starter track 1', 1],
     ['Prefabrication extension', 2],
     ['Quarry-to-Cement track', 3],
     ['Cement-to-Prefabrication track', 4],
@@ -560,6 +610,8 @@ describe('createRegionalConstructionOpportunityAnalyzer', () => {
       if (index !== 5) return detail;
       const target = protectedIndex === 0
         ? { x: 500, y: 0 }
+        : protectedIndex === 1
+        ? { x: 1_500, y: 0 }
         : protectedIndex === 2
         ? { x: 2_500, y: 0 }
         : protectedIndex === 3
@@ -631,6 +683,92 @@ describe('createRegionalConstructionOpportunityAnalyzer', () => {
       fixture.prefab,
       fixture.cement,
     )).toBeNull();
+  });
+
+  it.each([
+    ['starter witness version', (fixture: RegionalFixture) => {
+      fixture.starter.corridors[1].feasibilityWitness.witnessVersion = 2 as 1;
+    }],
+    ['starter witness total', (fixture: RegionalFixture) => {
+      fixture.starter.corridors[1].feasibilityWitness.totalCost += 1;
+    }],
+    ['starter estimated cost', (fixture: RegionalFixture) => {
+      fixture.starter.corridors[1].estimatedCost += 1;
+    }],
+    ['starter topology cost', (fixture: RegionalFixture) => {
+      fixture.starter.corridors[1].feasibilityWitness
+        .segments[1].topologyCost = 0;
+    }],
+    ['starter waypoints', (fixture: RegionalFixture) => {
+      fixture.starter.corridors[1].waypoints[1].x += 1;
+    }],
+    ['Forest identity', (fixture: RegionalFixture) => {
+      fixture.starter.sites[0].id = 'forged-forest';
+    }],
+    ['Forest label', (fixture: RegionalFixture) => {
+      fixture.starter.sites[0].label = 'Forged Forest';
+    }],
+    ['Sawmill identity', (fixture: RegionalFixture) => {
+      fixture.starter.sites[1].id = 'forged-sawmill';
+    }],
+    ['Sawmill label', (fixture: RegionalFixture) => {
+      fixture.starter.sites[1].label = 'Forged Sawmill';
+    }],
+  ])('rejects forged starter authority: %s', (_label, forge) => {
+    const fixture = regionalFixture();
+    forge(fixture);
+
+    expect(createRegionalConstructionOpportunityAnalyzer(
+      analyzerDouble().analyzer,
+      fixture.starter,
+      fixture.prefab,
+      fixture.cement,
+    )).toBeNull();
+  });
+
+  it.each([
+    ['non-finite Port x', {
+      portInterchange: { x: Number.NaN, y: 0 },
+    }],
+    ['non-finite Town y', {
+      townConstructionMarket: { x: 0, y: Number.POSITIVE_INFINITY },
+    }],
+    ['Port beyond world width', {
+      portInterchange: {
+        x: WorldGenerationConfig.WORLD_HALF_WIDTH + 1,
+        y: 0,
+      },
+    }],
+    ['Port beyond world height', {
+      portInterchange: {
+        x: QUARRY.x,
+        y: WorldGenerationConfig.WORLD_HALF_HEIGHT + 1,
+      },
+    }],
+    ['Town beyond world width', {
+      townConstructionMarket: {
+        x: -WorldGenerationConfig.WORLD_HALF_WIDTH - 1,
+        y: 0,
+      },
+    }],
+    ['Town beyond world height', {
+      townConstructionMarket: {
+        x: 0,
+        y: -WorldGenerationConfig.WORLD_HALF_HEIGHT - 1,
+      },
+    }],
+  ])('rejects %s', (_label, replacement) => {
+    const fixture = regionalFixture();
+    allowSyntheticCanonicalSampling();
+    const { opportunityAnalyzer } = createAnalyzer(
+      fixture,
+      analyzerDouble([1_000, 1_000]),
+    );
+
+    expect(opportunityAnalyzer?.({
+      ...DEFAULT_SITES,
+      ...replacement,
+    })).toBeNull();
   });
 
   it('rejects overflow after individually safe construction costs', () => {

@@ -6,10 +6,12 @@ import {
   REFERENCE_MANOEUVRE_TICKS,
   REFERENCE_SPEED_WORLD_UNITS_PER_TICK,
 } from '../config/FreightProgression';
+import { WorldGenerationConfig } from '../config/WorldGeneration';
 import type {
   StarterOpportunityDef,
   Vec2Def,
 } from '../config/WorldData';
+import { validateStarterOpportunityData } from '../config/WorldData';
 import type {
   ConstructionAnalysisDetail,
   ConstructionAnalyzer,
@@ -75,6 +77,13 @@ function deepFreeze<T>(value: T): T {
 
 function pointsMatch(left: Readonly<Vec2Def>, right: Readonly<Vec2Def>): boolean {
   return left.x === right.x && left.y === right.y;
+}
+
+function pointIsInWorld(point: Readonly<Vec2Def>): boolean {
+  return Number.isFinite(point.x)
+    && Number.isFinite(point.y)
+    && Math.abs(point.x) <= WorldGenerationConfig.WORLD_HALF_WIDTH
+    && Math.abs(point.y) <= WorldGenerationConfig.WORLD_HALF_HEIGHT;
 }
 
 function usableDetail(
@@ -156,11 +165,18 @@ function referenceActiveTicks(pathLength: number): number {
  * The detached witness is deterministic, deeply immutable, and never persisted.
  */
 export function createRegionalConstructionOpportunityAnalyzer(
-  analyzer: AnalyzerPort,
+  analyzer: Pick<ConstructionAnalyzer, 'analyzeDetailed'>,
   opportunity: StarterOpportunityDef,
   prefabricationExtension: PrefabricationExtensionWitness,
   cementSupply: CementSupplyOpportunityWitness,
 ): RegionalConstructionOpportunityAnalyzer | null {
+  if (!validateStarterOpportunityData(opportunity)
+    || opportunity.sites[0].id !== 'managed-forest'
+    || opportunity.sites[0].label !== 'Managed Forest'
+    || opportunity.sites[1].id !== 'sawmill'
+    || opportunity.sites[1].label !== 'Sawmill') {
+    return null;
+  }
   const corridor = [...opportunity.corridors].sort(
     (left, right) => left.estimatedCost - right.estimatedCost
       || left.id.localeCompare(right.id),
@@ -251,6 +267,10 @@ export function createRegionalConstructionOpportunityAnalyzer(
   ];
 
   return (sites) => {
+    if (!pointIsInWorld(sites.portInterchange)
+      || !pointIsInWorld(sites.townConstructionMarket)) {
+      return null;
+    }
     const portGeometry = deriveAutomaticCubic({
       start: quarryToCementDetail.proposal.geometry.p0,
       end: sites.portInterchange,
