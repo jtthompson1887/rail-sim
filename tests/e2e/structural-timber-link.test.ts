@@ -88,6 +88,20 @@ const dragPathClearsPoints = (
   return true;
 });
 
+const interactiveMapPoints = (
+  state: StructuralBrowserSnapshot,
+  canvas: CanvasBounds,
+): Point[] => [
+  ...state.runtime,
+  ...state.world.economy.facilities,
+].map((point) => {
+  const internal = worldToCameraPoint(point, state.camera);
+  return {
+    x: canvas.x + internal.x * canvas.width / state.camera.width,
+    y: canvas.y + internal.y * canvas.height / state.camera.height,
+  };
+});
+
 const findCanvasDragOrigin = async (
   page: Page,
   candidates: readonly Point[],
@@ -603,23 +617,17 @@ async function panWorldPointToCentre(
     const canvas = await page.locator('canvas').boundingBox();
     if (!canvas) throw new Error('Canvas is not visible');
     const releaseState = await snapshot(page);
-    const trainPoints = releaseState.runtime.map((runtime) => {
-      const internal = worldToCameraPoint(runtime, releaseState.camera);
-      return {
-        x: canvas.x + internal.x * canvas.width / releaseState.camera.width,
-        y: canvas.y + internal.y * canvas.height / releaseState.camera.height,
-      };
-    });
+    const blockedPoints = interactiveMapPoints(releaseState, canvas);
     const releaseOffset = { x: 4, y: 0 };
     const candidates = canvasDragCandidates(canvas)
       .filter((candidate) => dragPathClearsPoints(
         candidate,
         releaseOffset,
-        trainPoints,
+        blockedPoints,
       ));
     expect(
       candidates.length,
-      'follow-release candidates must clear every train',
+      'follow-release candidates must clear trains and facilities',
     ).toBeGreaterThan(0);
     const releaseOrigin = await findCanvasDragOrigin(
       page,
@@ -673,23 +681,17 @@ async function panWorldPointToCentre(
       maxMoveY,
       dy * scaleY,
     ));
-    const trainPoints = state.runtime.map((runtime) => {
-      const internalTrain = worldToCameraPoint(runtime, state.camera);
-      return {
-        x: canvas.x + internalTrain.x * canvas.width / state.camera.width,
-        y: canvas.y + internalTrain.y * canvas.height / state.camera.height,
-      };
-    });
+    const blockedPoints = interactiveMapPoints(state, canvas);
     const moveOffset = { x: moveX, y: moveY };
     const origins = canvasDragCandidates(canvas)
       .filter((candidate) => dragPathClearsPoints(
         candidate,
         moveOffset,
-        trainPoints,
+        blockedPoints,
       ));
     expect(
       origins.length,
-      'camera drag candidates must clear every train',
+      'camera drag candidates must clear trains and facilities',
     ).toBeGreaterThan(0);
     const dragOrigin = await findCanvasDragOrigin(
       page,
@@ -780,7 +782,12 @@ async function purchaseFlatbedAtForest(
   await panWorldPointToCentre(
     page,
     placement.point,
-    { x: 0.5, y: mobile ? 0.55 : 0.5 },
+    {
+      x: mobile
+        ? (before.camera.width - 4) / before.camera.width
+        : 0.5,
+      y: mobile ? 0.55 : 0.5,
+    },
   );
   if (mobile) {
     await assertVisibleWithinViewport(
@@ -801,6 +808,7 @@ async function purchaseFlatbedAtForest(
     .toContainText('£90,000');
   await expect(confirm).toBeEnabled();
   if (mobile) {
+    await confirm.scrollIntoViewIfNeeded();
     await assertVisibleWithinViewport(
       page,
       '[data-testid="freight-purchase-confirm"]',
@@ -1862,9 +1870,49 @@ test.describe('real structural-timber browser journey', () => {
           profitableLimestoneDeliveryCompleted: false,
           profitableCementDeliveryCompleted: false,
         });
-        expect(checkpoint.objective).toMatchObject({
-          id: 'structural-timber-link',
-          achieved: true,
+        expect(checkpoint.objective).toEqual({
+          objectiveVersion: 1,
+          id: 'cement-supply-chain',
+          title: 'Cement supply chain',
+          status: 'Build the cement supply chain',
+          achieved: false,
+          steps: [
+            {
+              id: 'connect-quarry-cement',
+              label: 'Connect Quarry to Cement Works',
+              state: 'current',
+            },
+            {
+              id: 'buy-aggregate-hopper',
+              label: 'Buy an Aggregate Hopper Set',
+              state: 'pending',
+            },
+            {
+              id: 'deliver-limestone-profitably',
+              label: 'Deliver 120 t limestone profitably',
+              state: 'pending',
+            },
+            {
+              id: 'produce-cement',
+              label: 'Produce 80 t cement',
+              state: 'pending',
+            },
+            {
+              id: 'connect-cement-prefabrication',
+              label: 'Connect Cement Works to Prefabrication Plant',
+              state: 'pending',
+            },
+            {
+              id: 'buy-covered-cement',
+              label: 'Buy a Covered Cement Set',
+              state: 'pending',
+            },
+            {
+              id: 'deliver-cement-profitably',
+              label: 'Deliver 80 t cement profitably',
+              state: 'pending',
+            },
+          ],
         });
         const finalFirstTrain = trainById(checkpoint, firstTrainId);
         expect(finalFirstTrain.operations.lastTripRevenue).toBeGreaterThan(
@@ -1911,19 +1959,59 @@ test.describe('real structural-timber browser journey', () => {
           'structural-timber',
         );
 
+        const objectiveCard = page.locator(
+          '[data-testid="freight-objective"]',
+        );
+        await expect(objectiveCard)
+          .toHaveAttribute('data-objective', 'cement-supply-chain');
+        await expect(objectiveCard)
+          .toHaveAttribute('aria-label', 'Cement supply chain objective');
         const expectedSteps = [
-          'produce-structural-timber',
-          'connect-prefabrication-plant',
-          'load-structural-timber',
-          'deliver-structural-timber-profitably',
-        ];
-        for (const step of expectedSteps) {
-          await expect(page.locator(`[data-step="${step}"]`)).toHaveCount(1);
+          [
+            'connect-quarry-cement',
+            'Current: Connect Quarry to Cement Works',
+            true,
+          ],
+          [
+            'buy-aggregate-hopper',
+            'Pending: Buy an Aggregate Hopper Set',
+            false,
+          ],
+          [
+            'deliver-limestone-profitably',
+            'Pending: Deliver 120 t limestone profitably',
+            false,
+          ],
+          ['produce-cement', 'Pending: Produce 80 t cement', false],
+          [
+            'connect-cement-prefabrication',
+            'Pending: Connect Cement Works to Prefabrication Plant',
+            false,
+          ],
+          [
+            'buy-covered-cement',
+            'Pending: Buy a Covered Cement Set',
+            false,
+          ],
+          [
+            'deliver-cement-profitably',
+            'Pending: Deliver 80 t cement profitably',
+            false,
+          ],
+        ] as const;
+        for (const [step, text, current] of expectedSteps) {
+          const item = page.locator(`[data-step="${step}"]`);
+          await expect(item).toHaveText(text);
+          if (current) {
+            await expect(item).toHaveAttribute('aria-current', 'step');
+          } else {
+            await expect(item).not.toHaveAttribute('aria-current', 'step');
+          }
         }
         await expect(page.locator('[data-step]')).toHaveCount(
           expectedSteps.length,
         );
-        await expect(page.locator('[aria-current="step"]')).toHaveCount(0);
+        await expect(page.locator('[aria-current="step"]')).toHaveCount(1);
 
         await page.keyboard.press('Escape');
         await clickFacilityThroughPointer(page, 'prefabrication-plant');
