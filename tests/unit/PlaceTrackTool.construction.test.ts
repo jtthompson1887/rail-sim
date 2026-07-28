@@ -128,6 +128,15 @@ function makeHarness(options: {
     company: {
       cash: options.cash ?? (options.affordable === false ? 0 : 10_000),
     },
+    trains: [],
+    freightProgress: {
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
+    },
   };
   const commandStack = {
     push: jest.fn().mockReturnValue(options.pushResult ?? true),
@@ -214,7 +223,7 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(Object.isFrozen(harness.tool.previewModel!.structureLengths)).toBe(true);
   });
 
-  it('warns only below the affordable £110,000 starter reserve boundary', () => {
+  it('publishes phase guidance and warns only below its affordable reserve boundary', () => {
     const exactReserve = preview() as any;
     exactReserve.totalCost = 890_000;
     exactReserve.quote.totalCost = 890_000;
@@ -231,7 +240,12 @@ describe('PlaceTrackTool live construction workflow', () => {
       affordable: true,
       canConfirm: true,
       cashAfter: 110_000,
-      breachesStarterReserve: false,
+      guidance: expect.objectContaining({
+        phase: 'first-route',
+        reserve: 110_000,
+        reservePurpose: 'a General Flatbed Set and operating reserve',
+      }),
+      breachesReserve: false,
     }));
 
     const belowReserve = preview() as any;
@@ -250,7 +264,7 @@ describe('PlaceTrackTool live construction workflow', () => {
       affordable: true,
       canConfirm: true,
       cashAfter: 109_999,
-      breachesStarterReserve: true,
+      breachesReserve: true,
     }));
 
     const unaffordable = preview() as any;
@@ -268,7 +282,44 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(blockedHarness.tool.previewModel).toEqual(expect.objectContaining({
       affordable: false,
       canConfirm: false,
-      breachesStarterReserve: false,
+      breachesReserve: false,
+    }));
+  });
+
+  it('uses the mineral phase reserve and keeps an affordable warning advisory', () => {
+    const belowReserve = preview() as any;
+    belowReserve.totalCost = 765_001;
+    belowReserve.quote.totalCost = 765_001;
+    belowReserve.cashBefore = 1_000_000;
+    belowReserve.cashAfter = 234_999;
+    const harness = makeHarness({
+      analyzed: belowReserve,
+      cash: 1_000_000,
+    });
+    WorldManager.world!.freightProgress.profitableLogDeliveryCompleted = true;
+    WorldManager.world!.freightProgress
+      .profitableStructuralTimberDeliveryCompleted = true;
+
+    harness.tool.onPointerDown(0, 0, pointer());
+    harness.tool.onPointerMove(300, 0, pointer());
+    harness.tool.onPointerUp(300, 0, pointer());
+
+    expect(harness.tool.previewModel).toEqual(expect.objectContaining({
+      affordable: true,
+      canConfirm: true,
+      guidance: {
+        guidanceVersion: 1,
+        phase: 'limestone',
+        objective: 'Connect Quarry to Cement Works.',
+        reserve: 235_000,
+        reservePurpose:
+          'an Aggregate Hopper Set, a Covered Cement Set, and operating reserve',
+        requiredFreightSetIds: [
+          'aggregate-hopper-set',
+          'covered-cement-set',
+        ],
+      },
+      breachesReserve: true,
     }));
   });
 

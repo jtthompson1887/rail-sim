@@ -1313,6 +1313,86 @@ describe('WorldScene disabled construction bypass guards', () => {
     });
   });
 
+  it('enriches one exact profitable cement objective delivery per world', () => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld('cement-objective-delivery');
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.trains[0].freightSetId = 'covered-cement-set';
+    const event = Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'cement',
+      units: 80,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 40,
+      revenue: 10_400,
+      runningCost: 2_000,
+      operatingProfit: 8_400,
+    });
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(event);
+    scene.presentCompletedDelivery(event);
+
+    const toasts = emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload as any);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toEqual({
+      type: 'success',
+      message: expect.stringMatching(
+        /Cement.*Prefabrication Plant.*£10,400.*trip profit £8,400/i,
+      ),
+    });
+    expect(toasts[1]).toEqual({
+      message: 'Delivery complete · +£10,400',
+      type: 'success',
+    });
+  });
+
+  it.each([
+    ['partial cargo', { units: 79 }, true, 'covered-cement-set'],
+    ['zero-profit trip', { operatingProfit: 0 }, true, 'covered-cement-set'],
+    ['wrong destination', {
+      destinationFacilityId: 'sawmill',
+    }, true, 'covered-cement-set'],
+    ['wrong set', {}, true, 'aggregate-hopper-set'],
+    ['unlatched delivery', {}, false, 'covered-cement-set'],
+  ])('keeps %s cement feedback ordinary', (
+    caseName,
+    overrides,
+    cementLatch,
+    freightSetId,
+  ) => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld(
+      `ordinary-cement-${caseName}`,
+    );
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = cementLatch;
+    world.trains[0].freightSetId = freightSetId;
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'cement',
+      units: 80,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 41,
+      revenue: 9_000,
+      runningCost: 2_000,
+      operatingProfit: 7_000,
+      ...overrides,
+    }));
+
+    expect(emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload)).toEqual([{
+      message: 'Delivery complete · +£9,000',
+      type: 'success',
+    }]);
+  });
+
   it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {
     const scene = new WorldScene() as any;
     const world = installFirstRouteWorld();

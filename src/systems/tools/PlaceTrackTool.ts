@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { PlaceTrackCommand } from '../../commands/PlaceTrackCommand';
 import { GameConfig } from '../../config/GameConfig';
-import { STARTER_ROUTE_RESERVE } from '../../freight/FreightSetCatalog';
+import {
+  deriveConstructionGuidance,
+} from '../../freight/ConstructionGuidance';
 import type TrackManager from '../../managers/TrackManager';
 import { WorldManager } from '../../managers/WorldManager';
 import { EventBus } from '../../services/EventBus';
@@ -324,8 +326,10 @@ export class PlaceTrackTool implements IEditorTool {
 
   private publishModel(stale: boolean): void {
     const preview = this.currentPreview;
-    if (!preview) return;
-    const cash = WorldManager.world?.company.cash;
+    const world = WorldManager.world;
+    if (!preview || !world) return;
+    const guidance = deriveConstructionGuidance(world);
+    const cash = world.company.cash;
     const affordable = preview.affordable !== false
       && Number.isSafeInteger(cash)
       && (cash as number) >= preview.totalCost;
@@ -373,8 +377,9 @@ export class PlaceTrackTool implements IEditorTool {
       stale,
       message,
       actions,
-      breachesStarterReserve:
-        affordable && preview.cashAfter < STARTER_ROUTE_RESERVE,
+      guidance,
+      breachesReserve:
+        affordable && preview.cashAfter < guidance.reserve,
     });
     this.overlay.render(this.currentModel);
     this.dispatchPreview();

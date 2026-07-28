@@ -72,8 +72,6 @@ export class ConstructionInspector {
       'font:12px/1.35 Verdana,sans-serif',
       'pointer-events:auto',
     ].join(';');
-    this.objective.textContent =
-      'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.';
     this.objective.style.cssText =
       'color:#9feaff;font-weight:700;margin-bottom:8px';
     this.primary.style.cssText = 'font-size:15px;font-weight:700;color:#fff;margin-bottom:4px';
@@ -162,6 +160,10 @@ export class ConstructionInspector {
     this.current = model;
     this.root.setAttribute('aria-hidden', this.enabled ? 'false' : 'true');
     this.root.style.display = this.enabled ? 'block' : 'none';
+    this.objective.textContent = model.guidance.reserve > 0
+      ? `${model.guidance.objective} Keep ${money(model.guidance.reserve)}`
+        + ` reserved for ${model.guidance.reservePurpose}.`
+      : model.guidance.objective;
     const affordability = model.affordable ? 'Affordable' : 'Unaffordable';
     this.primary.textContent = `Build ${money(model.totalCost)} · Cash after ${money(model.cashAfter)} · ${affordability}`;
     this.subtotal.textContent = `Engineering subtotal ${money(model.engineeringSubtotal)}`;
@@ -178,11 +180,13 @@ export class ConstructionInspector {
       `Track ${money(costs.track)} · Earthworks ${money(costs.earthworks)}`,
       `Bridge ${money(costs.bridge)} · Tunnel ${money(costs.tunnel)} · Topology ${money(model.topologyCost)}`,
     ].join('\n');
-    const reserveWarning = model.canConfirm
-      && model.affordable
-      && model.breachesStarterReserve;
+    const hardBlocker = model.phase === 'review'
+      && !model.canConfirm
+      && model.message.length > 0;
+    const reserveWarning = model.breachesReserve && !hardBlocker;
     const message = reserveWarning
-      ? 'Build leaves less than the £110,000 train and operating reserve'
+      ? `Build leaves less than ${money(model.guidance.reserve)}`
+        + ` reserved for ${model.guidance.reservePurpose}`
       : model.message;
     this.remedy.textContent = message;
     this.remedy.dataset.tone = reserveWarning ? 'amber' : 'default';

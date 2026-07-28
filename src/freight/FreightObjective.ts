@@ -3,7 +3,9 @@ import { getProduct } from '../economy/ProductCatalog';
 import type { FacilityEconomyDef } from '../economy/EconomyData';
 import type { TrackTopologySnapshot } from '../managers/TrackManager';
 import {
+  AGGREGATE_HOPPER_SET_ID,
   capacityForProduct,
+  COVERED_CEMENT_SET_ID,
   FLATBED_FREIGHT_SET_ID,
   getFreightSet,
 } from './FreightSetCatalog';
@@ -11,7 +13,8 @@ import { queryRailAccessConnectivity } from './RailAccessConnectivity';
 
 export type FreightObjectiveId =
   | 'first-profitable-route'
-  | 'structural-timber-link';
+  | 'structural-timber-link'
+  | 'cement-supply-chain';
 
 export type FreightObjectiveStepId =
   | 'connect-route'
@@ -22,7 +25,14 @@ export type FreightObjectiveStepId =
   | 'produce-structural-timber'
   | 'connect-prefabrication-plant'
   | 'load-structural-timber'
-  | 'deliver-structural-timber-profitably';
+  | 'deliver-structural-timber-profitably'
+  | 'connect-quarry-cement'
+  | 'buy-aggregate-hopper'
+  | 'deliver-limestone-profitably'
+  | 'produce-cement'
+  | 'connect-cement-prefabrication'
+  | 'buy-covered-cement'
+  | 'deliver-cement-profitably';
 
 export interface FreightObjectiveStep {
   readonly id: FreightObjectiveStepId;
@@ -71,6 +81,37 @@ const STRUCTURAL_TIMBER_STEPS = freezeStepDefinitions([
   {
     id: 'deliver-structural-timber-profitably',
     label: 'Deliver profitably',
+  },
+]);
+
+const CEMENT_SUPPLY_STEPS = freezeStepDefinitions([
+  {
+    id: 'connect-quarry-cement',
+    label: 'Connect Quarry to Cement Works',
+  },
+  {
+    id: 'buy-aggregate-hopper',
+    label: 'Buy an Aggregate Hopper Set',
+  },
+  {
+    id: 'deliver-limestone-profitably',
+    label: 'Deliver 120 t limestone profitably',
+  },
+  {
+    id: 'produce-cement',
+    label: 'Produce 80 t cement',
+  },
+  {
+    id: 'connect-cement-prefabrication',
+    label: 'Connect Cement Works to Prefabrication Plant',
+  },
+  {
+    id: 'buy-covered-cement',
+    label: 'Buy a Covered Cement Set',
+  },
+  {
+    id: 'deliver-cement-profitably',
+    label: 'Deliver 80 t cement profitably',
   },
 ]);
 
@@ -216,11 +257,75 @@ function deriveStructuralTimberObjective(
   });
 }
 
+function hasCementProductionEvidence(
+  world: WorldData,
+  cementWorks: FacilityEconomyDef | undefined,
+  prefab: FacilityEconomyDef | undefined,
+): boolean {
+  if (!world.freightProgress.profitableLimestoneDeliveryCompleted) {
+    return false;
+  }
+  const coveredSet = getFreightSet(COVERED_CEMENT_SET_ID);
+  const cement = getProduct('cement');
+  const capacity = coveredSet && cement
+    ? capacityForProduct(coveredSet, cement)
+    : null;
+  if (capacity?.ok !== true) return false;
+
+  const currentHeld = (cementWorks?.inventories.cement.quantity ?? 0)
+    + (prefab?.inventories.cement.quantity ?? 0)
+    + world.trains.reduce((total, train) => (
+      total + (train.cargo?.productId === 'cement' ? train.cargo.units : 0)
+    ), 0);
+  const produced = Math.max(
+    cementWorks?.inventories.cement.recentInflow ?? 0,
+    currentHeld,
+  );
+  return produced >= capacity.capacityUnits;
+}
+
+function deriveCementSupplyObjective(
+  world: WorldData,
+  topology: TrackTopologySnapshot,
+): FreightObjectiveDto {
+  const achieved = world.freightProgress
+    .profitableCementDeliveryCompleted;
+  const quarry = findFacility(world, 'quarry');
+  const cementWorks = findFacility(world, 'cement-works');
+  const prefab = findFacility(world, 'prefabrication-plant');
+  const facts = [
+    facilitiesAreConnected(world, topology, quarry, cementWorks),
+    world.trains.some(
+      ({ freightSetId }) => freightSetId === AGGREGATE_HOPPER_SET_ID,
+    ),
+    world.freightProgress.profitableLimestoneDeliveryCompleted,
+    hasCementProductionEvidence(world, cementWorks, prefab),
+    facilitiesAreConnected(world, topology, cementWorks, prefab),
+    world.trains.some(
+      ({ freightSetId }) => freightSetId === COVERED_CEMENT_SET_ID,
+    ),
+    achieved,
+  ];
+
+  return Object.freeze({
+    objectiveVersion: 1,
+    id: 'cement-supply-chain',
+    title: 'Cement supply chain',
+    status: achieved
+      ? 'Cement secured · Prefabrication awaits steel'
+      : 'Build the cement supply chain',
+    achieved,
+    steps: deriveSteps(CEMENT_SUPPLY_STEPS, facts, achieved),
+  });
+}
+
 export function deriveFreightObjective(
   world: WorldData,
   topology: TrackTopologySnapshot,
 ): FreightObjectiveDto {
-  return world.freightProgress.profitableLogDeliveryCompleted
+  return world.freightProgress.profitableStructuralTimberDeliveryCompleted
+    ? deriveCementSupplyObjective(world, topology)
+    : world.freightProgress.profitableLogDeliveryCompleted
     ? deriveStructuralTimberObjective(world, topology)
     : deriveFirstObjective(world, topology);
 }

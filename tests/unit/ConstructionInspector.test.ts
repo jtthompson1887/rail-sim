@@ -62,7 +62,15 @@ function preview(overrides: Record<string, unknown> = {}): any {
       stale: false,
       message: 'Click or press Enter to build this section.',
       actions: ['confirm', 'backstep', 'cancel'],
-      breachesStarterReserve: false,
+      guidance: {
+        guidanceVersion: 1,
+        phase: 'first-route',
+        objective: 'Connect Managed Forest to Sawmill.',
+        reserve: 110_000,
+        reservePurpose: 'a General Flatbed Set and operating reserve',
+        requiredFreightSetIds: ['flatbed-freight-set'],
+      },
+      breachesReserve: false,
       ...overrides,
     },
   };
@@ -101,28 +109,55 @@ describe('ConstructionInspector', () => {
       .toBe('Click or press Enter to build this section.');
     expect(document.querySelector('[data-testid="construction-objective"]')?.textContent)
       .toBe(
-        'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.',
+        'Connect Managed Forest to Sawmill. Keep £110,000 reserved for a General Flatbed Set and operating reserve.',
       );
+  });
+
+  it('renders phase guidance and its exact reserve purpose from the model', () => {
+    EventBus.emit('construction:preview', preview({
+      guidance: {
+        guidanceVersion: 1,
+        phase: 'limestone',
+        objective: 'Connect Quarry to Cement Works.',
+        reserve: 235_000,
+        reservePurpose:
+          'an Aggregate Hopper Set, a Covered Cement Set, and operating reserve',
+        requiredFreightSetIds: [
+          'aggregate-hopper-set',
+          'covered-cement-set',
+        ],
+      },
+    }));
+
+    expect(document.querySelector(
+      '[data-testid="construction-objective"]',
+    )?.textContent).toBe(
+      'Connect Quarry to Cement Works. Keep £235,000 reserved for '
+      + 'an Aggregate Hopper Set, a Covered Cement Set, and operating reserve.',
+    );
   });
 
   it('shows an amber reserve warning without disabling an affordable build', () => {
     EventBus.emit('construction:preview', preview({
       cashAfter: 110_000,
-      breachesStarterReserve: false,
+      breachesReserve: false,
     }));
     expect(document.querySelector('[data-testid="construction-remedy"]')?.textContent)
       .toBe('Click or press Enter to build this section.');
 
     EventBus.emit('construction:preview', preview({
       cashAfter: 109_999,
-      breachesStarterReserve: true,
+      breachesReserve: true,
     }));
 
     const remedy = document.querySelector(
       '[data-testid="construction-remedy"]',
     ) as HTMLElement;
     expect(remedy.textContent)
-      .toBe('Build leaves less than the £110,000 train and operating reserve');
+      .toBe(
+        'Build leaves less than £110,000 reserved for '
+        + 'a General Flatbed Set and operating reserve',
+      );
     expect(remedy.dataset.tone).toBe('amber');
     expect((document.querySelector(
       '[data-testid="construction-confirm"]',
@@ -133,7 +168,7 @@ describe('ConstructionInspector', () => {
     EventBus.emit('construction:preview', preview({
       affordable: true,
       canConfirm: false,
-      breachesStarterReserve: true,
+      breachesReserve: true,
       message: 'Maximum grade exceeds the engineering limit.',
       actions: ['backstep', 'cancel'],
     }));

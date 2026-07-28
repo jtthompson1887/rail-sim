@@ -59,6 +59,7 @@ import type {
 } from '../freight/CargoSystem';
 import {
   capacityForProduct,
+  COVERED_CEMENT_SET_ID,
   FLATBED_FREIGHT_SET_ID,
   getFreightSet,
 } from '../freight/FreightSetCatalog';
@@ -1386,6 +1387,14 @@ export default class WorldScene extends Phaser.Scene {
       && event.units === capacity.capacityUnits
       && world?.freightProgress
         .profitableStructuralTimberDeliveryCompleted === true;
+    const completesCementObjective = event.productId === 'cement'
+      && destination?.definitionId === 'prefabrication-plant'
+      && event.operatingProfit > 0
+      && train?.freightSetId === COVERED_CEMENT_SET_ID
+      && capacity?.ok === true
+      && event.units === capacity.capacityUnits
+      && world?.freightProgress
+        .profitableCementDeliveryCompleted === true;
     const celebrateStructuralObjective = world
       && completesStructuralObjective
       && freightObjectiveCelebrationSession.consume(
@@ -1393,7 +1402,16 @@ export default class WorldScene extends Phaser.Scene {
         'structural-timber-link',
         true,
       );
-    EventBus.emit('ui:toast', celebrateStructuralObjective
+    const celebrateCementObjective = world
+      && completesCementObjective
+      && freightObjectiveCelebrationSession.consume(
+        world.id,
+        'cement-supply-chain',
+        true,
+      );
+    EventBus.emit('ui:toast', (
+      celebrateStructuralObjective || celebrateCementObjective
+    )
       ? {
         message:
           `${product!.displayName} delivered to ${destination!.name}`
