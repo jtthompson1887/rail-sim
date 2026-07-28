@@ -12,6 +12,7 @@ function inspection(
     id: 'sawmill',
     name: 'Sawmill',
     status: { code: 'waiting-input', label: 'Needs logs' },
+    activeRecipe: null,
     produces: ['structural-timber'],
     needs: ['logs'],
     inputRows: [{

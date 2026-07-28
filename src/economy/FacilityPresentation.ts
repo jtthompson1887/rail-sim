@@ -6,6 +6,10 @@ import type {
 import { advanceFacilityRecipe } from './IndustrySystem';
 import { quoteLocalProduct } from './MarketSystem';
 import {
+  capacityForProduct,
+  FREIGHT_SETS,
+} from '../freight/FreightSetCatalog';
+import {
   getFacilityDefinition,
   getProduct,
   getRecipe,
@@ -23,6 +27,31 @@ export interface FacilityInspectionDto {
       | 'idle';
     label: string;
   };
+  activeRecipe: {
+    id: string;
+    displayName: string;
+    cycleTicks: number;
+    progressTicks: number;
+    inputs: Array<{
+      productId: ProductId;
+      displayName: string;
+      unitLabel: string;
+      quantity: number;
+    }>;
+    outputs: Array<{
+      productId: ProductId;
+      displayName: string;
+      unitLabel: string;
+      quantity: number;
+    }>;
+    fullLoad: {
+      freightSetId: string;
+      freightSetDisplayName: string;
+      inputQuantity: number;
+      outputQuantity: number;
+      cycles: number;
+    } | null;
+  } | null;
   produces: ProductId[];
   needs: ProductId[];
   inputRows: Array<{
@@ -51,10 +80,20 @@ export interface FacilityInspectionDto {
     displayName: string;
     unitLabel: string;
     unitPrice: number;
+    fullLoadQuantity: number | null;
+    fullLoadGross: number | null;
     factors: Array<{ id: string; basisPoints: number }>;
   }>;
   railConnected: boolean;
 }
+
+const RECIPE_NAMES: Record<string, string> = {
+  'forest-harvest': 'Forest harvest',
+  'quarry-extraction': 'Quarry extraction',
+  'sawmill-cut': 'Sawmill cut',
+  'cement-kiln': 'Cement kiln',
+  'module-assembly': 'Module assembly',
+};
 
 function waitingInputLabel(
   world: WorldData,
@@ -112,7 +151,12 @@ function buildStatus(
   if (blocker === 'output-full') {
     return { code: 'output-full', label: 'Output storage full' };
   }
-  if (blocker === 'working') return { code: 'working', label: 'Working' };
+  if (blocker === 'working') {
+    return {
+      code: 'working',
+      label: `Working ${facility.recipeProgressTicks} / ${recipe.cycleTicks} ticks`,
+    };
+  }
   return { code: 'idle', label: 'Idle' };
 }
 
@@ -120,6 +164,16 @@ function freezeInspection(
   dto: FacilityInspectionDto,
 ): FacilityInspectionDto {
   Object.freeze(dto.status);
+  if (dto.activeRecipe) {
+    dto.activeRecipe.inputs.forEach(Object.freeze);
+    dto.activeRecipe.outputs.forEach(Object.freeze);
+    Object.freeze(dto.activeRecipe.inputs);
+    Object.freeze(dto.activeRecipe.outputs);
+    if (dto.activeRecipe.fullLoad) {
+      Object.freeze(dto.activeRecipe.fullLoad);
+    }
+    Object.freeze(dto.activeRecipe);
+  }
   dto.inventories.forEach(Object.freeze);
   dto.quotes.forEach((quote) => {
     quote.factors.forEach(Object.freeze);
@@ -156,6 +210,78 @@ export function buildFacilityInspection(
   const produces = recipe
     ? Array.from(new Set(recipe.outputs.map(({ productId }) => productId)))
     : [];
+  const recipeInputs = recipe
+    ? recipe.inputs.reduce<
+      NonNullable<FacilityInspectionDto['activeRecipe']>['inputs']
+    >((all, input) => {
+      const product = getProduct(input.productId);
+      if (product) all.push({
+        productId: input.productId,
+        displayName: product.displayName,
+        unitLabel: product.unitLabel,
+        quantity: input.quantity,
+      });
+      return all;
+    }, [])
+    : [];
+  const recipeOutputs = recipe
+    ? recipe.outputs.reduce<
+      NonNullable<FacilityInspectionDto['activeRecipe']>['outputs']
+    >((all, output) => {
+      const product = getProduct(output.productId);
+      if (product) all.push({
+        productId: output.productId,
+        displayName: product.displayName,
+        unitLabel: product.unitLabel,
+        quantity: output.quantity,
+      });
+      return all;
+    }, [])
+    : [];
+  const primaryInput = recipeInputs.length === 1
+    ? recipeInputs[0]
+    : undefined;
+  const primaryOutput = recipeOutputs.length === 1
+    ? recipeOutputs[0]
+    : undefined;
+  const inputProduct = primaryInput
+    ? getProduct(primaryInput.productId)
+    : undefined;
+  const fullLoadFreightSet = inputProduct
+    ? FREIGHT_SETS.find((set) =>
+      set.compatibleProductIds.indexOf(inputProduct.id) !== -1)
+    : undefined;
+  const capacity = inputProduct && fullLoadFreightSet
+    ? capacityForProduct(fullLoadFreightSet, inputProduct)
+    : null;
+  const cycles = capacity?.ok === true && primaryInput
+    && capacity.capacityUnits % primaryInput.quantity === 0
+    ? capacity.capacityUnits / primaryInput.quantity
+    : null;
+  const fullLoadInputQuantity = capacity?.ok === true
+    ? capacity.capacityUnits
+    : null;
+  const fullLoad = cycles !== null && primaryOutput && fullLoadFreightSet
+    && fullLoadInputQuantity !== null
+    ? {
+      freightSetId: fullLoadFreightSet.id,
+      freightSetDisplayName: fullLoadFreightSet.displayName,
+      inputQuantity: fullLoadInputQuantity,
+      outputQuantity: primaryOutput.quantity * cycles,
+      cycles,
+    }
+    : null;
+  const activeRecipe = recipe
+    ? {
+      id: recipe.id,
+      displayName: RECIPE_NAMES[recipe.id] ?? 'Production recipe',
+      cycleTicks: recipe.cycleTicks,
+      progressTicks: facility.recipeProgressTicks,
+      inputs: recipeInputs,
+      outputs: recipeOutputs,
+      fullLoad,
+    }
+    : null;
   const inputRows = recipe
     ? recipe.inputs.reduce<FacilityInspectionDto['inputRows']>(
       (rows, input) => {
@@ -208,18 +334,30 @@ export function buildFacilityInspection(
     quantity: slot.quantity,
     capacity: slot.capacity,
   }));
-  const quotes = slots.reduce<FacilityInspectionDto['quotes']>((all, slot) => {
+  const quotes = needs.reduce<FacilityInspectionDto['quotes']>((all, productId) => {
+    const slot = facility.inventories[productId];
+    if (!slot) return all;
     const quote = quoteLocalProduct(
-      slot.productId,
+      productId,
       world.economy.market,
       slot,
     );
+    const quoteFullLoadQuantity = activeRecipe?.fullLoad
+      && activeRecipe.inputs[0]?.productId === productId
+      ? activeRecipe.fullLoad.inputQuantity
+      : null;
+    const fullLoadGross = quote.ok && quoteFullLoadQuantity !== null
+      && Number.isSafeInteger(quote.unitPrice * quoteFullLoadQuantity)
+      ? quote.unitPrice * quoteFullLoadQuantity
+      : null;
     if (quote.ok) all.push({
       productId: quote.productId,
       displayName:
         getProduct(quote.productId)?.displayName ?? 'Unknown product',
       unitLabel: getProduct(quote.productId)?.unitLabel ?? 'unit',
       unitPrice: quote.unitPrice,
+      fullLoadQuantity: quoteFullLoadQuantity,
+      fullLoadGross,
       factors: quote.factors.map((factor) => ({ ...factor })),
     });
     return all;
@@ -228,6 +366,7 @@ export function buildFacilityInspection(
     id: facility.id,
     name: facility.name,
     status: buildStatus(world, facility.id, railConnected),
+    activeRecipe,
     produces,
     needs,
     inputRows,

@@ -1,5 +1,10 @@
 import { EventBus } from '../services/EventBus';
 import type { OperatingSummaryDto } from '../freight/FreightPresentation';
+import type { FreightDeliveryEvent } from '../freight/CargoSystem';
+import {
+  getFacilityDefinition,
+  getProduct,
+} from '../economy/ProductCatalog';
 
 const CASH = new Intl.NumberFormat('en-GB', {
   style: 'currency',
@@ -12,6 +17,21 @@ const formatSignedCash = (value: number): string => value < 0
   : CASH.format(value);
 
 const ECONOMY_TICKS_PER_DAY = 24;
+
+const resultTone = (value: number): 'profit' | 'loss' | 'neutral' =>
+  value > 0 ? 'profit' : value < 0 ? 'loss' : 'neutral';
+
+const resultText = (value: number): string => value > 0
+  ? `Trip profit ${CASH.format(value)}`
+  : value < 0
+    ? `Trip loss ${CASH.format(Math.abs(value))}`
+    : `Break-even ${CASH.format(0)}`;
+
+const TONE_COLOURS = {
+  profit: '#9af0b6',
+  loss: '#ff9d91',
+  neutral: '#bad3e2',
+} as const;
 
 export interface CompanyHudState {
   cash: number;
@@ -36,6 +56,7 @@ export class CompanyHud {
   private readonly capitalExpenditure = document.createElement('span');
   private readonly cashFlow = document.createElement('span');
   private readonly cashPulse = document.createElement('strong');
+  private readonly lastDelivery = document.createElement('span');
   private visible = true;
   private readonly resizeHandler = () => this.applyLayout();
 
@@ -45,6 +66,19 @@ export class CompanyHud {
   private readonly cashPulseHandler = ({ amount }: { amount: number }) => {
     this.cashPulse.textContent = `+${CASH.format(amount)}`;
     this.cashPulse.style.display = amount > 0 ? 'inline' : 'none';
+  };
+  private readonly deliveryHandler = (delivery: FreightDeliveryEvent) => {
+    const product = getProduct(delivery.productId);
+    const destination = getFacilityDefinition(delivery.destinationFacilityId);
+    const tone = resultTone(delivery.operatingProfit);
+    this.lastDelivery.textContent =
+      `${product?.displayName ?? 'Unknown product'} delivered to `
+      + `${destination?.displayName ?? 'Unknown destination'}`
+      + ` · Revenue ${CASH.format(delivery.revenue)}`
+      + ` · ${resultText(delivery.operatingProfit)}`;
+    this.lastDelivery.dataset.tone = tone;
+    this.lastDelivery.style.color = TONE_COLOURS[tone];
+    this.lastDelivery.style.display = 'inline';
   };
 
   constructor() {
@@ -87,6 +121,12 @@ export class CompanyHud {
     this.cashFlow.dataset.testid = 'company-cash-flow';
     this.cashPulse.dataset.testid = 'company-cash-pulse';
     this.cashPulse.style.cssText = 'display:none;color:#9af0b6';
+    this.lastDelivery.dataset.testid = 'company-last-delivery';
+    this.lastDelivery.style.cssText = [
+      'display:none',
+      'flex-basis:100%',
+      'color:#bad3e2',
+    ].join(';');
     this.root.append(
       this.cash,
       this.saveState,
@@ -100,12 +140,14 @@ export class CompanyHud {
       this.capitalExpenditure,
       this.cashFlow,
       this.cashPulse,
+      this.lastDelivery,
     );
     document.body.append(this.root);
     this.applyLayout();
     this.setVisible(true);
     EventBus.on('ui:company-state', this.stateHandler);
     EventBus.on('ui:cash-pulse', this.cashPulseHandler);
+    EventBus.on('ui:freight-delivery-completed', this.deliveryHandler);
     window.addEventListener('resize', this.resizeHandler);
   }
 
@@ -129,6 +171,11 @@ export class CompanyHud {
       `Running ${CASH.format(state.operatingSummary.runningExpenses)}`;
     this.operatingProfit.textContent =
       `Rail profit ${formatSignedCash(state.operatingSummary.operatingProfit)}`;
+    const operatingTone = resultTone(
+      state.operatingSummary.operatingProfit,
+    );
+    this.operatingProfit.dataset.tone = operatingTone;
+    this.operatingProfit.style.color = TONE_COLOURS[operatingTone];
     this.capitalExpenditure.textContent =
       `Capex ${CASH.format(state.operatingSummary.capitalExpenditure)}`;
     this.cashFlow.textContent =
@@ -165,6 +212,7 @@ export class CompanyHud {
   destroy(): void {
     EventBus.off('ui:company-state', this.stateHandler);
     EventBus.off('ui:cash-pulse', this.cashPulseHandler);
+    EventBus.off('ui:freight-delivery-completed', this.deliveryHandler);
     window.removeEventListener('resize', this.resizeHandler);
     this.root.remove();
   }

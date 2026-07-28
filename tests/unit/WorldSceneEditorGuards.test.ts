@@ -1197,7 +1197,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(successToasts[0][1]).toEqual({
       type: 'success',
       message: expect.stringMatching(
-        /Structural Timber.*Prefabrication Plant.*£12,345.*trip profit £2,345/i,
+        /Structural Timber.*Prefabrication Plant.*Revenue £12,345.*Trip profit £2,345.*Timber link profitable/i,
       ),
     });
   });
@@ -1231,7 +1231,8 @@ describe('WorldScene disabled construction bypass guards', () => {
     }));
 
     expect(emit).toHaveBeenCalledWith('ui:toast', {
-      message: 'Delivery complete · +£6,000',
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £6,000 · Trip profit £5,000',
       type: 'success',
     });
   });
@@ -1249,7 +1250,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     ['unknown train', { trainId: 'unknown-train' }, undefined],
     ['unknown freight set', {}, 'unknown-set'],
     ['unknown product', { productId: 'unknown-product' }, undefined],
-  ])('emits one generic toast without crashing for %s', (
+  ])('emits one safe result toast without crashing for %s', (
     _case,
     overrides,
     freightSetId,
@@ -1274,15 +1275,27 @@ describe('WorldScene disabled construction bypass guards', () => {
       Object.freeze(event),
     )).not.toThrow();
 
+    const expectedProduct = event.productId === 'unknown-product'
+      ? 'Unknown product'
+      : event.productId === 'logs'
+        ? 'Logs'
+        : 'Structural Timber';
+    const expectedDestination = event.destinationFacilityId === 'sawmill'
+      ? 'Sawmill'
+      : 'Prefabrication Plant';
+    const expectedResult = event.operatingProfit === 0
+      ? 'Break-even £0'
+      : `Trip profit £${event.operatingProfit.toLocaleString('en-GB')}`;
     expect(emit.mock.calls.filter(
       ([eventName]) => eventName === 'ui:toast',
     ).map(([, payload]) => payload)).toEqual([{
-      message: 'Delivery complete · +£7,000',
-      type: 'success',
+      message: `${expectedProduct} delivered to ${expectedDestination}`
+        + ` · Revenue £7,000 · ${expectedResult}`,
+      type: event.operatingProfit === 0 ? 'info' : 'success',
     }]);
   });
 
-  it('enriches the first qualifying structural delivery and keeps repeats generic', () => {
+  it('composes the structural milestone once while keeping repeat results rich', () => {
     const scene = new WorldScene() as any;
     const world = installStructuralToastWorld('repeat-structural-delivery');
     const event = Object.freeze({
@@ -1307,8 +1320,12 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(toasts[0].message).toContain(
       'Structural Timber delivered to Prefabrication Plant',
     );
+    expect(toasts[0].message).toContain(
+      'Timber link profitable · Prefabrication awaits cement and steel',
+    );
     expect(toasts[1]).toEqual({
-      message: 'Delivery complete · +£8,000',
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £8,000 · Trip profit £6,000',
       type: 'success',
     });
   });
@@ -1341,11 +1358,12 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(toasts[0]).toEqual({
       type: 'success',
       message: expect.stringMatching(
-        /Cement.*Prefabrication Plant.*£10,400.*trip profit £8,400/i,
+        /Cement.*Prefabrication Plant.*Revenue £10,400.*Trip profit £8,400.*Cement secured.*Prefabrication awaits steel/i,
       ),
     });
     expect(toasts[1]).toEqual({
-      message: 'Delivery complete · +£10,400',
+      message: 'Cement delivered to Prefabrication Plant'
+        + ' · Revenue £10,400 · Trip profit £8,400',
       type: 'success',
     });
   });
@@ -1388,9 +1406,41 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(emit.mock.calls.filter(
       ([eventName]) => eventName === 'ui:toast',
     ).map(([, payload]) => payload)).toEqual([{
-      message: 'Delivery complete · +£9,000',
-      type: 'success',
+      message: `Cement delivered to ${
+        (overrides as any).destinationFacilityId === 'sawmill'
+          ? 'Sawmill'
+          : 'Prefabrication Plant'
+      } · Revenue £9,000 · ${
+        (overrides as any).operatingProfit === 0
+          ? 'Break-even £0'
+          : 'Trip profit £7,000'
+      }`,
+      type: (overrides as any).operatingProfit === 0 ? 'info' : 'success',
     }]);
+  });
+
+  it('reports a loss without hiding the positive cash receipt', () => {
+    const scene = new WorldScene() as any;
+    installStructuralToastWorld('loss-delivery-feedback');
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: 'train-1',
+      productId: 'structural-timber',
+      units: 30,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 42,
+      revenue: 3_000,
+      runningCost: 3_500,
+      operatingProfit: -500,
+    }));
+
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £3,000 · Trip loss £500',
+      type: 'error',
+    });
+    expect(emit).toHaveBeenCalledWith('ui:cash-pulse', { amount: 3_000 });
   });
 
   it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {

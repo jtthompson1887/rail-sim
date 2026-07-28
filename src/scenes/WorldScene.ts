@@ -102,7 +102,10 @@ import {
   freightObjectiveCelebrationSession,
   type FreightObjectiveDto,
 } from '../freight/FreightObjective';
-import { getProduct } from '../economy/ProductCatalog';
+import {
+  getFacilityDefinition,
+  getProduct,
+} from '../economy/ProductCatalog';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -1409,21 +1412,31 @@ export default class WorldScene extends Phaser.Scene {
         'cement-supply-chain',
         true,
       );
-    EventBus.emit('ui:toast', (
-      celebrateStructuralObjective || celebrateCementObjective
-    )
-      ? {
-        message:
-          `${product!.displayName} delivered to ${destination!.name}`
-          + ` · +£${event.revenue.toLocaleString('en-GB')}`
-          + ` · trip profit £${event.operatingProfit.toLocaleString('en-GB')}`,
-        type: 'success',
-      }
-      : {
-        message:
-          `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
-        type: 'success',
-      });
+    const result = event.operatingProfit > 0
+      ? `Trip profit £${event.operatingProfit.toLocaleString('en-GB')}`
+      : event.operatingProfit < 0
+        ? `Trip loss £${Math.abs(event.operatingProfit).toLocaleString('en-GB')}`
+        : 'Break-even £0';
+    const milestone = celebrateCementObjective
+      ? 'Cement secured · Prefabrication awaits steel'
+      : celebrateStructuralObjective
+        ? 'Timber link profitable · Prefabrication awaits cement and steel'
+        : null;
+    const destinationName = destination?.name
+      ?? getFacilityDefinition(event.destinationFacilityId)?.displayName
+      ?? 'Unknown destination';
+    EventBus.emit('ui:toast', {
+      message:
+        `${product?.displayName ?? 'Unknown product'} delivered to ${destinationName}`
+        + ` · Revenue £${event.revenue.toLocaleString('en-GB')}`
+        + ` · ${result}`
+        + (milestone ? ` · ${milestone}` : ''),
+      type: event.operatingProfit > 0
+        ? 'success'
+        : event.operatingProfit < 0
+          ? 'error'
+          : 'info',
+    });
     EventBus.emit('ui:cash-pulse', { amount: event.revenue });
   }
 

@@ -132,11 +132,104 @@ describe('CompanyHud', () => {
       '[data-testid="company-operating-profit"]',
     )?.textContent).toBe('Rail profit £700');
     expect(document.querySelector(
+      '[data-testid="company-operating-profit"]',
+    )?.getAttribute('data-tone')).toBe('profit');
+    expect(document.querySelector(
       '[data-testid="company-capital-expenditure"]',
     )?.textContent).toBe('Capex £2,000');
     expect(document.querySelector(
       '[data-testid="company-cash-flow"]',
     )?.textContent).toBe('Cash flow £248,700');
+  });
+
+  it.each([
+    [500, 'profit'],
+    [-500, 'loss'],
+    [0, 'neutral'],
+  ] as const)('marks rail profit %s with the %s tone', (
+    operatingProfit,
+    tone,
+  ) => {
+    EventBus.emit('ui:company-state', {
+      cash: 100_000,
+      saveState: 'saved',
+      economyTick: 24,
+      constructionIndexBps: 10_000,
+      operatingSummary: {
+        ...operatingSummary,
+        operatingProfit,
+      },
+    });
+
+    expect(document.querySelector(
+      '[data-testid="company-operating-profit"]',
+    )?.getAttribute('data-tone')).toBe(tone);
+  });
+
+  it.each([
+    [1_800, 'profit', 'Trip profit £1,800'],
+    [-500, 'loss', 'Trip loss £500'],
+    [0, 'neutral', 'Break-even £0'],
+  ] as const)('shows a named delivery with %s result', (
+    operatingProfit,
+    tone,
+    result,
+  ) => {
+    EventBus.emit('ui:freight-delivery-completed', Object.freeze({
+      trainId: 'train-1',
+      productId: 'limestone-aggregate',
+      units: 120,
+      destinationFacilityId: 'cement-works',
+      tick: 24,
+      revenue: 5_400,
+      runningCost: 3_600,
+      operatingProfit,
+    }));
+
+    const delivery = document.querySelector(
+      '[data-testid="company-last-delivery"]',
+    ) as HTMLElement;
+    expect(delivery.textContent).toBe(
+      `Limestone Aggregate delivered to Cement Works · Revenue £5,400 · ${result}`,
+    );
+    expect(delivery.dataset.tone).toBe(tone);
+  });
+
+  it('renders unknown delivery references safely and removes the listener', () => {
+    EventBus.emit('ui:freight-delivery-completed', Object.freeze({
+      trainId: 'unknown-train',
+      productId: 'unknown-product',
+      units: 1,
+      destinationFacilityId: 'unknown-destination',
+      tick: 1,
+      revenue: 100,
+      runningCost: 20,
+      operatingProfit: 80,
+    }));
+    expect(document.querySelector(
+      '[data-testid="company-last-delivery"]',
+    )?.textContent).toBe(
+      'Unknown product delivered to Unknown destination'
+      + ' · Revenue £100 · Trip profit £80',
+    );
+
+    hud.destroy();
+    expect(() => EventBus.emit(
+      'ui:freight-delivery-completed',
+      Object.freeze({
+        trainId: 'unknown-train',
+        productId: 'unknown-product',
+        units: 1,
+        destinationFacilityId: 'unknown-destination',
+        tick: 2,
+        revenue: 50,
+        runningCost: 100,
+        operatingProfit: -50,
+      }),
+    )).not.toThrow();
+    expect(document.querySelector(
+      '[data-testid="company-last-delivery"]',
+    )).toBeNull();
   });
 
   it('shows one visible positive delivery cash pulse and removes its listener', () => {
