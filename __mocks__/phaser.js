@@ -527,15 +527,82 @@ function makeScene(overrides = {}) {
 // ---------------------------------------------------------------------------
 class RandomDataGenerator {
   constructor(seeds) {
-    this._seed = seeds ? seeds[0] : '0';
-    this._state = 42;
+    this.c = 1;
+    this.s0 = 0;
+    this.s1 = 0;
+    this.s2 = 0;
+    this.n = 0;
+    if (seeds !== undefined) this.init(seeds);
+  }
+  rnd() {
+    const t = 2091639 * this.s0 + this.c * 2.3283064365386963e-10;
+    this.c = t | 0;
+    this.s0 = this.s1;
+    this.s1 = this.s2;
+    this.s2 = t - this.c;
+    return this.s2;
+  }
+  hash(value) {
+    let h;
+    let n = this.n;
+    const data = value.toString();
+    for (let index = 0; index < data.length; index++) {
+      n += data.charCodeAt(index);
+      h = 0.02519603282416938 * n;
+      n = h >>> 0;
+      h -= n;
+      h *= n;
+      n = h >>> 0;
+      h -= n;
+      n += h * 0x100000000;
+    }
+    this.n = n;
+    return (n >>> 0) * 2.3283064365386963e-10;
+  }
+  init(seeds) {
+    if (typeof seeds === 'string') this.state(seeds);
+    else this.sow(seeds);
+  }
+  sow(seeds) {
+    this.n = 0xefc8249d;
+    this.s0 = this.hash(' ');
+    this.s1 = this.hash(' ');
+    this.s2 = this.hash(' ');
+    this.c = 1;
+    if (!seeds) return;
+    for (
+      let index = 0;
+      index < seeds.length && seeds[index] != null;
+      index++
+    ) {
+      const seed = seeds[index];
+      this.s0 -= this.hash(seed);
+      this.s0 += ~~(this.s0 < 0);
+      this.s1 -= this.hash(seed);
+      this.s1 += ~~(this.s1 < 0);
+      this.s2 -= this.hash(seed);
+      this.s2 += ~~(this.s2 < 0);
+    }
   }
   frac() {
-    this._state = (this._state * 16807 + 1) % 2147483647;
-    return (this._state - 1) / 2147483646;
+    return this.rnd()
+      + (this.rnd() * 0x200000 | 0) * 1.1102230246251565e-16;
+  }
+  realInRange(min, max) {
+    return this.frac() * (max - min) + min;
   }
   between(min, max) {
-    return Math.floor(this.frac() * (max - min + 1)) + min;
+    return Math.floor(this.realInRange(0, max - min + 1) + min);
+  }
+  state(value) {
+    if (typeof value === 'string' && value.match(/^!rnd/)) {
+      const parts = value.split(',');
+      this.c = parseFloat(parts[1]);
+      this.s0 = parseFloat(parts[2]);
+      this.s1 = parseFloat(parts[3]);
+      this.s2 = parseFloat(parts[4]);
+    }
+    return ['!rnd', this.c, this.s0, this.s1, this.s2].join(',');
   }
 }
 

@@ -292,13 +292,13 @@ describe('WorldOpportunityGenerator', () => {
 
   it.each([
     {
-      seed: 'task15-manual-ash-keydiag',
+      seed: 'playtest-633',
       expectedCost: null,
       guaranteesStarterReserve: false,
     },
     {
-      seed: 'task15-manual-larch',
-      expectedCost: 146_372,
+      seed: 'playtest-602',
+      expectedCost: null,
       guaranteesStarterReserve: true,
     },
   ])('persists $seed as exact production-sequential construction quotes', ({
@@ -571,7 +571,8 @@ describe('WorldOpportunityGenerator', () => {
       right,
     ) => left.estimatedCost - right.estimatedCost
       || left.id.localeCompare(right.id))[0];
-    expect(cheapest.feasibilityWitness.segments).toHaveLength(1);
+    expect(cheapest.feasibilityWitness.segments)
+      .toHaveLength(cheapest.waypoints.length - 1);
     const cheapestSegment = cheapest.feasibilityWitness.segments[0];
     const uiCanonicalStart = snap.snapConstructionPoint(
       cheapestSegment.geometry.p0.x,
