@@ -78,14 +78,17 @@ export class PlaceVehicleTool implements IEditorTool {
     if (this.purchaseInFlight) {
       this.publishState(
         null,
-        formatFreightPurchaseRemedy('duplicate-gesture'),
+        formatFreightPurchaseRemedy('duplicate-gesture', this.freightSetId),
       );
       return;
     }
     const track = this.findNearestTrack(worldX, worldY);
     if (!track) {
       this.lastPlacement = null;
-      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
+      this.publishState(
+        null,
+        formatFreightPurchaseRemedy('no-track', this.freightSetId),
+      );
       return;
     }
 
@@ -99,12 +102,15 @@ export class PlaceVehicleTool implements IEditorTool {
     };
     const quote = this.quoteService?.quote(input);
     if (!quote) {
-      this.publishState(null, formatFreightPurchaseRemedy('no-track'));
+      this.publishState(
+        null,
+        formatFreightPurchaseRemedy('no-track', this.freightSetId),
+      );
       return;
     }
     const detached = freezeQuote(quote);
     const message = detached.blocker
-      ? formatFreightPurchaseRemedy(detached.blocker)
+      ? formatFreightPurchaseRemedy(detached.blocker, this.freightSetId)
       : '';
     if (detached.valid) this.purchaseInFlight = true;
     this.publishState(detached, message);

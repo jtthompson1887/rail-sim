@@ -1,7 +1,10 @@
 import type { TrainDef, WorldData } from '../config/WorldData';
 import type { CompanyStateDef } from '../economy/EconomyData';
 import { summariseProfitAndLoss } from '../economy/FinanceLedger';
-import { getProduct } from '../economy/ProductCatalog';
+import {
+  getFacilityDefinition,
+  getProduct,
+} from '../economy/ProductCatalog';
 import type {
   CargoBlockerCode,
   CargoTransferStatus,
@@ -13,7 +16,6 @@ import {
 } from './FacilityCargoRules';
 import {
   capacityForProduct,
-  FLATBED_FREIGHT_SET_ID,
   getFreightSet,
 } from './FreightSetCatalog';
 import type {
@@ -22,6 +24,9 @@ import type {
 import type {
   FreightPurchaseBlocker,
   FreightPurchaseQuote,
+} from './FreightPurchaseService';
+import {
+  getFreightPurchaseRoutePolicy,
 } from './FreightPurchaseService';
 import type { TrainRuntimeSnapshot } from './TrainRuntime';
 
@@ -37,7 +42,7 @@ export interface OperatingSummaryDto {
 }
 
 export interface FreightPurchaseDto {
-  readonly freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+  readonly freightSetId: string;
   readonly displayName: string;
   readonly price: number;
   readonly compatibleCargoLabel: string;
@@ -83,16 +88,6 @@ export interface TrainInspectionDto {
   };
 }
 
-const PURCHASE_REMEDIES: Readonly<
-Partial<Record<FreightPurchaseBlocker, string>>
-> = Object.freeze({
-  'no-track': 'Click on player track to place the General Flatbed Set',
-  'outside-forest-access': 'Place inside Managed Forest rail access',
-  'disconnected-route': 'Connect Managed Forest and Sawmill first',
-  'insufficient-cash': 'Insufficient cash for General Flatbed Set',
-  'duplicate-gesture': 'Purchase already in progress',
-});
-
 const deepFreeze = <T>(value: T): T => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     const record = value as unknown as Record<string, unknown>;
@@ -121,9 +116,30 @@ const capacityFor = (
 
 export function formatFreightPurchaseRemedy(
   blocker: FreightPurchaseBlocker,
+  freightSetId: string,
 ): string {
-  return PURCHASE_REMEDIES[blocker]
-    ?? 'General Flatbed Set purchase could not be completed';
+  const freightSet = getFreightSet(freightSetId);
+  const policy = getFreightPurchaseRoutePolicy(freightSetId);
+  if (!freightSet || !policy) return 'Unknown freight set';
+
+  const sourceName = getFacilityDefinition(
+    policy.sourceDefinitionId,
+  )?.displayName ?? 'source facility';
+  const destinationName = getFacilityDefinition(
+    policy.destinationDefinitionId,
+  )?.displayName ?? 'destination facility';
+  const remedies: Partial<Record<FreightPurchaseBlocker, string>> = {
+    'unknown-freight-set': 'Unknown freight set',
+    'route-unavailable': `${freightSet.displayName} route is unavailable`,
+    'no-track':
+      `Click on player track to place the ${freightSet.displayName}`,
+    'outside-source-access': `Place inside ${sourceName} rail access`,
+    'disconnected-route': `Connect ${sourceName} and ${destinationName} first`,
+    'insufficient-cash': `Insufficient cash for ${freightSet.displayName}`,
+    'duplicate-gesture': 'Purchase already in progress',
+  };
+  return remedies[blocker]
+    ?? `${freightSet.displayName} purchase could not be completed`;
 }
 
 export function formatCargoRemedy(
@@ -318,41 +334,57 @@ export function buildTrainInspection(
 }
 
 export function buildFreightPurchasePresentation(
+  freightSetId: string,
   quote: FreightPurchaseQuote | null,
   cash: number,
 ): FreightPurchaseDto {
-  const freightSet = getFreightSet(FLATBED_FREIGHT_SET_ID);
-  if (!freightSet) {
-    throw new Error('Approved flatbed freight set is missing');
+  const freightSet = getFreightSet(freightSetId);
+  const policy = getFreightPurchaseRoutePolicy(freightSetId);
+  if (!freightSet || !policy) {
+    return Object.freeze({
+      freightSetId,
+      displayName: 'Unknown freight set',
+      price: 0,
+      compatibleCargoLabel: 'Cargo unavailable',
+      capacityLabel: 'Capacity unavailable',
+      runningCostLabel: 'Running cost unavailable',
+      cashAfter: cash,
+      affordable: false,
+      validPlacement: false,
+      remedy: 'Unknown freight set',
+    });
   }
+  const activeQuote = quote?.freightSetId === freightSetId ? quote : null;
   const products = freightSet.compatibleProductIds
     .map((productId) => getProduct(productId))
     .filter((product) => product !== undefined);
-  const firstProduct = products[0];
-  const firstCapacity = firstProduct
-    ? capacityForProduct(freightSet, firstProduct)
+  const routeProduct = getProduct(policy.productId);
+  const routeCapacity = routeProduct
+    ? capacityForProduct(freightSet, routeProduct)
     : null;
-  const capacityUnits = firstCapacity?.ok
-    ? firstCapacity.capacityUnits
+  const capacityUnits = routeCapacity?.ok
+    ? routeCapacity.capacityUnits
     : 0;
-  const blocker = quote?.blocker ?? 'no-track';
+  const blocker = activeQuote?.blocker ?? 'no-track';
   return Object.freeze({
-    freightSetId: FLATBED_FREIGHT_SET_ID,
+    freightSetId,
     displayName: freightSet.displayName,
     price: freightSet.purchasePrice,
     compatibleCargoLabel: products
       .map(({ displayName }) => displayName)
       .join(' · '),
-    capacityLabel: firstProduct
+    capacityLabel: routeProduct
       ? `${capacityUnits.toLocaleString('en-GB')} `
-        + pluralUnit(firstProduct.unitLabel, capacityUnits)
+        + pluralUnit(routeProduct.unitLabel, capacityUnits)
       : 'Capacity unavailable',
     runningCostLabel:
       `£${freightSet.runningCostPerActiveTick.toLocaleString('en-GB')} `
       + '/ active tick',
-    cashAfter: quote?.cashAfter ?? cash - freightSet.purchasePrice,
-    affordable: quote?.affordable ?? cash >= freightSet.purchasePrice,
-    validPlacement: quote?.valid ?? false,
-    remedy: blocker === null ? '' : formatFreightPurchaseRemedy(blocker),
+    cashAfter: activeQuote?.cashAfter ?? cash - freightSet.purchasePrice,
+    affordable: activeQuote?.affordable ?? cash >= freightSet.purchasePrice,
+    validPlacement: activeQuote?.valid ?? false,
+    remedy: blocker === null
+      ? ''
+      : formatFreightPurchaseRemedy(blocker, freightSetId),
   });
 }

@@ -12,6 +12,11 @@ import { postLedgerEntry } from '../../src/economy/FinanceLedger';
 import type { CompanyStateDef } from '../../src/economy/EconomyData';
 import type { CargoTransferStatus } from '../../src/freight/CargoSystem';
 import type { TrainRuntimeSnapshot } from '../../src/freight/TrainRuntime';
+import {
+  AGGREGATE_HOPPER_SET_ID,
+  COVERED_CEMENT_SET_ID,
+  FLATBED_FREIGHT_SET_ID,
+} from '../../src/freight/FreightSetCatalog';
 import { clonePlainData } from '../../src/utils/PlainData';
 import {
   makeFirstFreightRouteWorld,
@@ -90,10 +95,14 @@ describe('FreightPresentation', () => {
       cashAfter: 110_000,
       affordable: true,
       valid: false,
-      blocker: 'outside-forest-access' as const,
+      blocker: 'outside-source-access' as const,
     });
 
-    const dto = buildFreightPurchasePresentation(quote, 200_000);
+    const dto = buildFreightPurchasePresentation(
+      FLATBED_FREIGHT_SET_ID,
+      quote,
+      200_000,
+    );
 
     expect(dto).toEqual({
       freightSetId: 'flatbed-freight-set',
@@ -108,6 +117,131 @@ describe('FreightPresentation', () => {
       remedy: 'Place inside Managed Forest rail access',
     });
     expect(Object.isFrozen(dto)).toBe(true);
+  });
+
+  it.each([
+    [
+      AGGREGATE_HOPPER_SET_ID,
+      110_000,
+      'Aggregate Hopper Set',
+      'Limestone Aggregate',
+      '120 tonnes',
+      '£20 / active tick',
+      'Place inside Quarry rail access',
+    ],
+    [
+      COVERED_CEMENT_SET_ID,
+      105_000,
+      'Covered Cement Set',
+      'Cement',
+      '80 tonnes',
+      '£22 / active tick',
+      'Place inside Cement Works rail access',
+    ],
+  ] as const)(
+    'builds one immutable %s purchase decision with exact commercial copy',
+    (
+      freightSetId,
+      purchasePrice,
+      displayName,
+      compatibleCargoLabel,
+      capacityLabel,
+      runningCostLabel,
+      remedy,
+    ) => {
+      const quote = Object.freeze({
+        expectedRevision: 7,
+        freightSetId,
+        trackUUID: 'route-track',
+        trackT: 0.1,
+        facing: 1 as const,
+        purchasePrice,
+        cashAfter: 200_000 - purchasePrice,
+        affordable: true,
+        valid: false,
+        blocker: 'outside-source-access' as const,
+      });
+
+      const dto = buildFreightPurchasePresentation(
+        freightSetId,
+        quote,
+        200_000,
+      );
+
+      expect(dto).toEqual({
+        freightSetId,
+        displayName,
+        price: purchasePrice,
+        compatibleCargoLabel,
+        capacityLabel,
+        runningCostLabel,
+        cashAfter: 200_000 - purchasePrice,
+        affordable: true,
+        validPlacement: false,
+        remedy,
+      });
+      expect(Object.isFrozen(dto)).toBe(true);
+    },
+  );
+
+  it.each([
+    [
+      FLATBED_FREIGHT_SET_ID,
+      'Connect Managed Forest and Sawmill first',
+    ],
+    [
+      AGGREGATE_HOPPER_SET_ID,
+      'Connect Quarry and Cement Works first',
+    ],
+    [
+      COVERED_CEMENT_SET_ID,
+      'Connect Cement Works and Prefabrication Plant first',
+    ],
+  ] as const)(
+    'formats the selected %s route remedy without duplicating route policy',
+    (freightSetId, expected) => {
+      expect(formatFreightPurchaseRemedy(
+        'disconnected-route',
+        freightSetId,
+      )).toBe(expected);
+    },
+  );
+
+  it('presents the selected set before a quote exists', () => {
+    expect(buildFreightPurchasePresentation(
+      AGGREGATE_HOPPER_SET_ID,
+      null,
+      200_000,
+    )).toMatchObject({
+      freightSetId: AGGREGATE_HOPPER_SET_ID,
+      displayName: 'Aggregate Hopper Set',
+      price: 110_000,
+      cashAfter: 90_000,
+      affordable: true,
+      validPlacement: false,
+    });
+  });
+
+  it('keeps an unknown purchase selection safe and inspectable', () => {
+    const dto = buildFreightPurchasePresentation(
+      'removed-set',
+      null,
+      200_000,
+    );
+
+    expect(dto).toEqual({
+      freightSetId: 'removed-set',
+      displayName: 'Unknown freight set',
+      price: 0,
+      compatibleCargoLabel: 'Cargo unavailable',
+      capacityLabel: 'Capacity unavailable',
+      runningCostLabel: 'Running cost unavailable',
+      cashAfter: 200_000,
+      affordable: false,
+      validPlacement: false,
+      remedy: 'Unknown freight set',
+    });
+    expect(JSON.stringify(dto)).not.toContain('undefined');
   });
 
   it('detaches selected train cargo, transfer, trip, delivery, and lifetime figures', () => {
@@ -422,10 +556,15 @@ describe('FreightPresentation', () => {
   });
 
   it('exports the same purchase remedy used by the purchase panel and tool', () => {
-    expect(formatFreightPurchaseRemedy('outside-forest-access'))
+    expect(formatFreightPurchaseRemedy(
+      'outside-source-access',
+      FLATBED_FREIGHT_SET_ID,
+    ))
       .toBe('Place inside Managed Forest rail access');
-    expect(formatFreightPurchaseRemedy('world-install-failed'))
-      .toBe('General Flatbed Set purchase could not be completed');
+    expect(formatFreightPurchaseRemedy(
+      'world-install-failed',
+      AGGREGATE_HOPPER_SET_ID,
+    )).toBe('Aggregate Hopper Set purchase could not be completed');
   });
 
   it.each([

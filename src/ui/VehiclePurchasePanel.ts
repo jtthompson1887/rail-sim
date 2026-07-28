@@ -131,6 +131,7 @@ export class VehiclePurchasePanel {
       ? Object.freeze(state.quote)
       : null;
     const dto = buildFreightPurchasePresentation(
+      this.currentQuote?.freightSetId ?? FLATBED_FREIGHT_SET_ID,
       this.currentQuote,
       state.cash,
     );
