@@ -90,6 +90,7 @@ import {
   FreightPurchaseService,
   type FreightPurchaseQuote,
   type FreightPurchaseRuntimePort,
+  type FreightPurchaseSetId,
 } from '../freight/FreightPurchaseService';
 import {
   buildOperatingSummary,
@@ -438,13 +439,13 @@ export default class WorldScene extends Phaser.Scene {
   private readonly freightPurchaseModeRequestedHandler = ({
     freightSetId,
   }: {
-    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+    freightSetId: FreightPurchaseSetId;
   }) => {
     if (GameStateManager.worldMode !== 'create') return;
     const tool = this.toolRegistry.get(
       'place-vehicle',
     ) as PlaceVehicleTool | undefined;
-    tool?.setFreightSetId(freightSetId);
+    if (!tool?.setFreightSetId(freightSetId)) return;
     EventBus.emit('ui:toolbar-select-tool', { tool: 'place-vehicle' });
   };
 
@@ -453,7 +454,12 @@ export default class WorldScene extends Phaser.Scene {
   }: {
     quote: FreightPurchaseQuote;
   }) => {
-    if (GameStateManager.worldMode !== 'create') return;
+    if (GameStateManager.worldMode !== 'create'
+      || this.activeTool !== 'place-vehicle') return;
+    const tool = this.toolRegistry.get(
+      'place-vehicle',
+    ) as PlaceVehicleTool | undefined;
+    if (!tool?.canConfirmQuote(quote)) return;
     const purchaseResult = this.freightPurchaseService.purchase(
       quote,
     );
@@ -753,6 +759,7 @@ export default class WorldScene extends Phaser.Scene {
     this.renderStarterOpportunitySurvey();
     this.renderFacilities();
     EventBus.emit('ui:freight-purchase-state', {
+      freightSetId: FLATBED_FREIGHT_SET_ID,
       quote: null,
       cash: world?.company.cash ?? 0,
       message: 'Click on player track to place the General Flatbed Set',

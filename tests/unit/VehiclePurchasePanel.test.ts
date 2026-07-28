@@ -3,20 +3,27 @@
  */
 import { EventBus } from '../../src/services/EventBus';
 import { VehiclePurchasePanel } from '../../src/ui/VehiclePurchasePanel';
-import { FreightPurchaseService } from '../../src/freight/FreightPurchaseService';
+import {
+  FreightPurchaseService,
+  type FreightPurchaseQuote,
+  type FreightPurchaseSetId,
+} from '../../src/freight/FreightPurchaseService';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { makeFirstFreightRouteWorld } from '../fixtures/FirstFreightRouteFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
 import { isGameplayInputFocused } from '../../src/systems/InputManager';
 
-const quote = () => ({
+const quote = (
+  freightSetId: FreightPurchaseSetId = 'flatbed-freight-set',
+  purchasePrice = 90_000,
+): FreightPurchaseQuote => ({
   expectedRevision: 4,
-  freightSetId: 'flatbed-freight-set' as const,
+  freightSetId,
   trackUUID: 'forest-sawmill-track',
   trackT: 0.1,
   facing: 1 as const,
-  purchasePrice: 90_000 as const,
-  cashAfter: 110_000,
+  purchasePrice,
+  cashAfter: 200_000 - purchasePrice,
   affordable: true,
   valid: true,
   blocker: null,
@@ -38,7 +45,7 @@ describe('VehiclePurchasePanel', () => {
     jest.restoreAllMocks();
   });
 
-  it('contains exactly one flatbed SKU and emits purchase mode then its frozen quote', () => {
+  it('clears stale confirmation on a flatbed mode request then emits its new frozen quote', () => {
     const mode = jest.fn();
     const confirmed = jest.fn();
     EventBus.on('freight:purchase-mode-requested', mode);
@@ -66,9 +73,20 @@ describe('VehiclePurchasePanel', () => {
     (root.querySelector(
       '[data-testid="flatbed-freight-set-buy"]',
     ) as HTMLButtonElement).click();
-    (root.querySelector(
+    const confirm = root.querySelector(
       '[data-testid="freight-purchase-confirm"]',
-    ) as HTMLButtonElement).click();
+    ) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    confirm.click();
+    expect(confirmed).not.toHaveBeenCalled();
+
+    panel.setState({
+      freightSetId: 'flatbed-freight-set',
+      quote: displayedQuote,
+      cash: 200_000,
+      message: '',
+    });
+    confirm.click();
 
     expect(mode).toHaveBeenCalledWith({
       freightSetId: 'flatbed-freight-set',
@@ -139,6 +157,104 @@ describe('VehiclePurchasePanel', () => {
       saveState: 'saved',
     });
     EventBus.off('freight:purchase-confirmed', listener);
+  });
+
+  it('renders three deterministic accessible SKU choices and clears confirmation when the selection changes', () => {
+    const mode = jest.fn();
+    const confirmed = jest.fn();
+    EventBus.on('freight:purchase-mode-requested', mode);
+    EventBus.on('freight:purchase-confirmed', confirmed);
+    panel.setState({
+      freightSetId: 'flatbed-freight-set',
+      quote: quote(),
+      cash: 200_000,
+      message: '',
+    });
+    const root = document.querySelector(
+      '[data-testid="vehicle-purchase-panel"]',
+    ) as HTMLElement;
+    const flatbed = root.querySelector(
+      '[data-testid="flatbed-freight-set-buy"]',
+    ) as HTMLButtonElement;
+    const aggregate = root.querySelector(
+      '[data-testid="aggregate-hopper-set-buy"]',
+    ) as HTMLButtonElement;
+    const cement = root.querySelector(
+      '[data-testid="covered-cement-set-buy"]',
+    ) as HTMLButtonElement;
+    const confirm = root.querySelector(
+      '[data-testid="freight-purchase-confirm"]',
+    ) as HTMLButtonElement;
+
+    expect(flatbed.textContent).toContain('General Flatbed Set');
+    expect(flatbed.textContent).toContain('£90,000');
+    expect(flatbed.textContent).toContain('60 tonnes');
+    expect(flatbed.textContent).toContain('Logs · Structural Timber');
+    expect(flatbed.textContent).toContain('£20 / active tick');
+    expect(aggregate.textContent).toContain('Aggregate Hopper Set');
+    expect(aggregate.textContent).toContain('£110,000');
+    expect(aggregate.textContent).toContain('120 tonnes');
+    expect(aggregate.textContent).toContain('Limestone Aggregate');
+    expect(cement.textContent).toContain('Covered Cement Set');
+    expect(cement.textContent).toContain('£105,000');
+    expect(cement.textContent).toContain('80 tonnes');
+    expect(cement.textContent).toContain('Cement');
+    expect([flatbed, aggregate, cement].map(
+      (button) => [button.tagName, button.type, button.tabIndex],
+    )).toEqual([
+      ['BUTTON', 'button', 0],
+      ['BUTTON', 'button', 0],
+      ['BUTTON', 'button', 0],
+    ]);
+    expect([flatbed, aggregate, cement].map(
+      (button) => button?.getAttribute('aria-pressed'),
+    )).toEqual(['true', 'false', 'false']);
+
+    aggregate.click();
+
+    expect(mode).toHaveBeenCalledWith({
+      freightSetId: 'aggregate-hopper-set',
+    });
+    expect([flatbed, aggregate, cement].map(
+      (button) => button.getAttribute('aria-pressed'),
+    )).toEqual(['false', 'true', 'false']);
+    expect(confirm.disabled).toBe(true);
+    confirm.click();
+    expect(confirmed).not.toHaveBeenCalled();
+
+    EventBus.off('freight:purchase-mode-requested', mode);
+    EventBus.off('freight:purchase-confirmed', confirmed);
+  });
+
+  it('confirms only the exact matching selected-set quote', () => {
+    const confirmed = jest.fn();
+    EventBus.on('freight:purchase-confirmed', confirmed);
+    const aggregateQuote = quote('aggregate-hopper-set', 110_000);
+    panel.setState({
+      freightSetId: 'aggregate-hopper-set',
+      quote: aggregateQuote,
+      cash: 200_000,
+      message: '',
+    });
+    const confirm = document.querySelector(
+      '[data-testid="freight-purchase-confirm"]',
+    ) as HTMLButtonElement;
+
+    confirm.click();
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    expect(confirmed.mock.calls[0][0].quote).toBe(aggregateQuote);
+    expect(Object.isFrozen(confirmed.mock.calls[0][0].quote)).toBe(true);
+
+    panel.setState({
+      freightSetId: 'covered-cement-set',
+      quote: aggregateQuote,
+      cash: 200_000,
+      message: '',
+    });
+    expect(confirm.disabled).toBe(true);
+    confirm.click();
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    EventBus.off('freight:purchase-confirmed', confirmed);
   });
 
   it('releases confirm focus after submitting a valid purchase', () => {
@@ -239,6 +355,7 @@ describe('VehiclePurchasePanel', () => {
 
     panel.destroy();
     EventBus.emit('ui:freight-purchase-state', {
+      freightSetId: 'flatbed-freight-set',
       quote: quote(),
       cash: 200_000,
       message: '',

@@ -170,6 +170,7 @@ describe('EventBus', () => {
     EventBus.on('freight:purchase-result', resultListener);
 
     EventBus.emit('ui:freight-purchase-state', {
+      freightSetId: 'flatbed-freight-set',
       quote,
       cash: 300_000,
       message: 'Review placement',
@@ -178,6 +179,7 @@ describe('EventBus', () => {
     EventBus.emit('freight:purchase-result', result);
 
     expect(stateListener).toHaveBeenCalledWith({
+      freightSetId: 'flatbed-freight-set',
       quote,
       cash: 300_000,
       message: 'Review placement',
@@ -201,6 +203,20 @@ describe('EventBus', () => {
     expect(listener).toHaveBeenCalledWith({
       freightSetId: 'flatbed-freight-set',
     });
+    EventBus.off('freight:purchase-mode-requested', listener);
+  });
+
+  it.each([
+    'flatbed-freight-set',
+    'aggregate-hopper-set',
+    'covered-cement-set',
+  ] as const)('round-trips the %s purchase selection', (freightSetId) => {
+    const listener = jest.fn();
+    EventBus.on('freight:purchase-mode-requested', listener);
+
+    EventBus.emit('freight:purchase-mode-requested', { freightSetId });
+
+    expect(listener).toHaveBeenCalledWith({ freightSetId });
     EventBus.off('freight:purchase-mode-requested', listener);
   });
 

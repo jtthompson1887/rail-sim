@@ -2130,7 +2130,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
   it('routes the timber purchase-mode request to the authoritative placement tool', () => {
     const scene = new WorldScene() as any;
-    const setFreightSetId = jest.fn();
+    const setFreightSetId = jest.fn().mockReturnValue(true);
     scene.toolRegistry = new Map([[
       'place-vehicle',
       { setFreightSetId },
@@ -2144,6 +2144,50 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(setFreightSetId).toHaveBeenCalledWith('flatbed-freight-set');
     expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it.each([
+    'flatbed-freight-set',
+    'aggregate-hopper-set',
+    'covered-cement-set',
+  ])('routes the supported %s purchase mode without interpreting its policy', (
+    freightSetId,
+  ) => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn().mockReturnValue(true);
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({ freightSetId });
+
+    expect(setFreightSetId).toHaveBeenCalledWith(freightSetId);
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it('fails closed when the placement tool rejects an unknown SKU', () => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn().mockReturnValue(false);
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({
+      freightSetId: 'unknown-set',
+    });
+
+    expect(setFreightSetId).toHaveBeenCalledWith('unknown-set');
+    expect(emit).not.toHaveBeenCalledWith('ui:toolbar-select-tool', {
       tool: 'place-vehicle',
     });
   });
@@ -2191,6 +2235,12 @@ describe('WorldScene disabled construction bypass guards', () => {
       saveState: 'saved',
     }));
     scene.freightPurchaseService = { purchase };
+    scene.activeTool = 'place-vehicle';
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote: (candidate: FreightPurchaseQuote) =>
+        candidate === quote },
+    ]]);
     scene.commandStack = { clear: jest.fn() };
     scene.selectionManager = {
       clearSelection: jest.fn(),
@@ -2265,6 +2315,12 @@ describe('WorldScene disabled construction bypass guards', () => {
         blocker: 'live-placement-failed',
       }),
     };
+    scene.activeTool = 'place-vehicle';
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote: (candidate: FreightPurchaseQuote) =>
+        candidate === quote },
+    ]]);
     scene.commandStack = { clear: jest.fn() };
     scene.selectionManager = { clearSelection: jest.fn() };
     scene.trainManager = { trains: [], selectTrain: jest.fn() };
@@ -2282,6 +2338,40 @@ describe('WorldScene disabled construction bypass guards', () => {
         blocker: 'live-placement-failed',
       }),
     );
+  });
+
+  it('rejects an inactive, old, or cloned confirmation before purchase', () => {
+    const scene = new WorldScene() as any;
+    const quote: FreightPurchaseQuote = Object.freeze({
+      expectedRevision: 0,
+      freightSetId: 'aggregate-hopper-set',
+      trackUUID: 'quarry-route',
+      trackT: 0,
+      facing: 1,
+      purchasePrice: 110_000,
+      cashAfter: 890_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    const purchase = jest.fn();
+    const canConfirmQuote = jest.fn(
+      (candidate: FreightPurchaseQuote) => candidate === quote,
+    );
+    scene.freightPurchaseService = { purchase };
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote },
+    ]]);
+    GameStateManager.enterCreate('confirmation-guard');
+
+    scene.activeTool = 'place-track';
+    scene.freightPurchaseConfirmedHandler({ quote });
+    scene.activeTool = 'place-vehicle';
+    scene.freightPurchaseConfirmedHandler({ quote: { ...quote } });
+
+    expect(canConfirmQuote).toHaveBeenCalledTimes(1);
+    expect(purchase).not.toHaveBeenCalled();
   });
 
   it('adapts TrainManager spawn/place/remove while preserving quote facing', () => {

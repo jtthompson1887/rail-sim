@@ -9,6 +9,7 @@ import type {
 import type {
   FreightPurchaseQuote,
   FreightPurchaseResult,
+  FreightPurchaseSetId,
 } from '../freight/FreightPurchaseService';
 import type {
   OperatingSummaryDto,
@@ -16,7 +17,6 @@ import type {
 } from '../freight/FreightPresentation';
 import type { FreightObjectiveDto } from '../freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../freight/CargoSystem';
-import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -84,9 +84,10 @@ interface EventMap {
   };
   'ui:cash-pulse': { amount: number };
   'freight:purchase-mode-requested': {
-    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+    freightSetId: FreightPurchaseSetId;
   };
   'ui:freight-purchase-state': {
+    freightSetId: FreightPurchaseSetId;
     quote: FreightPurchaseQuote | null;
     cash: number;
     message: string;
