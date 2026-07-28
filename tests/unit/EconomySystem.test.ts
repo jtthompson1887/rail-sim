@@ -314,6 +314,8 @@ describe('EconomySystem', () => {
       profitableLogDeliveryCompleted: true,
       developmentGrantAwarded: true,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     });
     const committedSawmill = world.economy.facilities.find(
       ({ id }) => id === 'sawmill',

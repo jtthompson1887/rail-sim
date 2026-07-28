@@ -394,7 +394,7 @@ async function createFixedSeedWorld(
   await waitForHarness(page);
 
   const created = await snapshot(page);
-  expect(created.world.schemaVersion).toBe(8);
+  expect(created.world.schemaVersion).toBe(9);
   expect(created.world.generationConfig.seed).toBe(seed);
   expect(created.world.economy.facilities).toHaveLength(7);
   expect(created.world.tracks).toHaveLength(0);
@@ -1612,6 +1612,8 @@ test.describe('real structural-timber browser journey', () => {
           profitableLogDeliveryCompleted: true,
           developmentGrantAwarded: true,
           profitableStructuralTimberDeliveryCompleted: false,
+          profitableLimestoneDeliveryCompleted: false,
+          profitableCementDeliveryCompleted: false,
         });
         expect(firstDelivered.world.company.ledger.filter(
           ({ referenceId }) =>
@@ -1857,6 +1859,8 @@ test.describe('real structural-timber browser journey', () => {
           profitableLogDeliveryCompleted: true,
           developmentGrantAwarded: true,
           profitableStructuralTimberDeliveryCompleted: true,
+          profitableLimestoneDeliveryCompleted: false,
+          profitableCementDeliveryCompleted: false,
         });
         expect(checkpoint.objective).toMatchObject({
           id: 'structural-timber-link',

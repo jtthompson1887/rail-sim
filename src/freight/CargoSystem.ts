@@ -374,10 +374,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isValidFreightProgress = (
   value: unknown,
 ): value is FreightProgressDef => isRecord(value)
+  && Object.keys(value).length === 6
   && value.progressVersion === 1
   && typeof value.profitableLogDeliveryCompleted === 'boolean'
   && typeof value.developmentGrantAwarded === 'boolean'
-  && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
+  && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean'
+  && typeof value.profitableLimestoneDeliveryCompleted === 'boolean'
+  && typeof value.profitableCementDeliveryCompleted === 'boolean';
 
 const hasConsistentDevelopmentGrant = (
   company: CompanyStateDef,

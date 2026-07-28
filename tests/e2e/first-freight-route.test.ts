@@ -90,6 +90,8 @@ interface FirstRouteWorld {
     readonly profitableLogDeliveryCompleted: boolean;
     readonly developmentGrantAwarded: boolean;
     readonly profitableStructuralTimberDeliveryCompleted: boolean;
+    readonly profitableLimestoneDeliveryCompleted: boolean;
+    readonly profitableCementDeliveryCompleted: boolean;
   };
   readonly starterOpportunity: {
     readonly corridors: readonly {

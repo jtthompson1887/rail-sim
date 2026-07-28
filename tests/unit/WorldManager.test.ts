@@ -813,6 +813,27 @@ describe('WorldManager', () => {
       expect(JSON.stringify(WorldManager.world)).toBe(before);
     });
 
+    it.each([
+      'profitableLimestoneDeliveryCompleted',
+      'profitableCementDeliveryCompleted',
+    ] as const)('rejects a draft missing %s with exact rollback', (field) => {
+      const world = WorldManager.createNew(
+        'Invalid mineral progress',
+        'real-terrain-alpha',
+      );
+      const before = JSON.stringify(world);
+
+      expect(WorldManager.applyOperationsBatch(
+        world.revision,
+        (draft) => {
+          delete (draft.freightProgress as any)[field];
+          return true;
+        },
+      )).toBe(false);
+      expect(WorldManager.world).toBe(world);
+      expect(JSON.stringify(WorldManager.world)).toBe(before);
+    });
+
     it('rejects nested operations and construction batches with exact rollback', () => {
       const world = WorldManager.createNew(
         'Nested operations',

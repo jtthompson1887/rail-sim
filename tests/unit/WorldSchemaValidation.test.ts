@@ -357,7 +357,7 @@ describe('world schema validation', () => {
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
     }],
-  ])('rejects schema 8 with %s', (_label, mutate) => {
+  ])('rejects schema 9 with %s', (_label, mutate) => {
     const raw = currentWorld();
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -407,7 +407,7 @@ describe('world schema validation', () => {
       world.constructionRevision = Number.MAX_SAFE_INTEGER;
       world.operationsRevision = 1;
     }],
-  ])('rejects schema 8 with %s', (_label, mutate) => {
+  ])('rejects schema 9 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw).compatible).toBe(false);
@@ -569,6 +569,63 @@ describe('world schema validation', () => {
     };
 
     expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+  });
+
+  it.each([
+    [
+      'aggregate hopper',
+      'aggregate-hopper-set',
+      'limestone-aggregate',
+      120,
+      'managed-forest',
+    ],
+    [
+      'covered cement set',
+      'covered-cement-set',
+      'cement',
+      80,
+      'managed-forest',
+    ],
+  ] as const)('accepts a full compatible %s consignment', (
+    _label,
+    freightSetId,
+    productId,
+    units,
+    originFacilityId,
+  ) => {
+    const raw = worldWithTrain();
+    raw.trains[0].freightSetId = freightSetId;
+    raw.trains[0].cargo = {
+      productId,
+      units,
+      loadedUnits: units,
+      originFacilityId,
+    };
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+  });
+
+  it.each([
+    ['aggregate-hopper-set', 'limestone-aggregate', 121, 'managed-forest'],
+    ['covered-cement-set', 'cement', 81, 'managed-forest'],
+    ['aggregate-hopper-set', 'cement', 1, 'managed-forest'],
+    ['covered-cement-set', 'limestone-aggregate', 1, 'managed-forest'],
+  ] as const)('rejects invalid mineral cargo for %s', (
+    freightSetId,
+    productId,
+    units,
+    originFacilityId,
+  ) => {
+    const raw = worldWithTrain();
+    raw.trains[0].freightSetId = freightSetId;
+    raw.trains[0].cargo = {
+      productId,
+      units,
+      loadedUnits: units,
+      originFacilityId,
+    };
+
+    expect(validateWorldData(raw).compatible).toBe(false);
   });
 
   it.each([
@@ -783,7 +840,7 @@ describe('world schema validation', () => {
     ['regional factor above its bound', (world: any) => {
       world.economy.market.regionalDemandBpsByProduct.logs = 12_001;
     }],
-  ])('rejects schema 8 with %s', (_label, mutate) => {
+  ])('rejects schema 9 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -843,7 +900,7 @@ describe('world schema validation', () => {
     ['ledger cash mismatch', (world: any) => {
       world.company.cash -= 1;
     }],
-  ])('rejects schema 8 company state with %s', (_label, mutate) => {
+  ])('rejects schema 9 company state with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -858,7 +915,7 @@ describe('world schema validation', () => {
     expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
   });
 
-  it('rejects scenarios as removed schema-8 state', () => {
+  it('rejects scenarios as removed schema-9 state', () => {
     const raw = currentWorld() as any;
     raw.scenarios = [];
     expect(validateWorldData(raw).compatible).toBe(false);
@@ -900,7 +957,7 @@ describe('world schema validation', () => {
     ['verticalProfile'],
     ['structures'],
     ['paidBuildCost'],
-  ])('rejects a schema-8 track missing required %s', (field) => {
+  ])('rejects a schema-9 track missing required %s', (field) => {
     const raw = currentWorld() as any;
     const track: any = {
       geometryVersion: 1,

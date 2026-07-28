@@ -112,7 +112,7 @@ describe('WorldContentLoader exact track restoration', () => {
     expect(TrackSerializer.toTrackDef(restoredTracks[0]).paidBuildCost).toBe(0);
   });
 
-  it('does not generate starter content for an empty schema-8 world', () => {
+  it('does not generate starter content for an empty schema-9 world', () => {
     WorldManager.createNew('Empty world', 'real-terrain-alpha');
     const trackManager = { addTrack: jest.fn(), getTrack: jest.fn() };
     const trainManager = {

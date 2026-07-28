@@ -65,6 +65,8 @@ const makeInput = (
       profitableLogDeliveryCompleted: boolean;
       developmentGrantAwarded: boolean;
       profitableStructuralTimberDeliveryCompleted: boolean;
+      profitableLimestoneDeliveryCompleted: boolean;
+      profitableCementDeliveryCompleted: boolean;
     };
     runtime: readonly TrainRuntimeSnapshot[];
   }> = {},
@@ -1512,6 +1514,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableLogDeliveryCompleted: true,
       developmentGrantAwarded: true,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     });
     expect(grantEntries).toEqual([{
       id: 8,
@@ -1610,6 +1614,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableLogDeliveryCompleted: false,
       developmentGrantAwarded: false,
       profitableStructuralTimberDeliveryCompleted: true,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     });
     expect(result.company.ledger.filter(
       ({ category }) => category === 'contract-bonus',
@@ -1677,6 +1683,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableLogDeliveryCompleted: true,
       developmentGrantAwarded: true,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);
@@ -1784,6 +1792,26 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.economy).toEqual(before.economy);
     expect(result.trains).toEqual(before.trains);
     expect(result.freightProgress).toEqual(before.freightProgress);
+    expect(result.completedDeliveries).toEqual([]);
+  });
+
+  it.each([
+    'profitableLimestoneDeliveryCompleted',
+    'profitableCementDeliveryCompleted',
+  ] as const)('rejects progress missing %s', (field) => {
+    const input = loadedAtSawmill(10);
+    input.trains[0].cargo!.loadedUnits = 60;
+    delete (input.freightProgress as any)[field];
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result.changed).toBe(false);
+    expect(result.company).toEqual(before.company);
+    expect(result.economy).toEqual(before.economy);
+    expect(result.trains).toEqual(before.trains);
+    expect(result.freightProgress).toEqual(before.freightProgress);
+    expect(result.statuses).toEqual([]);
     expect(result.completedDeliveries).toEqual([]);
   });
 
@@ -1936,6 +1964,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableLogDeliveryCompleted: true,
       developmentGrantAwarded: true,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);

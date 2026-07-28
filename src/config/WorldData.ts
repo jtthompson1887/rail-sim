@@ -899,7 +899,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   const trainIds = new Set<string>();
   for (const train of raw.trains) {
     if (!isTrain(train, trackIds, facilityIds, trainIds)) {
-      return incompatible(raw, 'data does not match schema version 8.');
+      return incompatible(raw, 'data does not match schema version 9.');
     }
   }
 

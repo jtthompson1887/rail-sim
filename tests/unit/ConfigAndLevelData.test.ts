@@ -228,12 +228,16 @@ describe('WorldData current-schema validation', () => {
       ),
       schemaVersion: 8,
     } as any;
+    delete world.freightProgress.profitableLimestoneDeliveryCompleted;
+    delete world.freightProgress.profitableCementDeliveryCompleted;
+    const before = JSON.stringify(world);
 
     expect(validateWorldData(world)).toEqual(expect.objectContaining({
       compatible: false,
       action: 'Start a new world.',
     }));
     expect(world.schemaVersion).toBe(8);
+    expect(JSON.stringify(world)).toBe(before);
   });
 
   it('rejects legacy passenger keys instead of backfilling freight authority', () => {
