@@ -83,7 +83,11 @@ export class PlaceVehicleTool implements IEditorTool {
   }
 
   cancel(): void {
-    this.clearPendingPurchase();
+    if (!this.clearPendingPurchase()) return;
+    this.publishState(
+      null,
+      formatFreightPurchaseRemedy('no-track', this.freightSetId),
+    );
   }
 
   wantsPointerButton(button: number): boolean {
@@ -277,11 +281,15 @@ export class PlaceVehicleTool implements IEditorTool {
     this.ghostGraphics.strokePath();
   }
 
-  private clearPendingPurchase(): void {
+  private clearPendingPurchase(): boolean {
+    const cleared = this.purchaseInFlight
+      || this.currentQuote !== null
+      || this.lastPlacement !== null;
     this.ghostGraphics.clear();
     this.purchaseInFlight = false;
     this.currentQuote = null;
     this.lastPlacement = null;
+    return cleared;
   }
 
   private readonly purchaseResultHandler = (

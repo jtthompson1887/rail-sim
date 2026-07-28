@@ -47,7 +47,7 @@ function makeQuote(
   };
 }
 
-describe('PlaceVehicleTool flatbed purchase gesture', () => {
+describe('PlaceVehicleTool selected freight-set purchase gesture', () => {
   let scene: any;
   let trackManager: any;
   let trainManager: any;
@@ -272,6 +272,28 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     expect(tool.setFreightSetId('flatbed-freight-set')).toBe(true);
 
     expect(tool.canConfirmQuote(issued)).toBe(false);
+  });
+
+  it('publishes one cleared selected-set state when cancellation and deactivation invalidate a quote', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const issued = Object.freeze(makeQuote());
+    quote.mockReturnValue(issued);
+    const state = jest.fn();
+    EventBus.on('ui:freight-purchase-state', state);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    tool.cancel();
+    tool.deactivate();
+
+    expect(tool.canConfirmQuote(issued)).toBe(false);
+    expect(state).toHaveBeenCalledTimes(2);
+    expect(state).toHaveBeenLastCalledWith({
+      freightSetId: 'flatbed-freight-set',
+      quote: null,
+      cash: WorldManager.world!.company.cash,
+      message: 'Click on player track to place the General Flatbed Set',
+    });
+    EventBus.off('ui:freight-purchase-state', state);
   });
 
   it('switches among supported sets and clears the old pending quote before another placement', () => {

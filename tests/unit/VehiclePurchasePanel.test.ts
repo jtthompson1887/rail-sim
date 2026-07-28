@@ -195,10 +195,12 @@ describe('VehiclePurchasePanel', () => {
     expect(aggregate.textContent).toContain('£110,000');
     expect(aggregate.textContent).toContain('120 tonnes');
     expect(aggregate.textContent).toContain('Limestone Aggregate');
+    expect(aggregate.textContent).toContain('£20 / active tick');
     expect(cement.textContent).toContain('Covered Cement Set');
     expect(cement.textContent).toContain('£105,000');
     expect(cement.textContent).toContain('80 tonnes');
     expect(cement.textContent).toContain('Cement');
+    expect(cement.textContent).toContain('£22 / active tick');
     expect([flatbed, aggregate, cement].map(
       (button) => [button.tagName, button.type, button.tabIndex],
     )).toEqual([
@@ -320,6 +322,7 @@ describe('VehiclePurchasePanel', () => {
     expect(root.style.left).toBe('56px');
     expect(root.style.right).toBe('8px');
     expect(root.style.maxHeight).not.toBe('');
+    expect(root.style.overflow).toBe('auto');
     expect(root.textContent).toContain(
       'Insufficient cash for General Flatbed Set',
     );
