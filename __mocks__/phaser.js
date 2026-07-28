@@ -449,7 +449,14 @@ function makeScene(overrides = {}) {
     _alpha: 0.5,
   };
   const text = { setOrigin: jest.fn().mockReturnThis(), setText: jest.fn().mockReturnThis() };
-  const image = { setOrigin: jest.fn().mockReturnThis(), setScale: jest.fn().mockReturnThis(), setDepth: jest.fn().mockReturnThis(), rotation: 0 };
+  const image = {
+    setOrigin: jest.fn().mockReturnThis(),
+    setScale: jest.fn().mockReturnThis(),
+    setDepth: jest.fn().mockReturnThis(),
+    setAlpha: jest.fn().mockReturnThis(),
+    setTint: jest.fn().mockReturnThis(),
+    rotation: 0,
+  };
   const graphics = new Graphics(scene);
   graphics.setDepth = jest.fn().mockReturnThis();
   const mockBody = makeMatterBody();
