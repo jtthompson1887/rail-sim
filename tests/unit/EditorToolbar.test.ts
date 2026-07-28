@@ -60,6 +60,30 @@ describe('EditorToolbar lifecycle', () => {
     },
   );
 
+  it('visually dims disabled construction tool buttons and suppresses hover feedback', () => {
+    const { scene } = makeUiScene();
+    const toolbar = new EditorToolbar(scene);
+    const disabledTools = ['completer', 'junction', 'generator', 'eraser'] as const;
+    const buttons = (toolbar as any).toolButtons as any[];
+    toolbar.destroy();
+
+    for (const tool of disabledTools) {
+      const ref = buttons.find((b) => b.tool === tool);
+      expect(ref).toBeDefined();
+      expect(ref.bg.setAlpha).toHaveBeenLastCalledWith(0.45);
+      expect(ref.iconText.setAlpha).toHaveBeenLastCalledWith(0.45);
+      expect(ref.labelText.setAlpha).toHaveBeenLastCalledWith(0.45);
+      expect(ref.shortcutText.setAlpha).toHaveBeenLastCalledWith(0.45);
+      expect(ref.bg.setInteractive).toHaveBeenCalledWith({ useHandCursor: false });
+
+      const fillCallsBefore = ref.bg.setFillStyle.mock.calls.length;
+      simulatePointer(ref.bg, 'pointerover');
+      expect(ref.bg.setFillStyle).toHaveBeenCalledTimes(fillCallsBefore);
+      simulatePointer(ref.bg, 'pointerout');
+      expect(ref.bg.setFillStyle).toHaveBeenCalledTimes(fillCallsBefore);
+    }
+  });
+
   it('enables the economy-aware place-track tool', () => {
     const scene = makeScene();
     const toolbar = new EditorToolbar(scene);
