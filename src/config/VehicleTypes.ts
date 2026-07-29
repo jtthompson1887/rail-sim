@@ -1,5 +1,7 @@
 import type { PIDController } from '../utils/math';
 import type RailTrack from '../entities/RailTrack';
+import { GameConfig } from './GameConfig';
+import type { RailVehicleDefinition } from '../physics/RailVehicleModel';
 
 /**
  * VehicleType – discriminated union of all placeable vehicle kinds.
@@ -21,7 +23,31 @@ export interface VehicleTypeInfo {
   passengerCapacity: number;
   hasEnginePower: boolean;
   defaultMassScale: number;
+  renderScale: { x: number; y: number };
+  physics: RailVehicleDefinition;
 }
+
+export const LOCOMOTIVE_PHYSICS: RailVehicleDefinition = {
+  id: 'locomotive',
+  massKg: GameConfig.VEHICLES.LOCOMOTIVE.MASS_KG,
+  bodyLength: GameConfig.VEHICLES.LOCOMOTIVE.BODY_LENGTH_WORLD_UNITS,
+  wheelbase: GameConfig.VEHICLES.LOCOMOTIVE.WHEELBASE_WORLD_UNITS,
+  frontCouplerOffset: GameConfig.VEHICLES.LOCOMOTIVE.COUPLER_OFFSET_WORLD_UNITS,
+  rearCouplerOffset: GameConfig.VEHICLES.LOCOMOTIVE.COUPLER_OFFSET_WORLD_UNITS,
+  maxTractiveEffortN: GameConfig.VEHICLES.LOCOMOTIVE.MAX_TRACTIVE_EFFORT_N,
+  maxBrakeForceN: GameConfig.VEHICLES.LOCOMOTIVE.MAX_BRAKE_FORCE_N,
+};
+
+export const PASSENGER_CARRIAGE_PHYSICS: RailVehicleDefinition = {
+  id: 'passenger-carriage',
+  massKg: GameConfig.VEHICLES.PASSENGER_CARRIAGE.MASS_KG,
+  bodyLength: GameConfig.VEHICLES.PASSENGER_CARRIAGE.BODY_LENGTH_WORLD_UNITS,
+  wheelbase: GameConfig.VEHICLES.PASSENGER_CARRIAGE.WHEELBASE_WORLD_UNITS,
+  frontCouplerOffset: GameConfig.VEHICLES.PASSENGER_CARRIAGE.COUPLER_OFFSET_WORLD_UNITS,
+  rearCouplerOffset: GameConfig.VEHICLES.PASSENGER_CARRIAGE.COUPLER_OFFSET_WORLD_UNITS,
+  maxTractiveEffortN: GameConfig.VEHICLES.PASSENGER_CARRIAGE.MAX_TRACTIVE_EFFORT_N,
+  maxBrakeForceN: GameConfig.VEHICLES.PASSENGER_CARRIAGE.MAX_BRAKE_FORCE_N,
+};
 
 /** Registry of known vehicle types.  Ordered for UI display. */
 export const VEHICLE_TYPE_REGISTRY: VehicleTypeInfo[] = [
@@ -32,6 +58,11 @@ export const VEHICLE_TYPE_REGISTRY: VehicleTypeInfo[] = [
     passengerCapacity: 20,
     hasEnginePower: true,
     defaultMassScale: 1.0,
+    renderScale: {
+      x: GameConfig.VEHICLES.LOCOMOTIVE.RENDER_SCALE_X,
+      y: GameConfig.VEHICLES.LOCOMOTIVE.RENDER_SCALE_Y,
+    },
+    physics: LOCOMOTIVE_PHYSICS,
   },
   {
     id: 'passenger-carriage',
@@ -40,12 +71,21 @@ export const VEHICLE_TYPE_REGISTRY: VehicleTypeInfo[] = [
     passengerCapacity: 40,
     hasEnginePower: false,
     defaultMassScale: 0.8,
+    renderScale: {
+      x: GameConfig.VEHICLES.PASSENGER_CARRIAGE.RENDER_SCALE_X,
+      y: GameConfig.VEHICLES.PASSENGER_CARRIAGE.RENDER_SCALE_Y,
+    },
+    physics: PASSENGER_CARRIAGE_PHYSICS,
   },
 ];
 
 /** Lookup a VehicleTypeInfo by its id. */
 export function getVehicleTypeInfo(type: VehicleType): VehicleTypeInfo | undefined {
   return VEHICLE_TYPE_REGISTRY.find((v) => v.id === type);
+}
+
+export function getRailVehicleDefinition(type: VehicleType): RailVehicleDefinition | undefined {
+  return getVehicleTypeInfo(type)?.physics;
 }
 
 /**
