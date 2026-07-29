@@ -183,6 +183,17 @@ export class TrackArcLengthIndex {
     return nearestArcDistance;
   }
 
+  distanceAtParameter(rawT: number): number {
+    const t = clamp(rawT, 0, 1);
+    if (t <= 0) return 0;
+    if (t >= 1) return this.length;
+
+    const lastIndex = this.samples.length - 1;
+    const leftIndex = Math.min(lastIndex - 1, Math.floor(t * lastIndex));
+    const left = this.samples[leftIndex];
+    return left.distance + this.arcLengthBetween(left.t, t);
+  }
+
   private refineT(startT: number, endT: number, fraction: number): number {
     if (fraction <= 0) return startT;
     if (fraction >= 1) return endT;

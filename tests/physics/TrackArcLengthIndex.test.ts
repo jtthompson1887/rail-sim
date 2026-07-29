@@ -55,6 +55,14 @@ describe('TrackArcLengthIndex', () => {
     expect(index.distanceForPoint({ x: 350, y: 0 })).toBeCloseTo(300, 8);
   });
 
+  it('maps geometry parameters to travelled distance on non-uniform rail', () => {
+    const index = new TrackArcLengthIndex(nonUniformStraight, 4);
+
+    expect(index.distanceAtParameter(0.5)).toBeCloseTo(60, 6);
+    expect(index.distanceAtParameter(-1)).toBe(0);
+    expect(index.distanceAtParameter(2)).toBeCloseTo(300, 8);
+  });
+
   it('rejects non-finite geometry and invalid sample spacing', () => {
     expect(() => new TrackArcLengthIndex({
       ...curved,
