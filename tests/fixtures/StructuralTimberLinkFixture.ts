@@ -181,10 +181,22 @@ export const makeEconomyTickBenchmarkFixture =
   const cementWorks = world.economy.facilities.find(
     ({ definitionId }) => definitionId === 'cement-works',
   );
+  const port = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'port-interchange',
+  );
   const prefab = world.economy.facilities.find(
     ({ definitionId }) => definitionId === 'prefabrication-plant',
   );
-  if (!forest || !sawmill || !quarry || !cementWorks || !prefab) {
+  const town = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'town-construction-market',
+  );
+  if (!forest
+    || !sawmill
+    || !quarry
+    || !cementWorks
+    || !port
+    || !prefab
+    || !town) {
     throw new Error('Benchmark freight facilities are missing');
   }
   forest.inventories.logs.quantity = 120;
@@ -231,7 +243,7 @@ export const makeEconomyTickBenchmarkFixture =
   });
   const structuralTimber = (): TrainDef['cargo'] => ({
     productId: 'structural-timber',
-    units: 20,
+    units: 60,
     loadedUnits: 60,
     originFacilityId: sawmill.id,
   });
@@ -242,6 +254,22 @@ export const makeEconomyTickBenchmarkFixture =
     units,
     loadedUnits: 80,
     originFacilityId: cementWorks.id,
+  });
+  const steel = (
+    units: number,
+  ): TrainDef['cargo'] => ({
+    productId: 'steel',
+    units,
+    loadedUnits: 60,
+    originFacilityId: port.id,
+  });
+  const buildingModules = (
+    units: number,
+  ): TrainDef['cargo'] => ({
+    productId: 'building-modules',
+    units,
+    loadedUnits: 4,
+    originFacilityId: prefab.id,
   });
   const inputs: BenchmarkTrainInput[] = [
     {
@@ -265,12 +293,22 @@ export const makeEconomyTickBenchmarkFixture =
       runtime: stopped(0.375, quarry.x),
     },
     {
+      state: 'loading',
+      train: makeBenchmarkTrain(
+        'loading-c',
+        'flatbed-freight-set',
+        0.625,
+        null,
+      ),
+      runtime: stopped(0.625, port.x),
+    },
+    {
       state: 'transit',
       train: makeBenchmarkTrain(
         'transit-a',
         'flatbed-freight-set',
         0.42,
-        logs(40),
+        logs(60),
       ),
       runtime: {
         ...stopped(0.42, -192),
@@ -284,7 +322,7 @@ export const makeEconomyTickBenchmarkFixture =
         'transit-b',
         'aggregate-hopper-set',
         0.46,
-        limestoneAggregate(40),
+        limestoneAggregate(120),
       ),
       runtime: {
         ...stopped(0.46, -96),
@@ -298,7 +336,7 @@ export const makeEconomyTickBenchmarkFixture =
         'unloading-a',
         'aggregate-hopper-set',
         0.5,
-        limestoneAggregate(30),
+        limestoneAggregate(120),
       ),
       runtime: stopped(0.5, cementWorks.x),
     },
@@ -308,9 +346,39 @@ export const makeEconomyTickBenchmarkFixture =
         'unloading-b',
         'covered-cement-set',
         0.75,
-        cement(30),
+        cement(80),
       ),
       runtime: stopped(0.75, prefab.x),
+    },
+    {
+      state: 'unloading',
+      train: makeBenchmarkTrain(
+        'unloading-c',
+        'flatbed-freight-set',
+        0.25,
+        logs(60),
+      ),
+      runtime: stopped(0.25, sawmill.x),
+    },
+    {
+      state: 'unloading',
+      train: makeBenchmarkTrain(
+        'unloading-d',
+        'flatbed-freight-set',
+        0.75,
+        steel(60),
+      ),
+      runtime: stopped(0.75, prefab.x),
+    },
+    {
+      state: 'unloading',
+      train: makeBenchmarkTrain(
+        'unloading-e',
+        'flatbed-freight-set',
+        0.875,
+        buildingModules(4),
+      ),
+      runtime: stopped(0.875, town.x),
     },
     {
       state: 'idle',
