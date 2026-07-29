@@ -1475,6 +1475,14 @@ export default class WorldScene extends Phaser.Scene {
   private activateCreateMode(): void {
     for (const train of this.trainManager.trains) {
       train.enginePower = 0;
+      const body = train.getMatterBody();
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
+    }
+    for (const carriage of this.trainManager.carriages) {
+      const body = carriage.getMatterBody();
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
     }
     this.cameraController.stopFollow();
     this.cameraController.setInputLockOwner(

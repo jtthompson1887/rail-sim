@@ -8,6 +8,8 @@ export default class HUDScene extends Phaser.Scene {
   private trainsText!: Phaser.GameObjects.Text;
   private modeToggleBtn!: Phaser.GameObjects.Text;
   private modeLabelText!: Phaser.GameObjects.Text;
+  private mobileControls: Phaser.GameObjects.GameObject[] = [];
+  private mobileThrottleHeld = false;
 
   constructor() {
     super({ key: 'HUDScene' });
@@ -69,6 +71,11 @@ export default class HUDScene extends Phaser.Scene {
     if (this.sys.game.device.input.touch) {
       this.createMobileControls();
     }
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.destroyMobileControls(true);
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    });
   }
 
   private toggleMode(): void {
@@ -87,8 +94,59 @@ export default class HUDScene extends Phaser.Scene {
    * Create on-screen throttle buttons for touch/mobile devices.
    * Sizes are proportional to the viewport so buttons remain easily tappable.
    */
-  private createMobileControls(): void {
-    const { width, height } = this.scale;
+  private layoutHud(width: number, height: number): void {
+    const mobile = isMobileWidth(width);
+    const sidebarW = scalePx(72, width, height, mobile ? 44 : 56);
+    this.timeText
+      .setPosition(12, height - 48)
+      .setFontSize(responsiveFontSize(20, width, height, 12, 20))
+      .setPadding({ left: 8, right: 8, top: 5, bottom: 5 });
+    this.trainsText
+      .setPosition(12, height - 84)
+      .setFontSize(responsiveFontSize(18, width, height, 11, 18));
+    this.modeLabelText
+      .setPosition(sidebarW + 8, 8)
+      .setFontSize(responsiveFontSize(22, width, height, 13, 22))
+      .setPadding({ left: 8, right: 8, top: 5, bottom: 5 });
+    this.modeToggleBtn
+      .setPosition(width - 12, 8)
+      .setFontSize(responsiveFontSize(26, width, height, 14, 26))
+      .setPadding({
+        left: mobile ? 10 : 16,
+        right: mobile ? 10 : 16,
+        top: mobile ? 6 : 8,
+        bottom: mobile ? 6 : 8,
+      });
+  }
+
+  private emitMobileThrottle(value: -1 | 0 | 1): void {
+    this.mobileThrottleHeld = value !== 0;
+    EventBus.emit('mobile:throttle', {
+      value,
+      hardStop: false,
+    });
+  }
+
+  private destroyMobileControls(neutralize: boolean): void {
+    if (neutralize && this.mobileThrottleHeld) {
+      this.emitMobileThrottle(0);
+    }
+    this.mobileControls.forEach((control) => control.destroy());
+    this.mobileControls = [];
+  }
+
+  private handleResize(gameSize: Phaser.Structs.Size): void {
+    this.layoutHud(gameSize.width, gameSize.height);
+    if (this.sys.game.device.input.touch) {
+      this.destroyMobileControls(true);
+      this.createMobileControls(gameSize.width, gameSize.height);
+    }
+  }
+
+  private createMobileControls(
+    width = this.scale.width,
+    height = this.scale.height,
+  ): void {
 
     // Button size: 15% of viewport width, but at least MIN_TOUCH_TARGET_PX and
     // no more than 120 px, so they're comfortably tappable on any screen.
@@ -106,13 +164,13 @@ export default class HUDScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(200)
       .setInteractive({ useHandCursor: true });
-    this.add
+    const accelIcon = this.add
       .text(btnX, accelY, '▲', { fontFamily: 'Verdana', fontSize: iconFontSize, color: '#ffffff' })
       .setOrigin(0.5).setScrollFactor(0).setDepth(201);
 
-    accelBtn.on('pointerdown', () => EventBus.emit('mobile:throttle', { value: 1 }));
-    accelBtn.on('pointerup',   () => EventBus.emit('mobile:throttle', { value: 0 }));
-    accelBtn.on('pointerout',  () => EventBus.emit('mobile:throttle', { value: 0 }));
+    accelBtn.on('pointerdown', () => this.emitMobileThrottle(1));
+    accelBtn.on('pointerup',   () => this.emitMobileThrottle(0));
+    accelBtn.on('pointerout',  () => this.emitMobileThrottle(0));
 
     const brakeY = height - margin - btnSize / 2;
     const brakeBtn = this.add
@@ -121,17 +179,29 @@ export default class HUDScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(200)
       .setInteractive({ useHandCursor: true });
-    this.add
+    const brakeIcon = this.add
       .text(btnX, brakeY, '▼', { fontFamily: 'Verdana', fontSize: iconFontSize, color: '#ffffff' })
       .setOrigin(0.5).setScrollFactor(0).setDepth(201);
 
-    brakeBtn.on('pointerdown', () => EventBus.emit('mobile:throttle', { value: -1 }));
-    brakeBtn.on('pointerup',   () => EventBus.emit('mobile:throttle', { value: 0 }));
-    brakeBtn.on('pointerout',  () => EventBus.emit('mobile:throttle', { value: 0 }));
+    brakeBtn.on('pointerdown', () => this.emitMobileThrottle(-1));
+    brakeBtn.on('pointerup',   () => this.emitMobileThrottle(0));
+    brakeBtn.on('pointerout',  () => this.emitMobileThrottle(0));
 
-    this.add.text(btnX, accelY - btnSize / 2 - 6, 'THROTTLE', {
+    const throttleLabel = this.add.text(
+      btnX,
+      accelY - btnSize / 2 - 6,
+      'THROTTLE',
+      {
       fontFamily: 'Verdana', fontSize: labelFontSize, color: '#d2e6ff',
-    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(200);
+      },
+    ).setOrigin(0.5, 1).setScrollFactor(0).setDepth(200);
+    this.mobileControls = [
+      accelBtn,
+      accelIcon,
+      brakeBtn,
+      brakeIcon,
+      throttleLabel,
+    ];
   }
 
   update(): void {

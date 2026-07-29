@@ -35,7 +35,7 @@ interface EventMap {
   'level:complete': { levelId: string; score: number };
   'audio:play-sfx': { key: string };
   'audio:play-bgm': { key: string };
-  'mobile:throttle': { value: number };
+  'mobile:throttle': { value: number; hardStop: boolean };
   // World / mode events
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };

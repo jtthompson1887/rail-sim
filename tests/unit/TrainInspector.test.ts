@@ -180,8 +180,9 @@ describe('TrainInspector', () => {
 
   it('emits safe mobile throttle controls and stops their pointer gestures', () => {
     panel.setState(inspection());
-    const values: number[] = [];
-    const listener = ({ value }: { value: number }) => values.push(value);
+    const intents: Array<{ value: number; hardStop?: boolean }> = [];
+    const listener = (intent: { value: number; hardStop?: boolean }) =>
+      intents.push(intent);
     EventBus.on('mobile:throttle', listener);
     const root = document.querySelector(
       '[data-testid="train-inspector"]',
@@ -199,7 +200,11 @@ describe('TrainInspector', () => {
       expect(document.activeElement).not.toBe(button);
     }
 
-    expect(values).toEqual([-1, 0, 1]);
+    expect(intents).toEqual([
+      { value: -1, hardStop: false },
+      { value: 0, hardStop: true },
+      { value: 1, hardStop: false },
+    ]);
     expect(bubbled).not.toHaveBeenCalled();
     EventBus.off('mobile:throttle', listener);
     document.body.removeEventListener('pointerdown', bubbled);
@@ -279,7 +284,7 @@ describe('TrainInspector', () => {
     ) as HTMLElement;
     expect(root.dataset.layout).toBe('mobile');
     expect(root.style.left).toBe('56px');
-    expect(root.style.right).toBe('8px');
+    expect(root.style.right).toBe('calc(8px + 19vw)');
     expect(root.style.maxHeight).not.toBe('');
     const throttle = root.querySelector(
       '[aria-label="Train throttle"]',
@@ -297,7 +302,7 @@ describe('TrainInspector', () => {
     });
     window.dispatchEvent(new Event('resize'));
     expect(root.style.left).toBe('calc(28px + 50vw)');
-    expect(root.style.right).toBe('8px');
+    expect(root.style.right).toBe('calc(8px + 19vw)');
 
     panel.destroy();
     EventBus.emit('ui:train-inspection', { inspection: inspection() });

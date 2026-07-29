@@ -2187,6 +2187,51 @@ describe('WorldScene disabled construction bypass guards', () => {
     saveSpy.mockRestore();
   });
 
+  it('stops live train and carriage motion before saving Create mode', () => {
+    const scene = new WorldScene();
+    const trainBody = {
+      setVelocity: jest.fn(),
+      setAngularVelocity: jest.fn(),
+    };
+    const carriageBody = {
+      setVelocity: jest.fn(),
+      setAngularVelocity: jest.fn(),
+    };
+    const train = {
+      enginePower: 1,
+      getMatterBody: jest.fn().mockReturnValue(trainBody),
+    };
+    const carriage = {
+      getMatterBody: jest.fn().mockReturnValue(carriageBody),
+    };
+    (scene as any).activeTool = 'none';
+    (scene as any).selectedFacilityId = null;
+    (scene as any).facilityViews = [];
+    (scene as any).trainManager = {
+      trains: [train],
+      carriages: [carriage],
+    };
+    (scene as any).cameraController = {
+      stopFollow: jest.fn(),
+      setInputLockOwner: jest.fn(),
+    };
+    const save = jest.fn();
+    (scene as any).saveWorldAndReport = save;
+
+    (scene as any).activateCreateMode();
+
+    expect(train.enginePower).toBe(0);
+    expect(trainBody.setVelocity).toHaveBeenCalledWith(0, 0);
+    expect(trainBody.setAngularVelocity).toHaveBeenCalledWith(0);
+    expect(carriageBody.setVelocity).toHaveBeenCalledWith(0, 0);
+    expect(carriageBody.setAngularVelocity).toHaveBeenCalledWith(0);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(trainBody.setVelocity.mock.invocationCallOrder[0])
+      .toBeLessThan(save.mock.invocationCallOrder[0]);
+    expect(carriageBody.setVelocity.mock.invocationCallOrder[0])
+      .toBeLessThan(save.mock.invocationCallOrder[0]);
+  });
+
   it('gives camera ownership to Operate mode', () => {
     const scene = new WorldScene();
     (scene as any).activeEditorTool = { cancel: jest.fn() };

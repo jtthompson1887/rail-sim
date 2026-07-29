@@ -95,7 +95,10 @@ export class TrainInspector {
         'padding:8px 4px;border:1px solid #4ad5ff;border-radius:4px;background:#123c55;color:#fff';
       button.addEventListener('click', () => {
         button.blur();
-        EventBus.emit('mobile:throttle', { value });
+        EventBus.emit('mobile:throttle', {
+          value,
+          hardStop: value === 0,
+        });
       });
       this.controls.append(button);
     }
@@ -240,7 +243,8 @@ export class TrainInspector {
       this.root.style.left = shortWide
         ? 'calc(50vw + 28px)'
         : '56px';
-      this.root.style.right = '8px';
+      // Reserve the on-canvas throttle gutter so touch input reaches Phaser.
+      this.root.style.right = 'calc(19vw + 8px)';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';
       this.root.style.width = 'auto';

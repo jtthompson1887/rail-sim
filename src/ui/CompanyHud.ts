@@ -75,6 +75,7 @@ export class CompanyHud {
       `${product?.displayName ?? 'Unknown product'} delivered to `
       + `${destination?.displayName ?? 'Unknown destination'}`
       + ` · Revenue ${CASH.format(delivery.revenue)}`
+      + ` · Running ${CASH.format(delivery.runningCost)}`
       + ` · ${resultText(delivery.operatingProfit)}`;
     this.lastDelivery.dataset.tone = tone;
     this.lastDelivery.style.color = TONE_COLOURS[tone];

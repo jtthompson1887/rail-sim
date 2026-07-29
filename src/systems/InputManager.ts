@@ -40,8 +40,13 @@ export class InputManager {
   private clickedGameObject: boolean = false;
   /** -1 = brake/reverse, 0 = neutral, 1 = accelerate — driven by mobile buttons */
   private mobileThrottle: number = 0;
-  private readonly mobileThrottleHandler = (data: { value: number }) => {
+  private mobileStopRequested = false;
+  private readonly mobileThrottleHandler = (data: {
+    value: number;
+    hardStop: boolean;
+  }) => {
     this.mobileThrottle = data.value;
+    this.mobileStopRequested = data.value === 0 && data.hardStop;
   };
   private clickHandlingSetup: boolean = false;
 
@@ -147,8 +152,10 @@ export class InputManager {
     if (isGameplayInputFocused()) return;
     // Keyboard input takes priority over mobile throttle buttons
     if (this.wKey.isDown) {
+      this.mobileStopRequested = false;
       selectedTrain.enginePower = GameConfig.TRAIN.ENGINE_POWER;
     } else if (this.sKey.isDown) {
+      this.mobileStopRequested = false;
       selectedTrain.enginePower = -GameConfig.TRAIN.ENGINE_POWER;
     } else if (this.mobileThrottle > 0) {
       selectedTrain.enginePower = GameConfig.TRAIN.ENGINE_POWER;
@@ -156,6 +163,12 @@ export class InputManager {
       selectedTrain.enginePower = -GameConfig.TRAIN.ENGINE_POWER;
     } else {
       selectedTrain.enginePower = 0;
+      if (this.mobileStopRequested) {
+        const body = selectedTrain.getMatterBody();
+        body.setVelocity(0, 0);
+        body.setAngularVelocity(0);
+        this.mobileStopRequested = false;
+      }
     }
   }
 }
