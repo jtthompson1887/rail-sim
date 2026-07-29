@@ -12,7 +12,7 @@ import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -31,6 +31,8 @@ function makeWorld(id: string, name: string, seed: string, timestamp: number): W
       profitableLogDeliveryCompleted: false,
       developmentGrantAwarded: false,
       profitableStructuralTimberDeliveryCompleted: false,
+      profitableLimestoneDeliveryCompleted: false,
+      profitableCementDeliveryCompleted: false,
     },
     starterOpportunity: makeStarterOpportunity(seed),
     tracks: [],
@@ -47,7 +49,7 @@ describe('SaveService', () => {
     localStorage.clear();
   });
 
-  it('preserves schema-8 revisions, progress, economy, ledger cash, and paid track value exactly without repair', () => {
+  it('preserves schema-9 revisions, progress, economy, ledger cash, and paid track value exactly without repair', () => {
     const world = makeWorld('economy-world', 'Economy', 'cash-seed', 123);
     world.tracks.push({
       geometryVersion: 1,
@@ -77,7 +79,7 @@ describe('SaveService', () => {
     expect(loaded.economy).toEqual(world.economy);
     expect(loaded.constructionRevision).toBe(0);
     expect((loaded as any).operationsRevision).toBe(0);
-    expect(loaded.schemaVersion).toBe(8);
+    expect(loaded.schemaVersion).toBe(9);
     expect((loaded as any).freightProgress).toEqual(world.freightProgress);
     expect(loaded).not.toHaveProperty('firstRouteProgress');
     expect(loaded.tracks[0].paidBuildCost).toBe(12_345);

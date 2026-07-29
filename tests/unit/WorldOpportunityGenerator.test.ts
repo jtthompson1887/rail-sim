@@ -2,6 +2,7 @@ import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
   OPPORTUNITY_CAMERA_PADDING,
+  WorldGenerationConfig,
 } from '../../src/config/WorldGeneration';
 import {
   WorldOpportunityGenerator,
@@ -33,8 +34,12 @@ import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { STARTER_ROUTE_RESERVE } from '../../src/freight/FreightSetCatalog';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
+import { MAX_STARTER_CORRIDOR_COST } from '../../src/config/FreightProgression';
 
 const { makeScene } = require('../../__mocks__/phaser');
+
+const MAX_ACCEPTANCE_EVALUATIONS = MAX_OPPORTUNITY_ATTEMPTS
+  * WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -249,6 +254,10 @@ describe('WorldOpportunityGenerator', () => {
     ).generate(config);
 
     expect(reject).toHaveBeenCalled();
+    expect(reject.mock.calls.length)
+      .toBeGreaterThan(MAX_OPPORTUNITY_ATTEMPTS);
+    expect(reject.mock.calls.length)
+      .toBeLessThanOrEqual(MAX_ACCEPTANCE_EVALUATIONS);
     expect(result).toEqual({
       ok: false,
       error: {
@@ -289,7 +298,7 @@ describe('WorldOpportunityGenerator', () => {
     },
     {
       seed: 'task15-manual-larch',
-      expectedCost: 64_106,
+      expectedCost: 146_372,
       guaranteesStarterReserve: true,
     },
   ])('persists $seed as exact production-sequential construction quotes', ({
@@ -697,21 +706,25 @@ describe('WorldOpportunityGenerator', () => {
     )).toEqual([0, ENDPOINT_CONNECTION_COST]);
     expect(Math.min(...result.opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
-    ))).toBeLessThanOrEqual(890_000);
+    ))).toBeLessThanOrEqual(MAX_STARTER_CORRIDOR_COST);
   });
 
-  it('accepts an exact £890,000 cheapest corridor', () => {
-    const result = generatorWithCheapestCorridorCost(890_000).generate(config);
+  it('accepts an exact starter corridor cost cap', () => {
+    const result = generatorWithCheapestCorridorCost(
+      MAX_STARTER_CORRIDOR_COST,
+    ).generate(config);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(Math.min(...result.opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
-    ))).toBe(890_000);
+    ))).toBe(MAX_STARTER_CORRIDOR_COST);
   });
 
-  it('rejects a £890,001 cheapest corridor within the fixed attempt bound', () => {
-    const result = generatorWithCheapestCorridorCost(890_001).generate(config);
+  it('rejects one pound over the starter corridor cap', () => {
+    const result = generatorWithCheapestCorridorCost(
+      MAX_STARTER_CORRIDOR_COST + 1,
+    ).generate(config);
 
     expect(result).toEqual({
       ok: false,

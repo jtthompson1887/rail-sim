@@ -1243,7 +1243,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(successToasts[0][1]).toEqual({
       type: 'success',
       message: expect.stringMatching(
-        /Structural Timber.*Prefabrication Plant.*£12,345.*trip profit £2,345/i,
+        /Structural Timber.*Prefabrication Plant.*Revenue £12,345.*Trip profit £2,345.*Timber link profitable/i,
       ),
     });
   });
@@ -1277,7 +1277,8 @@ describe('WorldScene disabled construction bypass guards', () => {
     }));
 
     expect(emit).toHaveBeenCalledWith('ui:toast', {
-      message: 'Delivery complete · +£6,000',
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £6,000 · Trip profit £5,000',
       type: 'success',
     });
   });
@@ -1295,7 +1296,7 @@ describe('WorldScene disabled construction bypass guards', () => {
     ['unknown train', { trainId: 'unknown-train' }, undefined],
     ['unknown freight set', {}, 'unknown-set'],
     ['unknown product', { productId: 'unknown-product' }, undefined],
-  ])('emits one generic toast without crashing for %s', (
+  ])('emits one safe result toast without crashing for %s', (
     _case,
     overrides,
     freightSetId,
@@ -1320,15 +1321,27 @@ describe('WorldScene disabled construction bypass guards', () => {
       Object.freeze(event),
     )).not.toThrow();
 
+    const expectedProduct = event.productId === 'unknown-product'
+      ? 'Unknown product'
+      : event.productId === 'logs'
+        ? 'Logs'
+        : 'Structural Timber';
+    const expectedDestination = event.destinationFacilityId === 'sawmill'
+      ? 'Sawmill'
+      : 'Prefabrication Plant';
+    const expectedResult = event.operatingProfit === 0
+      ? 'Break-even £0'
+      : `Trip profit £${event.operatingProfit.toLocaleString('en-GB')}`;
     expect(emit.mock.calls.filter(
       ([eventName]) => eventName === 'ui:toast',
     ).map(([, payload]) => payload)).toEqual([{
-      message: 'Delivery complete · +£7,000',
-      type: 'success',
+      message: `${expectedProduct} delivered to ${expectedDestination}`
+        + ` · Revenue £7,000 · ${expectedResult}`,
+      type: event.operatingProfit === 0 ? 'info' : 'success',
     }]);
   });
 
-  it('enriches the first qualifying structural delivery and keeps repeats generic', () => {
+  it('composes the structural milestone once while keeping repeat results rich', () => {
     const scene = new WorldScene() as any;
     const world = installStructuralToastWorld('repeat-structural-delivery');
     const event = Object.freeze({
@@ -1353,10 +1366,127 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(toasts[0].message).toContain(
       'Structural Timber delivered to Prefabrication Plant',
     );
+    expect(toasts[0].message).toContain(
+      'Timber link profitable · Prefabrication awaits cement and steel',
+    );
     expect(toasts[1]).toEqual({
-      message: 'Delivery complete · +£8,000',
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £8,000 · Trip profit £6,000',
       type: 'success',
     });
+  });
+
+  it('enriches one exact profitable cement objective delivery per world', () => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld('cement-objective-delivery');
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.trains[0].freightSetId = 'covered-cement-set';
+    const event = Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'cement',
+      units: 80,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 40,
+      revenue: 10_400,
+      runningCost: 2_000,
+      operatingProfit: 8_400,
+    });
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(event);
+    scene.presentCompletedDelivery(event);
+
+    const toasts = emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload as any);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toEqual({
+      type: 'success',
+      message: expect.stringMatching(
+        /Cement.*Prefabrication Plant.*Revenue £10,400.*Trip profit £8,400.*Cement secured.*Prefabrication awaits steel/i,
+      ),
+    });
+    expect(toasts[1]).toEqual({
+      message: 'Cement delivered to Prefabrication Plant'
+        + ' · Revenue £10,400 · Trip profit £8,400',
+      type: 'success',
+    });
+  });
+
+  it.each([
+    ['partial cargo', { units: 79 }, true, 'covered-cement-set'],
+    ['zero-profit trip', { operatingProfit: 0 }, true, 'covered-cement-set'],
+    ['wrong destination', {
+      destinationFacilityId: 'sawmill',
+    }, true, 'covered-cement-set'],
+    ['wrong set', {}, true, 'aggregate-hopper-set'],
+    ['unlatched delivery', {}, false, 'covered-cement-set'],
+  ])('keeps %s cement feedback ordinary', (
+    caseName,
+    overrides,
+    cementLatch,
+    freightSetId,
+  ) => {
+    const scene = new WorldScene() as any;
+    const world = installStructuralToastWorld(
+      `ordinary-cement-${caseName}`,
+    );
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = cementLatch;
+    world.trains[0].freightSetId = freightSetId;
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: world.trains[0].id,
+      productId: 'cement',
+      units: 80,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 41,
+      revenue: 9_000,
+      runningCost: 2_000,
+      operatingProfit: 7_000,
+      ...overrides,
+    }));
+
+    expect(emit.mock.calls.filter(
+      ([eventName]) => eventName === 'ui:toast',
+    ).map(([, payload]) => payload)).toEqual([{
+      message: `Cement delivered to ${
+        (overrides as any).destinationFacilityId === 'sawmill'
+          ? 'Sawmill'
+          : 'Prefabrication Plant'
+      } · Revenue £9,000 · ${
+        (overrides as any).operatingProfit === 0
+          ? 'Break-even £0'
+          : 'Trip profit £7,000'
+      }`,
+      type: (overrides as any).operatingProfit === 0 ? 'info' : 'success',
+    }]);
+  });
+
+  it('reports a loss without hiding the positive cash receipt', () => {
+    const scene = new WorldScene() as any;
+    installStructuralToastWorld('loss-delivery-feedback');
+    const emit = jest.spyOn(EventBus, 'emit');
+
+    scene.presentCompletedDelivery(Object.freeze({
+      trainId: 'train-1',
+      productId: 'structural-timber',
+      units: 30,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 42,
+      revenue: 3_000,
+      runningCost: 3_500,
+      operatingProfit: -500,
+    }));
+
+    expect(emit).toHaveBeenCalledWith('ui:toast', {
+      message: 'Structural Timber delivered to Prefabrication Plant'
+        + ' · Revenue £3,000 · Trip loss £500',
+      type: 'error',
+    });
+    expect(emit).toHaveBeenCalledWith('ui:cash-pulse', { amount: 3_000 });
   });
 
   it('retains the committed authority after localStorage failure and retries the exact world without rerunning operations', () => {
@@ -2176,7 +2306,7 @@ describe('WorldScene disabled construction bypass guards', () => {
 
   it('routes the timber purchase-mode request to the authoritative placement tool', () => {
     const scene = new WorldScene() as any;
-    const setFreightSetId = jest.fn();
+    const setFreightSetId = jest.fn().mockReturnValue(true);
     scene.toolRegistry = new Map([[
       'place-vehicle',
       { setFreightSetId },
@@ -2190,6 +2320,50 @@ describe('WorldScene disabled construction bypass guards', () => {
 
     expect(setFreightSetId).toHaveBeenCalledWith('flatbed-freight-set');
     expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it.each([
+    'flatbed-freight-set',
+    'aggregate-hopper-set',
+    'covered-cement-set',
+  ])('routes the supported %s purchase mode without interpreting its policy', (
+    freightSetId,
+  ) => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn().mockReturnValue(true);
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({ freightSetId });
+
+    expect(setFreightSetId).toHaveBeenCalledWith(freightSetId);
+    expect(emit).toHaveBeenCalledWith('ui:toolbar-select-tool', {
+      tool: 'place-vehicle',
+    });
+  });
+
+  it('fails closed when the placement tool rejects an unknown SKU', () => {
+    const scene = new WorldScene() as any;
+    const setFreightSetId = jest.fn().mockReturnValue(false);
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { setFreightSetId },
+    ]]);
+    const emit = jest.spyOn(EventBus, 'emit');
+    GameStateManager.enterCreate('purchase-mode');
+
+    scene.freightPurchaseModeRequestedHandler({
+      freightSetId: 'unknown-set',
+    });
+
+    expect(setFreightSetId).toHaveBeenCalledWith('unknown-set');
+    expect(emit).not.toHaveBeenCalledWith('ui:toolbar-select-tool', {
       tool: 'place-vehicle',
     });
   });
@@ -2237,6 +2411,12 @@ describe('WorldScene disabled construction bypass guards', () => {
       saveState: 'saved',
     }));
     scene.freightPurchaseService = { purchase };
+    scene.activeTool = 'place-vehicle';
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote: (candidate: FreightPurchaseQuote) =>
+        candidate === quote },
+    ]]);
     scene.commandStack = { clear: jest.fn() };
     scene.selectionManager = {
       clearSelection: jest.fn(),
@@ -2311,6 +2491,12 @@ describe('WorldScene disabled construction bypass guards', () => {
         blocker: 'live-placement-failed',
       }),
     };
+    scene.activeTool = 'place-vehicle';
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote: (candidate: FreightPurchaseQuote) =>
+        candidate === quote },
+    ]]);
     scene.commandStack = { clear: jest.fn() };
     scene.selectionManager = { clearSelection: jest.fn() };
     scene.trainManager = { trains: [], selectTrain: jest.fn() };
@@ -2328,6 +2514,40 @@ describe('WorldScene disabled construction bypass guards', () => {
         blocker: 'live-placement-failed',
       }),
     );
+  });
+
+  it('rejects an inactive, old, or cloned confirmation before purchase', () => {
+    const scene = new WorldScene() as any;
+    const quote: FreightPurchaseQuote = Object.freeze({
+      expectedRevision: 0,
+      freightSetId: 'aggregate-hopper-set',
+      trackUUID: 'quarry-route',
+      trackT: 0,
+      facing: 1,
+      purchasePrice: 110_000,
+      cashAfter: 890_000,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    const purchase = jest.fn();
+    const canConfirmQuote = jest.fn(
+      (candidate: FreightPurchaseQuote) => candidate === quote,
+    );
+    scene.freightPurchaseService = { purchase };
+    scene.toolRegistry = new Map([[
+      'place-vehicle',
+      { canConfirmQuote },
+    ]]);
+    GameStateManager.enterCreate('confirmation-guard');
+
+    scene.activeTool = 'place-track';
+    scene.freightPurchaseConfirmedHandler({ quote });
+    scene.activeTool = 'place-vehicle';
+    scene.freightPurchaseConfirmedHandler({ quote: { ...quote } });
+
+    expect(canConfirmQuote).toHaveBeenCalledTimes(1);
+    expect(purchase).not.toHaveBeenCalled();
   });
 
   it('adapts TrainManager spawn/place/remove while preserving quote facing', () => {

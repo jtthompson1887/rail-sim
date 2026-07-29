@@ -4,6 +4,10 @@
 import WorldSelectScene from '../../src/scenes/WorldSelectScene';
 import { SaveService } from '../../src/services/SaveService';
 import { WorldManager } from '../../src/managers/WorldManager';
+import {
+  MAX_OPPORTUNITY_ATTEMPTS,
+  MAX_SITE_CANDIDATES_PER_ATTEMPT,
+} from '../../src/config/WorldGeneration';
 
 describe('WorldSelectScene incompatible save rows', () => {
   it.each([
@@ -113,8 +117,8 @@ describe('WorldSelectScene generated-world picker', () => {
       error: {
         code: 'opportunity-exhausted',
         seed: '11111111-1111-4111-8111-111111111111',
-        attemptsEvaluated: 12,
-        maxSiteCandidatesEvaluated: 256,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
       },
     });
 

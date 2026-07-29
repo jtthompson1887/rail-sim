@@ -60,6 +60,46 @@ const structuralSteps = (
   },
 ];
 
+const cementSteps = (
+  states: Array<'complete' | 'current' | 'pending'>,
+): FreightObjectiveStep[] => [
+  {
+    id: 'connect-quarry-cement',
+    label: 'Connect Quarry to Cement Works',
+    state: states[0],
+  },
+  {
+    id: 'buy-aggregate-hopper',
+    label: 'Buy an Aggregate Hopper Set',
+    state: states[1],
+  },
+  {
+    id: 'deliver-limestone-profitably',
+    label: 'Deliver 120 t limestone profitably',
+    state: states[2],
+  },
+  {
+    id: 'produce-cement',
+    label: 'Produce 80 t cement',
+    state: states[3],
+  },
+  {
+    id: 'connect-cement-prefabrication',
+    label: 'Connect Cement Works to Prefabrication Plant',
+    state: states[4],
+  },
+  {
+    id: 'buy-covered-cement',
+    label: 'Buy a Covered Cement Set',
+    state: states[5],
+  },
+  {
+    id: 'deliver-cement-profitably',
+    label: 'Deliver 80 t cement profitably',
+    state: states[6],
+  },
+];
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -158,6 +198,48 @@ function structuralWorld(): {
       previous: null,
       next: null,
     }],
+  };
+}
+
+function cementWorld(): {
+  world: WorldData;
+  quarryCementTopology: TrackTopologySnapshot;
+  fullTopology: TrackTopologySnapshot;
+} {
+  const { world } = structuralWorld();
+  world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
+  const prefab = world.economy.facilities.find(
+    ({ definitionId }) => definitionId === 'prefabrication-plant',
+  )!;
+  prefab.x = 2_000;
+  prefab.railAccess.x = 2_000;
+  world.economy.facilities.push(
+    facility('quarry', 1_000),
+    facility('cement-works', 1_500),
+  );
+  const source = world.tracks[0];
+  world.tracks.push(
+    trackStub(source, 'quarry-cement-track', 1_000, 1_500),
+    trackStub(source, 'cement-prefab-track', 1_500, 2_000),
+  );
+  const quarryCementTopology: TrackTopologySnapshot = [{
+    kind: 'track',
+    uuid: 'quarry-cement-track',
+    previous: null,
+    next: null,
+  }];
+  return {
+    world,
+    quarryCementTopology,
+    fullTopology: [
+      ...quarryCementTopology,
+      {
+        kind: 'track',
+        uuid: 'cement-prefab-track',
+        previous: null,
+        next: null,
+      },
+    ],
   };
 }
 
@@ -368,7 +450,7 @@ describe('deriveFreightObjective structural timber link', () => {
     );
   });
 
-  it('freezes all four steps complete once the structural latch is durable', () => {
+  it('advances to the cement objective once the structural latch is durable', () => {
     const { world } = structuralWorld();
     world.freightProgress.profitableStructuralTimberDeliveryCompleted = true;
     world.tracks = [];
@@ -381,19 +463,14 @@ describe('deriveFreightObjective structural timber link', () => {
       }
     });
 
-    expect(deriveFreightObjective(world, [])).toEqual({
-      objectiveVersion: 1,
-      id: 'structural-timber-link',
-      title: 'Extend the timber chain',
-      status: 'Timber link profitable · Prefabrication awaits cement and steel',
-      achieved: true,
-      steps: structuralSteps([
-        'complete',
-        'complete',
-        'complete',
-        'complete',
-      ]),
-    });
+    expect(deriveFreightObjective(world, [])).toEqual(
+      expect.objectContaining({
+        objectiveVersion: 1,
+        id: 'cement-supply-chain',
+        title: 'Cement supply chain',
+        achieved: false,
+      }),
+    );
   });
 
   it('returns deeply frozen data without mutating world authority', () => {
@@ -406,6 +483,220 @@ describe('deriveFreightObjective structural timber link', () => {
     expect(Object.isFrozen(dto)).toBe(true);
     expect(Object.isFrozen(dto.steps)).toBe(true);
     dto.steps.forEach((step) => expect(Object.isFrozen(step)).toBe(true));
+  });
+});
+
+describe('deriveFreightObjective cement supply chain', () => {
+  it('advances through seven ordered facts with durable delivery latches', () => {
+    const {
+      world,
+      quarryCementTopology,
+      fullTopology,
+    } = cementWorld();
+
+    expect(deriveFreightObjective(world, [])).toEqual({
+      objectiveVersion: 1,
+      id: 'cement-supply-chain',
+      title: 'Cement supply chain',
+      status: 'Build the cement supply chain',
+      achieved: false,
+      steps: cementSteps([
+        'current',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+      ]),
+    });
+
+    expect(deriveFreightObjective(world, quarryCementTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'current',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+      ]));
+
+    world.trains = [{
+      ...trainWith({
+        productId: 'limestone-aggregate',
+        units: 120,
+        loadedUnits: 120,
+        originFacilityId: 'quarry',
+      }),
+      id: 'aggregate-train',
+      freightSetId: 'aggregate-hopper-set',
+    }];
+    expect(deriveFreightObjective(world, quarryCementTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'complete',
+        'current',
+        'pending',
+        'pending',
+        'pending',
+        'pending',
+      ]));
+
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    expect(deriveFreightObjective(world, quarryCementTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'complete',
+        'complete',
+        'current',
+        'pending',
+        'pending',
+        'pending',
+      ]));
+
+    const cementWorks = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'cement-works',
+    )!;
+    const prefab = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'prefabrication-plant',
+    )!;
+    cementWorks.inventories.cement.recentInflow = 40;
+    cementWorks.inventories.cement.quantity = 20;
+    prefab.inventories.cement.quantity = 20;
+    expect(deriveFreightObjective(world, quarryCementTopology).steps[3].state)
+      .toBe('current');
+
+    world.trains[0].cargo = {
+      productId: 'cement',
+      units: 40,
+      loadedUnits: 40,
+      originFacilityId: 'cement-works',
+    };
+    expect(deriveFreightObjective(world, quarryCementTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'current',
+        'pending',
+        'pending',
+      ]));
+
+    expect(deriveFreightObjective(world, fullTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'current',
+        'pending',
+      ]));
+
+    world.trains.push({
+      ...trainWith({
+        productId: 'cement',
+        units: 80,
+        loadedUnits: 80,
+        originFacilityId: 'cement-works',
+      }),
+      id: 'covered-train',
+      freightSetId: 'covered-cement-set',
+    });
+    expect(deriveFreightObjective(world, fullTopology).steps)
+      .toEqual(cementSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'current',
+      ]));
+  });
+
+  it('requires the catalogue-derived 80 units without double-counting flow', () => {
+    const { world, quarryCementTopology } = cementWorld();
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.trains = [{
+      ...trainWith(null),
+      id: 'aggregate-train',
+      freightSetId: 'aggregate-hopper-set',
+    }];
+    const cementWorks = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'cement-works',
+    )!;
+    const prefab = world.economy.facilities.find(
+      ({ definitionId }) => definitionId === 'prefabrication-plant',
+    )!;
+    cementWorks.inventories.cement.recentInflow = 79;
+    cementWorks.inventories.cement.quantity = 30;
+    prefab.inventories.cement.quantity = 30;
+
+    expect(deriveFreightObjective(
+      world,
+      quarryCementTopology,
+    ).steps[3].state).toBe('current');
+
+    world.trains[0].cargo = {
+      productId: 'cement',
+      units: 20,
+      loadedUnits: 20,
+      originFacilityId: 'cement-works',
+    };
+    expect(deriveFreightObjective(
+      world,
+      quarryCementTopology,
+    ).steps[3].state).toBe('complete');
+  });
+
+  it('keeps the achieved cement objective selected and frozen after demolition', () => {
+    const { world } = cementWorld();
+    world.freightProgress.profitableLimestoneDeliveryCompleted = true;
+    world.freightProgress.profitableCementDeliveryCompleted = true;
+    world.tracks = [];
+    world.trains = [];
+    world.economy.facilities.forEach((entry) => {
+      const cement = entry.inventories.cement;
+      if (cement) {
+        cement.quantity = 0;
+        cement.recentInflow = 0;
+      }
+    });
+    const before = clone(world);
+
+    const dto = deriveFreightObjective(world, []);
+
+    expect(dto).toEqual({
+      objectiveVersion: 1,
+      id: 'cement-supply-chain',
+      title: 'Cement supply chain',
+      status: 'Cement secured · Prefabrication awaits steel',
+      achieved: true,
+      steps: cementSteps([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+      ]),
+    });
+    expect(world).toEqual(before);
+    expect(Object.isFrozen(dto)).toBe(true);
+    expect(Object.isFrozen(dto.steps)).toBe(true);
+    dto.steps.forEach((step) => expect(Object.isFrozen(step)).toBe(true));
+  });
+
+  it('keeps exactly one current step until achievement', () => {
+    const { world } = cementWorld();
+    const dto = deriveFreightObjective(world, []);
+
+    expect(dto.steps.filter(({ state }) => state === 'current')).toHaveLength(1);
+    expect(dto.steps.filter(({ state }) => state === 'complete')).toHaveLength(0);
   });
 });
 
@@ -441,6 +732,16 @@ describe('FreightObjectiveCelebrationSession', () => {
     expect(session.consume(
       'world-a',
       'structural-timber-link',
+      true,
+    )).toBe(false);
+    expect(session.consume(
+      'world-a',
+      'cement-supply-chain',
+      true,
+    )).toBe(true);
+    expect(session.consume(
+      'world-a',
+      'cement-supply-chain',
       true,
     )).toBe(false);
     expect(session.consume(

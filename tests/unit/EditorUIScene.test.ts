@@ -147,6 +147,7 @@ describe('EditorUIScene construction UI boundary', () => {
       id: 'sawmill',
       name: 'Sawmill',
       status: { code: 'working', label: 'Working' },
+      activeRecipe: null,
       produces: ['structural-timber'],
       needs: ['logs'],
       inputRows: [],
@@ -407,6 +408,7 @@ describe('EditorUIScene construction UI boundary', () => {
         id: 'sawmill',
         name: 'Sawmill',
         status: { code: 'working', label: 'Working' },
+        activeRecipe: null,
         produces: ['structural-timber'],
         needs: ['logs'],
         inputRows: [{

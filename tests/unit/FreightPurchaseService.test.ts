@@ -9,6 +9,12 @@ import type { TrackDef, WorldData } from '../../src/config/WorldData';
 import type { TrackTopologySnapshot } from '../../src/managers/TrackManager';
 import { WorldManager } from '../../src/managers/WorldManager';
 import { createCompanyState } from '../../src/economy/FinanceLedger';
+import type {
+  FacilityDefinition,
+  FacilityEconomyDef,
+} from '../../src/economy/EconomyData';
+import { getFacilityDefinition } from '../../src/economy/ProductCatalog';
+import { FLATBED_FREIGHT_SET_ID } from '../../src/freight/FreightSetCatalog';
 import {
   makeFirstFreightRouteWorld,
   makeFreightTrainDef,
@@ -53,6 +59,35 @@ function addTrack(
   return track;
 }
 
+function makeFacility(
+  definition: FacilityDefinition,
+  x: number,
+  y: number,
+): FacilityEconomyDef {
+  return {
+    id: definition.id,
+    definitionId: definition.id,
+    name: definition.displayName,
+    x,
+    y,
+    railAccess: { x, y, radius: 32.5 },
+    inventories: Object.fromEntries(definition.inventory.map((slot) => [
+      slot.productId,
+      {
+        productId: slot.productId,
+        quantity: slot.initialQuantity,
+        reservedQuantity: 0,
+        capacity: slot.capacity,
+        recentInflow: 0,
+        recentOutflow: 0,
+        targetStock: slot.targetStock,
+      },
+    ])),
+    activeRecipeId: definition.recipeIds[0] ?? null,
+    recipeProgressTicks: 0,
+  };
+}
+
 function makeRuntime(overrides: Partial<FreightPurchaseRuntimePort> = {}): {
   port: FreightPurchaseRuntimePort;
   live: Map<string, Train>;
@@ -83,21 +118,69 @@ function setupWorld(cash = 1_000_000): WorldData {
   world.economy = clone(fixture.economy);
   world.company = createCompanyState(cash);
   world.trains = [];
+  const mineralFacilities = [
+    ['quarry', -500, 500],
+    ['cement-works', 500, 500],
+    ['prefabrication-plant', 1_500, 500],
+  ] as const;
+  mineralFacilities.forEach(([definitionId, x, y]) => {
+    const definition = getFacilityDefinition(definitionId);
+    if (!definition) throw new Error(`Missing ${definitionId}`);
+    world.economy.facilities.push(makeFacility(definition, x, y));
+  });
+  addTrack(world, 'quarry-cement-track', {
+    p0: { x: -500, y: 500 },
+    p1: { x: -167, y: 500 },
+    p2: { x: 167, y: 500 },
+    p3: { x: 500, y: 500 },
+  });
+  addTrack(world, 'cement-prefab-track', {
+    p0: { x: 500, y: 500 },
+    p1: { x: 833, y: 500 },
+    p2: { x: 1_167, y: 500 },
+    p3: { x: 1_500, y: 500 },
+  });
   return world;
+}
+
+const ROUTE_INPUTS = {
+  'flatbed-freight-set': {
+    trackUUID: 'forest-sawmill-track',
+    x: -500,
+    y: 0,
+  },
+  'aggregate-hopper-set': {
+    trackUUID: 'quarry-cement-track',
+    x: -500,
+    y: 500,
+  },
+  'covered-cement-set': {
+    trackUUID: 'cement-prefab-track',
+    x: 500,
+    y: 500,
+  },
+} as const;
+
+function routeInput(
+  freightSetId: keyof typeof ROUTE_INPUTS,
+  overrides: Partial<FreightPurchaseQuoteInput> = {},
+): FreightPurchaseQuoteInput {
+  const route = ROUTE_INPUTS[freightSetId];
+  return {
+    freightSetId: freightSetId as FreightPurchaseQuoteInput['freightSetId'],
+    trackUUID: route.trackUUID,
+    trackT: 0,
+    x: route.x,
+    y: route.y,
+    topology: [node(route.trackUUID)],
+    ...overrides,
+  };
 }
 
 function connectedInput(
   overrides: Partial<FreightPurchaseQuoteInput> = {},
 ): FreightPurchaseQuoteInput {
-  return {
-    freightSetId: 'flatbed-freight-set',
-    trackUUID: 'forest-sawmill-track',
-    trackT: 0,
-    x: -500,
-    y: 0,
-    topology: [node('forest-sawmill-track')],
-    ...overrides,
-  };
+  return routeInput('flatbed-freight-set', overrides);
 }
 
 function authoritativeSnapshot(world: WorldData): string {
@@ -116,6 +199,216 @@ describe('FreightPurchaseService', () => {
     jest.restoreAllMocks();
     WorldManager.reset();
     localStorage.clear();
+  });
+
+  it.each([
+    {
+      freightSetId: 'flatbed-freight-set' as const,
+      trackUUID: 'forest-sawmill-track',
+      purchasePrice: 90_000,
+    },
+    {
+      freightSetId: 'aggregate-hopper-set' as const,
+      trackUUID: 'quarry-cement-track',
+      purchasePrice: 110_000,
+    },
+    {
+      freightSetId: 'covered-cement-set' as const,
+      trackUUID: 'cement-prefab-track',
+      purchasePrice: 105_000,
+    },
+  ])('quotes and purchases the explicit $freightSetId route policy', ({
+    freightSetId,
+    trackUUID,
+    purchasePrice,
+  }) => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => `${freightSetId}-train`,
+    );
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+
+    const quote = service.quote(routeInput(freightSetId));
+    const result = service.purchase(quote);
+
+    expect(quote).toMatchObject({
+      freightSetId,
+      trackUUID,
+      trackT: 0,
+      facing: 1,
+      purchasePrice,
+      cashAfter: 1_000_000 - purchasePrice,
+      affordable: true,
+      valid: true,
+      blocker: null,
+    });
+    expect(result).toEqual({
+      ok: true,
+      trainId: `${freightSetId}-train`,
+      saved: true,
+      saveState: 'saved',
+    });
+    expect(world.trains.at(-1)).toEqual(expect.objectContaining({
+      id: `${freightSetId}-train`,
+      freightSetId,
+      trackUUID,
+      facing: 1,
+      cargo: null,
+    }));
+    expect(world.company.ledger.at(-1)).toEqual(expect.objectContaining({
+      category: 'vehicle-capex',
+      amount: -purchasePrice,
+      referenceId: freightSetId,
+    }));
+    expect(runtime.port.spawn).toHaveBeenCalledWith(
+      `${freightSetId}-train`,
+      freightSetId,
+    );
+  });
+
+  it.each([
+    {
+      freightSetId: 'flatbed-freight-set' as const,
+      sourceDefinitionId: 'managed-forest',
+      destinationDefinitionId: 'sawmill',
+    },
+    {
+      freightSetId: 'aggregate-hopper-set' as const,
+      sourceDefinitionId: 'quarry',
+      destinationDefinitionId: 'cement-works',
+    },
+    {
+      freightSetId: 'covered-cement-set' as const,
+      sourceDefinitionId: 'cement-works',
+      destinationDefinitionId: 'prefabrication-plant',
+    },
+  ])('fails closed when the $freightSetId route facilities are stale', ({
+    freightSetId,
+    sourceDefinitionId,
+    destinationDefinitionId,
+  }) => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(WorldManager, runtime.port);
+    const quote = service.quote(routeInput(freightSetId));
+    world.economy.facilities = world.economy.facilities.filter(
+      ({ definitionId }) => definitionId !== sourceDefinitionId,
+    );
+    const before = authoritativeSnapshot(world);
+
+    expect(service.purchase(quote)).toEqual({
+      ok: false,
+      blocker: 'route-unavailable',
+    });
+    expect(world.economy.facilities.some(
+      ({ definitionId }) => definitionId === destinationDefinitionId,
+    )).toBe(true);
+    expect(authoritativeSnapshot(world)).toBe(before);
+    expect(runtime.port.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown freight-set policy before spawning or charging', () => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(WorldManager, runtime.port);
+    const before = authoritativeSnapshot(world);
+
+    const quote = service.quote({
+      ...connectedInput(),
+      freightSetId: 'unknown-freight-set',
+    });
+
+    expect(quote).toMatchObject({
+      freightSetId: 'unknown-freight-set',
+      purchasePrice: 0,
+      cashAfter: 1_000_000,
+      affordable: false,
+      valid: false,
+      blocker: 'unknown-freight-set',
+    });
+    expect(service.purchase(quote)).toEqual({
+      ok: false,
+      blocker: 'unknown-freight-set',
+    });
+    expect(authoritativeSnapshot(world)).toBe(before);
+    expect(runtime.port.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cross-set forged quote before spawning or charging', () => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(WorldManager, runtime.port);
+    const issued = service.quote(routeInput('aggregate-hopper-set'));
+    const forged = Object.freeze({
+      ...issued,
+      freightSetId: 'covered-cement-set',
+      purchasePrice: 105_000,
+      cashAfter: 895_000,
+    });
+    const before = authoritativeSnapshot(world);
+
+    expect(service.purchase(forged)).toEqual({
+      ok: false,
+      blocker: 'stale-revision',
+    });
+    expect(authoritativeSnapshot(world)).toBe(before);
+    expect(runtime.port.spawn).not.toHaveBeenCalled();
+  });
+
+  it('detaches issued route authority from later caller topology mutation', () => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(
+      WorldManager,
+      runtime.port,
+      () => 'detached-topology-train',
+    );
+    jest.spyOn(WorldManager, 'save').mockReturnValue(true);
+    const input = connectedInput();
+    const quote = service.quote(input);
+
+    input.topology[0].uuid = 'caller-mutated-track';
+    input.topology.splice(0);
+
+    expect(service.purchase(quote)).toEqual({
+      ok: true,
+      trainId: 'detached-topology-train',
+      saved: true,
+      saveState: 'saved',
+    });
+    expect(world.trains.at(-1)?.freightSetId).toBe(
+      FLATBED_FREIGHT_SET_ID,
+    );
+  });
+
+  it.each([
+    'aggregate-hopper-set',
+    'covered-cement-set',
+  ] as const)('requires the selected %s route rather than accepting another set route', (
+    freightSetId,
+  ) => {
+    const world = setupWorld();
+    const runtime = makeRuntime();
+    const service = new FreightPurchaseService(WorldManager, runtime.port);
+
+    const quote = service.quote(routeInput(freightSetId, {
+      trackUUID: 'forest-sawmill-track',
+      x: -500,
+      y: 0,
+      topology: [node('forest-sawmill-track')],
+    }));
+
+    expect(quote.valid).toBe(false);
+    expect(quote.blocker).toBe('outside-source-access');
+    expect(service.purchase(quote)).toEqual({
+      ok: false,
+      blocker: 'outside-source-access',
+    });
+    expect(world.trains).toHaveLength(0);
+    expect(runtime.port.spawn).not.toHaveBeenCalled();
   });
 
   it('atomically places one train, posts one £90k capex, and advances only root and operations revisions', () => {
@@ -228,7 +521,7 @@ describe('FreightPurchaseService', () => {
     },
     {
       name: 'placement centre outside Managed Forest access',
-      expected: 'outside-forest-access' as const,
+      expected: 'outside-source-access' as const,
       prepare: (_world: WorldData) => connectedInput({
         trackT: 0.5,
         x: 0,

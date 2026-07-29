@@ -59,6 +59,7 @@ import type {
 } from '../freight/CargoSystem';
 import {
   capacityForProduct,
+  COVERED_CEMENT_SET_ID,
   FLATBED_FREIGHT_SET_ID,
   getFreightSet,
 } from '../freight/FreightSetCatalog';
@@ -91,6 +92,7 @@ import {
   FreightPurchaseService,
   type FreightPurchaseQuote,
   type FreightPurchaseRuntimePort,
+  type FreightPurchaseSetId,
 } from '../freight/FreightPurchaseService';
 import {
   buildOperatingSummary,
@@ -101,7 +103,10 @@ import {
   freightObjectiveCelebrationSession,
   type FreightObjectiveDto,
 } from '../freight/FreightObjective';
-import { getProduct } from '../economy/ProductCatalog';
+import {
+  getFacilityDefinition,
+  getProduct,
+} from '../economy/ProductCatalog';
 
 interface ConstructionE2ESnapshot {
   readonly phase: ConstructionToolPhase;
@@ -447,13 +452,13 @@ export default class WorldScene extends Phaser.Scene {
   private readonly freightPurchaseModeRequestedHandler = ({
     freightSetId,
   }: {
-    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+    freightSetId: FreightPurchaseSetId;
   }) => {
     if (GameStateManager.worldMode !== 'create') return;
     const tool = this.toolRegistry.get(
       'place-vehicle',
     ) as PlaceVehicleTool | undefined;
-    tool?.setFreightSetId(freightSetId);
+    if (!tool?.setFreightSetId(freightSetId)) return;
     EventBus.emit('ui:toolbar-select-tool', { tool: 'place-vehicle' });
   };
 
@@ -462,7 +467,12 @@ export default class WorldScene extends Phaser.Scene {
   }: {
     quote: FreightPurchaseQuote;
   }) => {
-    if (GameStateManager.worldMode !== 'create') return;
+    if (GameStateManager.worldMode !== 'create'
+      || this.activeTool !== 'place-vehicle') return;
+    const tool = this.toolRegistry.get(
+      'place-vehicle',
+    ) as PlaceVehicleTool | undefined;
+    if (!tool?.canConfirmQuote(quote)) return;
     const purchaseResult = this.freightPurchaseService.purchase(
       quote,
     );
@@ -783,6 +793,7 @@ export default class WorldScene extends Phaser.Scene {
     this.renderStarterOpportunitySurvey();
     this.renderFacilities();
     EventBus.emit('ui:freight-purchase-state', {
+      freightSetId: FLATBED_FREIGHT_SET_ID,
       quote: null,
       cash: world?.company.cash ?? 0,
       message: 'Click on player track to place the General Flatbed Set',
@@ -1414,6 +1425,14 @@ export default class WorldScene extends Phaser.Scene {
       && event.units === capacity.capacityUnits
       && world?.freightProgress
         .profitableStructuralTimberDeliveryCompleted === true;
+    const completesCementObjective = event.productId === 'cement'
+      && destination?.definitionId === 'prefabrication-plant'
+      && event.operatingProfit > 0
+      && train?.freightSetId === COVERED_CEMENT_SET_ID
+      && capacity?.ok === true
+      && event.units === capacity.capacityUnits
+      && world?.freightProgress
+        .profitableCementDeliveryCompleted === true;
     const celebrateStructuralObjective = world
       && completesStructuralObjective
       && freightObjectiveCelebrationSession.consume(
@@ -1421,19 +1440,38 @@ export default class WorldScene extends Phaser.Scene {
         'structural-timber-link',
         true,
       );
-    EventBus.emit('ui:toast', celebrateStructuralObjective
-      ? {
-        message:
-          `${product!.displayName} delivered to ${destination!.name}`
-          + ` · +£${event.revenue.toLocaleString('en-GB')}`
-          + ` · trip profit £${event.operatingProfit.toLocaleString('en-GB')}`,
-        type: 'success',
-      }
-      : {
-        message:
-          `Delivery complete · +£${event.revenue.toLocaleString('en-GB')}`,
-        type: 'success',
-      });
+    const celebrateCementObjective = world
+      && completesCementObjective
+      && freightObjectiveCelebrationSession.consume(
+        world.id,
+        'cement-supply-chain',
+        true,
+      );
+    const result = event.operatingProfit > 0
+      ? `Trip profit £${event.operatingProfit.toLocaleString('en-GB')}`
+      : event.operatingProfit < 0
+        ? `Trip loss £${Math.abs(event.operatingProfit).toLocaleString('en-GB')}`
+        : 'Break-even £0';
+    const milestone = celebrateCementObjective
+      ? 'Cement secured · Prefabrication awaits steel'
+      : celebrateStructuralObjective
+        ? 'Timber link profitable · Prefabrication awaits cement and steel'
+        : null;
+    const destinationName = destination?.name
+      ?? getFacilityDefinition(event.destinationFacilityId)?.displayName
+      ?? 'Unknown destination';
+    EventBus.emit('ui:toast', {
+      message:
+        `${product?.displayName ?? 'Unknown product'} delivered to ${destinationName}`
+        + ` · Revenue £${event.revenue.toLocaleString('en-GB')}`
+        + ` · ${result}`
+        + (milestone ? ` · ${milestone}` : ''),
+      type: event.operatingProfit > 0
+        ? 'success'
+        : event.operatingProfit < 0
+          ? 'error'
+          : 'info',
+    });
     EventBus.emit('ui:cash-pulse', { amount: event.revenue });
   }
 

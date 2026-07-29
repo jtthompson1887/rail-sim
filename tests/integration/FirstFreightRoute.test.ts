@@ -292,7 +292,7 @@ describe('Integration: first profitable timber freight route', () => {
       outputs: [{ productId: 'structural-timber', quantity: 8 }],
     });
 
-    expect(opening.schemaVersion).toBe(8);
+    expect(opening.schemaVersion).toBe(9);
     expect(opening.tracks).toEqual([]);
     expect(opening.junctions).toEqual([]);
     expect(opening.stations).toEqual([]);

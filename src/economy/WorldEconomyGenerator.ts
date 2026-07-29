@@ -2,6 +2,11 @@ import {
   MAX_ECONOMY_SITE_CANDIDATES,
   WorldGenerationConfig,
 } from '../config/WorldGeneration';
+import { ENDPOINT_CONNECTION_COST } from '../config/ConstructionConfig';
+import {
+  MAX_CEMENT_SUPPLY_LINK_COST,
+  MAX_STARTER_CORRIDOR_COST,
+} from '../config/FreightProgression';
 import type {
   EconomyStateDef,
   StarterOpportunityDef,
@@ -22,6 +27,8 @@ import {
 } from './InitialEconomyContent';
 import {
   ConstructionAnalyzer,
+  type ConstructionAnalysisDetail,
+  type ConstructionAnalysisOptions,
   type TerrainHeightSource,
 } from '../systems/ConstructionAnalyzer';
 import { createSeededRandom } from '../utils/SeededRandom';
@@ -31,9 +38,21 @@ import {
 } from './PrefabricationOpportunity';
 import { canonicalizeConstructionGridPoint } from '../systems/ConstructionGrid';
 import { GameConfig } from '../config/GameConfig';
+import {
+  analyzeCementSupplyOpportunity,
+  createCementSupplyOpportunityAnalyzer,
+  type CementSupplyOpportunityAnalyzer,
+} from './CementSupplyOpportunity';
+import { deriveTrackEndpointOutward } from '../systems/TrackGeometry';
+import type { TrackGeometryDef } from '../systems/TrackGeometry';
+import type {
+  PrefabricationExtensionWitness,
+} from './PrefabricationOpportunity';
 
 export interface EconomyGenerationDiagnostics {
   candidatesEvaluated: number;
+  prefabAnalyses: number;
+  mineralPairAnalyses: number;
 }
 
 export type EconomyGenerationResult =
@@ -48,6 +67,8 @@ export type EconomyGenerationResult =
       code: 'economy-exhausted';
       seed: string;
       candidatesEvaluated: number;
+      prefabAnalyses: number;
+      mineralPairAnalyses: number;
       facilitiesPlaced: number;
     };
   };
@@ -57,15 +78,9 @@ interface FacilityPosition {
   y: number;
 }
 
-const SECONDARY_PLACEMENT_ORDER = [
-  'prefabrication-plant',
-  'quarry',
-  'cement-works',
-  'port-interchange',
-  'town-construction-market',
-] as const;
-
-const PREFAB_SEARCH_HALF_SPAN = 2_400;
+const CANDIDATE_GRID_SIZE = 16;
+const CANDIDATE_SEARCH_HALF_SPAN = 3_200;
+export const MAX_CEMENT_SUPPLY_PAIR_ANALYSES = 256;
 
 function footprintRelief(
   terrain: TerrainHeightSource,
@@ -182,17 +197,39 @@ export function validateGeneratedEconomy(
   const prefabricationPlant = value.facilities.find(
     ({ id }) => id === 'prefabrication-plant',
   );
+  const quarry = value.facilities.find(({ id }) => id === 'quarry');
+  const cementWorks = value.facilities.find(
+    ({ id }) => id === 'cement-works',
+  );
   const extensionStart = resolvePrefabricationExtensionStart(opportunity);
+  const prefabWitness = prefabricationPlant && extensionStart
+    ? analyzePrefabricationExtension(
+      new ConstructionAnalyzer(terrain),
+      extensionStart,
+      prefabricationPlant.railAccess,
+    )
+    : null;
   return forest.x === opportunity.sites[0].x
     && forest.y === opportunity.sites[0].y
     && sawmill.x === opportunity.sites[1].x
     && sawmill.y === opportunity.sites[1].y
     && prefabricationPlant !== undefined
+    && quarry !== undefined
+    && cementWorks !== undefined
     && extensionStart !== null
-    && analyzePrefabricationExtension(
+    && Math.min(...opportunity.corridors.map(
+      (corridor) => corridor.estimatedCost,
+    )) <= MAX_STARTER_CORRIDOR_COST
+    && prefabWitness !== null
+    && analyzeCementSupplyOpportunity(
       new ConstructionAnalyzer(terrain),
-      extensionStart,
-      prefabricationPlant.railAccess,
+      opportunity,
+      prefabWitness,
+      {
+        quarry: quarry.railAccess,
+        cementWorks: cementWorks.railAccess,
+        prefabricationPlant: prefabricationPlant.railAccess,
+      },
     ) !== null;
 }
 
@@ -203,8 +240,8 @@ export class WorldEconomyGenerator {
     config: WorldGenerationConfigDef,
     opportunity: StarterOpportunityDef,
   ): EconomyGenerationResult {
-    const random = createSeededRandom(`${config.seed}:economy`);
-    const analyzer = new ConstructionAnalyzer(this.terrain);
+    const siteRandom = createSeededRandom(`${config.seed}:economy:sites`);
+    const marketRandom = createSeededRandom(`${config.seed}:economy:market`);
     const extensionStart = resolvePrefabricationExtensionStart(opportunity);
     if (!extensionStart) {
       return {
@@ -213,118 +250,299 @@ export class WorldEconomyGenerator {
           code: 'economy-exhausted',
           seed: config.seed,
           candidatesEvaluated: 0,
+          prefabAnalyses: 0,
+          mineralPairAnalyses: 0,
           facilitiesPlaced: 0,
         },
       };
     }
-    const positions: FacilityPosition[] = opportunity.sites.map(
+    const fixedPositions: FacilityPosition[] = opportunity.sites.map(
       ({ x, y }) => ({ x, y }),
     );
     const positionByDefinition = new Map<string, FacilityPosition>([
-      ['managed-forest', positions[0]],
-      ['sawmill', positions[1]],
+      ['managed-forest', fixedPositions[0]],
+      ['sawmill', fixedPositions[1]],
     ]);
     const canonicalCandidates = new Set<string>();
-    const deferredFacilityCandidates: FacilityPosition[] = [];
-    let facilitiesPlaced = 0;
-    const gridSize = Math.sqrt(MAX_ECONOMY_SITE_CANDIDATES);
+    const candidates: FacilityPosition[] = [];
     const xLimit = WorldGenerationConfig.WORLD_HALF_WIDTH
       - WorldGenerationConfig.SITE_SEARCH_MARGIN;
     const yLimit = WorldGenerationConfig.WORLD_HALF_HEIGHT
       - WorldGenerationConfig.SITE_SEARCH_MARGIN;
     const searchMinX = Math.max(
       -xLimit,
-      positions[1].x - PREFAB_SEARCH_HALF_SPAN,
+      fixedPositions[1].x - CANDIDATE_SEARCH_HALF_SPAN,
     );
     const searchMaxX = Math.min(
       xLimit,
-      positions[1].x + PREFAB_SEARCH_HALF_SPAN,
+      fixedPositions[1].x + CANDIDATE_SEARCH_HALF_SPAN,
     );
     const searchMinY = Math.max(
       -yLimit,
-      positions[1].y - PREFAB_SEARCH_HALF_SPAN,
+      fixedPositions[1].y - CANDIDATE_SEARCH_HALF_SPAN,
     );
     const searchMaxY = Math.min(
       yLimit,
-      positions[1].y + PREFAB_SEARCH_HALF_SPAN,
+      fixedPositions[1].y + CANDIDATE_SEARCH_HALF_SPAN,
     );
-    const cellWidth = (searchMaxX - searchMinX) / gridSize;
-    const cellHeight = (searchMaxY - searchMinY) / gridSize;
-    let candidatesEvaluated = 0;
-
-    for (
-      let index = 0;
-      index < MAX_ECONOMY_SITE_CANDIDATES
-        && facilitiesPlaced < SECONDARY_PLACEMENT_ORDER.length;
-      index++
-    ) {
-      const row = Math.floor(index / gridSize);
-      const column = index % gridSize;
-      const rawCandidate = {
-        x: searchMinX + (column + 0.2 + random() * 0.6) * cellWidth,
-        y: searchMinY + (row + 0.2 + random() * 0.6) * cellHeight,
-      };
-      candidatesEvaluated += 1;
-      const canonical = canonicalizeConstructionGridPoint(
-        rawCandidate.x,
-        rawCandidate.y,
-        GameConfig.WORLD.SNAP_GRID_SIZE,
-      );
-      const candidate = { x: canonical.x, y: canonical.y };
-      const candidateKey = `${candidate.x}:${candidate.y}`;
-      if (canonicalCandidates.has(candidateKey)) continue;
-      canonicalCandidates.add(candidateKey);
-      const relief = footprintRelief(this.terrain, candidate);
-      if (relief === null || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
-        continue;
-      }
-      if (positions.some((position) => Math.hypot(
-        candidate.x - position.x,
-        candidate.y - position.y,
-      ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
-        continue;
-      }
-      const facilityId = SECONDARY_PLACEMENT_ORDER[facilitiesPlaced];
-      if (facilityId === 'prefabrication-plant') {
-        if (analyzePrefabricationExtension(
-          analyzer,
-          extensionStart,
-          candidate,
-        ) === null) {
-          deferredFacilityCandidates.push(candidate);
+    const cellWidth = (searchMaxX - searchMinX) / CANDIDATE_GRID_SIZE;
+    const cellHeight = (searchMaxY - searchMinY) / CANDIDATE_GRID_SIZE;
+    for (let row = 0; row < CANDIDATE_GRID_SIZE; row++) {
+      for (let column = 0; column < CANDIDATE_GRID_SIZE; column++) {
+        const rawCandidate = {
+          x: searchMinX
+            + (column + 0.2 + siteRandom() * 0.6) * cellWidth,
+          y: searchMinY
+            + (row + 0.2 + siteRandom() * 0.6) * cellHeight,
+        };
+        const canonical = canonicalizeConstructionGridPoint(
+          rawCandidate.x,
+          rawCandidate.y,
+          GameConfig.WORLD.SNAP_GRID_SIZE,
+        );
+        const candidate = { x: canonical.x, y: canonical.y };
+        const candidateKey = `${candidate.x}:${candidate.y}`;
+        if (canonicalCandidates.has(candidateKey)) continue;
+        canonicalCandidates.add(candidateKey);
+        const relief = footprintRelief(this.terrain, candidate);
+        if (relief === null
+          || relief > WorldGenerationConfig.MAX_SITE_RELIEF) {
           continue;
         }
-        positions.push(candidate);
+        candidates.push(candidate);
+      }
+    }
+    const productionAnalyzer = new ConstructionAnalyzer(this.terrain);
+    const analysisCache = new Map<string, ConstructionAnalysisDetail>();
+    const analyzeDetailed = (
+      geometry: TrackGeometryDef,
+      options: ConstructionAnalysisOptions = {},
+    ): ConstructionAnalysisDetail => {
+      const key = JSON.stringify([geometry, options]);
+      const cached = analysisCache.get(key);
+      if (cached) return cached;
+      const detail = productionAnalyzer.analyzeDetailed(geometry, options);
+      analysisCache.set(key, detail);
+      return detail;
+    };
+    const analyzer = {
+      analyzeDetailed,
+      analyze(
+        geometry: TrackGeometryDef,
+        options: ConstructionAnalysisOptions = {},
+      ) {
+        return analyzeDetailed(geometry, options).proposal;
+      },
+    };
+
+    const isSeparated = (
+      candidate: FacilityPosition,
+      positions: readonly FacilityPosition[],
+    ): boolean => positions.every((position) => Math.hypot(
+      candidate.x - position.x,
+      candidate.y - position.y,
+    ) >= WorldGenerationConfig.MIN_FACILITY_SEPARATION);
+
+    interface MineralPairCandidate {
+      quarry: FacilityPosition;
+      cementWorks: FacilityPosition;
+      score: number;
+    }
+    interface PrefabOption {
+      position: FacilityPosition;
+      witness: PrefabricationExtensionWitness;
+      pairs: MineralPairCandidate[];
+      analyze: CementSupplyOpportunityAnalyzer | null | undefined;
+    }
+    let prefabAnalyses = 0;
+    const buildPrefabOption = (
+      prefabCandidate: FacilityPosition,
+    ): PrefabOption | null => {
+      if (!isSeparated(prefabCandidate, fixedPositions)) return null;
+      prefabAnalyses += 1;
+      const witness = analyzePrefabricationExtension(
+        analyzer,
+        extensionStart,
+        prefabCandidate,
+      );
+      if (!witness) return null;
+      const mineralCandidates = candidates.filter(
+        (candidate) => isSeparated(
+          candidate,
+          [...fixedPositions, prefabCandidate],
+        ),
+      );
+      const prefabOutward = deriveTrackEndpointOutward(
+        witness.proposal.geometry,
+        'end',
+      );
+      const pairs: MineralPairCandidate[] = [];
+      for (const cementCandidate of mineralCandidates) {
+        const cementFromPrefab = {
+          x: cementCandidate.x - prefabCandidate.x,
+          y: cementCandidate.y - prefabCandidate.y,
+        };
+        if (cementFromPrefab.x * prefabOutward.x
+          + cementFromPrefab.y * prefabOutward.y <= 0) continue;
+        for (const quarryCandidate of mineralCandidates) {
+          if (!isSeparated(quarryCandidate, [cementCandidate])) continue;
+          const firstDirection = {
+            x: cementCandidate.x - quarryCandidate.x,
+            y: cementCandidate.y - quarryCandidate.y,
+          };
+          const secondDirection = {
+            x: prefabCandidate.x - cementCandidate.x,
+            y: prefabCandidate.y - cementCandidate.y,
+          };
+          const firstDistance = Math.hypot(
+            firstDirection.x,
+            firstDirection.y,
+          );
+          const secondDistance = Math.hypot(
+            secondDirection.x,
+            secondDirection.y,
+          );
+          const alignment = (
+            firstDirection.x * secondDirection.x
+              + firstDirection.y * secondDirection.y
+          ) / (firstDistance * secondDistance);
+          if (alignment <= 0) continue;
+          const minimumEngineeringCost = (
+            firstDistance + secondDistance
+          ) * 10 + ENDPOINT_CONNECTION_COST * 2;
+          if (minimumEngineeringCost > MAX_CEMENT_SUPPLY_LINK_COST) continue;
+          pairs.push({
+            quarry: quarryCandidate,
+            cementWorks: cementCandidate,
+            score: minimumEngineeringCost + (1 - alignment) * 10_000,
+          });
+        }
+      }
+      pairs.sort((left, right) => left.score - right.score
+        || left.cementWorks.x - right.cementWorks.x
+        || left.cementWorks.y - right.cementWorks.y
+        || left.quarry.x - right.quarry.x
+        || left.quarry.y - right.quarry.y);
+      if (pairs.length === 0) return null;
+      return {
+          position: prefabCandidate,
+          witness,
+          pairs,
+          analyze: undefined,
+      };
+    };
+
+    const prefabOptions: PrefabOption[] = [];
+    const prefabCandidates = candidates.map((candidate) => {
+      const direction = {
+        x: candidate.x - extensionStart.point.x,
+        y: candidate.y - extensionStart.point.y,
+      };
+      const distance = Math.hypot(direction.x, direction.y);
+      const forwardProjection = direction.x * extensionStart.outward.x
+        + direction.y * extensionStart.outward.y;
+      return {
+        candidate,
+        distance,
+        forwardAlignment: distance > 0 ? forwardProjection / distance : -1,
+        score: distance > 0
+          ? distance + (1 - forwardProjection / distance)
+            * CANDIDATE_SEARCH_HALF_SPAN
+          : Number.POSITIVE_INFINITY,
+      };
+    }).filter(({ candidate, forwardAlignment }) => (
+      forwardAlignment > 0
+        && isSeparated(candidate, fixedPositions)
+    )).sort((left, right) => (
+      left.score - right.score
+        || left.candidate.x - right.candidate.x
+        || left.candidate.y - right.candidate.y
+    )).map(({ candidate }) => candidate);
+    let facilitiesPlaced = 0;
+    let mineralPairAnalyses = 0;
+    let quarry: FacilityPosition | null = null;
+    let cementWorks: FacilityPosition | null = null;
+    let prefabricationPlant: FacilityPosition | null = null;
+    for (
+      let pairIndex = 0;
+      mineralPairAnalyses < MAX_CEMENT_SUPPLY_PAIR_ANALYSES;
+      pairIndex++
+    ) {
+      let pairAvailable = false;
+      const optionsForRound = pairIndex === 0
+        ? prefabCandidates
+        : prefabOptions;
+      for (const value of optionsForRound) {
+        const option = pairIndex === 0
+          ? buildPrefabOption(value as FacilityPosition)
+          : value as PrefabOption;
+        if (!option) continue;
+        if (pairIndex === 0) {
+          prefabOptions.push(option);
+          facilitiesPlaced = 1;
+        }
+        const pair = option.pairs[pairIndex];
+        if (!pair) continue;
+        pairAvailable = true;
+        if (option.analyze === undefined) {
+          option.analyze = createCementSupplyOpportunityAnalyzer(
+            analyzer,
+            opportunity,
+            option.witness,
+          );
+        }
+        if (!option.analyze) continue;
+        mineralPairAnalyses += 1;
+        if (!option.analyze({
+          quarry: pair.quarry,
+          cementWorks: pair.cementWorks,
+          prefabricationPlant: option.position,
+        })) {
+          if (mineralPairAnalyses >= MAX_CEMENT_SUPPLY_PAIR_ANALYSES) break;
+          continue;
+        }
+        quarry = pair.quarry;
+        cementWorks = pair.cementWorks;
+        prefabricationPlant = option.position;
+        break;
+      }
+      if (quarry && cementWorks && prefabricationPlant) break;
+      if (!pairAvailable) break;
+    }
+    if (quarry && cementWorks && prefabricationPlant) {
+      positionByDefinition.set('quarry', quarry);
+      positionByDefinition.set('cement-works', cementWorks);
+      positionByDefinition.set('prefabrication-plant', prefabricationPlant);
+      facilitiesPlaced = 3;
+      const accepted = [
+        ...fixedPositions,
+        quarry,
+        cementWorks,
+        prefabricationPlant,
+      ];
+      for (const facilityId of [
+        'port-interchange',
+        'town-construction-market',
+      ]) {
+        const candidate = candidates.find(
+          (value) => isSeparated(value, accepted),
+        );
+        if (!candidate) break;
+        accepted.push(candidate);
         positionByDefinition.set(facilityId, candidate);
         facilitiesPlaced += 1;
-        for (const deferred of deferredFacilityCandidates) {
-          if (positions.some((position) => Math.hypot(
-            deferred.x - position.x,
-            deferred.y - position.y,
-          ) < WorldGenerationConfig.MIN_FACILITY_SEPARATION)) {
-            continue;
-          }
-          const deferredFacilityId =
-            SECONDARY_PLACEMENT_ORDER[facilitiesPlaced];
-          positions.push(deferred);
-          positionByDefinition.set(deferredFacilityId, deferred);
-          facilitiesPlaced += 1;
-          if (facilitiesPlaced === SECONDARY_PLACEMENT_ORDER.length) break;
-        }
-        continue;
       }
-      positions.push(candidate);
-      positionByDefinition.set(facilityId, candidate);
-      facilitiesPlaced += 1;
     }
 
-    if (facilitiesPlaced < SECONDARY_PLACEMENT_ORDER.length) {
+    if (facilitiesPlaced < 5) {
       return {
         ok: false,
         error: {
           code: 'economy-exhausted',
           seed: config.seed,
-          candidatesEvaluated,
+          candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+          prefabAnalyses,
+          mineralPairAnalyses,
           facilitiesPlaced,
         },
       };
@@ -336,7 +554,7 @@ export class WorldEconomyGenerator {
     const regionalDemandBpsByProduct: Record<string, number> = {};
     INITIAL_PRODUCTS.forEach((product) => {
       regionalDemandBpsByProduct[product.id] = 8_000
-        + Math.floor(random() * 4_001);
+        + Math.floor(marketRandom() * 4_001);
     });
 
     return {
@@ -350,7 +568,11 @@ export class WorldEconomyGenerator {
           regionalDemandBpsByProduct,
         },
       },
-      diagnostics: { candidatesEvaluated },
+      diagnostics: {
+        candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
+        prefabAnalyses,
+        mineralPairAnalyses,
+      },
     };
   }
 }

@@ -31,10 +31,11 @@ function makeTrack(
 function makeQuote(
   blocker: FreightPurchaseBlocker | null = null,
   expectedRevision = 0,
+  freightSetId = 'flatbed-freight-set',
 ): FreightPurchaseQuote {
   return {
     expectedRevision,
-    freightSetId: 'flatbed-freight-set',
+    freightSetId,
     trackUUID: 'forest-route',
     trackT: 0,
     facing: 1,
@@ -46,7 +47,7 @@ function makeQuote(
   };
 }
 
-describe('PlaceVehicleTool flatbed purchase gesture', () => {
+describe('PlaceVehicleTool selected freight-set purchase gesture', () => {
   let scene: any;
   let trackManager: any;
   let trainManager: any;
@@ -102,6 +103,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     tool.onPointerDown(0, 0, { button: 0 } as any);
 
     expect(state).toHaveBeenCalledWith({
+      freightSetId: 'flatbed-freight-set',
       quote: null,
       cash: WorldManager.world!.company.cash,
       message: 'Click on player track to place the General Flatbed Set',
@@ -112,7 +114,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
 
   it.each([
     [
-      'outside-forest-access',
+      'outside-source-access',
       'Place inside Managed Forest rail access',
     ],
     [
@@ -133,6 +135,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     tool.onPointerDown(-500, 0, { button: 0 } as any);
 
     expect(state).toHaveBeenCalledWith({
+      freightSetId: 'flatbed-freight-set',
       quote: expect.objectContaining({ blocker }),
       cash: WorldManager.world!.company.cash,
       message,
@@ -165,27 +168,35 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     EventBus.off('ui:freight-purchase-state', state);
   });
 
-  it('holds one in-flight gesture until a result and reports the exact duplicate remedy', () => {
+  it('replaces a pending placement quote when the player clicks the track again', () => {
     trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const firstQuote = Object.freeze(makeQuote());
+    const replacementQuote = Object.freeze({
+      ...makeQuote(),
+      trackT: 1,
+    });
+    quote
+      .mockReturnValueOnce(firstQuote)
+      .mockReturnValueOnce(replacementQuote);
     const state = jest.fn();
     EventBus.on('ui:freight-purchase-state', state);
 
     tool.onPointerDown(-500, 0, { button: 0 } as any);
-    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    tool.onPointerDown(500, 0, { button: 0 } as any);
 
-    expect(quote).toHaveBeenCalledTimes(1);
     expect(state).toHaveBeenLastCalledWith({
-      quote: null,
+      freightSetId: 'flatbed-freight-set',
+      quote: replacementQuote,
       cash: WorldManager.world!.company.cash,
-      message: 'Purchase already in progress',
+      message: '',
     });
-
-    EventBus.emit('freight:purchase-result', {
-      ok: false,
-      blocker: 'live-spawn-failed',
-    });
-    tool.onPointerDown(-500, 0, { button: 0 } as any);
-    expect(quote).toHaveBeenCalledTimes(2);
+    expect(tool.canConfirmQuote(firstQuote)).toBe(false);
+    expect(tool.canConfirmQuote(replacementQuote)).toBe(true);
+    expect(state.mock.calls).not.toContainEqual([
+      expect.objectContaining({
+        message: 'Purchase already in progress',
+      }),
+    ]);
     EventBus.off('ui:freight-purchase-state', state);
   });
 
@@ -206,6 +217,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     expect(quote).toHaveBeenCalledTimes(2);
     expect(trackManager.captureTopology).toHaveBeenCalledTimes(2);
     expect(state).toHaveBeenLastCalledWith({
+      freightSetId: 'flatbed-freight-set',
       quote: expect.objectContaining({
         expectedRevision: 1,
         valid: true,
@@ -229,6 +241,7 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     });
 
     expect(state).toHaveBeenLastCalledWith({
+      freightSetId: 'flatbed-freight-set',
       quote: null,
       cash: WorldManager.world!.company.cash,
       message: 'Freight state changed · review and retry purchase',
@@ -283,25 +296,129 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     );
   });
 
-  it('cancels an in-flight gesture so a new placement can be started', () => {
+  it('supports the general flatbed freight-set mode', () => {
+    expect(tool.setFreightSetId('flatbed-freight-set')).toBe(true);
+  });
+
+  it('clears a pending quote when the selected set is requested again', () => {
     trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const issued = Object.freeze(makeQuote());
+    quote.mockReturnValue(issued);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    expect(tool.canConfirmQuote(issued)).toBe(true);
+
+    expect(tool.setFreightSetId('flatbed-freight-set')).toBe(true);
+
+    expect(tool.canConfirmQuote(issued)).toBe(false);
+  });
+
+  it('publishes one cleared selected-set state when cancellation and deactivation invalidate a quote', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const issued = Object.freeze(makeQuote());
+    quote.mockReturnValue(issued);
     const state = jest.fn();
     EventBus.on('ui:freight-purchase-state', state);
-
     tool.onPointerDown(-500, 0, { button: 0 } as any);
-    expect(state).toHaveBeenLastCalledWith(expect.objectContaining({
-      quote: expect.objectContaining({ valid: true }),
-    }));
 
     tool.cancel();
-    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    tool.deactivate();
 
-    expect(quote).toHaveBeenCalledTimes(2);
+    expect(tool.canConfirmQuote(issued)).toBe(false);
+    expect(state).toHaveBeenCalledTimes(2);
+    expect(state).toHaveBeenLastCalledWith({
+      freightSetId: 'flatbed-freight-set',
+      quote: null,
+      cash: WorldManager.world!.company.cash,
+      message: 'Click on player track to place the General Flatbed Set',
+    });
     EventBus.off('ui:freight-purchase-state', state);
   });
 
-  it('supports only the general flatbed freight-set mode', () => {
-    expect(() => tool.setFreightSetId('flatbed-freight-set')).not.toThrow();
+  it('switches among supported sets and clears the old pending quote before another placement', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    quote
+      .mockReturnValueOnce(makeQuote())
+      .mockReturnValueOnce(makeQuote(
+        null,
+        0,
+        'aggregate-hopper-set',
+      ));
+    const state = jest.fn();
+    EventBus.on('ui:freight-purchase-state', state);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    expect(tool.setFreightSetId('aggregate-hopper-set')).toBe(true);
+    expect(state).toHaveBeenLastCalledWith({
+      freightSetId: 'aggregate-hopper-set',
+      quote: null,
+      cash: WorldManager.world!.company.cash,
+      message: 'Click on player track to place the Aggregate Hopper Set',
+    });
+
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+    expect(quote).toHaveBeenLastCalledWith(expect.objectContaining({
+      freightSetId: 'aggregate-hopper-set',
+    }));
+    EventBus.off('ui:freight-purchase-state', state);
+  });
+
+  it('fails closed on unsupported set selection without clearing the current pending quote', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const issued = Object.freeze(makeQuote());
+    quote.mockReturnValue(issued);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    expect(tool.setFreightSetId('unknown-set')).toBe(false);
+    expect(tool.canConfirmQuote(issued)).toBe(true);
+  });
+
+  it('accepts confirmation only for the exact latest selected-set quote identity', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    const issued = Object.freeze(makeQuote());
+    quote.mockReturnValue(issued);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    expect(tool.canConfirmQuote(issued)).toBe(true);
+    expect(tool.canConfirmQuote({ ...issued })).toBe(false);
+    expect(tool.canConfirmQuote({
+      ...issued,
+      freightSetId: 'aggregate-hopper-set',
+    })).toBe(false);
+
+    EventBus.emit('freight:purchase-result', {
+      ok: false,
+      blocker: 'live-placement-failed',
+    });
+    expect(tool.canConfirmQuote(issued)).toBe(false);
+  });
+
+  it('re-quotes a stale placement only for the currently selected set', () => {
+    trackManager.getClosestTrack.mockReturnValue(makeTrack(scene));
+    quote
+      .mockReturnValueOnce(makeQuote(
+        null,
+        0,
+        'covered-cement-set',
+      ))
+      .mockReturnValueOnce(Object.freeze(makeQuote(
+        null,
+        1,
+        'covered-cement-set',
+      )));
+    expect(tool.setFreightSetId('covered-cement-set')).toBe(true);
+    tool.onPointerDown(-500, 0, { button: 0 } as any);
+
+    EventBus.emit('freight:purchase-result', {
+      ok: false,
+      blocker: 'stale-revision',
+    });
+
+    expect(quote).toHaveBeenLastCalledWith(expect.objectContaining({
+      freightSetId: 'covered-cement-set',
+    }));
+    expect(tool.canConfirmQuote(
+      quote.mock.results[1].value,
+    )).toBe(true);
   });
 
   it('clears its result listener on destroy', () => {

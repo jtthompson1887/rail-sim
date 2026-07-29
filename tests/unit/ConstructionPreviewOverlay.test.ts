@@ -94,7 +94,15 @@ function model(): ConstructionPreviewModel {
     stale: false,
     message: '',
     actions: ['confirm', 'backstep', 'cancel'],
-    breachesStarterReserve: false,
+    guidance: {
+      guidanceVersion: 1,
+      phase: 'first-route',
+      objective: 'Connect Managed Forest to Sawmill.',
+      reserve: 110_000,
+      reservePurpose: 'a General Flatbed Set and operating reserve',
+      requiredFreightSetIds: ['flatbed-freight-set'],
+    },
+    breachesReserve: false,
   };
 }
 

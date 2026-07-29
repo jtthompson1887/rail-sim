@@ -91,11 +91,15 @@ function startHarnessServer() {
       && audit.seedsEvaluated === 284
       && audit.seedsResolved === 284
       && audit.seedsExhausted === 0
-      && audit.maxResolvedAttempt === 3
-      && audit.maxEconomyEvaluations === 5
-      && audit.maxTotalEconomyCandidatesEvaluated === 1_155
-      && audit.maxJointWorkUnits === 1_762
-      && audit.firstWorstSeed === 'playtest-666'
+      && audit.maxResolvedAttempt === 26
+      && audit.maxEconomyEvaluations === 81
+      && audit.maxTotalEconomyCandidatesEvaluated === 20_736
+      && audit.maxTotalPrefabAnalyses === 1_070
+      && audit.maxTotalMineralPairAnalyses === 1_381
+      && audit.totalPairCapHits === 6
+      && audit.maxPairCapHits === 1
+      && audit.maxJointWorkUnits === 27_392
+      && audit.firstWorstSeed === 'playtest-825'
       && Number.isFinite(audit.maxGenerationDurationMs)
       && audit.maxGenerationDurationMs < targetMs
       && Number.isFinite(audit.durationMs)
@@ -110,8 +114,8 @@ function startHarnessServer() {
       && measurement.economyResult.economy.facilities.length === 7
       && measurement.economyResult.diagnostics.candidatesEvaluated
         <= measurement.economyCandidatesCap
-      && measurement.economyEvaluations === 4
-      && measurement.totalEconomyCandidatesEvaluated === 994
+      && measurement.economyEvaluations === 81
+      && measurement.totalEconomyCandidatesEvaluated === 20_736
       && measurement.opportunityResult.opportunity.resolvedAttempt
         * measurement.candidatesCap
         + measurement.totalEconomyCandidatesEvaluated
@@ -119,9 +123,13 @@ function startHarnessServer() {
       && measurement.totalEconomyCandidatesEvaluated
         <= measurement.economyEvaluations * measurement.economyCandidatesCap
       && measurement.prefabWitnessCost <= 194_000
+      && measurement.starterCorridorCost
+        <= measurement.starterCorridorCostCap
+      && measurement.cementSupplyWitnessCost
+        <= measurement.cementSupplyLinkCostCap
       && measurement.blankInfrastructure === true;
     if (!exactObservedWorstCase
-      || measurement.attemptsCap !== 12
+      || measurement.attemptsCap !== 26
       || measurement.candidatesCap !== 256
       || measurement.economyCandidatesCap !== 256
       || measurement.analysisSamplesCap !== 96

@@ -32,6 +32,18 @@ function productNames(
 const units = (unitLabel: string, quantity: number): string =>
   quantity === 1 ? unitLabel : `${unitLabel}s`;
 
+const compactAmount = (
+  amount: {
+    displayName: string;
+    unitLabel: string;
+    quantity: number;
+  },
+): string => `${amount.quantity.toLocaleString('en-GB')} ${
+  amount.unitLabel === 'tonne'
+    ? 't'
+    : units(amount.unitLabel, amount.quantity)
+} ${amount.displayName}`;
+
 function factorText(id: string, basisPoints: number): string {
   const percent = (basisPoints - 10_000) / 100;
   const sign = percent >= 0 ? '+' : '';
@@ -43,6 +55,7 @@ export class FacilityInspector {
   private readonly root = element('section', 'facility-inspector');
   private readonly name = element('h2', 'facility-name');
   private readonly status = element('strong', 'facility-status');
+  private readonly recipe = element('div', 'facility-recipe');
   private readonly products = element('div', 'facility-products');
   private readonly inventories = element('div', 'facility-inventories');
   private readonly quotes = element('div', 'facility-quotes');
@@ -92,6 +105,15 @@ export class FacilityInspector {
       'color:#ffe39a',
       'font-size:13px',
     ].join(';');
+    this.recipe.style.cssText = [
+      'display:none',
+      'margin-bottom:10px',
+      'padding:8px',
+      'border-radius:4px',
+      'background:#0c2638',
+      'white-space:pre-line',
+      'color:#eaf8ff',
+    ].join(';');
     this.products.style.cssText = 'white-space:pre-line;margin-bottom:10px;color:#bad3e2';
     this.inventories.style.cssText = 'display:grid;gap:7px;margin-bottom:10px';
     this.quotes.style.cssText = 'display:grid;gap:8px;margin-bottom:10px';
@@ -99,6 +121,7 @@ export class FacilityInspector {
     this.root.append(
       this.name,
       this.status,
+      this.recipe,
       this.products,
       this.inventories,
       this.quotes,
@@ -120,6 +143,28 @@ export class FacilityInspector {
     this.name.textContent = dto.name;
     this.status.textContent = dto.status.label;
     this.status.dataset.status = dto.status.code;
+    if (dto.activeRecipe) {
+      const inputs = dto.activeRecipe.inputs.map(compactAmount).join(' + ');
+      const outputs = dto.activeRecipe.outputs.map(compactAmount).join(' + ');
+      const conversion = inputs && outputs
+        ? `${inputs} → ${outputs}`
+        : inputs || outputs;
+      const cycle = conversion
+        ? `${dto.activeRecipe.displayName} · ${conversion}`
+          + ` · ${dto.activeRecipe.cycleTicks.toLocaleString('en-GB')} ticks`
+        : dto.activeRecipe.displayName;
+      const fullLoad = dto.activeRecipe.fullLoad;
+      this.recipe.textContent = fullLoad
+        ? `${cycle}\nFull ${fullLoad.freightSetDisplayName} · `
+          + `${fullLoad.inputQuantity.toLocaleString('en-GB')} t`
+          + ` → ${fullLoad.outputQuantity.toLocaleString('en-GB')} t`
+          + ` · ${fullLoad.cycles.toLocaleString('en-GB')} cycles`
+        : cycle;
+      this.recipe.style.display = 'block';
+    } else {
+      this.recipe.textContent = '';
+      this.recipe.style.display = 'none';
+    }
     this.products.textContent = [
       `Produces ${productNames(dto.outputRows)}`,
       `Needs ${productNames(dto.inputRows)}`,
@@ -151,15 +196,24 @@ export class FacilityInspector {
       const row = document.createElement('div');
       row.style.cssText = 'padding:7px 8px;border-radius:4px;background:#0c2638';
       const heading = document.createElement('strong');
-      heading.textContent = `${quote.displayName} · `
-        + `${CURRENCY.format(quote.unitPrice)} / ${quote.unitLabel}`;
+      heading.textContent = `Receiving ${quote.displayName} · `
+        + `${CURRENCY.format(quote.unitPrice)} / t`;
       heading.style.cssText = 'display:block;color:#eaf8ff;margin-bottom:3px';
+      const fullLoad = document.createElement('div');
+      fullLoad.style.cssText = 'color:#bad3e2;margin-bottom:3px';
+      fullLoad.textContent = quote.fullLoadQuantity !== null
+        && quote.fullLoadGross !== null
+        ? `Full ${quote.fullLoadQuantity.toLocaleString('en-GB')} t `
+          + `at current rate · ${CURRENCY.format(quote.fullLoadGross)} gross`
+        : '';
       const factors = document.createElement('div');
       factors.style.cssText = 'white-space:pre-line;color:#8ab4d0;font-size:11px';
       factors.textContent = quote.factors.map(
         ({ id, basisPoints }) => factorText(id, basisPoints),
       ).join('\n');
-      row.append(heading, factors);
+      row.append(heading);
+      if (fullLoad.textContent) row.append(fullLoad);
+      row.append(factors);
       return row;
     }));
     this.rail.textContent = dto.railConnected
@@ -206,6 +260,8 @@ export class FacilityInspector {
     this.name.textContent = '';
     this.status.textContent = '';
     delete this.status.dataset.status;
+    this.recipe.textContent = '';
+    this.recipe.style.display = 'none';
     this.products.textContent = '';
     this.inventories.replaceChildren();
     this.quotes.replaceChildren();

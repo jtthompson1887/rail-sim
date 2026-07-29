@@ -21,6 +21,28 @@ function sawmillInspection(): FacilityInspectionDto {
   return dto;
 }
 
+function cementWorksInspection(): FacilityInspectionDto {
+  const created = WorldManager.tryCreateNew(
+    'Cement inspection',
+    'cement-inspector-seed',
+    'temperate',
+  );
+  if (!created.ok) throw new Error('fixture generation failed');
+  const cementWorks = created.world.economy.facilities.find(
+    ({ id }) => id === 'cement-works',
+  );
+  if (!cementWorks) throw new Error('cement works missing');
+  cementWorks.recipeProgressTicks = 2;
+  cementWorks.inventories['limestone-aggregate'].quantity = 120;
+  created.world.economy.market.constructionIndexBps = 10_000;
+  created.world.economy.market.regionalDemandBpsByProduct[
+    'limestone-aggregate'
+  ] = 10_000;
+  const dto = buildFacilityInspection(created.world, 'cement-works', true);
+  if (!dto) throw new Error('cement works inspection missing');
+  return dto;
+}
+
 describe('Facility presentation', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -68,7 +90,7 @@ describe('Facility presentation', () => {
         capacity: 160,
       },
     ]);
-    expect(dto.quotes).toHaveLength(2);
+    expect(dto.quotes).toHaveLength(1);
     expect(dto.quotes[0]).toEqual(expect.objectContaining({
       displayName: 'Logs',
       unitLabel: 'tonne',
@@ -124,7 +146,7 @@ describe('Facility presentation', () => {
       .toEqual({ code: 'waiting-input', label: 'Needs logs' });
     sawmill.inventories.logs.quantity = 10;
     expect(buildFacilityInspection(created.world, 'sawmill', true)?.status)
-      .toEqual({ code: 'working', label: 'Working' });
+      .toEqual({ code: 'working', label: 'Working 0 / 3 ticks' });
   });
 
   it('keeps every remaining prefab input blocker in recipe order after timber arrives', () => {
@@ -216,7 +238,7 @@ describe('FacilityInspector', () => {
     expect(root.querySelector('[data-testid="facility-inventories"]')?.textContent)
       .toContain('Logs 0 / 200');
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
-      .toMatch(/Logs · £[\d,]+ \/ tonne/);
+      .toMatch(/Receiving Logs · £[\d,]+ \/ t/);
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
       .toContain('Global construction');
     expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
@@ -257,6 +279,54 @@ describe('FacilityInspector', () => {
     expect(text.indexOf('Cement needs')).toBeLessThan(
       text.indexOf('Steel needs'),
     );
+    expect(document.querySelector(
+      '[data-testid="facility-recipe"]',
+    )?.textContent).toBe(
+      'Module assembly · 8 t Structural Timber + 8 t Cement + 6 t Steel'
+      + ' → 4 modules Building Modules · 6 ticks',
+    );
+  });
+
+  it('shows cement progress, conversion, receiving economics, and stock', () => {
+    EventBus.emit('facility:inspection', cementWorksInspection());
+
+    const root = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+    expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
+      .toBe('Working 2 / 4 ticks');
+    expect(root.querySelector('[data-testid="facility-recipe"]')?.textContent)
+      .toContain(
+        'Cement kiln · 12 t Limestone Aggregate → 8 t Cement · 4 ticks',
+      );
+    expect(root.querySelector('[data-testid="facility-recipe"]')?.textContent)
+      .toContain(
+        'Full Aggregate Hopper Set · 120 t → 80 t · 10 cycles',
+      );
+    expect(root.querySelector('[data-testid="facility-inventories"]')?.textContent)
+      .toContain('Limestone Aggregate 120 / 240 tonnes');
+    expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
+      .toContain('Receiving Limestone Aggregate · £45 / t');
+    expect(root.querySelector('[data-testid="facility-quotes"]')?.textContent)
+      .toContain('Full 120 t at current rate · £5,400 gross');
+  });
+
+  it('keeps pointer and touch input inside its scrollable mobile surface', () => {
+    EventBus.emit('facility:inspection', cementWorksInspection());
+    const root = document.querySelector(
+      '[data-testid="facility-inspector"]',
+    ) as HTMLElement;
+    const bodyPointer = jest.fn();
+    const bodyTouch = jest.fn();
+    document.body.addEventListener('pointerdown', bodyPointer);
+    document.body.addEventListener('touchstart', bodyTouch);
+
+    root.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    root.dispatchEvent(new Event('touchstart', { bubbles: true }));
+
+    expect(bodyPointer).not.toHaveBeenCalled();
+    expect(bodyTouch).not.toHaveBeenCalled();
+    expect(root.style.overflow).toBe('auto');
   });
 
   it('clears stale content and screen hit bounds when selection is cleared', () => {
@@ -318,6 +388,7 @@ describe('FacilityInspector', () => {
     expect(root.querySelector('[data-testid="facility-status"]')?.textContent)
       .toBe('Needs logs');
     expect(root.style.maxHeight).toBe('calc(75vh - 208px)');
+    expect(root.querySelector('[data-testid="facility-recipe"]')).not.toBeNull();
 
     Object.defineProperty(window, 'innerWidth', {
       value: 667,

@@ -5,6 +5,7 @@ import type {
 } from '../systems/ConstructionService';
 import type { ConstructionProposal } from '../systems/ConstructionAnalyzer';
 import { createTrackGeometry } from '../systems/TrackGeometry';
+import type { ConstructionGuidanceDto } from '../freight/ConstructionGuidance';
 
 export type ConstructionToolPhase =
   | 'idle'
@@ -28,7 +29,8 @@ export interface ConstructionPreviewModel {
   readonly stale: boolean;
   readonly message: string;
   readonly actions: ReadonlyArray<'confirm' | 'backstep' | 'cancel'>;
-  readonly breachesStarterReserve: boolean;
+  readonly guidance: ConstructionGuidanceDto;
+  readonly breachesReserve: boolean;
 }
 
 export interface ConstructionPreviewEvent {

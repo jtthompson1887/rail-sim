@@ -230,21 +230,21 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   const terrainCases = [
     {
       name: 'cheap low-earthworks route',
-      seed: 'playtest-040',
-      attempt: 1,
+      seed: 'playtest-632',
+      attempt: 2,
       direct: {
-        estimatedTotal: 29_028,
-        total: 29_028,
-        track: 20_524,
-        earthworks: 8_504,
+        estimatedTotal: 30_127,
+        total: 30_127,
+        track: 17_500,
+        earthworks: 12_627,
         bridge: 0,
         tunnel: 0,
       },
       detour: {
-        estimatedTotal: 49_487,
-        total: 46_987,
-        track: 22_394,
-        earthworks: 24_593,
+        estimatedTotal: 51_388,
+        total: 48_888,
+        track: 19_488,
+        earthworks: 29_400,
         bridge: 0,
         tunnel: 0,
       },
@@ -254,23 +254,23 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     },
     {
       name: 'rolling earthworks choice',
-      seed: 'playtest-077',
-      attempt: 1,
+      seed: 'playtest-601',
+      attempt: 3,
       direct: {
-        estimatedTotal: 331_507,
-        total: 331_507,
-        track: 40_025,
-        earthworks: 229_221,
-        bridge: 30_495,
-        tunnel: 31_766,
+        estimatedTotal: 185_131,
+        total: 185_131,
+        track: 27_893,
+        earthworks: 136_953,
+        bridge: 7_607,
+        tunnel: 12_678,
       },
       detour: {
-        estimatedTotal: 223_521,
-        total: 221_021,
-        track: 40_837,
-        earthworks: 148_260,
+        estimatedTotal: 119_718,
+        total: 117_218,
+        track: 33_821,
+        earthworks: 83_397,
         bridge: 0,
-        tunnel: 31_924,
+        tunnel: 0,
       },
       expectedPreviewStructure: 'tunnel',
       liveCostProfile: 'earthworks',
@@ -278,22 +278,22 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     },
     {
       name: 'tunnel versus bridge tradeoff',
-      seed: 'playtest-082',
-      attempt: 1,
+      seed: 'playtest-657',
+      attempt: 6,
       direct: {
-        estimatedTotal: 323_555,
-        total: 323_555,
-        track: 34_125,
-        earthworks: 200_958,
+        estimatedTotal: 286_794,
+        total: 286_794,
+        track: 37_710,
+        earthworks: 197_952,
         bridge: 0,
-        tunnel: 88_472,
+        tunnel: 51_132,
       },
       detour: {
-        estimatedTotal: 161_071,
-        total: 158_571,
-        track: 35_098,
-        earthworks: 112_230,
-        bridge: 11_243,
+        estimatedTotal: 253_739,
+        total: 251_239,
+        track: 44_617,
+        earthworks: 168_679,
+        bridge: 37_943,
         tunnel: 0,
       },
       expectedPreviewStructure: 'tunnel',
@@ -389,29 +389,29 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   }
 
   test('shows deterministic unaffordability and readable blocking UI on mobile', async ({ page }) => {
-    await createFixedSeedWorld(page, 'playtest-1468');
+    await createFixedSeedWorld(page, 'playtest-607');
     const generated = await snapshot(page);
     const [direct, detour] = generated.world.starterOpportunity.corridors;
 
     expect(generated.world.company.cash).toBe(1_000_000);
     expect(generated.world.starterOpportunity.resolvedAttempt).toBe(1);
-    expect(direct.estimatedCost).toBe(113_931);
+    expect(direct.estimatedCost).toBe(98_077);
     expect(aggregateWitnessCosts(direct)).toEqual({
-      total: 113_931,
-      track: 37_000,
-      earthworks: 76_931,
+      total: 98_077,
+      track: 31_579,
+      earthworks: 66_498,
       bridge: 0,
       tunnel: 0,
     });
     expect(direct.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0]);
-    expect(detour.estimatedCost).toBe(73_628);
-    expect(detour.feasibilityWitness.totalCost).toBe(73_628);
+    expect(detour.estimatedCost).toBe(100_953);
+    expect(detour.feasibilityWitness.totalCost).toBe(100_953);
     expect(aggregateWitnessCosts(detour)).toEqual({
-      total: 71_128,
-      track: 37_887,
-      earthworks: 33_241,
+      total: 98_453,
+      track: 32_754,
+      earthworks: 65_699,
       bridge: 0,
       tunnel: 0,
     });
@@ -435,7 +435,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     await page.reload();
     await openOnlySavedWorld(page);
     const lowCash = await snapshot(page);
-    expect(lowCash.world.company.cash).toBe(113_930);
+    expect(lowCash.world.company.cash).toBe(98_076);
     expect(lowCash.world.tracks).toHaveLength(0);
 
     const reviewed = await reviewDirectCorridor(page);
@@ -474,6 +474,6 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     await page.keyboard.press('Enter');
     const rejected = await snapshot(page);
     expect(rejected.world.tracks).toHaveLength(0);
-    expect(rejected.world.company.cash).toBe(113_930);
+    expect(rejected.world.company.cash).toBe(98_076);
   });
 });

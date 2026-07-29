@@ -1,8 +1,12 @@
-import type { ProductDefinition } from '../economy/EconomyData';
+import type {
+  CargoClass,
+  ProductDefinition,
+} from '../economy/EconomyData';
 
 export interface FreightSetDefinition {
   readonly id: string;
   readonly displayName: string;
+  readonly cargoClass: CargoClass;
   readonly compatibleProductIds: readonly string[];
   readonly payloadMassKg: number;
   readonly payloadVolumeLitres: number;
@@ -19,6 +23,8 @@ export type FreightSetValidationResult =
   | { valid: false; code: string; referenceId?: string };
 
 export const FLATBED_FREIGHT_SET_ID = 'flatbed-freight-set';
+export const AGGREGATE_HOPPER_SET_ID = 'aggregate-hopper-set';
+export const COVERED_CEMENT_SET_ID = 'covered-cement-set';
 export const FLATBED_TRAIN_PURCHASE_PRICE = 90_000;
 export const OPERATING_RESERVE = 20_000;
 export const STARTER_ROUTE_RESERVE = 110_000;
@@ -49,11 +55,30 @@ export const FREIGHT_SETS: readonly FreightSetDefinition[] =
   freezeFreightSets([{
     id: FLATBED_FREIGHT_SET_ID,
     displayName: 'General Flatbed Set',
+    cargoClass: 'flatbed',
     compatibleProductIds: ['logs', 'structural-timber'],
     payloadMassKg: 60_000,
     payloadVolumeLitres: 96_000,
     purchasePrice: FLATBED_TRAIN_PURCHASE_PRICE,
     runningCostPerActiveTick: 20,
+  }, {
+    id: AGGREGATE_HOPPER_SET_ID,
+    displayName: 'Aggregate Hopper Set',
+    cargoClass: 'bulk',
+    compatibleProductIds: ['limestone-aggregate'],
+    payloadMassKg: 120_000,
+    payloadVolumeLitres: 75_000,
+    purchasePrice: 110_000,
+    runningCostPerActiveTick: 20,
+  }, {
+    id: COVERED_CEMENT_SET_ID,
+    displayName: 'Covered Cement Set',
+    cargoClass: 'covered',
+    compatibleProductIds: ['cement'],
+    payloadMassKg: 80_000,
+    payloadVolumeLitres: 64_000,
+    purchasePrice: 105_000,
+    runningCostPerActiveTick: 22,
   }]);
 
 const freightSetById = new Map(
@@ -97,6 +122,7 @@ export const validateFreightSetContent = (
   for (const set of sets) {
     if (!isNonEmptyString(set.id)
       || !isNonEmptyString(set.displayName)
+      || ['bulk', 'covered', 'flatbed'].indexOf(set.cargoClass) === -1
       || !Array.isArray(set.compatibleProductIds)
       || set.compatibleProductIds.length === 0) {
       return invalid(
@@ -126,6 +152,10 @@ export const validateFreightSetContent = (
       }
       if (!productIds.has(productId)) {
         return invalid('unknown-compatible-product', productId);
+      }
+      const product = products.find(({ id }) => id === productId);
+      if (product?.cargoClass !== set.cargoClass) {
+        return invalid('cargo-class-mismatch', productId);
       }
       compatibleProductIds.add(productId);
     }
