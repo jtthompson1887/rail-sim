@@ -1,6 +1,7 @@
 import {
   CURVE_FLATNESS_TOLERANCE,
   CURVE_LENGTH_UNCERTAINTY,
+  isStrictlyForwardStraightCubic,
   sampleConstructionCurve,
 } from '../../src/systems/ConstructionCurveSampler';
 import {
@@ -21,6 +22,77 @@ function straight(length: number): TrackGeometryDef {
     p1: { x: -length / 6, y: 0 },
     p2: { x: length / 6, y: 0 },
     p3: { x: length / 2, y: 0 },
+  };
+}
+
+function referencePointAt(def: TrackGeometryDef, t: number) {
+  const inverse = 1 - t;
+  return {
+    x: inverse ** 3 * def.p0.x
+      + 3 * inverse ** 2 * t * def.p1.x
+      + 3 * inverse * t ** 2 * def.p2.x
+      + t ** 3 * def.p3.x,
+    y: inverse ** 3 * def.p0.y
+      + 3 * inverse ** 2 * t * def.p1.y
+      + 3 * inverse * t ** 2 * def.p2.y
+      + t ** 3 * def.p3.y,
+  };
+}
+
+function referenceStraightProfile(def: TrackGeometryDef) {
+  const chord = {
+    x: def.p3.x - def.p0.x,
+    y: def.p3.y - def.p0.y,
+  };
+  const chordLength = Math.hypot(chord.x, chord.y);
+  const chordUnit = {
+    x: chord.x / chordLength,
+    y: chord.y / chordLength,
+  };
+  const intervalCount = Math.max(
+    1,
+    Math.ceil((chordLength - 1e-9) / TERRAIN_ANALYSIS_SPACING),
+  );
+  const intervalLength = chordLength / intervalCount;
+  const profile = [{
+    t: 0,
+    point: { ...def.p0 },
+    distance: 0,
+    segmentLength: 0,
+  }];
+  let previousT = 0;
+  for (let index = 1; index < intervalCount; index++) {
+    const targetDistance = intervalLength * index;
+    let low = previousT;
+    let high = 1;
+    for (let iteration = 0; iteration < 48; iteration++) {
+      const candidateT = (low + high) / 2;
+      const candidatePoint = referencePointAt(def, candidateT);
+      const projectedDistance =
+        (candidatePoint.x - def.p0.x) * chordUnit.x
+        + (candidatePoint.y - def.p0.y) * chordUnit.y;
+      if (projectedDistance < targetDistance) low = candidateT;
+      else high = candidateT;
+    }
+    previousT = (low + high) / 2;
+    profile.push({
+      t: previousT,
+      point: referencePointAt(def, previousT),
+      distance: targetDistance,
+      segmentLength: intervalLength,
+    });
+  }
+  profile.push({
+    t: 1,
+    point: { ...def.p3 },
+    distance: chordLength,
+    segmentLength: intervalLength,
+  });
+  return {
+    ok: true,
+    samples: profile,
+    length: chordLength,
+    maxLengthError: 0,
   };
 }
 
@@ -104,6 +176,103 @@ describe('sampleConstructionCurve', () => {
         sample.t,
       ) <= TERRAIN_ANALYSIS_SPACING + 1e-7
     ))).toBe(true);
+  });
+
+  it.each([
+    ['clamped-control long', deriveAutomaticCubic({
+      start: { x: -3_040, y: 0 },
+      end: { x: 3_040, y: 0 },
+    })],
+    ['diagonal', deriveAutomaticCubic({
+      start: { x: -2_000, y: -1_000 },
+      end: { x: 2_000, y: 3_000 },
+    })],
+    ['short', deriveAutomaticCubic({
+      start: { x: 0, y: 0 },
+      end: { x: 192, y: 0 },
+    })],
+  ])('gives every %s straight interval exact equal-distance accounting', (
+    _label,
+    geometry,
+  ) => {
+    const result = sampleConstructionCurve(geometry);
+    const chord = Math.hypot(
+      geometry.p3.x - geometry.p0.x,
+      geometry.p3.y - geometry.p0.y,
+    );
+    const intervalCount = Math.ceil(chord / TERRAIN_ANALYSIS_SPACING);
+    const expectedSegmentLength = chord / intervalCount;
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.length).toBe(chord);
+    expect(result.maxLengthError).toBe(0);
+    expect(result.samples).toHaveLength(intervalCount + 1);
+    for (let index = 1; index < result.samples.length; index++) {
+      expect(result.samples[index].segmentLength)
+        .toBe(expectedSegmentLength);
+      expect(result.samples[index].distance)
+        .toBe(expectedSegmentLength * index);
+    }
+  });
+
+  it.each([
+    ['long', deriveAutomaticCubic({
+      start: { x: -3_040, y: 0 },
+      end: { x: 3_040, y: 0 },
+    })],
+    ['diagonal', deriveAutomaticCubic({
+      start: { x: -2_000, y: -1_000 },
+      end: { x: 2_000, y: 3_000 },
+    })],
+    ['short', deriveAutomaticCubic({
+      start: { x: 0, y: 0 },
+      end: { x: 192, y: 0 },
+    })],
+  ])('matches the allocation-heavy %s straight reference exactly', (
+    _label,
+    geometry,
+  ) => {
+    expect(sampleConstructionCurve(geometry))
+      .toEqual(referenceStraightProfile(geometry));
+  });
+
+  it.each([
+    ['review case', {
+      geometryVersion: 1 as const,
+      p0: { x: 0, y: 0 },
+      p1: { x: 0.00004, y: 0.0000001 },
+      p2: { x: 500.00004, y: -0.0000001 },
+      p3: { x: 1000, y: 0 },
+    }],
+    ['sub-tolerance endpoint curvature', {
+      geometryVersion: 1 as const,
+      p0: { x: 0, y: 0 },
+      p1: { x: 0.00004, y: 0.00000004 },
+      p2: { x: 500.00004, y: -0.00000004 },
+      p3: { x: 1000, y: 0 },
+    }],
+  ])('keeps the hostile %s cubic on the general sampler path', (
+    _label,
+    geometry,
+  ) => {
+    const result = sampleConstructionCurve(geometry);
+
+    expect(isStrictlyForwardStraightCubic(geometry)).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.maxLengthError).toBeGreaterThan(0);
+  });
+
+  it('keeps a canonical short stationary chord on the general path', () => {
+    const geometry = deriveAutomaticCubic({
+      start: { x: 0, y: 0 },
+      end: { x: 50, y: 0 },
+    });
+    const result = sampleConstructionCurve(geometry);
+
+    expect(isStrictlyForwardStraightCubic(geometry)).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('fails without allocating a 97th position when a straight exceeds the cap', () => {

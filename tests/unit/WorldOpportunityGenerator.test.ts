@@ -158,22 +158,151 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
-  it('does not spend the pair-evaluation budget on invalid pair draws', () => {
+  it('rejects an impossible direct endpoint grade before exact analysis', () => {
+    const steepTerrain = {
+      getHeightAt(x: number): number {
+        return x * 500;
+      },
+    };
+    const analyze = jest.spyOn(
+      ConstructionAnalyzer.prototype,
+      'analyzeDetailed',
+    );
+    const generator = new WorldOpportunityGenerator(steepTerrain);
+
+    const result = (generator as any).buildOpportunity(
+      config,
+      1,
+      { x: 0, y: 0, elevation: 0 },
+      { x: 2_000, y: 0, elevation: 1_000_000 },
+    );
+    const calls = analyze.mock.calls.length;
+    analyze.mockRestore();
+
+    expect(result).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('rejects impossible detour endpoint grades before exact leg analysis', () => {
+    const getHeightAt = jest.fn((x: number, y: number): number => (
+      y === 0 ? x * 0.01 : 1_000_000
+    ));
+    const analyze = jest.spyOn(
+      ConstructionAnalyzer.prototype,
+      'analyzeDetailed',
+    );
+    const generator = new WorldOpportunityGenerator({ getHeightAt });
+
+    const result = (generator as any).buildOpportunity(
+      config,
+      1,
+      { x: 0, y: 0, elevation: 0 },
+      { x: 2_000, y: 0, elevation: 20 },
+    );
+    const analyzedGeometries = analyze.mock.calls.map(([geometry]) => geometry);
+    analyze.mockRestore();
+
+    expect(result).toBeNull();
+    expect(analyzedGeometries).toHaveLength(1);
+    expect(analyzedGeometries[0].p0).toEqual({ x: 0, y: 0 });
+    expect(analyzedGeometries[0].p3).toEqual({ x: 2_000, y: 0 });
+  });
+
+  it('allows an endpoint grade just within the exact analyzer tolerance', () => {
+    const maximumGradeRatio = (
+      ConstructionConfig.MAX_GRADE_PERCENT
+        + ENGINEERED_GRADE_COMPARISON_EPSILON / 2
+    ) / 100;
+    const analyze = jest.spyOn(
+      ConstructionAnalyzer.prototype,
+      'analyzeDetailed',
+    );
+    const generator = new WorldOpportunityGenerator({
+      getHeightAt(x: number): number {
+        return x * maximumGradeRatio;
+      },
+    });
+
+    (generator as any).buildOpportunity(
+      config,
+      1,
+      { x: 0, y: 0, elevation: 0 },
+      { x: 2_000, y: 0, elevation: 2_000 * maximumGradeRatio },
+    );
+    const calls = analyze.mock.calls.length;
+    analyze.mockRestore();
+
+    expect(calls).toBeGreaterThan(0);
+  });
+
+  it('enumerates attempt-one pairs before ranking lower endpoint grade', () => {
     const generator = new WorldOpportunityGenerator(variedTerrain);
     const opportunity = makeStarterOpportunity('late-valid-pair');
     const buildOpportunity = jest.spyOn(
       generator as any,
       'buildOpportunity',
     ).mockReturnValue(opportunity);
-    const values = [
-      ...Array.from({ length: 48 }, () => 0.1),
-      0.1,
-      0.8,
+    const candidates = [
+      { x: 0, y: 5_000, elevation: 0 },
+      { x: 2_000, y: 5_000, elevation: 60 },
+      { x: 0, y: 0, elevation: 0 },
+      { x: 2_000, y: 0, elevation: 20 },
+      { x: -1_200, y: 5_000, elevation: 0 },
     ];
-    const random = jest.fn(() => values.shift() ?? 0.1);
+    const values = [
+      0.1, 0.3,
+      0.5, 0.7,
+      ...Array.from(
+        { length: MAX_SITE_CANDIDATES_PER_ATTEMPT * 2 - 4 },
+        (_, index) => index % 2 === 0 ? 0.1 : 0.3,
+      ),
+    ];
+    const random = jest.fn(() => values.shift()!);
+
+    expect((generator as any).tryAttempt(
+      config,
+      1,
+      candidates,
+      random,
+    )).toBe(opportunity);
+    expect(random).not.toHaveBeenCalled();
+    expect(buildOpportunity).toHaveBeenCalledTimes(1);
+    expect(buildOpportunity).toHaveBeenCalledWith(
+      config,
+      1,
+      candidates[2],
+      candidates[3],
+    );
+  });
+
+  it('enumerates unordered pairs and builds both stable orientations', () => {
+    const considered: StarterOpportunityDef[] = [];
+    const generator = new WorldOpportunityGenerator(
+      variedTerrain,
+      (opportunity) => {
+        considered.push(opportunity);
+        return considered.length === 2;
+      },
+    );
+    const original = makeStarterOpportunity('original-orientation');
+    const reversed = makeStarterOpportunity('reversed-orientation');
+    const buildOpportunity = jest.spyOn(
+      generator as any,
+      'buildOpportunity',
+    ).mockImplementation((
+      _config: unknown,
+      _attempt: unknown,
+      first: { x: number },
+    ) => first.x === 0 ? original : reversed);
+    const values = Array.from(
+      { length: MAX_SITE_CANDIDATES_PER_ATTEMPT * 2 },
+      (_, index) => index % 4 < 2
+        ? (index % 2 === 0 ? 0.1 : 0.8)
+        : (index % 2 === 0 ? 0.8 : 0.1),
+    );
+    const random = jest.fn(() => values.shift()!);
     const candidates = [
       { x: 0, y: 0, elevation: 0 },
-      { x: 200, y: 0, elevation: 20 },
       { x: 2_000, y: 0, elevation: 20 },
     ];
 
@@ -182,38 +311,41 @@ describe('WorldOpportunityGenerator', () => {
       1,
       candidates,
       random,
-    )).toBe(opportunity);
-    expect(random).toHaveBeenCalledTimes(50);
-    expect(buildOpportunity).toHaveBeenCalledTimes(1);
-    expect(buildOpportunity).toHaveBeenCalledWith(
-      config,
-      1,
-      candidates[0],
-      candidates[2],
-    );
+    )).toBe(reversed);
+    expect(random).not.toHaveBeenCalled();
+    expect(buildOpportunity.mock.calls.map((call) => call.slice(2)))
+      .toEqual([
+        [candidates[0], candidates[1]],
+        [candidates[1], candidates[0]],
+      ]);
+    expect(considered).toEqual([original, reversed]);
   });
 
-  it('keeps invalid pair draws inside the hard site-candidate draw cap', () => {
-    const generator = new WorldOpportunityGenerator(variedTerrain);
+  it('keeps every build inside 24 orientation slots and 624 globally', () => {
+    const generator = new WorldOpportunityGenerator(
+      variedTerrain,
+      () => false,
+    );
     const buildOpportunity = jest.spyOn(
       generator as any,
       'buildOpportunity',
-    );
-    const random = jest.fn(() => 0.1);
+    ).mockReturnValue(makeStarterOpportunity('bounded-orientation'));
 
-    expect((generator as any).tryAttempt(
-      config,
-      1,
-      [
-        { x: 0, y: 0, elevation: 0 },
-        { x: 2_000, y: 0, elevation: 20 },
-      ],
-      random,
-    )).toBeNull();
-    expect(random).toHaveBeenCalledTimes(
-      MAX_SITE_CANDIDATES_PER_ATTEMPT * 2,
+    const result = generator.generate(config);
+
+    expect(result.ok).toBe(false);
+    const callsByAttempt = new Map<number, number>();
+    for (const call of buildOpportunity.mock.calls) {
+      const attempt = call[1] as number;
+      callsByAttempt.set(attempt, (callsByAttempt.get(attempt) ?? 0) + 1);
+    }
+    expect(Math.max(...callsByAttempt.values()))
+      .toBeLessThanOrEqual(
+        WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT,
+      );
+    expect(buildOpportunity).toHaveBeenCalledTimes(
+      MAX_ACCEPTANCE_EVALUATIONS,
     );
-    expect(buildOpportunity).not.toHaveBeenCalled();
   });
 
   it('continues its bounded deterministic search when acceptance rejects an otherwise-valid opportunity', () => {
@@ -288,6 +420,39 @@ describe('WorldOpportunityGenerator', () => {
 
     expect(mutateAndAccept).toHaveBeenCalledTimes(1);
     expect(result).toEqual(baseline);
+  });
+
+  it.each([
+    'playtest-610',
+    'playtest-616',
+    'economy-accumulator',
+  ])('recovers production world %s within the unchanged bounds', (seed) => {
+    localStorage.clear();
+    WorldManager.reset();
+    try {
+      const creation = WorldManager.tryCreateNew(
+        'Bounded starter ordering',
+        seed,
+      );
+
+      expect(creation.ok).toBe(true);
+      if (!creation.ok) return;
+      expect(creation.world.starterOpportunity.resolvedAttempt)
+        .toBeLessThanOrEqual(MAX_OPPORTUNITY_ATTEMPTS);
+      expect(creation.world.economy.facilities).toHaveLength(7);
+      expect(creation.world.economy.facilities.map(({ id }) => id))
+        .toEqual([
+          'managed-forest',
+          'sawmill',
+          'quarry',
+          'cement-works',
+          'port-interchange',
+          'prefabrication-plant',
+          'town-construction-market',
+        ]);
+    } finally {
+      WorldManager.reset();
+    }
   });
 
   it.each([
@@ -600,6 +765,42 @@ describe('WorldOpportunityGenerator', () => {
 
     expect(first.ok).toBe(true);
     expect(replay).toEqual(first);
+  });
+
+  it('reuses accepted segment analyses within each generated witness', () => {
+    const analyze = jest.spyOn(
+      ConstructionAnalyzer.prototype,
+      'analyzeDetailed',
+    );
+    const generator = new WorldOpportunityGenerator(variedTerrain);
+    const result = generator.generate(config);
+    const firstAnalyzedGeometryKeys = analyze.mock.calls.map(
+      ([geometry]) => JSON.stringify(geometry),
+    );
+    analyze.mockClear();
+    const replay = generator.generate(config);
+    const replayAnalyzedGeometryKeys = analyze.mock.calls.map(
+      ([geometry]) => JSON.stringify(geometry),
+    );
+    analyze.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(replay).toEqual(result);
+    if (!result.ok) return;
+    const acceptedGeometries = result.opportunity.corridors.flatMap(
+      (corridor) => corridor.feasibilityWitness.segments.map(
+        (segment) => segment.geometry,
+      ),
+    );
+    for (const geometry of acceptedGeometries) {
+      const geometryKey = JSON.stringify(geometry);
+      expect(firstAnalyzedGeometryKeys.filter(
+        (analyzedGeometryKey) => analyzedGeometryKey === geometryKey,
+      )).toHaveLength(1);
+      expect(replayAnalyzedGeometryKeys.filter(
+        (analyzedGeometryKey) => analyzedGeometryKey === geometryKey,
+      )).toHaveLength(1);
+    }
   });
 
   it('varies the generated opportunity for a different seed', () => {

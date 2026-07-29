@@ -436,6 +436,38 @@ describe('createRegionalConstructionOpportunityAnalyzer', () => {
     ]);
   });
 
+  it('rejects a replayed Prefab leg that exits the Sawmill throat then crosses the starter spine', () => {
+    const fixture = regionalFixture();
+    const testAnalyzer = analyzerDouble(
+      [27_500, 27_500],
+      (detail, index) => {
+        if (index !== 2) return detail;
+        const points = [
+          detail.proposal.geometry.p0,
+          { x: 2_100, y: 0 },
+          { x: 1_500, y: 0 },
+          detail.proposal.geometry.p3,
+        ];
+        return {
+          ...detail,
+          curveSamples: points.map((point, sampleIndex) => ({
+            t: sampleIndex / (points.length - 1),
+            point,
+            distance: sampleIndex * 600,
+            segmentLength: sampleIndex === 0 ? 0 : 600,
+          })),
+        };
+      },
+    );
+
+    expect(createRegionalConstructionOpportunityAnalyzer(
+      testAnalyzer.analyzer,
+      fixture.starter,
+      fixture.prefab,
+      fixture.cement,
+    )).toBeNull();
+  });
+
   it('publishes the bounded pair-analysis and operating-plan constants', () => {
     expect(MAX_REGIONAL_PAIR_ANALYSES).toBe(32);
     expect(REFERENCE_SPEED_WORLD_UNITS_PER_TICK).toBe(20);

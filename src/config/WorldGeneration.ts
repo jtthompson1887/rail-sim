@@ -4,6 +4,8 @@ export const MAX_OPPORTUNITY_ATTEMPTS = 26;
 export const MAX_SITE_CANDIDATES_PER_ATTEMPT = 256;
 export const MAX_ECONOMY_SITE_CANDIDATES = 256;
 export const OPPORTUNITY_CAMERA_PADDING = 160;
+export const REGIONAL_ENDPOINT_MIN_CHORD = 1_024;
+export const REGIONAL_ENDPOINT_MAX_CHORD = 2_048;
 
 export const WorldGenerationConfig = {
   SITE_GRID_SIZE: 16,

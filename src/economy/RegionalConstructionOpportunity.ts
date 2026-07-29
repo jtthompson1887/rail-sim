@@ -3,8 +3,11 @@ import {
   MAX_MODULE_REFERENCE_ACTIVE_TICKS,
   MAX_REGIONAL_CONSTRUCTION_LINK_COST,
   MAX_STEEL_REFERENCE_ACTIVE_TICKS,
+  MODULE_REFERENCE_REVENUE,
   REFERENCE_MANOEUVRE_TICKS,
+  REFERENCE_RUNNING_COST_PER_ACTIVE_TICK,
   REFERENCE_SPEED_WORLD_UNITS_PER_TICK,
+  STEEL_REFERENCE_REVENUE,
 } from '../config/FreightProgression';
 import { WorldGenerationConfig } from '../config/WorldGeneration';
 import type {
@@ -239,6 +242,16 @@ export function createRegionalConstructionOpportunityAnalyzer(
 
   const firstStarterDetail = starterDetails[0];
   const lastStarterDetail = starterDetails[starterDetails.length - 1];
+  const starterProtectedTracks = starterDetails.map((detail, index) => (
+    protectedTrack(`starter-${index}`, detail)
+  ));
+  const prefabStarterConnection: ClearanceEndpointConnection = {
+    kind: 'endpoint-connection',
+    existingTrackUUID: `starter-${starterDetails.length - 1}`,
+    existingEndpoint: 'end',
+    newEndpoint: 'start',
+    point: { ...prefabDetail.proposal.geometry.p0 },
+  };
   if (!pointsMatch(
     lastStarterDetail.proposal.geometry.p3,
     prefabDetail.proposal.geometry.p0,
@@ -250,14 +263,20 @@ export function createRegionalConstructionOpportunityAnalyzer(
     || !pointsMatch(
       cementToPrefabricationDetail.proposal.geometry.p3,
       prefabDetail.proposal.geometry.p3,
+    )
+    || !hasConstructionClearance(
+      {
+        geometry: prefabDetail.proposal.geometry,
+        curveSamples: prefabDetail.curveSamples,
+      },
+      starterProtectedTracks,
+      [prefabStarterConnection],
     )) {
     return null;
   }
 
   const priorProtectedTracks = [
-    ...starterDetails.map((detail, index) => (
-      protectedTrack(`starter-${index}`, detail)
-    )),
+    ...starterProtectedTracks,
     protectedTrack('prefabrication-extension', prefabDetail),
     protectedTrack('quarry-to-cement', quarryToCementDetail),
     protectedTrack(
@@ -361,10 +380,10 @@ export function createRegionalConstructionOpportunityAnalyzer(
 
     const steelReferenceActiveTicks = referenceActiveTicks(steelPathLength);
     const moduleReferenceActiveTicks = referenceActiveTicks(modulePathLength);
-    const minimumSteelMargin = 31_990
-      - steelReferenceActiveTicks * 20;
-    const minimumModuleMargin = 21_216
-      - moduleReferenceActiveTicks * 20;
+    const minimumSteelMargin = STEEL_REFERENCE_REVENUE
+      - steelReferenceActiveTicks * REFERENCE_RUNNING_COST_PER_ACTIVE_TICK;
+    const minimumModuleMargin = MODULE_REFERENCE_REVENUE
+      - moduleReferenceActiveTicks * REFERENCE_RUNNING_COST_PER_ACTIVE_TICK;
     if (!Number.isSafeInteger(steelReferenceActiveTicks)
       || !Number.isSafeInteger(moduleReferenceActiveTicks)
       || steelReferenceActiveTicks > MAX_STEEL_REFERENCE_ACTIVE_TICKS

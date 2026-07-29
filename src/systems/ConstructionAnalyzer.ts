@@ -14,10 +14,14 @@ import {
   type TrackGeometryDef,
 } from './TrackGeometry';
 import {
+  isStrictlyForwardStraightCubic,
   sampleConstructionCurve,
   type ConstructionCurveSample,
 } from './ConstructionCurveSampler';
 import { realPolynomialRootsInUnitInterval } from './PolynomialRoots';
+import {
+  ENGINEERED_GRADE_COMPARISON_EPSILON,
+} from './ConstructionGradeMetrics';
 import {
   deriveVerticalAlignment,
   type TerrainProfileSample,
@@ -288,6 +292,7 @@ export function minimumRadiusForGeometry(
   def: TrackGeometryDef,
   sampledPoints: readonly ConstructionCurveSample[],
 ): number {
+  if (isStrictlyForwardStraightCubic(def)) return Infinity;
   if (hasStationaryPoint(def)) return 0;
 
   let previousDirection: { x: number; y: number } | null = null;
@@ -535,7 +540,8 @@ export class ConstructionAnalyzer {
       ({ t }) => t === alignment.maximumGradeT,
     )?.distance ?? 0;
     const valid = alignment.maximumGradePercent
-      <= ConstructionConfig.MAX_GRADE_PERCENT + 1e-9;
+      <= ConstructionConfig.MAX_GRADE_PERCENT
+        + ENGINEERED_GRADE_COMPARISON_EPSILON;
     const reasonCode: ConstructionReasonCode = valid ? 'ok' : 'grade';
 
     return {

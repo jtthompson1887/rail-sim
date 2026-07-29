@@ -384,6 +384,7 @@ describe('generated blank-world start', () => {
           candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
           prefabAnalyses: 0,
           mineralPairAnalyses: 0,
+          regionalPairAnalyses: 0,
           facilitiesPlaced: 2,
         },
       }),
@@ -406,6 +407,7 @@ describe('generated blank-world start', () => {
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
         prefabAnalyses: 0,
         mineralPairAnalyses: 0,
+        regionalPairAnalyses: 0,
         facilitiesPlaced: 2,
       },
     });
@@ -436,6 +438,7 @@ describe('generated blank-world start', () => {
           candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
           prefabAnalyses: 0,
           mineralPairAnalyses: 0,
+          regionalPairAnalyses: 0,
           facilitiesPlaced: 4,
         },
       }),
@@ -498,6 +501,7 @@ describe('generated blank-world start', () => {
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
         prefabAnalyses: 0,
         mineralPairAnalyses: 0,
+        regionalPairAnalyses: 0,
         facilitiesPlaced: 4,
       };
       if (value === undefined) {

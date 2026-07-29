@@ -107,17 +107,34 @@ export function createCementSupplyOpportunityAnalyzer(
   const prefabDetail = analyzer.analyzeDetailed(
     prefabricationExtension.proposal.geometry,
   );
+  const starterProtectedTracks = starterDetails.map((detail, index) => (
+    protectedTrack(`starter-${index}`, detail)
+  ));
+  const starterLastIndex = starterDetails.length - 1;
+  const prefabStarterConnection: ClearanceEndpointConnection = {
+    kind: 'endpoint-connection',
+    existingTrackUUID: `starter-${starterLastIndex}`,
+    existingEndpoint: 'end',
+    newEndpoint: 'start',
+    point: { ...prefabDetail.proposal.geometry.p0 },
+  };
   if (!usableDetail(prefabDetail)
     || !pointsMatch(
       prefabDetail.proposal.geometry.p3,
       prefabricationExtension.proposal.geometry.p3,
+    )
+    || !hasConstructionClearance(
+      {
+        geometry: prefabDetail.proposal.geometry,
+        curveSamples: prefabDetail.curveSamples,
+      },
+      starterProtectedTracks,
+      [prefabStarterConnection],
     )) {
     return null;
   }
   const protectedTracks = [
-    ...starterDetails.map((detail, index) => (
-      protectedTrack(`starter-${index}`, detail)
-    )),
+    ...starterProtectedTracks,
     protectedTrack('prefabrication-extension', prefabDetail),
   ];
   const cementToPrefabCache = new Map<

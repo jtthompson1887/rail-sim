@@ -90,6 +90,7 @@ describe('WorldManager', () => {
               candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
               prefabAnalyses: 0,
               mineralPairAnalyses: 0,
+              regionalPairAnalyses: 0,
               facilitiesPlaced: 0,
             },
           };
@@ -214,6 +215,44 @@ describe('WorldManager', () => {
         MAX_JOINT_ECONOMY_EVALUATIONS,
       );
       expect(invalidEconomies).toBe(1);
+      expect(saveCalls).toBe(0);
+      expect(WorldManager.world).toBeNull();
+    });
+
+    it('rejects forged regional diagnostics instead of trusting generator output', () => {
+      const realGenerate = WorldEconomyGenerator.prototype.generate;
+      const generate = jest.spyOn(
+        WorldEconomyGenerator.prototype,
+        'generate',
+      ).mockImplementation(function forgeAcceptedDiagnostics(
+        generationConfig,
+        opportunity,
+      ) {
+        const result = realGenerate.call(
+          this,
+          generationConfig,
+          opportunity,
+        );
+        if (result.ok) result.diagnostics.regionalTotalCost = 1;
+        return result;
+      });
+      const save = jest.spyOn(SaveService, 'saveWorld');
+
+      const result = WorldManager.tryCreateNew(
+        'Forged regional diagnostics',
+        'real-terrain-alpha',
+      );
+
+      const saveCalls = save.mock.calls.length;
+      generate.mockRestore();
+      save.mockRestore();
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'world-validation-failed',
+          seed: 'real-terrain-alpha',
+        },
+      });
       expect(saveCalls).toBe(0);
       expect(WorldManager.world).toBeNull();
     });

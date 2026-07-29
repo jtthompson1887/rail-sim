@@ -1,4 +1,5 @@
 import {
+  ConstructionConfig,
   ENDPOINT_CONNECTION_COST,
 } from '../config/ConstructionConfig';
 import { GameConfig } from '../config/GameConfig';
@@ -18,6 +19,8 @@ import type {
 import { createSeededRandom } from '../utils/SeededRandom';
 import {
   ConstructionAnalyzer,
+  type ConstructionAnalysisDetail,
+  type ConstructionAnalysisOptions,
   type ConstructionProposal,
   type TerrainHeightSource,
 } from './ConstructionAnalyzer';
@@ -29,6 +32,7 @@ import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
 import {
   deriveAutomaticCubic,
   deriveTrackEndpointOutward,
+  type TrackGeometryDef,
 } from './TrackGeometry';
 import {
   MAX_STARTER_CORRIDOR_COST,
@@ -67,6 +71,21 @@ interface Candidate {
   elevation: number;
 }
 
+interface DrawnPair {
+  first: Candidate;
+  second: Candidate;
+  distance: number;
+  drawOrdinal: number;
+}
+
+interface ScoredOrientation {
+  forest: Candidate;
+  sawmill: Candidate;
+  endpointElevationDeltaPerChord: number;
+  drawOrdinal: number;
+  orientationOrdinal: 0 | 1;
+}
+
 function canonicalConstructionPoint(
   point: Readonly<{ x: number; y: number }>,
 ): Vec2Def {
@@ -90,6 +109,34 @@ function siteRelief(
     }
   }
   return Math.max(...samples) - Math.min(...samples);
+}
+
+function controlPolygonLength(geometry: TrackGeometryDef): number {
+  return Math.hypot(
+    geometry.p1.x - geometry.p0.x,
+    geometry.p1.y - geometry.p0.y,
+  ) + Math.hypot(
+    geometry.p2.x - geometry.p1.x,
+    geometry.p2.y - geometry.p1.y,
+  ) + Math.hypot(
+    geometry.p3.x - geometry.p2.x,
+    geometry.p3.y - geometry.p2.y,
+  );
+}
+
+function endpointGradeCanFit(
+  geometry: TrackGeometryDef,
+  startElevation: number,
+  endElevation: number,
+): boolean {
+  return Number.isFinite(startElevation)
+    && Number.isFinite(endElevation)
+    && Math.abs(endElevation - startElevation)
+      <= controlPolygonLength(geometry)
+        * (
+          ConstructionConfig.MAX_GRADE_PERCENT
+            + ENGINEERED_GRADE_COMPARISON_EPSILON
+        ) / 100;
 }
 
 function witnessSegment(
@@ -142,7 +189,8 @@ function corridor(
 }
 
 export class WorldOpportunityGenerator {
-  private readonly analyzer: ConstructionAnalyzer;
+  private readonly analysisCache = new Map<string, ConstructionAnalysisDetail>();
+  private readonly analyzer: Pick<ConstructionAnalyzer, 'analyzeDetailed'>;
   private readonly validator: WorldOpportunityValidator;
 
   constructor(
@@ -150,11 +198,28 @@ export class WorldOpportunityGenerator {
     private readonly acceptsOpportunity: OpportunityAcceptancePredicate =
       () => true,
   ) {
-    this.analyzer = new ConstructionAnalyzer(terrain);
+    const productionAnalyzer = new ConstructionAnalyzer(terrain);
+    this.analyzer = {
+      analyzeDetailed: (
+        geometry: TrackGeometryDef,
+        options: ConstructionAnalysisOptions = {},
+      ) => {
+        const key = JSON.stringify([
+          geometry,
+          options.connectionAngleDeg ?? null,
+        ]);
+        const cached = this.analysisCache.get(key);
+        if (cached) return cached;
+        const detail = productionAnalyzer.analyzeDetailed(geometry, options);
+        this.analysisCache.set(key, detail);
+        return detail;
+      },
+    };
     this.validator = new WorldOpportunityValidator(terrain, this.analyzer);
   }
 
   generate(config: WorldGenerationConfigDef): OpportunityGenerationResult {
+    this.analysisCache.clear();
     let maxSiteCandidatesEvaluated = 0;
     for (let attempt = 1; attempt <= MAX_OPPORTUNITY_ATTEMPTS; attempt++) {
       const random = createSeededRandom(`${config.seed}:${attempt}`);
@@ -211,7 +276,8 @@ export class WorldOpportunityGenerator {
           elevation: 0,
         };
         candidate.elevation = this.terrain.getHeightAt(candidate.x, candidate.y);
-        if (siteRelief(this.terrain, candidate) <= WorldGenerationConfig.MAX_SITE_RELIEF) {
+        if (siteRelief(this.terrain, candidate)
+          <= WorldGenerationConfig.MAX_SITE_RELIEF) {
           usable.push(candidate);
         }
       }
@@ -226,34 +292,109 @@ export class WorldOpportunityGenerator {
     random: () => number,
   ): StarterOpportunityDef | null {
     if (candidates.length < 2) return null;
-    const pairKeys = new Set<string>();
-    let evaluations = 0;
-    for (
-      let draw = 0;
-      draw < MAX_SITE_CANDIDATES_PER_ATTEMPT
-        && evaluations
-          < WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
-      draw++
-    ) {
-      const firstIndex = Math.floor(random() * candidates.length);
-      const secondIndex = Math.floor(random() * candidates.length);
-      if (firstIndex === secondIndex) continue;
-      const key = firstIndex < secondIndex
-        ? `${firstIndex}:${secondIndex}`
-        : `${secondIndex}:${firstIndex}`;
-      if (pairKeys.has(key)) continue;
-      pairKeys.add(key);
-      const first = candidates[firstIndex];
-      const second = candidates[secondIndex];
-      const distance = Math.hypot(second.x - first.x, second.y - first.y);
-      if (distance < WorldGenerationConfig.MIN_SITE_SEPARATION
-        || distance > WorldGenerationConfig.MAX_SITE_SEPARATION
-        || Math.abs(second.elevation - first.elevation)
-          < WorldGenerationConfig.MIN_SITE_ELEVATION_DIFFERENCE) {
-        continue;
+    const drawnPairs: DrawnPair[] = [];
+    const useEnumeration = attempt % 4 !== 3;
+    if (useEnumeration) {
+      let pairOrdinal = 0;
+      for (let firstIndex = 0; firstIndex < candidates.length; firstIndex++) {
+        for (
+          let secondIndex = firstIndex + 1;
+          secondIndex < candidates.length;
+          secondIndex++
+        ) {
+          const first = candidates[firstIndex];
+          const second = candidates[secondIndex];
+          const drawOrdinal = pairOrdinal;
+          pairOrdinal += 1;
+          const distance = Math.hypot(
+            second.x - first.x,
+            second.y - first.y,
+          );
+          if (distance < WorldGenerationConfig.MIN_SITE_SEPARATION
+            || distance > WorldGenerationConfig.MAX_SITE_SEPARATION
+            || Math.abs(second.elevation - first.elevation)
+              < WorldGenerationConfig.MIN_SITE_ELEVATION_DIFFERENCE) {
+            continue;
+          }
+          drawnPairs.push({
+            first,
+            second,
+            distance,
+            drawOrdinal,
+          });
+        }
       }
-      evaluations += 1;
-      const opportunity = this.buildOpportunity(config, attempt, first, second);
+    } else {
+      const pairKeys = new Set<string>();
+      for (
+        let draw = 0;
+        draw < MAX_SITE_CANDIDATES_PER_ATTEMPT;
+        draw++
+      ) {
+        const firstIndex = Math.floor(random() * candidates.length);
+        const secondIndex = Math.floor(random() * candidates.length);
+        if (firstIndex === secondIndex) continue;
+        const key = firstIndex < secondIndex
+          ? `${firstIndex}:${secondIndex}`
+          : `${secondIndex}:${firstIndex}`;
+        if (pairKeys.has(key)) continue;
+        pairKeys.add(key);
+        const first = candidates[firstIndex];
+        const second = candidates[secondIndex];
+        const distance = Math.hypot(second.x - first.x, second.y - first.y);
+        if (distance < WorldGenerationConfig.MIN_SITE_SEPARATION
+          || distance > WorldGenerationConfig.MAX_SITE_SEPARATION
+          || Math.abs(second.elevation - first.elevation)
+            < WorldGenerationConfig.MIN_SITE_ELEVATION_DIFFERENCE) {
+          continue;
+        }
+        drawnPairs.push({
+          first,
+          second,
+          distance,
+          drawOrdinal: draw,
+        });
+      }
+    }
+    const orientations: ScoredOrientation[] = [];
+    for (const pair of drawnPairs) {
+      orientations.push(
+        this.scoreOrientation(
+          pair,
+          pair.first,
+          pair.second,
+          0,
+        ),
+        this.scoreOrientation(
+          pair,
+          pair.second,
+          pair.first,
+          1,
+        ),
+      );
+    }
+    orientations.sort((left, right) => (
+      left.endpointElevationDeltaPerChord
+        - right.endpointElevationDeltaPerChord
+      || left.drawOrdinal - right.drawOrdinal
+      || left.orientationOrdinal - right.orientationOrdinal
+    ));
+    const selectedOrientations = orientations.slice(
+      0,
+      WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT,
+    );
+    for (
+      let orientationIndex = 0;
+      orientationIndex < selectedOrientations.length;
+      orientationIndex++
+    ) {
+      const orientation = selectedOrientations[orientationIndex];
+      const opportunity = this.buildOpportunity(
+        config,
+        attempt,
+        orientation.forest,
+        orientation.sawmill,
+      );
       if (opportunity && this.acceptsOpportunity(
         clonePlainData(opportunity),
       )) {
@@ -261,6 +402,22 @@ export class WorldOpportunityGenerator {
       }
     }
     return null;
+  }
+
+  private scoreOrientation(
+    pair: DrawnPair,
+    forest: Candidate,
+    sawmill: Candidate,
+    orientationOrdinal: 0 | 1,
+  ): ScoredOrientation {
+    return {
+      forest,
+      sawmill,
+      endpointElevationDeltaPerChord:
+        Math.abs(sawmill.elevation - forest.elevation) / pair.distance,
+      drawOrdinal: pair.drawOrdinal,
+      orientationOrdinal,
+    };
   }
 
   private buildOpportunity(
@@ -279,9 +436,15 @@ export class WorldOpportunityGenerator {
 
     const start = { x: first.x, y: first.y };
     const end = { x: second.x, y: second.y };
-    const directDetail = this.analyzer.analyzeDetailed(
-      deriveAutomaticCubic({ start, end }),
-    );
+    const directGeometry = deriveAutomaticCubic({ start, end });
+    if (!endpointGradeCanFit(
+      directGeometry,
+      first.elevation,
+      second.elevation,
+    )) {
+      return null;
+    }
+    const directDetail = this.analyzer.analyzeDetailed(directGeometry);
     const directProposal = directDetail.proposal;
     if (!directProposal.valid) return null;
 
@@ -291,6 +454,7 @@ export class WorldOpportunityGenerator {
     for (const offset of WorldGenerationConfig.DETOUR_OFFSETS) {
       signedOffsets.push(offset, -offset);
     }
+    const waypointElevationByCoordinate = new Map<string, number>();
     for (const signedOffset of signedOffsets) {
       const waypoint = canonicalConstructionPoint({
         x: (first.x + second.x) / 2 - dy * signedOffset,
@@ -300,24 +464,42 @@ export class WorldOpportunityGenerator {
         || Math.abs(waypoint.y) > WorldGenerationConfig.WORLD_HALF_HEIGHT) {
         continue;
       }
-      const firstDetail = this.analyzer.analyzeDetailed(
-        deriveAutomaticCubic({
-          start,
-          end: waypoint,
-        }),
-      );
+      const waypointKey = `${waypoint.x}:${waypoint.y}`;
+      let waypointElevation = waypointElevationByCoordinate.get(waypointKey);
+      if (waypointElevation === undefined) {
+        waypointElevation = this.terrain.getHeightAt(waypoint.x, waypoint.y);
+        waypointElevationByCoordinate.set(waypointKey, waypointElevation);
+      }
+      const firstGeometry = deriveAutomaticCubic({
+        start,
+        end: waypoint,
+      });
+      if (!endpointGradeCanFit(
+        firstGeometry,
+        first.elevation,
+        waypointElevation,
+      )) {
+        continue;
+      }
+      const firstDetail = this.analyzer.analyzeDetailed(firstGeometry);
       const firstLeg = firstDetail.proposal;
       if (!firstLeg.valid) continue;
-      const secondDetail = this.analyzer.analyzeDetailed(
-        deriveAutomaticCubic({
-          start: firstLeg.geometry.p3,
-          end,
-          startOutward: deriveTrackEndpointOutward(
-            firstLeg.geometry,
-            'end',
-          ),
-        }),
-      );
+      const secondGeometry = deriveAutomaticCubic({
+        start: firstLeg.geometry.p3,
+        end,
+        startOutward: deriveTrackEndpointOutward(
+          firstLeg.geometry,
+          'end',
+        ),
+      });
+      if (!endpointGradeCanFit(
+        secondGeometry,
+        waypointElevation,
+        second.elevation,
+      )) {
+        continue;
+      }
+      const secondDetail = this.analyzer.analyzeDetailed(secondGeometry);
       const secondLeg = secondDetail.proposal;
       if (!secondLeg.valid) continue;
 
