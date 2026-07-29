@@ -9,6 +9,7 @@
     "test": "jest --coverage",
     "test:e2e": "npm run build && npx playwright test",
     "benchmark:construction-drag": "node tests/performance/run-construction-drag-browser.js",
+    "benchmark:train-physics": "jest tests/performance/TrainPhysicsBenchmark.test.ts --runInBand --coverage=false",
     "benchmark:world-generation": "node tests/performance/run-world-generation-browser.js"
   },
   "keywords": [

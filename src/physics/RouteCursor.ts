@@ -5,7 +5,9 @@ import {
   type TrackEndpointSide,
   type TrackPort,
 } from '../entities/TrackPort';
+import type { VerticalProfileDef } from '../config/WorldData';
 import type { TrackPose } from './TrackArcLengthIndex';
+import type { TrackArcLengthIndex } from './TrackArcLengthIndex';
 
 export type TravelDirection = 1 | -1;
 
@@ -15,13 +17,19 @@ export interface RouteCursorState {
   direction: TravelDirection;
 }
 
+export interface RouteTrack {
+  getUUID(): string;
+  getArcLengthIndex(): TrackArcLengthIndex;
+  readonly verticalProfile: VerticalProfileDef | null;
+}
+
 export interface RouteResolver {
-  trackByUUID(uuid: string): RailTrack | null;
+  trackByUUID(uuid: string): RouteTrack | null;
   continuation(
-    track: RailTrack,
+    track: RouteTrack,
     exit: TrackEndpointSide,
     preferredTrackUUID?: string,
-  ): { track: RailTrack; direction: TravelDirection } | null;
+  ): { track: RouteTrack; direction: TravelDirection } | null;
 }
 
 export type RouteTraversalErrorCode = 'route-cycle' | 'route-missing-track';
@@ -37,7 +45,7 @@ function opposite(direction: TravelDirection): TravelDirection {
   return direction === 1 ? -1 : 1;
 }
 
-function clampDistance(track: RailTrack, distance: number): number {
+function clampDistance(track: RouteTrack, distance: number): number {
   return Math.max(0, Math.min(track.getArcLengthIndex().length, distance));
 }
 
@@ -137,7 +145,7 @@ export class RouteCursor {
     }, this.resolver);
   }
 
-  private requireTrack(uuid: string): RailTrack {
+  private requireTrack(uuid: string): RouteTrack {
     const track = this.resolver.trackByUUID(uuid);
     if (!track) {
       throw new RouteTraversalError('route-missing-track', `Route track "${uuid}" does not exist`);
@@ -166,12 +174,14 @@ export class TrackGraphRouteResolver implements RouteResolver {
   }
 
   continuation(
-    track: RailTrack,
+    track: RouteTrack,
     exit: TrackEndpointSide,
     preferredTrackUUID?: string,
   ): { track: RailTrack; direction: TravelDirection } | null {
-    const connected = this.connectedTracks(track.getPort(exit))
-      .filter((candidate) => candidate.track !== track);
+    const graphTrack = this.tracksByUUID.get(track.getUUID());
+    if (!graphTrack) return null;
+    const connected = this.connectedTracks(graphTrack.getPort(exit))
+      .filter((candidate) => candidate.track !== graphTrack);
     if (connected.length === 0) return null;
 
     let chosen = preferredTrackUUID
@@ -182,8 +192,8 @@ export class TrackGraphRouteResolver implements RouteResolver {
     }
     if (!chosen) {
       for (const junction of this.junctions) {
-        if (junction.getAllTracks().indexOf(track) === -1) continue;
-        const routedTrack = junction.getRoutedContinuation(track);
+        if (junction.getAllTracks().indexOf(graphTrack) === -1) continue;
+        const routedTrack = junction.getRoutedContinuation(graphTrack);
         chosen = connected.find((candidate) => candidate.track === routedTrack);
         if (chosen) break;
       }

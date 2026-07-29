@@ -10,7 +10,10 @@ import {
   RouteCursor,
   type RouteResolver,
 } from './RouteCursor';
-import { TRAIN_PHYSICS_CONFIG } from './TrainPhysicsConfig';
+import {
+  TRAIN_PHYSICS_CONFIG,
+  type TrainPhysicsConfig,
+} from './TrainPhysicsConfig';
 
 export interface ConsistState {
   id: string;
@@ -70,6 +73,10 @@ function cloneState(state: Readonly<ConsistState>): ConsistState {
 }
 
 export class ConsistDynamicsSolver {
+  constructor(
+    private readonly config: Readonly<TrainPhysicsConfig> = TRAIN_PHYSICS_CONFIG,
+  ) {}
+
   step(
     state: Readonly<ConsistState>,
     definitions: ReadonlyMap<string, RailVehicleDefinition>,
@@ -86,7 +93,7 @@ export class ConsistDynamicsSolver {
     let finalForces: Record<string, VehicleForceBreakdown> = {};
     const brokenCouplerIds = new Set<string>();
     while (remaining > 1e-12) {
-      const substep = Math.min(TRAIN_PHYSICS_CONFIG.fixedStepSeconds, remaining);
+      const substep = Math.min(this.config.fixedStepSeconds, remaining);
       const result = this.substep(working, definitions, control, resolver, substep);
       working = result.state;
       finalForces = result.forces;
@@ -131,8 +138,8 @@ export class ConsistDynamicsSolver {
         : -speedSign * definition.maxBrakeForceN * brake;
       breakdown.rollingResistanceN = speedSign === 0
         ? 0
-        : -speedSign * TRAIN_PHYSICS_CONFIG.rollingResistancePerKg * definition.massKg;
-      breakdown.aerodynamicDragN = -TRAIN_PHYSICS_CONFIG.aerodynamicDrag
+        : -speedSign * this.config.rollingResistancePerKg * definition.massKg;
+      breakdown.aerodynamicDragN = -this.config.aerodynamicDrag
         * vehicle.speedMps
         * Math.abs(vehicle.speedMps);
       breakdown.gradientN = this.gradientForceN(vehicle, definition, resolver);
@@ -142,7 +149,7 @@ export class ConsistDynamicsSolver {
     const nextCouplers: CouplerState[] = [];
     const brokenCouplerIds: string[] = [];
     for (const coupler of state.couplers) {
-      const evaluation = evaluateCoupler(coupler, TRAIN_PHYSICS_CONFIG.coupler);
+      const evaluation = evaluateCoupler(coupler, this.config.coupler);
       const leadingForces = forces[coupler.leadingVehicleId];
       const trailingForces = forces[coupler.trailingVehicleId];
       if (!leadingForces || !trailingForces) {
@@ -177,7 +184,7 @@ export class ConsistDynamicsSolver {
 
       const cursor = new RouteCursor(vehicle.centre, resolver);
       const centre = cursor.movedBy(
-        speedMps * dtSeconds * TRAIN_PHYSICS_CONFIG.worldUnitsPerMetre,
+        speedMps * dtSeconds * this.config.worldUnitsPerMetre,
       ).state;
       return { ...vehicle, centre, speedMps };
     });
