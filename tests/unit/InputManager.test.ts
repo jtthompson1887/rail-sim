@@ -253,13 +253,67 @@ describe('InputManager drag recovery regression', () => {
     expect(train.enginePower).toBe(0);
 
     (inputManager as any).wKey.isDown = false;
-    EventBus.emit('mobile:throttle', { value: 1 });
+    EventBus.emit('mobile:throttle', { value: 1, hardStop: false });
     inputManager.handleTrainMovement(
       train,
       new Set(['locked-train']),
     );
 
     expect(train.enginePower).toBe(0);
+  });
+
+  it('explicit UI Stop zeros linear and angular velocity without changing coasting or direction commands', () => {
+    const train = trainManager.createInitialTrain('mobile-stop-train');
+    const body = train.getMatterBody();
+    body.setVelocity(3, 4);
+    body.setAngularVelocity(0.2);
+    const velocitySpy = jest.spyOn(body, 'setVelocity');
+    const angularVelocitySpy = jest.spyOn(body, 'setAngularVelocity');
+
+    inputManager.handleTrainMovement(train);
+    expect(velocitySpy).not.toHaveBeenCalled();
+    expect(angularVelocitySpy).not.toHaveBeenCalled();
+
+    EventBus.emit('mobile:throttle', { value: 1, hardStop: false });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(GameConfig.TRAIN.ENGINE_POWER);
+    expect(velocitySpy).not.toHaveBeenCalled();
+
+    EventBus.emit('mobile:throttle', { value: -1, hardStop: false });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-GameConfig.TRAIN.ENGINE_POWER);
+    expect(velocitySpy).not.toHaveBeenCalled();
+
+    EventBus.emit('mobile:throttle', {
+      value: 0,
+      hardStop: false,
+    });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(0);
+    expect(velocitySpy).not.toHaveBeenCalled();
+    expect(angularVelocitySpy).not.toHaveBeenCalled();
+
+    EventBus.emit('mobile:throttle', {
+      value: 0,
+      hardStop: true,
+    });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(0);
+    expect(velocitySpy).toHaveBeenLastCalledWith(0, 0);
+    expect(angularVelocitySpy).toHaveBeenLastCalledWith(0);
+
+    body.setVelocity(2, 0);
+    velocitySpy.mockClear();
+    angularVelocitySpy.mockClear();
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(0);
+    expect(velocitySpy).not.toHaveBeenCalled();
+    expect(angularVelocitySpy).not.toHaveBeenCalled();
+
+    (inputManager as any).wKey.isDown = true;
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(GameConfig.TRAIN.ENGINE_POWER);
+    expect(velocitySpy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -325,7 +379,7 @@ describe('InputManager drag recovery regression', () => {
     expect(train.enginePower).toBe(-0.25);
 
     (inputManager as any).wKey.isDown = false;
-    EventBus.emit('mobile:throttle', { value: 1 });
+    EventBus.emit('mobile:throttle', { value: 1, hardStop: false });
     inputManager.handleTrainMovement(train);
     expect(train.enginePower).toBe(-0.25);
     input.remove();

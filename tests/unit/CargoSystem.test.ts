@@ -68,6 +68,8 @@ const makeInput = (
       profitableStructuralTimberDeliveryCompleted: boolean;
       profitableLimestoneDeliveryCompleted: boolean;
       profitableCementDeliveryCompleted: boolean;
+      profitableSteelDeliveryCompleted: boolean;
+      profitableBuildingModuleDeliveryCompleted: boolean;
     };
     runtime: readonly TrainRuntimeSnapshot[];
   }> = {},
@@ -90,7 +92,12 @@ const propose = (
 
 const facility = (
   economy: EconomyStateDef,
-  definitionId: 'managed-forest' | 'sawmill' | 'prefabrication-plant',
+  definitionId:
+    | 'managed-forest'
+    | 'sawmill'
+    | 'port-interchange'
+    | 'prefabrication-plant'
+    | 'town-construction-market',
 ): FacilityEconomyDef => {
   const found = economy.facilities.find(
     (candidate) => candidate.definitionId === definitionId,
@@ -1111,6 +1118,562 @@ describe('proposeCargoTick loading conservation and capacity', () => {
 });
 
 describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
+  it('moves Port steel to Prefab and Prefab modules to Town transactionally', () => {
+    const portDefinition = ProductCatalog.getFacilityDefinition(
+      'port-interchange',
+    );
+    const prefabDefinition = ProductCatalog.getFacilityDefinition(
+      'prefabrication-plant',
+    );
+    const townDefinition = ProductCatalog.getFacilityDefinition(
+      'town-construction-market',
+    );
+    if (!portDefinition || !prefabDefinition || !townDefinition) {
+      throw new Error('Regional construction boundary definitions are missing');
+    }
+    let input = makeInput();
+    input.economy.facilities.push(
+      makeFacility(portDefinition, 900),
+      makeFacility(prefabDefinition, 1_200),
+      makeFacility(townDefinition, 1_500),
+    );
+    facility(
+      input.economy,
+      'prefabrication-plant',
+    ).inventories['building-modules'].quantity = 4;
+    input.runtime = [makeRuntime('train-1', { x: 900 })];
+    const initialCompany = JSON.parse(JSON.stringify(input.company));
+    const initialProgress = JSON.parse(JSON.stringify(input.freightProgress));
+
+    let proposal: CargoTickProposal | null = null;
+    for (let batch = 0; batch < 6; batch += 1) {
+      proposal = proposeCargoTick(input);
+      expect(proposal.statuses).toEqual([expect.objectContaining({
+        facilityId: 'port-interchange',
+        productId: 'steel',
+        kind: 'loading',
+        batchUnits: 10,
+        cargoUnits: (batch + 1) * 10,
+        capacityUnits: 60,
+        batchRevenue: 0,
+      })]);
+      input = {
+        ...input,
+        company: proposal.company,
+        economy: proposal.economy,
+        trains: proposal.trains,
+        freightProgress: proposal.freightProgress,
+      };
+    }
+    if (!proposal) throw new Error('Port loading did not run');
+
+    expect(proposal.trains[0].cargo).toEqual({
+      productId: 'steel',
+      units: 60,
+      loadedUnits: 60,
+      originFacilityId: 'port-interchange',
+    });
+    expect(facility(
+      proposal.economy,
+      'port-interchange',
+    ).inventories.steel).toEqual({
+      productId: 'steel',
+      quantity: 60,
+      reservedQuantity: 0,
+      capacity: 240,
+      recentInflow: 0,
+      recentOutflow: 60,
+      targetStock: 120,
+    });
+    expect(facility(
+      proposal.economy,
+      'port-interchange',
+    ).inventories['building-modules']).toEqual({
+      productId: 'building-modules',
+      quantity: 0,
+      reservedQuantity: 0,
+      capacity: 120,
+      recentInflow: 0,
+      recentOutflow: 0,
+      targetStock: 60,
+    });
+    expect(proposal.company).toEqual(initialCompany);
+
+    const steelBatchRevenues = [8_450, 8_210, 7_960, 7_720, 7_480, 7_230];
+    input.runtime = [makeRuntime('train-1', { x: 1_200 })];
+    for (let batch = 0; batch < 6; batch += 1) {
+      proposal = proposeCargoTick(input);
+      expect(proposal.statuses).toEqual([expect.objectContaining({
+        facilityId: 'prefabrication-plant',
+        productId: 'steel',
+        kind: 'unloading',
+        batchUnits: 10,
+        cargoUnits: 50 - batch * 10,
+        capacityUnits: 60,
+        batchRevenue: steelBatchRevenues[batch],
+      })]);
+      input = {
+        ...input,
+        company: proposal.company,
+        economy: proposal.economy,
+        trains: proposal.trains,
+        freightProgress: proposal.freightProgress,
+      };
+    }
+
+    expect(proposal.trains[0].cargo).toBeNull();
+    expect(proposal.completedDeliveries).toEqual([{
+      trainId: 'train-1',
+      productId: 'steel',
+      units: 60,
+      destinationFacilityId: 'prefabrication-plant',
+      tick: 0,
+      revenue: 47_050,
+      runningCost: 0,
+      operatingProfit: 47_050,
+    }]);
+    expect(
+      proposal.freightProgress.profitableSteelDeliveryCompleted,
+    ).toBe(true);
+    expect(
+      proposal.freightProgress.profitableBuildingModuleDeliveryCompleted,
+    ).toBe(false);
+    expect(facility(
+      proposal.economy,
+      'prefabrication-plant',
+    ).inventories.steel).toEqual({
+      productId: 'steel',
+      quantity: 60,
+      reservedQuantity: 0,
+      capacity: 160,
+      recentInflow: 60,
+      recentOutflow: 0,
+      targetStock: 80,
+    });
+
+    proposal = proposeCargoTick(input);
+    expect(proposal.statuses).toEqual([expect.objectContaining({
+      facilityId: 'prefabrication-plant',
+      productId: 'building-modules',
+      kind: 'loading',
+      batchUnits: 4,
+      cargoUnits: 4,
+      capacityUnits: 4,
+      batchRevenue: 0,
+    })]);
+    expect(proposal.trains[0].cargo).toEqual({
+      productId: 'building-modules',
+      units: 4,
+      loadedUnits: 4,
+      originFacilityId: 'prefabrication-plant',
+    });
+    input = {
+      ...input,
+      company: proposal.company,
+      economy: proposal.economy,
+      trains: proposal.trains,
+      freightProgress: proposal.freightProgress,
+      runtime: [makeRuntime('train-1', { x: 1_500 })],
+    };
+
+    proposal = proposeCargoTick(input);
+    expect(proposal.statuses).toEqual([expect.objectContaining({
+      facilityId: 'town-construction-market',
+      productId: 'building-modules',
+      kind: 'unloading',
+      batchUnits: 4,
+      cargoUnits: 0,
+      capacityUnits: 4,
+      batchRevenue: 31_200,
+    })]);
+    expect(proposal.completedDeliveries).toEqual([{
+      trainId: 'train-1',
+      productId: 'building-modules',
+      units: 4,
+      destinationFacilityId: 'town-construction-market',
+      tick: 0,
+      revenue: 31_200,
+      runningCost: 0,
+      operatingProfit: 31_200,
+    }]);
+    expect(proposal.freightProgress).toEqual({
+      ...initialProgress,
+      profitableSteelDeliveryCompleted: true,
+      profitableBuildingModuleDeliveryCompleted: true,
+    });
+    expect(proposal.trains[0].cargo).toBeNull();
+    expect(facility(
+      proposal.economy,
+      'prefabrication-plant',
+    ).inventories['building-modules']).toEqual({
+      productId: 'building-modules',
+      quantity: 0,
+      reservedQuantity: 0,
+      capacity: 120,
+      recentInflow: 0,
+      recentOutflow: 4,
+      targetStock: 60,
+    });
+    expect(facility(
+      proposal.economy,
+      'town-construction-market',
+    ).inventories['building-modules']).toEqual({
+      productId: 'building-modules',
+      quantity: 4,
+      reservedQuantity: 0,
+      capacity: 160,
+      recentInflow: 4,
+      recentOutflow: 0,
+      targetStock: 80,
+    });
+    expect(facility(
+      proposal.economy,
+      'port-interchange',
+    ).inventories).toEqual({
+      steel: expect.objectContaining({
+        quantity: 60,
+        recentOutflow: 60,
+      }),
+      'building-modules': expect.objectContaining({
+        quantity: 0,
+        recentInflow: 0,
+        recentOutflow: 0,
+      }),
+    });
+    expect(proposal.company.ledger.slice(1).map((entry) => ({
+      category: entry.category,
+      amount: entry.amount,
+      referenceId: entry.referenceId,
+    }))).toEqual([
+      ...steelBatchRevenues.map((amount) => ({
+        category: 'delivery-revenue',
+        amount,
+        referenceId: 'train-1:0:prefabrication-plant',
+      })),
+      {
+        category: 'delivery-revenue',
+        amount: 31_200,
+        referenceId: 'train-1:0:town-construction-market',
+      },
+    ]);
+    expect(proposal.company.cash).toBe(
+      initialCompany.cash + 47_050 + 31_200,
+    );
+  });
+
+  const regionalDeliveryInput = (
+    productId: 'steel' | 'building-modules',
+    loadedUnits: number,
+    units: number,
+    destinationDefinitionId:
+      | 'prefabrication-plant'
+      | 'town-construction-market',
+    operationOverrides: Partial<TrainDef['operations']> = {},
+  ) => {
+    const input = makeInput();
+    const destinationDefinition = ProductCatalog.getFacilityDefinition(
+      destinationDefinitionId,
+    );
+    if (!destinationDefinition) {
+      throw new Error(`Missing ${destinationDefinitionId} definition`);
+    }
+    input.economy.facilities.push(makeFacility(destinationDefinition, 900));
+    input.trains = [makeFreightTrainDef({
+      cargo: {
+        productId,
+        units,
+        loadedUnits,
+        originFacilityId: productId === 'steel'
+          ? 'port-interchange'
+          : 'prefabrication-plant',
+      },
+      operations: {
+        ...makeFreightTrainDef().operations,
+        currentTripRevenue: 250,
+        currentTripRunningCost: 100,
+        ...operationOverrides,
+      },
+    })];
+    input.runtime = [makeRuntime('train-1', { x: 900, trackT: 0.9 })];
+    return input;
+  };
+
+  it.each([
+    {
+      productId: 'steel' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 60,
+      firstBatchUnits: 20,
+      finalBatchRevenue: 8_210,
+      expectedProfit: 16_810,
+      progressField: 'profitableSteelDeliveryCompleted' as const,
+    },
+    {
+      productId: 'building-modules' as const,
+      destinationDefinitionId: 'town-construction-market' as const,
+      loadedUnits: 4,
+      firstBatchUnits: 4,
+      finalBatchRevenue: 31_200,
+      expectedProfit: 31_350,
+      progressField:
+        'profitableBuildingModuleDeliveryCompleted' as const,
+    },
+  ])(
+    'latches a complete profitable $productId consignment on its final accepted batch',
+    ({
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      firstBatchUnits,
+      finalBatchRevenue,
+      expectedProfit,
+      progressField,
+    }) => {
+      const input = regionalDeliveryInput(
+        productId,
+        loadedUnits,
+        firstBatchUnits,
+        destinationDefinitionId,
+      );
+
+      const first = proposeCargoTick(input);
+      if (first.trains[0].cargo === null) {
+        expect(first.statuses[0].batchRevenue).toBe(finalBatchRevenue);
+        expect(first.completedDeliveries[0].operatingProfit)
+          .toBe(expectedProfit);
+        expect(first.freightProgress[progressField]).toBe(true);
+        return;
+      }
+
+      expect(first.trains[0].cargo.units).toBe(10);
+      expect(first.freightProgress[progressField]).toBe(false);
+      expect(first.completedDeliveries).toEqual([]);
+
+      const final = proposeCargoTick({
+        ...input,
+        company: first.company,
+        economy: first.economy,
+        trains: first.trains,
+        freightProgress: first.freightProgress,
+      });
+
+      expect(final.statuses[0].batchRevenue).toBe(finalBatchRevenue);
+      expect(final.completedDeliveries).toEqual([expect.objectContaining({
+        productId,
+        units: loadedUnits,
+        destinationFacilityId: destinationDefinitionId,
+        operatingProfit: expectedProfit,
+      })]);
+      expect(final.freightProgress[progressField]).toBe(true);
+    },
+  );
+
+  it.each([
+    {
+      productId: 'steel' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 59,
+      units: 10,
+      progressField: 'profitableSteelDeliveryCompleted' as const,
+    },
+    {
+      productId: 'building-modules' as const,
+      destinationDefinitionId: 'town-construction-market' as const,
+      loadedUnits: 3,
+      units: 3,
+      progressField:
+        'profitableBuildingModuleDeliveryCompleted' as const,
+    },
+  ])(
+    'does not latch a profitable partial $productId consignment',
+    ({
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      units,
+      progressField,
+    }) => {
+      const result = proposeCargoTick(regionalDeliveryInput(
+        productId,
+        loadedUnits,
+        units,
+        destinationDefinitionId,
+      ));
+
+      expect(result.trains[0].cargo).toBeNull();
+      expect(result.completedDeliveries[0]).toEqual(expect.objectContaining({
+        productId,
+        units: loadedUnits,
+      }));
+      expect(result.completedDeliveries[0].operatingProfit).toBeGreaterThan(0);
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      productId: 'steel' as const,
+      canonicalDestinationId: 'prefabrication-plant' as const,
+      loadedUnits: 60,
+      units: 10,
+      progressField: 'profitableSteelDeliveryCompleted' as const,
+    },
+    {
+      productId: 'building-modules' as const,
+      canonicalDestinationId: 'town-construction-market' as const,
+      loadedUnits: 4,
+      units: 4,
+      progressField:
+        'profitableBuildingModuleDeliveryCompleted' as const,
+    },
+  ])(
+    'does not latch $productId at another accepting destination definition',
+    ({
+      productId,
+      canonicalDestinationId,
+      loadedUnits,
+      units,
+      progressField,
+    }) => {
+      const canonical = ProductCatalog.getFacilityDefinition(
+        canonicalDestinationId,
+      );
+      if (!canonical) throw new Error(`Missing ${canonicalDestinationId}`);
+      const otherDefinition: FacilityDefinition = {
+        ...canonical,
+        id: `other-${canonicalDestinationId}`,
+        displayName: `Other ${canonical.displayName}`,
+      };
+      const originalGetFacilityDefinition =
+        ProductCatalog.getFacilityDefinition;
+      jest.spyOn(ProductCatalog, 'getFacilityDefinition')
+        .mockImplementation((definitionId) =>
+          definitionId === otherDefinition.id
+            ? otherDefinition
+            : originalGetFacilityDefinition(definitionId));
+      const input = regionalDeliveryInput(
+        productId,
+        loadedUnits,
+        units,
+        canonicalDestinationId,
+      );
+      input.economy.facilities.pop();
+      input.economy.facilities.push(makeFacility(otherDefinition, 900));
+
+      const result = proposeCargoTick(input);
+
+      expect(result.completedDeliveries[0]).toEqual(expect.objectContaining({
+        productId,
+        destinationFacilityId: otherDefinition.id,
+      }));
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      productId: 'steel' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 60,
+      units: 10,
+      progressField:
+        'profitableBuildingModuleDeliveryCompleted' as const,
+    },
+    {
+      productId: 'building-modules' as const,
+      destinationDefinitionId: 'town-construction-market' as const,
+      loadedUnits: 4,
+      units: 4,
+      progressField: 'profitableSteelDeliveryCompleted' as const,
+    },
+  ])(
+    'does not latch the other regional product for a profitable $productId delivery',
+    ({
+      productId,
+      destinationDefinitionId,
+      loadedUnits,
+      units,
+      progressField,
+    }) => {
+      const result = proposeCargoTick(regionalDeliveryInput(
+        productId,
+        loadedUnits,
+        units,
+        destinationDefinitionId,
+      ));
+
+      expect(result.completedDeliveries).toHaveLength(1);
+      expect(result.completedDeliveries[0].operatingProfit).toBeGreaterThan(0);
+      expect(result.freightProgress[progressField]).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      name: 'zero-profit steel',
+      productId: 'steel' as const,
+      destinationDefinitionId: 'prefabrication-plant' as const,
+      loadedUnits: 60,
+      units: 10,
+      runningCost: 8_700,
+      expectedProfit: 0,
+      progressField: 'profitableSteelDeliveryCompleted' as const,
+    },
+    {
+      name: 'loss-making modules',
+      productId: 'building-modules' as const,
+      destinationDefinitionId: 'town-construction-market' as const,
+      loadedUnits: 4,
+      units: 4,
+      runningCost: 31_451,
+      expectedProfit: -1,
+      progressField:
+        'profitableBuildingModuleDeliveryCompleted' as const,
+    },
+  ])('does not latch a $name trip', ({
+    productId,
+    destinationDefinitionId,
+    loadedUnits,
+    units,
+    runningCost,
+    expectedProfit,
+    progressField,
+  }) => {
+    const result = proposeCargoTick(regionalDeliveryInput(
+      productId,
+      loadedUnits,
+      units,
+      destinationDefinitionId,
+      { currentTripRunningCost: runningCost },
+    ));
+
+    expect(result.completedDeliveries[0].operatingProfit).toBe(expectedProfit);
+    expect(result.freightProgress[progressField]).toBe(false);
+  });
+
+  it('rejects a profitable steel completion atomically when its ledger post is fatal', () => {
+    const input = regionalDeliveryInput(
+      'steel',
+      60,
+      10,
+      'prefabrication-plant',
+    );
+    input.company = createCompanyState(Number.MAX_SAFE_INTEGER - 1_000);
+    const before = JSON.parse(JSON.stringify(input));
+
+    const result = proposeCargoTick(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      changed: false,
+      company: before.company,
+      economy: before.economy,
+      trains: before.trains,
+      freightProgress: before.freightProgress,
+      statuses: [],
+      completedDeliveries: [],
+    }));
+  });
+
   const mineralDeliveryInput = (
     freightSetId: string,
     productId: 'limestone-aggregate' | 'cement',
@@ -1470,6 +2033,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
   it.each([
     'profitableLimestoneDeliveryCompleted',
     'profitableCementDeliveryCompleted',
+    'profitableSteelDeliveryCompleted',
+    'profitableBuildingModuleDeliveryCompleted',
   ] as const)('fails closed for nonboolean %s', (field) => {
     const input = mineralDeliveryInput(
       'aggregate-hopper-set',
@@ -1969,6 +2534,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(grantEntries).toEqual([{
       id: 8,
@@ -2069,6 +2636,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: true,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
     expect(result.company.ledger.filter(
       ({ category }) => category === 'contract-bonus',
@@ -2138,6 +2707,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);
@@ -2248,9 +2819,25 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
     expect(result.completedDeliveries).toEqual([]);
   });
 
+  it('accepts exact schema-10 freight progress at the proposal boundary', () => {
+    const input = makeInput({ operating: false }) as any;
+    input.freightProgress.profitableSteelDeliveryCompleted = false;
+    input.freightProgress.profitableBuildingModuleDeliveryCompleted = false;
+
+    expect(proposeCargoTick(input).statuses).toEqual([
+      expect.objectContaining({
+        trainId: 'train-1',
+        kind: 'idle',
+        blocker: 'not-operating',
+      }),
+    ]);
+  });
+
   it.each([
     'profitableLimestoneDeliveryCompleted',
     'profitableCementDeliveryCompleted',
+    'profitableSteelDeliveryCompleted',
+    'profitableBuildingModuleDeliveryCompleted',
   ] as const)('rejects progress missing %s', (field) => {
     const input = loadedAtSawmill(10);
     input.trains[0].cargo!.loadedUnits = 60;
@@ -2419,6 +3006,8 @@ describe('proposeCargoTick unloading, revenue, and trip roll-over', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     };
 
     const result = proposeCargoTick(input);

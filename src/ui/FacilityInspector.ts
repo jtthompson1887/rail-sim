@@ -44,6 +44,13 @@ const compactAmount = (
     : units(amount.unitLabel, amount.quantity)
 } ${amount.displayName}`;
 
+const compactQuantity = (
+  unitLabel: string,
+  quantity: number,
+): string => `${quantity.toLocaleString('en-GB')} ${
+  unitLabel === 'tonne' ? 't' : units(unitLabel, quantity)
+}`;
+
 function factorText(id: string, basisPoints: number): string {
   const percent = (basisPoints - 10_000) / 100;
   const sign = percent >= 0 ? '+' : '';
@@ -154,10 +161,12 @@ export class FacilityInspector {
           + ` · ${dto.activeRecipe.cycleTicks.toLocaleString('en-GB')} ticks`
         : dto.activeRecipe.displayName;
       const fullLoad = dto.activeRecipe.fullLoad;
+      const inputUnit = dto.activeRecipe.inputs[0]?.unitLabel ?? 'unit';
+      const outputUnit = dto.activeRecipe.outputs[0]?.unitLabel ?? 'unit';
       this.recipe.textContent = fullLoad
         ? `${cycle}\nFull ${fullLoad.freightSetDisplayName} · `
-          + `${fullLoad.inputQuantity.toLocaleString('en-GB')} t`
-          + ` → ${fullLoad.outputQuantity.toLocaleString('en-GB')} t`
+          + compactQuantity(inputUnit, fullLoad.inputQuantity)
+          + ` → ${compactQuantity(outputUnit, fullLoad.outputQuantity)}`
           + ` · ${fullLoad.cycles.toLocaleString('en-GB')} cycles`
         : cycle;
       this.recipe.style.display = 'block';
@@ -166,8 +175,17 @@ export class FacilityInspector {
       this.recipe.style.display = 'none';
     }
     this.products.textContent = [
-      `Produces ${productNames(dto.outputRows)}`,
-      `Needs ${productNames(dto.inputRows)}`,
+      ...(dto.boundaryTrade
+        ? [
+          dto.boundaryTrade.label,
+          ...(dto.boundaryTrade.kind === 'import-source'
+            ? ['Imported stock is finite']
+            : []),
+        ]
+        : [
+          `Produces ${productNames(dto.outputRows)}`,
+          `Needs ${productNames(dto.inputRows)}`,
+        ]),
       ...dto.inputRows.map((row) => row.missingQuantity === 0
         ? `${row.displayName} received `
           + `${row.availableQuantity.toLocaleString('en-GB')} / `
@@ -197,13 +215,18 @@ export class FacilityInspector {
       row.style.cssText = 'padding:7px 8px;border-radius:4px;background:#0c2638';
       const heading = document.createElement('strong');
       heading.textContent = `Receiving ${quote.displayName} · `
-        + `${CURRENCY.format(quote.unitPrice)} / t`;
+        + `${CURRENCY.format(quote.unitPrice)} / ${
+          quote.unitLabel === 'tonne' ? 't' : quote.unitLabel
+        }`;
       heading.style.cssText = 'display:block;color:#eaf8ff;margin-bottom:3px';
       const fullLoad = document.createElement('div');
       fullLoad.style.cssText = 'color:#bad3e2;margin-bottom:3px';
       fullLoad.textContent = quote.fullLoadQuantity !== null
         && quote.fullLoadGross !== null
-        ? `Full ${quote.fullLoadQuantity.toLocaleString('en-GB')} t `
+        ? `Full ${compactQuantity(
+          quote.unitLabel,
+          quote.fullLoadQuantity,
+        )} `
           + `at current rate · ${CURRENCY.format(quote.fullLoadGross)} gross`
         : '';
       const factors = document.createElement('div');

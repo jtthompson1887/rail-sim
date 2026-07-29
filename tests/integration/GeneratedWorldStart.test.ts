@@ -321,7 +321,7 @@ describe('generated blank-world start', () => {
       },
       successfulResult('atomic-seed').opportunity,
     );
-    expect(result.world.schemaVersion).toBe(9);
+    expect(result.world.schemaVersion).toBe(10);
     expect(result.world.revision).toBe(0);
     expect(result.world.company.cash).toBe(STANDARD_STARTING_CASH);
     expect(result.world.starterOpportunity).toEqual(
@@ -384,6 +384,7 @@ describe('generated blank-world start', () => {
           candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
           prefabAnalyses: 0,
           mineralPairAnalyses: 0,
+          regionalPairAnalyses: 0,
           facilitiesPlaced: 2,
         },
       }),
@@ -406,6 +407,7 @@ describe('generated blank-world start', () => {
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
         prefabAnalyses: 0,
         mineralPairAnalyses: 0,
+        regionalPairAnalyses: 0,
         facilitiesPlaced: 2,
       },
     });
@@ -436,6 +438,7 @@ describe('generated blank-world start', () => {
           candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
           prefabAnalyses: 0,
           mineralPairAnalyses: 0,
+          regionalPairAnalyses: 0,
           facilitiesPlaced: 4,
         },
       }),
@@ -498,6 +501,7 @@ describe('generated blank-world start', () => {
         candidatesEvaluated: MAX_ECONOMY_SITE_CANDIDATES,
         prefabAnalyses: 0,
         mineralPairAnalyses: 0,
+        regionalPairAnalyses: 0,
         facilitiesPlaced: 4,
       };
       if (value === undefined) {

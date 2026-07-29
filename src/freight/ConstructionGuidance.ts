@@ -12,6 +12,8 @@ export type ConstructionGuidancePhase =
   | 'structural-timber'
   | 'limestone'
   | 'cement'
+  | 'steel'
+  | 'modules'
   | 'achieved';
 
 export interface ConstructionGuidanceDto {
@@ -63,9 +65,23 @@ const guidancePhase = (
       requiredFreightSetIds: [COVERED_CEMENT_SET_ID],
     };
   }
+  if (!world.freightProgress.profitableSteelDeliveryCompleted) {
+    return {
+      phase: 'steel',
+      objective: 'Extend the Quarry end to Port Interchange',
+      requiredFreightSetIds: [FLATBED_FREIGHT_SET_ID],
+    };
+  }
+  if (!world.freightProgress.profitableBuildingModuleDeliveryCompleted) {
+    return {
+      phase: 'modules',
+      objective: 'Extend the Forest end to Town Construction Market',
+      requiredFreightSetIds: [FLATBED_FREIGHT_SET_ID],
+    };
+  }
   return {
     phase: 'achieved',
-    objective: 'Cement secured · Prefabrication awaits steel.',
+    objective: 'Regional construction supplied · Network ready to automate',
     requiredFreightSetIds: [],
   };
 };

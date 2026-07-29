@@ -95,7 +95,10 @@ export class TrainInspector {
         'padding:8px 4px;border:1px solid #4ad5ff;border-radius:4px;background:#123c55;color:#fff';
       button.addEventListener('click', () => {
         button.blur();
-        EventBus.emit('mobile:throttle', { value });
+        EventBus.emit('mobile:throttle', {
+          value,
+          hardStop: value === 0,
+        });
       });
       this.controls.append(button);
     }
@@ -152,13 +155,17 @@ export class TrainInspector {
       : 'Nearest eligible: none';
     this.status.textContent = dto.transferRemedy
       || titleCase(dto.transfer.kind);
-    const compactUnit = dto.cargo.unitLabel === 'tonnes' ? 't' : 'units';
+    const compactUnit = dto.cargo.unitLabel === 'tonnes'
+      ? 't'
+      : dto.cargo.unitLabel;
+    const batchCapacity = Math.min(10, dto.cargo.capacityUnits);
     this.batchText.textContent =
-      `Batch ${dto.transfer.batchUnits} / 10 ${compactUnit}`;
+      `Batch ${dto.transfer.batchUnits} / ${batchCapacity} ${compactUnit}`;
+    this.batch.max = batchCapacity;
     this.batch.value = dto.transfer.batchUnits;
     this.batch.setAttribute(
       'aria-label',
-      `Cargo transfer batch ${dto.transfer.batchUnits} of 10 `
+      `Cargo transfer batch ${dto.transfer.batchUnits} of ${batchCapacity} `
       + dto.cargo.unitLabel,
     );
     this.currentTripProfit.textContent =
@@ -236,7 +243,8 @@ export class TrainInspector {
       this.root.style.left = shortWide
         ? 'calc(50vw + 28px)'
         : '56px';
-      this.root.style.right = '8px';
+      // Reserve the on-canvas throttle gutter so touch input reaches Phaser.
+      this.root.style.right = 'calc(19vw + 8px)';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';
       this.root.style.width = 'auto';

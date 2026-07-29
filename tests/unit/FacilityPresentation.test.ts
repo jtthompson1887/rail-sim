@@ -116,4 +116,73 @@ describe('FacilityPresentation', () => {
       fullLoad: null,
     });
   });
+
+  it('presents finite Port supply and Town demand as immutable boundary trade', () => {
+    const created = WorldManager.tryCreateNew(
+      'Boundary presentation',
+      'boundary-presentation-seed',
+      'temperate',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const port = created.world.economy.facilities.find(
+      ({ id }) => id === 'port-interchange',
+    );
+    const town = created.world.economy.facilities.find(
+      ({ id }) => id === 'town-construction-market',
+    );
+    if (!port || !town) throw new Error('boundary facilities missing');
+    created.world.economy.market.constructionIndexBps = 10_000;
+    created.world.economy.market.regionalDemandBpsByProduct[
+      'building-modules'
+    ] = 10_000;
+
+    const portDto = buildFacilityInspection(
+      created.world,
+      port.id,
+      true,
+    );
+    const townDto = buildFacilityInspection(
+      created.world,
+      town.id,
+      true,
+    );
+
+    expect(portDto).toMatchObject({
+      status: { code: 'idle', label: 'Imported steel available' },
+      boundaryTrade: {
+        kind: 'import-source',
+        productId: 'steel',
+        label: 'Offers Steel',
+      },
+      activeRecipe: null,
+      quotes: [],
+    });
+    expect(townDto).toMatchObject({
+      status: { code: 'idle', label: 'Buying Building Modules' },
+      boundaryTrade: {
+        kind: 'consumer-sink',
+        productId: 'building-modules',
+        label: 'Buys Building Modules',
+      },
+      activeRecipe: null,
+      quotes: [{
+        productId: 'building-modules',
+        displayName: 'Building Modules',
+        unitLabel: 'module',
+        fullLoadQuantity: 4,
+        fullLoadGross: expect.any(Number),
+      }],
+    });
+    expect(Object.isFrozen(portDto?.boundaryTrade)).toBe(true);
+    expect(Object.isFrozen(townDto?.boundaryTrade)).toBe(true);
+
+    port.inventories.steel.quantity = 0;
+    town.inventories['building-modules'].quantity =
+      town.inventories['building-modules'].capacity;
+    expect(buildFacilityInspection(created.world, port.id, true)?.status)
+      .toEqual({ code: 'idle', label: 'Steel import stock depleted' });
+    expect(buildFacilityInspection(created.world, town.id, true)?.status)
+      .toEqual({ code: 'idle', label: 'Construction market supplied' });
+  });
 });

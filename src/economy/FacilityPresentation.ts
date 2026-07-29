@@ -1,5 +1,6 @@
 import type { WorldData } from '../config/WorldData';
 import type {
+  FacilityEconomyDef,
   FacilityId,
   ProductId,
 } from './EconomyData';
@@ -14,6 +15,12 @@ import {
   getProduct,
   getRecipe,
 } from './ProductCatalog';
+
+export interface FacilityBoundaryTradeDto {
+  readonly kind: 'import-source' | 'consumer-sink';
+  readonly productId: string;
+  readonly label: string;
+}
 
 export interface FacilityInspectionDto {
   id: FacilityId;
@@ -84,6 +91,7 @@ export interface FacilityInspectionDto {
     fullLoadGross: number | null;
     factors: Array<{ id: string; basisPoints: number }>;
   }>;
+  boundaryTrade: FacilityBoundaryTradeDto | null;
   railConnected: boolean;
 }
 
@@ -130,10 +138,28 @@ function buildStatus(
   world: WorldData,
   facilityId: FacilityId,
   railConnected: boolean,
+  boundaryTrade: FacilityBoundaryTradeDto | null,
 ): FacilityInspectionDto['status'] {
   const facility = world.economy.facilities.find(
     (candidate) => candidate.id === facilityId,
   );
+  if (facility && boundaryTrade?.kind === 'import-source') {
+    return {
+      code: 'idle',
+      label: facility.inventories[boundaryTrade.productId]?.quantity > 0
+        ? 'Imported steel available'
+        : 'Steel import stock depleted',
+    };
+  }
+  if (facility && boundaryTrade?.kind === 'consumer-sink') {
+    const slot = facility.inventories[boundaryTrade.productId];
+    return {
+      code: 'idle',
+      label: slot && slot.quantity < slot.capacity
+        ? 'Buying Building Modules'
+        : 'Construction market supplied',
+    };
+  }
   if (!facility?.activeRecipeId) {
     return railConnected
       ? { code: 'idle', label: 'Idle' }
@@ -160,10 +186,36 @@ function buildStatus(
   return { code: 'idle', label: 'Idle' };
 }
 
+function buildBoundaryTrade(
+  facility: FacilityEconomyDef,
+): FacilityBoundaryTradeDto | null {
+  const definition = getFacilityDefinition(facility.definitionId);
+  if (definition?.boundary === 'port'
+    && facility.inventories.steel
+    && getProduct('steel')) {
+    return {
+      kind: 'import-source',
+      productId: 'steel',
+      label: 'Offers Steel',
+    };
+  }
+  if (definition?.boundary === 'town-consumer'
+    && facility.inventories['building-modules']
+    && getProduct('building-modules')) {
+    return {
+      kind: 'consumer-sink',
+      productId: 'building-modules',
+      label: 'Buys Building Modules',
+    };
+  }
+  return null;
+}
+
 function freezeInspection(
   dto: FacilityInspectionDto,
 ): FacilityInspectionDto {
   Object.freeze(dto.status);
+  if (dto.boundaryTrade) Object.freeze(dto.boundaryTrade);
   if (dto.activeRecipe) {
     dto.activeRecipe.inputs.forEach(Object.freeze);
     dto.activeRecipe.outputs.forEach(Object.freeze);
@@ -201,6 +253,7 @@ export function buildFacilityInspection(
     (candidate) => candidate.id === facilityId,
   );
   if (!facility || !getFacilityDefinition(facility.definitionId)) return null;
+  const boundaryTrade = buildBoundaryTrade(facility);
   const recipe = facility.activeRecipeId
     ? getRecipe(facility.activeRecipeId)
     : undefined;
@@ -334,38 +387,63 @@ export function buildFacilityInspection(
     quantity: slot.quantity,
     capacity: slot.capacity,
   }));
-  const quotes = needs.reduce<FacilityInspectionDto['quotes']>((all, productId) => {
-    const slot = facility.inventories[productId];
-    if (!slot) return all;
-    const quote = quoteLocalProduct(
-      productId,
-      world.economy.market,
-      slot,
-    );
-    const quoteFullLoadQuantity = activeRecipe?.fullLoad
-      && activeRecipe.inputs[0]?.productId === productId
-      ? activeRecipe.fullLoad.inputQuantity
-      : null;
-    const fullLoadGross = quote.ok && quoteFullLoadQuantity !== null
-      && Number.isSafeInteger(quote.unitPrice * quoteFullLoadQuantity)
-      ? quote.unitPrice * quoteFullLoadQuantity
-      : null;
-    if (quote.ok) all.push({
-      productId: quote.productId,
-      displayName:
-        getProduct(quote.productId)?.displayName ?? 'Unknown product',
-      unitLabel: getProduct(quote.productId)?.unitLabel ?? 'unit',
-      unitPrice: quote.unitPrice,
-      fullLoadQuantity: quoteFullLoadQuantity,
-      fullLoadGross,
-      factors: quote.factors.map((factor) => ({ ...factor })),
-    });
-    return all;
-  }, []);
+  const quotedProductIds = boundaryTrade?.kind === 'consumer-sink'
+    ? [boundaryTrade.productId]
+    : needs;
+  const quotes = quotedProductIds.reduce<FacilityInspectionDto['quotes']>(
+    (all, productId) => {
+      const slot = facility.inventories[productId];
+      if (!slot) return all;
+      const quote = quoteLocalProduct(
+        productId,
+        world.economy.market,
+        slot,
+      );
+      const recipeFullLoadQuantity = activeRecipe?.fullLoad
+        && activeRecipe.inputs[0]?.productId === productId
+        ? activeRecipe.fullLoad.inputQuantity
+        : null;
+      const boundaryProduct = boundaryTrade?.kind === 'consumer-sink'
+        ? getProduct(productId)
+        : undefined;
+      const boundaryFreightSet = boundaryProduct
+        ? FREIGHT_SETS.find((set) =>
+          set.compatibleProductIds.indexOf(productId) !== -1)
+        : undefined;
+      const boundaryCapacity = boundaryProduct && boundaryFreightSet
+        ? capacityForProduct(boundaryFreightSet, boundaryProduct)
+        : null;
+      const quoteFullLoadQuantity = recipeFullLoadQuantity
+        ?? (boundaryCapacity?.ok === true
+          ? boundaryCapacity.capacityUnits
+          : null);
+      const fullLoadGross = quote.ok && quoteFullLoadQuantity !== null
+        && Number.isSafeInteger(quote.unitPrice * quoteFullLoadQuantity)
+        ? quote.unitPrice * quoteFullLoadQuantity
+        : null;
+      if (quote.ok) all.push({
+        productId: quote.productId,
+        displayName:
+          getProduct(quote.productId)?.displayName ?? 'Unknown product',
+        unitLabel: getProduct(quote.productId)?.unitLabel ?? 'unit',
+        unitPrice: quote.unitPrice,
+        fullLoadQuantity: quoteFullLoadQuantity,
+        fullLoadGross,
+        factors: quote.factors.map((factor) => ({ ...factor })),
+      });
+      return all;
+    },
+    [],
+  );
   return freezeInspection({
     id: facility.id,
     name: facility.name,
-    status: buildStatus(world, facility.id, railConnected),
+    status: buildStatus(
+      world,
+      facility.id,
+      railConnected,
+      boundaryTrade,
+    ),
     activeRecipe,
     produces,
     needs,
@@ -373,6 +451,7 @@ export function buildFacilityInspection(
     outputRows,
     inventories,
     quotes,
+    boundaryTrade,
     railConnected,
   });
 }

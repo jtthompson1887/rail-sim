@@ -408,7 +408,7 @@ async function createFixedSeedWorld(
   await waitForHarness(page);
 
   const created = await snapshot(page);
-  expect(created.world.schemaVersion).toBe(9);
+  expect(created.world.schemaVersion).toBe(10);
   expect(created.world.generationConfig.seed).toBe(seed);
   expect(created.world.economy.facilities).toHaveLength(7);
   expect(created.world.tracks).toHaveLength(0);
@@ -1622,6 +1622,8 @@ test.describe('real structural-timber browser journey', () => {
           profitableStructuralTimberDeliveryCompleted: false,
           profitableLimestoneDeliveryCompleted: false,
           profitableCementDeliveryCompleted: false,
+          profitableSteelDeliveryCompleted: false,
+          profitableBuildingModuleDeliveryCompleted: false,
         });
         expect(firstDelivered.world.company.ledger.filter(
           ({ referenceId }) =>
@@ -1869,6 +1871,8 @@ test.describe('real structural-timber browser journey', () => {
           profitableStructuralTimberDeliveryCompleted: true,
           profitableLimestoneDeliveryCompleted: false,
           profitableCementDeliveryCompleted: false,
+          profitableSteelDeliveryCompleted: false,
+          profitableBuildingModuleDeliveryCompleted: false,
         });
         expect(checkpoint.objective).toEqual({
           objectiveVersion: 1,

@@ -199,7 +199,7 @@ describe('LevelData', () => {
 });
 
 describe('WorldData current-schema validation', () => {
-  it('creates schema 9 with the exact mineral freight progress authority', () => {
+  it('creates schema 10 with the exact regional freight progress authority', () => {
     const world = createEmptyWorld(
       'Mineral freight',
       'mineral-seed',
@@ -207,7 +207,7 @@ describe('WorldData current-schema validation', () => {
       makeStarterOpportunity('mineral-seed'),
     );
 
-    expect(world.schemaVersion).toBe(9);
+    expect(world.schemaVersion).toBe(10);
     expect(world.freightProgress).toEqual({
       progressVersion: 1,
       profitableLogDeliveryCompleted: false,
@@ -215,28 +215,30 @@ describe('WorldData current-schema validation', () => {
       profitableStructuralTimberDeliveryCompleted: false,
       profitableLimestoneDeliveryCompleted: false,
       profitableCementDeliveryCompleted: false,
+      profitableSteelDeliveryCompleted: false,
+      profitableBuildingModuleDeliveryCompleted: false,
     });
   });
 
-  it('rejects schema 8 without converting it', () => {
+  it('rejects schema 9 without converting it', () => {
     const world = {
       ...createEmptyWorld(
         'Old freight world',
-        'schema-eight-seed',
+        'schema-nine-seed',
         'temperate',
-        makeStarterOpportunity('schema-eight-seed'),
+        makeStarterOpportunity('schema-nine-seed'),
       ),
-      schemaVersion: 8,
+      schemaVersion: 9,
     } as any;
-    delete world.freightProgress.profitableLimestoneDeliveryCompleted;
-    delete world.freightProgress.profitableCementDeliveryCompleted;
+    delete world.freightProgress.profitableSteelDeliveryCompleted;
+    delete world.freightProgress.profitableBuildingModuleDeliveryCompleted;
     const before = JSON.stringify(world);
 
     expect(validateWorldData(world)).toEqual(expect.objectContaining({
       compatible: false,
       action: 'Start a new world.',
     }));
-    expect(world.schemaVersion).toBe(8);
+    expect(world.schemaVersion).toBe(9);
     expect(JSON.stringify(world)).toBe(before);
   });
 

@@ -3,13 +3,17 @@ import {
   TERRAIN_ANALYSIS_SPACING,
 } from '../config/ConstructionConfig';
 import type { Vec2Def } from '../config/WorldData';
-import type { TrackGeometryDef } from './TrackGeometry';
+import {
+  deriveAutomaticCubic,
+  type TrackGeometryDef,
+} from './TrackGeometry';
 
 export const CURVE_LENGTH_UNCERTAINTY = 0.25;
 export const CURVE_FLATNESS_TOLERANCE = 0.5;
 
 const SAMPLER_EPSILON = 1e-9;
 const BOUNDARY_BISECTION_STEPS = 48;
+const GEOMETRY_LENGTH_EPSILON = 1e-6;
 
 export interface ConstructionCurveSample {
   readonly t: number;
@@ -51,6 +55,62 @@ function pointAt(def: TrackGeometryDef, t: number): Vec2Def {
       + 3 * inverse * t ** 2 * def.p2.y
       + t ** 3 * def.p3.y,
   };
+}
+
+function projectedDistanceAt(
+  def: TrackGeometryDef,
+  t: number,
+  chordUnit: Readonly<Vec2Def>,
+): number {
+  const inverse = 1 - t;
+  const x = inverse ** 3 * def.p0.x
+    + 3 * inverse ** 2 * t * def.p1.x
+    + 3 * inverse * t ** 2 * def.p2.x
+    + t ** 3 * def.p3.x;
+  const y = inverse ** 3 * def.p0.y
+    + 3 * inverse ** 2 * t * def.p1.y
+    + 3 * inverse * t ** 2 * def.p2.y
+    + t ** 3 * def.p3.y;
+  return (x - def.p0.x) * chordUnit.x
+    + (y - def.p0.y) * chordUnit.y;
+}
+
+export function isStrictlyForwardStraightCubic(
+  def: TrackGeometryDef,
+): boolean {
+  const chord = {
+    x: def.p3.x - def.p0.x,
+    y: def.p3.y - def.p0.y,
+  };
+  const chordLength = Math.hypot(chord.x, chord.y);
+  if (chordLength < GEOMETRY_LENGTH_EPSILON) return false;
+  const canonical = deriveAutomaticCubic({
+    start: def.p0,
+    end: def.p3,
+  });
+  if (def.p1.x !== canonical.p1.x
+    || def.p1.y !== canonical.p1.y
+    || def.p2.x !== canonical.p2.x
+    || def.p2.y !== canonical.p2.y) {
+    return false;
+  }
+  const controlVectors = [
+    {
+      x: def.p1.x - def.p0.x,
+      y: def.p1.y - def.p0.y,
+    },
+    {
+      x: def.p2.x - def.p1.x,
+      y: def.p2.y - def.p1.y,
+    },
+    {
+      x: def.p3.x - def.p2.x,
+      y: def.p3.y - def.p2.y,
+    },
+  ];
+  return controlVectors.every((vector) => (
+    chord.x * vector.x + chord.y * vector.y > 0
+  ));
 }
 
 function derivativeAt(def: TrackGeometryDef, t: number): Vec2Def {
@@ -169,6 +229,65 @@ function failure(lowerBoundLength: number): ConstructionCurveProfile {
   return Object.freeze({ ok: false as const, lowerBoundLength });
 }
 
+function sampleStrictlyForwardStraight(
+  def: TrackGeometryDef,
+  chordLength: number,
+  intervalCount: number,
+): ConstructionCurveProfile {
+  const chordUnit = {
+    x: (def.p3.x - def.p0.x) / chordLength,
+    y: (def.p3.y - def.p0.y) / chordLength,
+  };
+  const intervalLength = chordLength / intervalCount;
+  const samples: ConstructionCurveSample[] = [
+    Object.freeze({
+      t: 0,
+      point: Object.freeze({ ...def.p0 }),
+      distance: 0,
+      segmentLength: 0,
+    }),
+  ];
+  let previousT = 0;
+  for (let index = 1; index < intervalCount; index++) {
+    const targetDistance = intervalLength * index;
+    let low = previousT;
+    let high = 1;
+    for (
+      let iteration = 0;
+      iteration < BOUNDARY_BISECTION_STEPS;
+      iteration++
+    ) {
+      const candidateT = (low + high) / 2;
+      const projectedDistance = projectedDistanceAt(
+        def,
+        candidateT,
+        chordUnit,
+      );
+      if (projectedDistance < targetDistance) low = candidateT;
+      else high = candidateT;
+    }
+    previousT = (low + high) / 2;
+    samples.push(Object.freeze({
+      t: previousT,
+      point: Object.freeze(pointAt(def, previousT)),
+      distance: targetDistance,
+      segmentLength: intervalLength,
+    }));
+  }
+  samples.push(Object.freeze({
+    t: 1,
+    point: Object.freeze({ ...def.p3 }),
+    distance: chordLength,
+    segmentLength: intervalLength,
+  }));
+  return Object.freeze({
+    ok: true as const,
+    samples: Object.freeze(samples),
+    length: chordLength,
+    maxLengthError: 0,
+  });
+}
+
 function indexOfRequiredSplit(intervals: readonly CubicInterval[]): number {
   let selected = -1;
   let selectedSeverity = -Infinity;
@@ -213,6 +332,13 @@ export function sampleConstructionCurve(
   );
   if (initialIntervalCount + 1 > MAX_ANALYSIS_SAMPLES) {
     return failure(endpointChord);
+  }
+  if (isStrictlyForwardStraightCubic(def)) {
+    return sampleStrictlyForwardStraight(
+      def,
+      endpointChord,
+      initialIntervalCount,
+    );
   }
 
   const boundaries = balancedBoundaries(def, initialIntervalCount);

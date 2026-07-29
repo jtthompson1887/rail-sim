@@ -108,8 +108,10 @@ describe('FreightPresentation', () => {
       freightSetId: 'flatbed-freight-set',
       displayName: 'General Flatbed Set',
       price: 90_000,
-      compatibleCargoLabel: 'Logs · Structural Timber',
-      capacityLabel: '60 tonnes',
+      compatibleCargoLabel:
+        'Logs · Structural Timber · Steel · Building Modules',
+      capacityLabel:
+        '60 t Logs · 60 t Structural Timber · 60 t Steel · 4 modules',
       runningCostLabel: '£20 / active tick',
       cashAfter: 110_000,
       affordable: true,
@@ -364,6 +366,36 @@ describe('FreightPresentation', () => {
       units: 0,
       capacityUnits: 60,
       text: 'Empty 0 / 60 t',
+    });
+  });
+
+  it('presents one full module load with product-specific units', () => {
+    const world = makeFirstFreightRouteWorld();
+    world.trains[0] = makeFreightTrainDef({
+      cargo: {
+        productId: 'building-modules',
+        units: 4,
+        loadedUnits: 4,
+        originFacilityId: 'prefabrication-plant',
+      },
+    });
+
+    expect(buildTrainInspection(
+      world,
+      runtime(),
+      transfer({
+        facilityId: 'town-construction-market',
+        productId: 'building-modules',
+        batchUnits: 4,
+        cargoUnits: 4,
+        capacityUnits: 4,
+      }),
+    )?.cargo).toEqual({
+      productLabel: 'Building Modules',
+      unitLabel: 'modules',
+      units: 4,
+      capacityUnits: 4,
+      text: 'Building Modules 4 / 4 modules',
     });
   });
 

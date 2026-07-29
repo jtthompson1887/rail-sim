@@ -14,7 +14,8 @@ import { queryRailAccessConnectivity } from './RailAccessConnectivity';
 export type FreightObjectiveId =
   | 'first-profitable-route'
   | 'structural-timber-link'
-  | 'cement-supply-chain';
+  | 'cement-supply-chain'
+  | 'regional-construction-supply';
 
 export type FreightObjectiveStepId =
   | 'connect-route'
@@ -32,7 +33,12 @@ export type FreightObjectiveStepId =
   | 'produce-cement'
   | 'connect-cement-prefabrication'
   | 'buy-covered-cement'
-  | 'deliver-cement-profitably';
+  | 'deliver-cement-profitably'
+  | 'connect-port'
+  | 'deliver-steel-profitably'
+  | 'assemble-building-modules'
+  | 'connect-town'
+  | 'deliver-building-modules-profitably';
 
 export interface FreightObjectiveStep {
   readonly id: FreightObjectiveStepId;
@@ -112,6 +118,29 @@ const CEMENT_SUPPLY_STEPS = freezeStepDefinitions([
   {
     id: 'deliver-cement-profitably',
     label: 'Deliver 80 t cement profitably',
+  },
+]);
+
+const REGIONAL_CONSTRUCTION_STEPS = freezeStepDefinitions([
+  {
+    id: 'connect-port',
+    label: 'Connect Port Interchange',
+  },
+  {
+    id: 'deliver-steel-profitably',
+    label: 'Deliver Steel profitably',
+  },
+  {
+    id: 'assemble-building-modules',
+    label: 'Assemble Building Modules',
+  },
+  {
+    id: 'connect-town',
+    label: 'Connect Town Construction Market',
+  },
+  {
+    id: 'deliver-building-modules-profitably',
+    label: 'Deliver Building Modules profitably',
   },
 ]);
 
@@ -319,11 +348,58 @@ function deriveCementSupplyObjective(
   });
 }
 
+function deriveRegionalConstructionObjective(
+  world: WorldData,
+  topology: TrackTopologySnapshot,
+): FreightObjectiveDto {
+  const steelLatch = world.freightProgress
+    .profitableSteelDeliveryCompleted;
+  const moduleLatch = world.freightProgress
+    .profitableBuildingModuleDeliveryCompleted;
+  const port = findFacility(world, 'port-interchange');
+  const prefab = findFacility(world, 'prefabrication-plant');
+  const town = findFacility(world, 'town-construction-market');
+  const prefabModules =
+    prefab?.inventories['building-modules']?.quantity ?? 0;
+  const moduleCargoOnTrains = world.trains.reduce((total, train) => (
+    total + (train.cargo?.productId === 'building-modules'
+      ? train.cargo.units
+      : 0)
+  ), 0);
+  const townModules =
+    town?.inventories['building-modules']?.quantity ?? 0;
+  const assembledModules = steelLatch && (
+    moduleLatch
+    || prefabModules + moduleCargoOnTrains + townModules >= 4
+  );
+  const achieved = moduleLatch;
+  const facts = [
+    facilitiesAreConnected(world, topology, port, prefab),
+    steelLatch,
+    assembledModules,
+    facilitiesAreConnected(world, topology, prefab, town),
+    moduleLatch,
+  ];
+
+  return Object.freeze({
+    objectiveVersion: 1,
+    id: 'regional-construction-supply',
+    title: 'Regional construction supply',
+    status: achieved
+      ? 'Regional construction supplied · Network ready to automate'
+      : 'Supply regional construction',
+    achieved,
+    steps: deriveSteps(REGIONAL_CONSTRUCTION_STEPS, facts, achieved),
+  });
+}
+
 export function deriveFreightObjective(
   world: WorldData,
   topology: TrackTopologySnapshot,
 ): FreightObjectiveDto {
-  return world.freightProgress.profitableStructuralTimberDeliveryCompleted
+  return world.freightProgress.profitableCementDeliveryCompleted
+    ? deriveRegionalConstructionObjective(world, topology)
+    : world.freightProgress.profitableStructuralTimberDeliveryCompleted
     ? deriveCementSupplyObjective(world, topology)
     : world.freightProgress.profitableLogDeliveryCompleted
     ? deriveStructuralTimberObjective(world, topology)

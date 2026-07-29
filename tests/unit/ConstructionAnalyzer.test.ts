@@ -1,4 +1,7 @@
-import { ConstructionAnalyzer } from '../../src/systems/ConstructionAnalyzer';
+import {
+  ConstructionAnalyzer,
+  minimumRadiusForGeometry,
+} from '../../src/systems/ConstructionAnalyzer';
 import {
   ConstructionConfig,
   MAX_ANALYSIS_SAMPLES,
@@ -6,7 +9,12 @@ import {
   TERRAIN_ANALYSIS_SPACING,
 } from '../../src/config/ConstructionConfig';
 import { elevationAtProfile } from '../../src/systems/VerticalAlignment';
-import type { TrackGeometryDef } from '../../src/systems/TrackGeometry';
+import {
+  deriveAutomaticCubic,
+  type TrackGeometryDef,
+} from '../../src/systems/TrackGeometry';
+import * as PolynomialRoots from '../../src/systems/PolynomialRoots';
+import { sampleConstructionCurve } from '../../src/systems/ConstructionCurveSampler';
 
 function straight(length: number, startX = -length / 2, y = 0): TrackGeometryDef {
   return {
@@ -30,6 +38,82 @@ function structureTypes(proposal: ReturnType<typeof analyse>): string[] {
 }
 
 describe('ConstructionAnalyzer', () => {
+  it('returns infinite radius for a strictly forward straight without root solving', () => {
+    const solveRoots = jest.spyOn(
+      PolynomialRoots,
+      'realPolynomialRootsInUnitInterval',
+    );
+
+    const proposal = analyse(deriveAutomaticCubic({
+      start: { x: -320, y: 0 },
+      end: { x: 320, y: 0 },
+    }), () => 0);
+    const rootCalls = solveRoots.mock.calls.length;
+    solveRoots.mockRestore();
+
+    expect(proposal.minimumRadius).toBe(Infinity);
+    expect(rootCalls).toBe(0);
+  });
+
+  it('keeps a straight duplicate control point on the stationary path', () => {
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 0, y: 0 },
+      p2: { x: 200, y: 0 },
+      p3: { x: 300, y: 0 },
+    }, () => 0);
+
+    expect(proposal.minimumRadius).toBe(0);
+    expect(proposal.reasonCode).toBe('curvature');
+  });
+
+  it('keeps a nearly-collinear curve on the finite-radius path', () => {
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 100, y: 0 },
+      p2: { x: 200, y: 0.001 },
+      p3: { x: 300, y: 0 },
+    }, () => 0);
+
+    expect(Number.isFinite(proposal.minimumRadius)).toBe(true);
+    expect(proposal.minimumRadius).toBeGreaterThan(
+      ConstructionConfig.MINIMUM_RADIUS,
+    );
+  });
+
+  it('keeps sub-tolerance endpoint curvature on the general root path', () => {
+    const solveRoots = jest.spyOn(
+      PolynomialRoots,
+      'realPolynomialRootsInUnitInterval',
+    );
+    const proposal = analyse({
+      geometryVersion: 1,
+      p0: { x: 0, y: 0 },
+      p1: { x: 0.00004, y: 0.00000004 },
+      p2: { x: 500.00004, y: -0.00000004 },
+      p3: { x: 1000, y: 0 },
+    }, () => 0);
+    const rootCalls = solveRoots.mock.calls.length;
+    solveRoots.mockRestore();
+
+    expect(proposal.minimumRadius).toBe(Infinity);
+    expect(rootCalls).toBeGreaterThan(0);
+  });
+
+  it('keeps a canonical short stationary chord on the general path', () => {
+    const geometry = deriveAutomaticCubic({
+      start: { x: 0, y: 0 },
+      end: { x: 50, y: 0 },
+    });
+    const profile = sampleConstructionCurve(geometry);
+    expect(profile.ok).toBe(true);
+    if (!profile.ok) return;
+
+    expect(minimumRadiusForGeometry(geometry, profile.samples)).toBe(0);
+  });
+
   it('analyses flat terrain as valid surface track', () => {
     const proposal = analyse(straight(640), () => 75);
 

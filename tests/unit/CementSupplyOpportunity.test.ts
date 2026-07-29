@@ -261,6 +261,48 @@ describe('analyzeCementSupplyOpportunity', () => {
     )).toBeNull();
   });
 
+  it('rejects a Prefab leg that exits the Sawmill throat then crosses the starter spine', () => {
+    const productionAnalyzer = new ConstructionAnalyzer(flatTerrain);
+    const starter = opportunity(productionAnalyzer);
+    const extensionStart = resolvePrefabricationExtensionStart(starter)!;
+    const prefab = { x: 2_000, y: 0 };
+    const prefabWitness = analyzePrefabricationExtension(
+      productionAnalyzer,
+      extensionStart,
+      prefab,
+    )!;
+    let analyses = 0;
+    const analyzer = {
+      analyzeDetailed(geometry: Parameters<
+        ConstructionAnalyzer['analyzeDetailed']
+      >[0]) {
+        const detail = productionAnalyzer.analyzeDetailed(geometry);
+        if (analyses++ !== 1) return detail;
+        const points = [
+          detail.proposal.geometry.p0,
+          { x: 1_100, y: 0 },
+          { x: 500, y: 0 },
+          detail.proposal.geometry.p3,
+        ];
+        return {
+          ...detail,
+          curveSamples: points.map((point, index) => ({
+            t: index / (points.length - 1),
+            point,
+            distance: index * 600,
+            segmentLength: index === 0 ? 0 : 600,
+          })),
+        };
+      },
+    };
+
+    expect(createCementSupplyOpportunityAnalyzer(
+      analyzer,
+      starter,
+      prefabWitness,
+    )).toBeNull();
+  });
+
   it('rejects a second leg that collides beyond the Cement throat', () => {
     const productionAnalyzer = new ConstructionAnalyzer(flatTerrain);
     const starter = opportunity(productionAnalyzer);

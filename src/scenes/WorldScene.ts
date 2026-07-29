@@ -1433,6 +1433,15 @@ export default class WorldScene extends Phaser.Scene {
       && event.units === capacity.capacityUnits
       && world?.freightProgress
         .profitableCementDeliveryCompleted === true;
+    const completesRegionalObjective =
+      event.productId === 'building-modules'
+      && destination?.definitionId === 'town-construction-market'
+      && event.operatingProfit > 0
+      && train?.freightSetId === FLATBED_FREIGHT_SET_ID
+      && capacity?.ok === true
+      && event.units === capacity.capacityUnits
+      && world?.freightProgress
+        .profitableBuildingModuleDeliveryCompleted === true;
     const celebrateStructuralObjective = world
       && completesStructuralObjective
       && freightObjectiveCelebrationSession.consume(
@@ -1447,12 +1456,21 @@ export default class WorldScene extends Phaser.Scene {
         'cement-supply-chain',
         true,
       );
+    const celebrateRegionalObjective = world
+      && completesRegionalObjective
+      && freightObjectiveCelebrationSession.consume(
+        world.id,
+        'regional-construction-supply',
+        true,
+      );
     const result = event.operatingProfit > 0
       ? `Trip profit £${event.operatingProfit.toLocaleString('en-GB')}`
       : event.operatingProfit < 0
         ? `Trip loss £${Math.abs(event.operatingProfit).toLocaleString('en-GB')}`
         : 'Break-even £0';
-    const milestone = celebrateCementObjective
+    const milestone = celebrateRegionalObjective
+      ? 'Regional construction supplied · Network ready to automate'
+      : celebrateCementObjective
       ? 'Cement secured · Prefabrication awaits steel'
       : celebrateStructuralObjective
         ? 'Timber link profitable · Prefabrication awaits cement and steel'
@@ -1492,6 +1510,14 @@ export default class WorldScene extends Phaser.Scene {
   private activateCreateMode(): void {
     for (const train of this.trainManager.trains) {
       train.enginePower = 0;
+      const body = train.getMatterBody();
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
+    }
+    for (const carriage of this.trainManager.carriages) {
+      const body = carriage.getMatterBody();
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
     }
     this.cameraController.stopFollow();
     this.cameraController.setInputLockOwner(

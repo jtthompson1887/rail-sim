@@ -13,7 +13,7 @@ import type { ConstructionPreviewModel } from '../../src/ui/ConstructionPreviewO
 
 const DESKTOP = { width: 1920, height: 1400 };
 const MOBILE = { width: 375, height: 667 };
-const EXPECTED_SCHEMA_VERSION = 9;
+const EXPECTED_SCHEMA_VERSION = 10;
 const CASH = new Intl.NumberFormat('en-GB', {
   style: 'currency',
   currency: 'GBP',
@@ -1015,6 +1015,7 @@ async function establishCementObjective(
 
   await setMode(page, 'create');
   await buildGeneratedExtensions(page);
+  await stopTrainAt(page, flatbedId, 'managed-forest');
   await setMode(page, 'play');
   await runFixedLogTrip(page, flatbedId);
   await runFixedLogTrip(page, flatbedId);

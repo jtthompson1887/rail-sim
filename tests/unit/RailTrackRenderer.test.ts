@@ -4,6 +4,34 @@ import RailTrack from '../../src/entities/RailTrack';
 const { makeScene } = require('../../__mocks__/phaser');
 
 describe('RailTrackRenderer mixed engineering structures', () => {
+  it('supports tunnel styling with the default Phaser scene image stub', () => {
+    const scene = makeScene();
+    const track = new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(0, 0),
+      new Phaser.Math.Vector2(133.333333, 0),
+      new Phaser.Math.Vector2(266.666667, 0),
+      new Phaser.Math.Vector2(400, 0),
+    );
+
+    expect(() => track.setConstructionData(
+      {
+        profileVersion: 1,
+        knots: [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+      },
+      [
+        {
+          type: 'tunnel',
+          startT: 0,
+          endT: 1,
+          startElevation: 0,
+          endElevation: 0,
+        },
+      ],
+      1234,
+    )).not.toThrow();
+  });
+
   it('keeps photographic track textures narrow across the route', () => {
     const scene = makeScene();
     const images: any[] = [];

@@ -39,6 +39,7 @@ import {
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
 } from '../config/WorldGeneration';
 import { clonePlainData, equalPlainData } from '../utils/PlainData';
+import { MAX_REGIONAL_PAIR_ANALYSES } from '../config/FreightProgression';
 
 export interface WorldConstructionDraft {
   company: CompanyStateDef;
@@ -95,7 +96,10 @@ function hasValidEconomyAnalysisCounts(value: UnknownRecord): boolean {
     && Number.isInteger(value.mineralPairAnalyses)
     && (value.mineralPairAnalyses as number) >= 0
     && (value.mineralPairAnalyses as number)
-      <= MAX_CEMENT_SUPPLY_PAIR_ANALYSES;
+      <= MAX_CEMENT_SUPPLY_PAIR_ANALYSES
+    && Number.isInteger(value.regionalPairAnalyses)
+    && (value.regionalPairAnalyses as number) >= 0
+    && (value.regionalPairAnalyses as number) <= MAX_REGIONAL_PAIR_ANALYSES;
 }
 
 function isOpportunityFailure(
@@ -290,6 +294,7 @@ class WorldManagerClass {
                 economyResult.economy,
                 opportunity,
                 terrain,
+                economyResult.diagnostics,
               )) {
               throw new Error('Invalid default economy generation result');
             }
@@ -369,6 +374,7 @@ class WorldManagerClass {
         generatedEconomy.economy,
         generatedOpportunity,
         terrain,
+        generatedEconomy.diagnostics,
       )) {
       return validationFailure;
     }

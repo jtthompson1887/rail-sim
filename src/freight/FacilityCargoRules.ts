@@ -1,6 +1,7 @@
 import type {
   FacilityEconomyDef,
   InventorySlotDef,
+  ProductDefinition,
   RecipeDefinition,
 } from '../economy/EconomyData';
 import type { TrainDef } from '../config/WorldData';
@@ -36,6 +37,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const hasProductDefinition = (productId: string): boolean => {
   const product = getProduct(productId) as unknown;
   return isRecord(product) && product.id === productId;
+};
+
+const productDefinition = (
+  productId: string,
+): ProductDefinition | null => {
+  const product = getProduct(productId) as unknown;
+  return isRecord(product) && product.id === productId
+    ? product as unknown as ProductDefinition
+    : null;
 };
 
 const activeRecipe = (
@@ -82,36 +92,59 @@ export function potentialLoadProducts(
   facility: FacilityEconomyDef,
   freightSet: FreightSetDefinition,
 ): readonly LoadableProduct[] {
+  const definition = getFacilityDefinition(facility.definitionId);
   const recipe = activeRecipe(facility);
-  if (!recipe
-    || !Array.isArray(recipe.outputs)
-    || !Array.isArray(freightSet.compatibleProductIds)) {
+  if (!definition || !Array.isArray(freightSet.compatibleProductIds)) {
     return EMPTY_LOAD_PRODUCTS;
   }
 
   const candidates: OrderedLoadableProduct[] = [];
   const includedProductIds = new Set<string>();
-  recipe.outputs.forEach((output, recipeOrder) => {
-    if (typeof output?.productId !== 'string'
-      || !Number.isSafeInteger(output.quantity)
-      || output.quantity <= 0
-      || includedProductIds.has(output.productId)
-      || !hasProductDefinition(output.productId)
-      || freightSet.compatibleProductIds.indexOf(output.productId) === -1) {
+  const addCandidate = (
+    productId: string,
+    recipeOrder: number,
+  ): void => {
+    if (includedProductIds.has(productId)
+      || !hasProductDefinition(productId)
+      || freightSet.compatibleProductIds.indexOf(productId) === -1) {
       return;
     }
-    const slot = facility.inventories?.[output.productId];
-    if (!validInventorySlot(slot, output.productId)) return;
+    const slot = facility.inventories?.[productId];
+    if (!validInventorySlot(slot, productId)) return;
     const availableUnits = slot.quantity - slot.reservedQuantity;
     if (!Number.isSafeInteger(availableUnits)) return;
 
-    includedProductIds.add(output.productId);
+    includedProductIds.add(productId);
     candidates.push({
-      productId: output.productId,
+      productId,
       availableUnits,
       recipeOrder,
     });
+  };
+
+  const recipeOutputs = recipe && Array.isArray(recipe.outputs)
+    ? recipe.outputs
+    : [];
+  recipeOutputs.forEach((output, recipeOrder) => {
+    if (typeof output?.productId !== 'string'
+      || !Number.isSafeInteger(output.quantity)
+      || output.quantity <= 0) {
+      return;
+    }
+    addCandidate(output.productId, recipeOrder);
   });
+  if (definition.boundary === 'port'
+    && Array.isArray(definition.inventory)) {
+    definition.inventory.forEach((template, inventoryOrder) => {
+      if (typeof template?.productId !== 'string') return;
+      const product = productDefinition(template.productId);
+      if (product?.category !== 'imported-material') return;
+      addCandidate(
+        product.id,
+        recipeOutputs.length + inventoryOrder,
+      );
+    });
+  }
   candidates.sort((left, right) => left.recipeOrder - right.recipeOrder
     || left.productId.localeCompare(right.productId));
 
@@ -134,18 +167,26 @@ export function potentialAcceptedProduct(
   facility: FacilityEconomyDef,
   productId: string,
 ): AcceptedProduct | null {
+  const definition = getFacilityDefinition(facility.definitionId);
   const recipe = activeRecipe(facility);
-  if (!recipe
-    || !Array.isArray(recipe.inputs)
-    || !hasProductDefinition(productId)) {
+  const product = productDefinition(productId);
+  if (!definition || !product) {
     return null;
   }
-  const input = recipe.inputs.find((candidate) =>
-    candidate?.productId === productId
-    && Number.isSafeInteger(candidate.quantity)
-    && candidate.quantity > 0);
+  const recipeInput = recipe && Array.isArray(recipe.inputs)
+    ? recipe.inputs.find((candidate) =>
+      candidate?.productId === productId
+      && Number.isSafeInteger(candidate.quantity)
+      && candidate.quantity > 0)
+    : undefined;
+  const boundaryInput = definition.boundary === 'town-consumer'
+    && product.category === 'finished-good'
+    && Array.isArray(definition.inventory)
+    && definition.inventory.some((template) =>
+      template?.productId === product.id);
   const slot = facility.inventories?.[productId];
-  if (!input || !validInventorySlot(slot, productId)) return null;
+  if ((!recipeInput && !boundaryInput)
+    || !validInventorySlot(slot, productId)) return null;
 
   const freeCapacityUnits = slot.capacity - slot.quantity;
   if (!Number.isSafeInteger(freeCapacityUnits)) return null;

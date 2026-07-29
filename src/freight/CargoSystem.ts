@@ -376,13 +376,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isValidFreightProgress = (
   value: unknown,
 ): value is FreightProgressDef => isRecord(value)
-  && Object.keys(value).length === 6
+  && Object.keys(value).length === 8
   && value.progressVersion === 1
   && typeof value.profitableLogDeliveryCompleted === 'boolean'
   && typeof value.developmentGrantAwarded === 'boolean'
   && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean'
   && typeof value.profitableLimestoneDeliveryCompleted === 'boolean'
-  && typeof value.profitableCementDeliveryCompleted === 'boolean';
+  && typeof value.profitableCementDeliveryCompleted === 'boolean'
+  && typeof value.profitableSteelDeliveryCompleted === 'boolean'
+  && typeof value.profitableBuildingModuleDeliveryCompleted === 'boolean';
 
 const hasConsistentDevelopmentGrant = (
   company: CompanyStateDef,
@@ -549,6 +551,16 @@ const unloadBatch = (
     && train.freightSetId === COVERED_CEMENT_SET_ID
     && cargo.productId === 'cement'
     && facility.definitionId === 'prefabrication-plant';
+  const completesProfitableFullSteel = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'steel'
+    && facility.definitionId === 'prefabrication-plant';
+  const completesProfitableFullBuildingModules = completesDelivery
+    && profitable
+    && fullConsignment
+    && cargo.productId === 'building-modules'
+    && facility.definitionId === 'town-construction-market';
   let postedCompany = deliveryPost.company;
   if (completesProfitableFullLogs
     && !progress.developmentGrantAwarded) {
@@ -599,6 +611,12 @@ const unloadBatch = (
     }
     if (completesProfitableFullCement) {
       progress.profitableCementDeliveryCompleted = true;
+    }
+    if (completesProfitableFullSteel) {
+      progress.profitableSteelDeliveryCompleted = true;
+    }
+    if (completesProfitableFullBuildingModules) {
+      progress.profitableBuildingModuleDeliveryCompleted = true;
     }
   }
 

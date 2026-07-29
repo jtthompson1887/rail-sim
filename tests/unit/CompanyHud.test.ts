@@ -229,7 +229,8 @@ describe('CompanyHud', () => {
       '[data-testid="company-last-delivery"]',
     ) as HTMLElement;
     expect(delivery.textContent).toBe(
-      `Limestone Aggregate delivered to Cement Works · Revenue £5,400 · ${result}`,
+      'Limestone Aggregate delivered to Cement Works'
+      + ` · Revenue £5,400 · Running £3,600 · ${result}`,
     );
     expect(delivery.dataset.tone).toBe(tone);
   });
@@ -249,7 +250,7 @@ describe('CompanyHud', () => {
       '[data-testid="company-last-delivery"]',
     )?.textContent).toBe(
       'Unknown product delivered to Unknown destination'
-      + ' · Revenue £100 · Trip profit £80',
+      + ' · Revenue £100 · Running £20 · Trip profit £80',
     );
 
     hud.destroy();

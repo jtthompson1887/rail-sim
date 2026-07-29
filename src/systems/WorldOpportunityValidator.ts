@@ -59,7 +59,7 @@ export function validateGeneratedOpportunityData(
 
 function corridorMetrics(
   corridor: OpportunityCorridorDef,
-  analyzer: ConstructionAnalyzer,
+  analyzer: Pick<ConstructionAnalyzer, 'analyzeDetailed'>,
 ): { length: number; meanAbsoluteGrade: number } | null {
   if (corridor.feasibilityWitness.segments.length !== corridor.waypoints.length - 1) {
     return null;
@@ -118,7 +118,8 @@ function corridorMetrics(
 export class WorldOpportunityValidator {
   constructor(
     private readonly terrain: TerrainHeightSource,
-    private readonly analyzer = new ConstructionAnalyzer(terrain),
+    private readonly analyzer: Pick<ConstructionAnalyzer, 'analyzeDetailed'> =
+      new ConstructionAnalyzer(terrain),
   ) {}
 
   validate(
