@@ -5,6 +5,8 @@ import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
 import { RailTrackRenderer } from './RailTrackRenderer';
 import { createPort, type TrackPort } from './TrackPort';
+import { TrackArcLengthIndex } from '../physics/TrackArcLengthIndex';
+import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import type {
   StructureInterval,
   StructureType,
@@ -35,6 +37,7 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   private p1!: Phaser.Math.Vector2;
   private p2!: Phaser.Math.Vector2;
   private curve!: CubicBezier;
+  private arcLengthIndex!: TrackArcLengthIndex;
   private uuid: string;
   private renderer: RailTrackRenderer;
   /** Port-based connection model. */
@@ -68,6 +71,13 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
     this.p0 = copiedP0;
     this.p1 = copiedP1;
     this.p2 = copiedP2;
+    this.arcLengthIndex = new TrackArcLengthIndex({
+      geometryVersion: 1,
+      p0: copiedP0,
+      p1: copiedP1,
+      p2: copiedP2,
+      p3: copiedP3,
+    }, TRAIN_PHYSICS_CONFIG.arcSampleSpacing);
     this.totalDistance = this.curve.getLength();
     this.iterations = Math.max(1, Math.ceil(this.totalDistance / (this.railTrackWidth * this.railTrackScale)));
     // Update port positions
@@ -132,6 +142,10 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
 
   getCurvePath(): CubicBezier {
     return this.curve;
+  }
+
+  getArcLengthIndex(): TrackArcLengthIndex {
+    return this.arcLengthIndex;
   }
 
   /** The stored second knot (p1) of the spline curve, as a copy. */
