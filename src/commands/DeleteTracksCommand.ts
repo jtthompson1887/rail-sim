@@ -316,7 +316,8 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     );
     return stationIds.size > 0
       || world.trains.some((train) => (
-        this.uuids.indexOf(train.trackUUID) !== -1
+        train.dynamics.mode === 'on-rail'
+        && this.uuids.indexOf(train.dynamics.trackUUID) !== -1
       ));
   }
 

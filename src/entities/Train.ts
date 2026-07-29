@@ -5,6 +5,7 @@ import { applyForceToGameObject, matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { IVehicle, VehicleType } from '../config/VehicleTypes';
+import type { PersistedVehicleDynamics } from '../config/WorldData';
 
 interface TrainMatterImage extends Phaser.Physics.Matter.Image {
   parentTrain?: Train;
@@ -22,6 +23,7 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
+  persistedDynamics: PersistedVehicleDynamics | null = null;
   readonly vehicleType: VehicleType = 'locomotive';
   readonly passengerCapacity: number = 20;
   public debugGraphics!: Phaser.GameObjects.Graphics;

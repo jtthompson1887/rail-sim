@@ -6,11 +6,12 @@ const { makeScene } = require('../../__mocks__/phaser');
 
 describe('TrainSerializer', () => {
   describe('toTrainDef', () => {
-    it('returns null when train has no currentTrack', () => {
+    it('returns null when a vehicle has neither persisted dynamics nor a current track', () => {
       const train = {
         vehicleType: 'locomotive',
         getUUID: () => 'train-1',
         currentTrack: null,
+        persistedDynamics: null,
         getMatterBody: () => ({ x: 0, y: 0 }),
         getPassengerCount: () => 0,
       } as unknown as IVehicle;
@@ -18,13 +19,19 @@ describe('TrainSerializer', () => {
       expect(TrainSerializer.toTrainDef(train)).toBeNull();
     });
 
-    it('serialises a train on a track with correct fields', () => {
+    it('serialises exact on-rail dynamics including consist order and speed', () => {
       const train = {
         vehicleType: 'locomotive',
         getUUID: () => 'train-abc',
-        currentTrack: {
-          getUUID: () => 'track-xyz',
-          getTrackPosition: () => 0.75,
+        currentTrack: null,
+        persistedDynamics: {
+          mode: 'on-rail',
+          trackUUID: 'track-xyz',
+          distance: 750,
+          direction: -1,
+          speedMps: 18.5,
+          consistId: 'express-7',
+          consistOrder: 3,
         },
         getMatterBody: () => ({ x: 100, y: 200 }),
         getPassengerCount: () => 12,
@@ -33,27 +40,46 @@ describe('TrainSerializer', () => {
       const def = TrainSerializer.toTrainDef(train);
       expect(def).not.toBeNull();
       expect(def!.id).toBe('train-abc');
-      expect(def!.trackUUID).toBe('track-xyz');
-      expect(def!.trackT).toBe(0.75);
+      expect(def!.dynamics).toEqual({
+        mode: 'on-rail',
+        trackUUID: 'track-xyz',
+        distance: 750,
+        direction: -1,
+        speedMps: 18.5,
+        consistId: 'express-7',
+        consistOrder: 3,
+      });
       expect(def!.passengers).toBe(12);
       expect(def!.type).toBe('locomotive');
     });
 
-    it('computes trackT from the track position method', () => {
-      const trackPosition = jest.fn().mockReturnValue(0.33);
+    it('serialises exact free-body crash state without rail fields', () => {
       const train = {
         vehicleType: 'locomotive',
         getUUID: () => 't1',
-        currentTrack: {
-          getUUID: () => 'trk1',
-          getTrackPosition: trackPosition,
+        currentTrack: null,
+        persistedDynamics: {
+          mode: 'free-body',
+          x: 50,
+          y: 75,
+          angleRad: 0.25,
+          velocityX: 9,
+          velocityY: -4,
+          angularVelocityRadPerSec: 1.5,
         },
-        getMatterBody: () => ({ x: 50, y: 50 }),
+        getMatterBody: () => ({ x: 50, y: 75 }),
         getPassengerCount: () => 0,
       } as unknown as IVehicle;
 
-      TrainSerializer.toTrainDef(train);
-      expect(trackPosition).toHaveBeenCalledWith({ x: 50, y: 50 });
+      expect(TrainSerializer.toTrainDef(train)?.dynamics).toEqual({
+        mode: 'free-body',
+        x: 50,
+        y: 75,
+        angleRad: 0.25,
+        velocityX: 9,
+        velocityY: -4,
+        angularVelocityRadPerSec: 1.5,
+      });
     });
 
     it('serialises the declared vehicle type without constructor-name inspection', () => {
@@ -62,8 +88,9 @@ describe('TrainSerializer', () => {
         getUUID: () => 'carriage-1',
         currentTrack: {
           getUUID: () => 'track-1',
-          getTrackPosition: () => 0.4,
+          getArcLengthIndex: () => ({ distanceForPoint: () => 40 }),
         },
+        persistedDynamics: null,
         getMatterBody: () => ({ x: 40, y: 50 }),
         getPassengerCount: () => 8,
       } as unknown as IVehicle;
@@ -75,7 +102,7 @@ describe('TrainSerializer', () => {
       const train = new Train(makeScene(), 10, 20, 'concrete-train');
       train.currentTrack = {
         getUUID: () => 'track-1',
-        getTrackPosition: () => 0.5,
+        getArcLengthIndex: () => ({ distanceForPoint: () => 50 }),
       } as any;
 
       expect(train.vehicleType).toBe('locomotive');

@@ -5,6 +5,7 @@ import { matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { IVehicle, VehicleType } from '../config/VehicleTypes';
+import type { PersistedVehicleDynamics } from '../config/WorldData';
 
 interface CarriageMatterImage extends Phaser.Physics.Matter.Image {
   parentCarriage?: Carriage;
@@ -21,6 +22,7 @@ export default class Carriage extends Phaser.GameObjects.Container implements IV
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
+  persistedDynamics: PersistedVehicleDynamics | null = null;
   readonly vehicleType: VehicleType = 'passenger-carriage';
   readonly passengerCapacity: number = 40;
   public debugGraphics!: Phaser.GameObjects.Graphics;

@@ -2,6 +2,7 @@ import type { PIDController } from '../utils/math';
 import type RailTrack from '../entities/RailTrack';
 import { GameConfig } from './GameConfig';
 import type { RailVehicleDefinition } from '../physics/RailVehicleModel';
+import type { PersistedVehicleDynamics } from './WorldData';
 
 /**
  * VehicleType – discriminated union of all placeable vehicle kinds.
@@ -108,6 +109,9 @@ export interface ITrackFollower {
 
   /** The track the follower is currently aligned to (null if derailed / not yet placed). */
   currentTrack: RailTrack | null;
+
+  /** Last exact simulation state used for save/load round-tripping. */
+  persistedDynamics: PersistedVehicleDynamics | null;
 
   /** Self-propulsion multiplier [-1 … 1].  Only locomotives set this. */
   enginePower: number;

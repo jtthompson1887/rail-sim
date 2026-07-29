@@ -54,7 +54,7 @@ function currentWorld() {
     'alpine',
     undefined as any,
   ) as any;
-  world.schemaVersion = 6;
+  world.schemaVersion = 7;
   world.revision = 0;
   world.constructionRevision = 0;
   world.economyRevision = 0;
@@ -203,7 +203,7 @@ describe('world schema validation', () => {
     localStorage.clear();
   });
 
-  it('round-trips schema 6 with an empty valid economy without converting or copying it', () => {
+  it('round-trips schema 7 with an empty valid economy without converting or copying it', () => {
     const world = currentWorld();
     world.revision = 7;
     world.constructionRevision = 3;
@@ -220,7 +220,8 @@ describe('world schema validation', () => {
     ['company-only', 3],
     ['opportunity-only', 4],
     ['schema-five', 5],
-    ['unsupported', 7],
+    ['schema-six', 6],
+    ['unsupported', 8],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -276,7 +277,7 @@ describe('world schema validation', () => {
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
     }],
-  ])('rejects schema 6 with %s', (_label, mutate) => {
+  ])('rejects schema 7 with %s', (_label, mutate) => {
     const raw = currentWorld();
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -326,7 +327,7 @@ describe('world schema validation', () => {
       world.constructionRevision = Number.MAX_SAFE_INTEGER;
       world.economyRevision = 1;
     }],
-  ])('rejects schema 6 with %s', (_label, mutate) => {
+  ])('rejects schema 7 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw).compatible).toBe(false);
@@ -427,7 +428,7 @@ describe('world schema validation', () => {
     ['regional factor above its bound', (world: any) => {
       world.economy.market.regionalDemandBpsByProduct.logs = 12_001;
     }],
-  ])('rejects schema 6 with %s', (_label, mutate) => {
+  ])('rejects schema 7 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -487,7 +488,7 @@ describe('world schema validation', () => {
     ['ledger cash mismatch', (world: any) => {
       world.company.cash -= 1;
     }],
-  ])('rejects schema 6 company state with %s', (_label, mutate) => {
+  ])('rejects schema 7 company state with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -645,6 +646,121 @@ describe('world schema validation', () => {
       compatible: false,
       action: 'Start a new world.',
     }));
+  });
+
+  it('accepts complete on-rail and free-body vehicle dynamics', () => {
+    const raw = currentWorld() as any;
+    raw.trains = [
+      {
+        id: 'engine',
+        passengers: 4,
+        type: 'locomotive',
+        dynamics: {
+          mode: 'on-rail',
+          trackUUID: 'main',
+          distance: 125.5,
+          direction: 1,
+          speedMps: 22,
+          consistId: 'freight-1',
+          consistOrder: 0,
+        },
+      },
+      {
+        id: 'derailed-car',
+        passengers: 0,
+        type: 'passenger-carriage',
+        dynamics: {
+          mode: 'free-body',
+          x: 12,
+          y: -4,
+          angleRad: 0.75,
+          velocityX: 3,
+          velocityY: -2,
+          angularVelocityRadPerSec: 0.5,
+        },
+      },
+    ];
+
+    expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
+  });
+
+  it.each([
+    ['on-rail distance', (dynamics: any) => { dynamics.distance = Number.NaN; }],
+    ['on-rail speed', (dynamics: any) => { dynamics.speedMps = Number.POSITIVE_INFINITY; }],
+    ['free-body x', (dynamics: any) => { dynamics.x = Number.NEGATIVE_INFINITY; }],
+    ['free-body angular velocity', (dynamics: any) => {
+      dynamics.angularVelocityRadPerSec = Number.NaN;
+    }],
+  ])('rejects non-finite %s', (_label, mutate) => {
+    const raw = currentWorld() as any;
+    const onRail = {
+      mode: 'on-rail',
+      trackUUID: 'main',
+      distance: 5,
+      direction: 1,
+      speedMps: 2,
+      consistId: 'freight-1',
+      consistOrder: 0,
+    };
+    const freeBody = {
+      mode: 'free-body',
+      x: 1,
+      y: 2,
+      angleRad: 0,
+      velocityX: 0,
+      velocityY: 0,
+      angularVelocityRadPerSec: 0,
+    };
+    const dynamics = _label.startsWith('free-body') ? freeBody : onRail;
+    mutate(dynamics);
+    raw.trains = [{
+      id: 'vehicle',
+      passengers: 0,
+      type: 'locomotive',
+      dynamics,
+    }];
+
+    expect(validateWorldData(raw).compatible).toBe(false);
+  });
+
+  it('rejects duplicate consist positions', () => {
+    const raw = currentWorld() as any;
+    const dynamics = {
+      mode: 'on-rail',
+      trackUUID: 'main',
+      distance: 5,
+      direction: 1,
+      speedMps: 2,
+      consistId: 'freight-1',
+      consistOrder: 0,
+    };
+    raw.trains = [
+      { id: 'a', passengers: 0, type: 'locomotive', dynamics },
+      { id: 'b', passengers: 0, type: 'passenger-carriage', dynamics: { ...dynamics } },
+    ];
+
+    expect(validateWorldData(raw).compatible).toBe(false);
+  });
+
+  it('rejects rail fields smuggled into free-body dynamics', () => {
+    const raw = currentWorld() as any;
+    raw.trains = [{
+      id: 'vehicle',
+      passengers: 0,
+      type: 'locomotive',
+      dynamics: {
+        mode: 'free-body',
+        x: 1,
+        y: 2,
+        angleRad: 0,
+        velocityX: 0,
+        velocityY: 0,
+        angularVelocityRadPerSec: 0,
+        trackUUID: 'must-not-survive-a-crash',
+      },
+    }];
+
+    expect(validateWorldData(raw).compatible).toBe(false);
   });
 
   it('rejects legacy root generation authorities', () => {

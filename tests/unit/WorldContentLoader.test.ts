@@ -129,4 +129,64 @@ describe('WorldContentLoader exact track restoration', () => {
     expect(trackManager.addTrack).not.toHaveBeenCalled();
     expect(trainManager.createInitialTrain).not.toHaveBeenCalled();
   });
+
+  it('restores both rail-constrained and free-body vehicle dynamics through the manager', () => {
+    const world = WorldManager.createNew('Dynamics restore', 'dynamics-seed');
+    world.trains = [
+      {
+        id: 'engine',
+        passengers: 3,
+        type: 'locomotive',
+        dynamics: {
+          mode: 'on-rail',
+          trackUUID: 'main',
+          distance: 40,
+          direction: -1,
+          speedMps: 12,
+          consistId: 'mixed',
+          consistOrder: 0,
+        },
+      },
+      {
+        id: 'car',
+        passengers: 0,
+        type: 'passenger-carriage',
+        dynamics: {
+          mode: 'free-body',
+          x: 5,
+          y: 6,
+          angleRad: 0.2,
+          velocityX: 3,
+          velocityY: 4,
+          angularVelocityRadPerSec: 0.5,
+        },
+      },
+    ];
+    const engine = { boardPassengers: jest.fn() };
+    const car = { boardPassengers: jest.fn() };
+    const trainManager = {
+      createInitialTrain: jest.fn(() => engine),
+      createCarriage: jest.fn(() => car),
+      restoreVehicleDynamics: jest.fn(),
+    };
+    const loader = new WorldContentLoader(
+      makeScene(),
+      { addTrack: jest.fn(), getTrack: jest.fn() } as any,
+      trainManager as any,
+    );
+
+    loader.load();
+
+    expect(trainManager.restoreVehicleDynamics).toHaveBeenNthCalledWith(
+      1,
+      engine,
+      world.trains[0].dynamics,
+    );
+    expect(trainManager.restoreVehicleDynamics).toHaveBeenNthCalledWith(
+      2,
+      car,
+      world.trains[1].dynamics,
+    );
+    expect(engine.boardPassengers).toHaveBeenCalledWith(3);
+  });
 });

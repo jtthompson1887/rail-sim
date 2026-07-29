@@ -38,16 +38,11 @@ export class WorldContentLoader {
   }
 
   private restoreVehicle(def: TrainDef): void {
-    const track = this.trackManager.getTrack(def.trackUUID);
-    if (!track) return;
     const vehicleType = def.type;
     const vehicle = vehicleType === 'passenger-carriage'
       ? this.trainManager.createCarriage(def.id)
       : this.trainManager.createInitialTrain(def.id);
-    const pt = track.getCurvePath().getPoint(def.trackT);
-    vehicle.getMatterBody().setPosition(pt.x, pt.y);
-    vehicle.currentTrack = track;
-    vehicle.getMatterBody().setAngle(track.getTrackAngle(vehicle.getMatterBody()));
+    this.trainManager.restoreVehicleDynamics(vehicle, def.dynamics);
     if (def.passengers > 0) {
       vehicle.boardPassengers(def.passengers);
     }

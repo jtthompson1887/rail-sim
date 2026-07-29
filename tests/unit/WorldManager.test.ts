@@ -5,11 +5,33 @@
 import { WorldManager } from '../../src/managers/WorldManager';
 import { SaveService } from '../../src/services/SaveService';
 import { createEmptyWorld } from '../../src/config/WorldData';
-import type { TrackDef } from '../../src/config/WorldData';
+import type { TrackDef, TrainDef } from '../../src/config/WorldData';
 import { EventBus } from '../../src/services/EventBus';
 import { STANDARD_STARTING_CASH } from '../../src/config/ConstructionConfig';
 import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
 import { clonePlainData } from '../../src/utils/PlainData';
+
+function makeTrainDef(
+  id: string,
+  trackUUID = 'abc',
+  passengers = 0,
+  type: TrainDef['type'] = 'locomotive',
+): TrainDef {
+  return {
+    id,
+    passengers,
+    type,
+    dynamics: {
+      mode: 'on-rail',
+      trackUUID,
+      distance: 0,
+      direction: 1,
+      speedMps: 0,
+      consistId: `consist-${id}`,
+      consistOrder: 0,
+    },
+  };
+}
 
 function makeTrackDef(
   uuid: string,
@@ -77,9 +99,9 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 6 with a generated economy and conserved opening balance', () => {
+    it('creates schema 7 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(6);
+      expect(w.schemaVersion).toBe(7);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.economyRevision).toBe(0);
@@ -547,30 +569,30 @@ describe('WorldManager', () => {
   describe('addTrainDef() / removeTrainDef() / updateTrainDef()', () => {
     it('adds a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'train-1', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeTrainDef('train-1'));
       expect(WorldManager.world!.trains).toHaveLength(1);
     });
 
     it('removes a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'rm-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeTrainDef('rm-train'));
       WorldManager.removeTrainDef('rm-train');
       expect(WorldManager.world!.trains).toHaveLength(0);
     });
 
     it('updates a train definition', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'upd-train', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeTrainDef('upd-train'));
       WorldManager.updateTrainDef({ id: 'upd-train', passengers: 42 });
       expect(WorldManager.world!.trains[0].passengers).toBe(42);
     });
 
     it('replaces all train definitions via setTrainDefs', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      WorldManager.addTrainDef({ id: 'old', trackUUID: 'abc', trackT: 0, passengers: 0, type: 'locomotive' });
+      WorldManager.addTrainDef(makeTrainDef('old'));
       WorldManager.setTrainDefs([
-        { id: 'new1', trackUUID: 'x', trackT: 0.5, passengers: 5, type: 'locomotive' },
-        { id: 'new2', trackUUID: 'y', trackT: 0.8, passengers: 3, type: 'locomotive' },
+        makeTrainDef('new1', 'x', 5),
+        makeTrainDef('new2', 'y', 3),
       ]);
       expect(WorldManager.world!.trains).toHaveLength(2);
       expect(WorldManager.world!.trains[0].id).toBe('new1');
@@ -579,12 +601,12 @@ describe('WorldManager', () => {
 
     it('setTrainDefs does nothing when no world is loaded', () => {
       WorldManager.reset();
-      expect(() => WorldManager.setTrainDefs([{ id: 'x', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' }])).not.toThrow();
+      expect(() => WorldManager.setTrainDefs([makeTrainDef('x', 'a')])).not.toThrow();
     });
 
     it('does not advance revision when setTrainDefs receives identical data', () => {
       WorldManager.createNew('Tr', 'real-terrain-alpha');
-      const defs = [{ id: 'same', trackUUID: 'a', trackT: 0, passengers: 0, type: 'locomotive' as const }];
+      const defs = [makeTrainDef('same', 'a')];
       expect(WorldManager.setTrainDefs(defs)).toBe(true);
       const revision = WorldManager.world!.revision;
       expect(WorldManager.setTrainDefs(defs.map((train) => ({ ...train })))).toBe(false);

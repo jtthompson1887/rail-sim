@@ -208,9 +208,16 @@ describe('WorldData current-schema validation', () => {
     );
     (world.trains as any) = [{
         id: 'legacy-train',
-        trackUUID: 'track-1',
-        trackT: 0.5,
         passengers: 4,
+        dynamics: {
+          mode: 'on-rail',
+          trackUUID: 'track-1',
+          distance: 50,
+          direction: 1,
+          speedMps: 0,
+          consistId: 'legacy',
+          consistOrder: 0,
+        },
     }];
     const result = validateWorldData(world);
 
@@ -227,10 +234,17 @@ describe('WorldData current-schema validation', () => {
     );
     world.trains = [{
         id: 'carriage-1',
-        trackUUID: 'track-1',
-        trackT: 0.5,
         passengers: 8,
         type: 'passenger-carriage',
+        dynamics: {
+          mode: 'on-rail',
+          trackUUID: 'track-1',
+          distance: 50,
+          direction: 1,
+          speedMps: 0,
+          consistId: 'passenger',
+          consistOrder: 0,
+        },
     }];
     const result = validateWorldData(world);
 

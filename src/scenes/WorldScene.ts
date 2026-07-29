@@ -105,7 +105,10 @@ function deletionBlockingReason(
   if (stationIds.size > 0) {
     return 'Deletion blocked · Remove stations from these tracks first';
   }
-  if (world.trains.some((train) => selected.has(train.trackUUID))) {
+  if (world.trains.some((train) => (
+    train.dynamics.mode === 'on-rail'
+    && selected.has(train.dynamics.trackUUID)
+  ))) {
     return 'Deletion blocked · Move trains off these tracks first';
   }
   return '';

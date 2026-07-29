@@ -27,6 +27,7 @@ import {
   validateCompanyState,
 } from '../economy/FinanceLedger';
 import { clonePlainData } from '../utils/PlainData';
+import type { TravelDirection } from '../physics/RouteCursor';
 
 export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
 
@@ -87,13 +88,32 @@ export interface WorldStationDef {
   passengerSpawnRate: number;
 }
 
-/** A serialised Train placed in the world. */
+export type PersistedVehicleDynamics =
+  | {
+      mode: 'on-rail';
+      trackUUID: string;
+      distance: number;
+      direction: TravelDirection;
+      speedMps: number;
+      consistId: string;
+      consistOrder: number;
+    }
+  | {
+      mode: 'free-body';
+      x: number;
+      y: number;
+      angleRad: number;
+      velocityX: number;
+      velocityY: number;
+      angularVelocityRadPerSec: number;
+    };
+
+/** A serialised rail vehicle in constrained or free-body mode. */
 export interface TrainDef {
   id: string;
-  trackUUID: string;
-  trackT: number;
   passengers: number;
   type: VehicleType;
+  dynamics: PersistedVehicleDynamics;
 }
 
 /** Asset type identifiers for scenery objects. */
@@ -168,7 +188,7 @@ export interface EconomyStateDef {
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 6;
+  schemaVersion: 7;
   revision: number;
   constructionRevision: number;
   economyRevision: number;
@@ -201,7 +221,7 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     constructionRevision: 0,
     economyRevision: 0,
@@ -544,13 +564,52 @@ function isStation(value: unknown): value is WorldStationDef {
     && isFiniteNumber(value.passengerSpawnRate);
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length
+    && actual.every((key, index) => key === wanted[index]);
+}
+
+function isPersistedVehicleDynamics(value: unknown): value is PersistedVehicleDynamics {
+  if (!isRecord(value)) return false;
+  if (value.mode === 'on-rail') {
+    return hasExactKeys(value, [
+      'mode', 'trackUUID', 'distance', 'direction', 'speedMps',
+      'consistId', 'consistOrder',
+    ])
+      && typeof value.trackUUID === 'string'
+      && value.trackUUID.length > 0
+      && isFiniteNumber(value.distance)
+      && value.distance >= 0
+      && (value.direction === 1 || value.direction === -1)
+      && isFiniteNumber(value.speedMps)
+      && typeof value.consistId === 'string'
+      && value.consistId.length > 0
+      && Number.isSafeInteger(value.consistOrder)
+      && value.consistOrder >= 0;
+  }
+  if (value.mode === 'free-body') {
+    return hasExactKeys(value, [
+      'mode', 'x', 'y', 'angleRad', 'velocityX', 'velocityY',
+      'angularVelocityRadPerSec',
+    ])
+      && isFiniteNumber(value.x)
+      && isFiniteNumber(value.y)
+      && isFiniteNumber(value.angleRad)
+      && isFiniteNumber(value.velocityX)
+      && isFiniteNumber(value.velocityY)
+      && isFiniteNumber(value.angularVelocityRadPerSec);
+  }
+  return false;
+}
+
 function isTrain(value: unknown): value is TrainDef {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
-    && typeof value.trackUUID === 'string'
-    && isFiniteNumber(value.trackT)
     && isFiniteNumber(value.passengers)
-    && (value.type === 'locomotive' || value.type === 'passenger-carriage');
+    && (value.type === 'locomotive' || value.type === 'passenger-carriage')
+    && isPersistedVehicleDynamics(value.dynamics);
 }
 
 function isScenery(value: unknown): value is SceneryObjectDef {
@@ -714,7 +773,7 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 6) {
+  if (raw.schemaVersion !== 7) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -737,6 +796,15 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
 
   const company = raw.company;
   const metadata = raw.metadata;
+  const consistPositions = new Set<string>();
+  const hasDuplicateConsistPosition = (raw.trains as unknown[] | undefined)?.some((train) => {
+    if (!isTrain(train) || train.dynamics.mode !== 'on-rail') return false;
+    const key = `${train.dynamics.consistId}:${train.dynamics.consistOrder}`;
+    if (consistPositions.has(key)) return true;
+    consistPositions.add(key);
+    return false;
+  }) ?? false;
+
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
     || !isNonNegativeSafeInteger(raw.revision)
@@ -749,6 +817,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !Array.isArray(raw.junctions) || !raw.junctions.every(isJunction)
     || !Array.isArray(raw.stations) || !raw.stations.every(isStation)
     || !Array.isArray(raw.trains) || !raw.trains.every(isTrain)
+    || hasDuplicateConsistPosition
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
     || validateCompanyState(company).valid === false
     || !isEconomyState(raw.economy)
@@ -756,7 +825,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 6.');
+    return incompatible(raw, 'data does not match schema version 7.');
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

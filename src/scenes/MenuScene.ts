@@ -2,10 +2,16 @@ import Phaser from 'phaser';
 import Background from '../entities/Background';
 import RailTrack from '../entities/RailTrack';
 import Train from '../entities/Train';
-import TrackFlowSolver from '../systems/TrackFlowSolver';
 import { CameraController } from '../systems/CameraController';
 import { SaveService } from '../services/SaveService';
 import { responsiveFontSize } from '../utils/responsive';
+import { connectPorts } from '../entities/TrackPort';
+import { TrackGraphRouteResolver } from '../physics/RouteCursor';
+import { createDerailmentHazardState } from '../physics/DerailmentEvaluator';
+import { LOCOMOTIVE_PHYSICS } from '../config/VehicleTypes';
+import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
+import { TrainDynamicsAdapter } from '../systems/TrainDynamicsAdapter';
+import { GameConfig } from '../config/GameConfig';
 
 /** Window augmentation for Playwright / E2E test hooks. */
 declare global {
@@ -24,7 +30,8 @@ export default class MenuScene extends Phaser.Scene {
   /** Engine power per train, stored so recovery can restore it correctly. */
   private trainEnginePowers: number[] = [];
   private camControl?: CameraController;
-  private previewSolvers: TrackFlowSolver[] = [];
+  private previewAdapters: TrainDynamicsAdapter[] = [];
+  private accumulatorSeconds = 0;
 
   constructor() {
     super({ key: 'MenuScene' });
@@ -67,6 +74,12 @@ export default class MenuScene extends Phaser.Scene {
       const cp2 = new Phaser.Math.Vector2(next.x - (afterNext.x - current.x) / 6, next.y - (afterNext.y - current.y) / 6);
       this.railTracks.push(new RailTrack(this, current, cp1, cp2, next));
     }
+    for (let i = 0; i < this.railTracks.length; i++) {
+      connectPorts(
+        this.railTracks[i].endPort,
+        this.railTracks[(i + 1) % this.railTracks.length].startPort,
+      );
+    }
 
     this.cameras.main.setBounds(0, 0, width, height);
     this.cameras.main.setZoom(1);
@@ -82,13 +95,12 @@ export default class MenuScene extends Phaser.Scene {
     train1Body.setPosition(startPoint1.x, startPoint1.y);
     train1.currentTrack = firstTrack;
     train1Body.setAngle(firstTrack.getTrackAngle(train1Body));
-    train1.enginePower = 38;
+    train1.enginePower = GameConfig.TRAIN.ENGINE_POWER * 0.18;
     train1.setDepth(50);
     train1.getMatterBody().setDepth(50);
     this.trains.push(train1);
     this.trainStartTracks.push(firstTrack);
-    this.trainEnginePowers.push(38);
-    this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train1));
+    this.trainEnginePowers.push(train1.enginePower);
 
     // Train 2 – starts at the opposite side of the circle
     const halfSegment = Math.floor(circleSegments / 2);
@@ -99,13 +111,13 @@ export default class MenuScene extends Phaser.Scene {
     train2Body.setPosition(startPoint2.x, startPoint2.y);
     train2.currentTrack = secondTrack;
     train2Body.setAngle(secondTrack.getTrackAngle(train2Body));
-    train2.enginePower = 42;
+    train2.enginePower = GameConfig.TRAIN.ENGINE_POWER * 0.16;
     train2.setDepth(50);
     train2.getMatterBody().setDepth(50);
     this.trains.push(train2);
     this.trainStartTracks.push(secondTrack);
-    this.trainEnginePowers.push(42);
-    this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train2));
+    this.trainEnginePowers.push(train2.enginePower);
+    this.rebuildPreviewAdapters();
 
     window.__railSimMenuTrains = this.trains;
     window.__railSimMenuTracks = this.railTracks;
@@ -211,10 +223,16 @@ export default class MenuScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     this.camControl?.update(time, delta);
+    this.accumulatorSeconds += Math.min(Math.max(delta, 0) / 1000, 0.25);
+    while (this.accumulatorSeconds >= TRAIN_PHYSICS_CONFIG.fixedStepSeconds) {
+      this.previewAdapters.forEach((adapter) => {
+        adapter.fixedUpdate(TRAIN_PHYSICS_CONFIG.fixedStepSeconds);
+      });
+      this.accumulatorSeconds -= TRAIN_PHYSICS_CONFIG.fixedStepSeconds;
+    }
+    const alpha = this.accumulatorSeconds / TRAIN_PHYSICS_CONFIG.fixedStepSeconds;
+    this.previewAdapters.forEach((adapter) => adapter.render(alpha));
     for (let i = 0; i < this.trains.length; i++) {
-      this.trains[i].update(time, delta);
-      this.previewSolvers[i].applyTrackFlowForces();
-
       // Recovery safety net: if the train somehow derails on the menu loop,
       // teleport it back to its starting position so it keeps running.
       if (this.trains[i].derailed) {
@@ -250,10 +268,39 @@ export default class MenuScene extends Phaser.Scene {
     train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
     train.getMatterBody().setVelocity(0, 0);
     train.getMatterBody().setAngularVelocity(0);
-    // Restore engine power and clear PID state so the solver can guide cleanly.
+    // Restore input and rebuild the same production dynamics adapter.
     train.enginePower = this.trainEnginePowers[index];
-    train.pidControllerFront.reset();
-    train.pidControllerRear.reset();
+    this.rebuildPreviewAdapters();
+  }
+
+  private rebuildPreviewAdapters(): void {
+    const resolver = new TrackGraphRouteResolver(this.railTracks);
+    this.previewAdapters = this.trains.map((train, index) => {
+      const track = train.currentTrack ?? this.trainStartTracks[index];
+      const body = train.getMatterBody();
+      const distance = track.getArcLengthIndex().distanceForPoint(body);
+      const trackPose = track.getArcLengthIndex().poseAtDistance(distance);
+      const heading = { x: Math.cos(body.rotation), y: Math.sin(body.rotation) };
+      const direction = heading.x * trackPose.tangent.x + heading.y * trackPose.tangent.y >= 0
+        ? 1 as const
+        : -1 as const;
+      return new TrainDynamicsAdapter({
+        consistId: `menu-${index}`,
+        resolver,
+        bindings: [{
+          vehicle: train,
+          definition: LOCOMOTIVE_PHYSICS,
+          order: 0,
+          state: {
+            mode: 'on-rail',
+            vehicleId: train.getUUID(),
+            centre: { trackUUID: track.getUUID(), distance, direction },
+            speedMps: 0,
+            hazard: createDerailmentHazardState(train.getUUID()),
+          },
+        }],
+      });
+    });
   }
 
   private continueGame(): void {

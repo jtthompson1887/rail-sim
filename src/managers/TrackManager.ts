@@ -3,6 +3,7 @@ type Vector2Like = Phaser.Types.Math.Vector2Like;
 import RailTrack from '../entities/RailTrack';
 import Junction from '../entities/Junction';
 import type { TrackNode } from '../entities/TrackNode';
+import { connectPorts, disconnectPorts } from '../entities/TrackPort';
 import { GameConfig } from '../config/GameConfig';
 import type { TrackDef } from '../config/WorldData';
 
@@ -110,6 +111,10 @@ export default class TrackManager {
         track.setPrevious(previous.track);
         if (previous.isStart) previous.track.setPrevious(track);
         else previous.track.setNext(track);
+        connectPorts(
+          track.startPort,
+          previous.isStart ? previous.track.startPort : previous.track.endPort,
+        );
       }
 
       const next = this.findExactEndpoint(endPoint, track.getUUID());
@@ -120,6 +125,10 @@ export default class TrackManager {
         track.setNext(next.track);
         if (next.isStart) next.track.setPrevious(track);
         else next.track.setNext(track);
+        connectPorts(
+          track.endPort,
+          next.isStart ? next.track.startPort : next.track.endPort,
+        );
       }
     } else {
       const mainTrack = track.getMainTrack();
@@ -225,6 +234,9 @@ export default class TrackManager {
       if (neighbour.getPrevious?.() === track) neighbour.setPrevious?.(undefined);
       if ((neighbour as any).getNextTrack?.() === track) (neighbour as any).setNextTrack?.(undefined);
       if ((neighbour as any).getPreviousTrack?.() === track) (neighbour as any).setPreviousTrack?.(undefined);
+    }
+    for (const port of track.getPorts()) {
+      [...port.connections].forEach((connected) => disconnectPorts(port, connected));
     }
 
     this.deindexTrack(track);

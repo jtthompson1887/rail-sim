@@ -12,7 +12,7 @@ import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     constructionRevision: 0,
     economyRevision: 0,

@@ -614,10 +614,17 @@ describe('WorldScene disabled construction bypass guards', () => {
     );
     world.trains = [{
       id: 'live-train',
-      trackUUID: 'track-live',
-      trackT: 0.1,
       passengers: 3,
       type: 'locomotive',
+      dynamics: {
+        mode: 'on-rail',
+        trackUUID: 'track-live',
+        distance: 100,
+        direction: 1,
+        speedMps: 4,
+        consistId: 'consist-live',
+        consistOrder: 0,
+      },
     }];
     const liveTrack = {
       getUUID: jest.fn().mockReturnValue('track-live'),
@@ -625,6 +632,15 @@ describe('WorldScene disabled construction bypass guards', () => {
     };
     const liveTrain = {
       currentTrack: liveTrack,
+      persistedDynamics: {
+        mode: 'on-rail',
+        trackUUID: 'track-live',
+        distance: 750,
+        direction: 1,
+        speedMps: 8,
+        consistId: 'consist-live',
+        consistOrder: 0,
+      },
       getUUID: jest.fn().mockReturnValue('live-train'),
       getMatterBody: jest.fn().mockReturnValue({ x: 750, y: 20 }),
       getPassengerCount: jest.fn().mockReturnValue(7),
@@ -650,10 +666,17 @@ describe('WorldScene disabled construction bypass guards', () => {
     expect(world.economy.tick).toBe(1);
     expect(world.trains).toEqual([{
       id: 'live-train',
-      trackUUID: 'track-live',
-      trackT: 0.75,
       passengers: 7,
       type: 'locomotive',
+      dynamics: {
+        mode: 'on-rail',
+        trackUUID: 'track-live',
+        distance: 750,
+        direction: 1,
+        speedMps: 8,
+        consistId: 'consist-live',
+        consistOrder: 0,
+      },
     }]);
     expect(trainAtSave).toEqual(world.trains[0]);
     expect(save).toHaveBeenCalledTimes(1);
