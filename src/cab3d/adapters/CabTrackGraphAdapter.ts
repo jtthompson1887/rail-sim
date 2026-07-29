@@ -275,5 +275,3 @@ function reverseBackwardSpans(raw: RawSpan[]): CabPathSpan[] {
 
   return result;
 }
-
-

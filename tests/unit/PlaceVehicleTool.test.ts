@@ -259,7 +259,11 @@ describe('PlaceVehicleTool flatbed purchase gesture', () => {
     if (!forest) throw new Error('Missing managed-forest facility in test world');
     trackManager.getClosestTrack.mockReturnValue(null);
 
-    tool.onPointerDown(forest.railAccess.x, forest.railAccess.y, { button: 0 } as any);
+    tool.onPointerDown(
+      forest.railAccess.x,
+      forest.railAccess.y,
+      { button: 0 } as any,
+    );
     expect(trackManager.getClosestTrack).toHaveBeenLastCalledWith(
       { x: forest.railAccess.x, y: forest.railAccess.y },
       forest.railAccess.radius,

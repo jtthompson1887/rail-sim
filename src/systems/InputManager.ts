@@ -158,13 +158,4 @@ export class InputManager {
       selectedTrain.enginePower = 0;
     }
   }
-
-  getThrottleKeyState(): { w: boolean; s: boolean } {
-    return { w: this.wKey.isDown, s: this.sKey.isDown };
-  }
-
-  setThrottleKeys(w: boolean, s: boolean): void {
-    this.wKey.isDown = w;
-    this.sKey.isDown = s;
-  }
 }

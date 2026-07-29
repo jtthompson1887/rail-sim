@@ -406,7 +406,7 @@ export class SceneryInstanceBuilder {
   }
 
   private disposeRoot(): void {
-    this.root?.dispose();
+    this.root?.dispose(false, true);
     this.root = null;
     for (const mesh of this.prototypes.values()) {
       mesh.dispose();

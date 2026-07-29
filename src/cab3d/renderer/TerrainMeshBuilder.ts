@@ -128,7 +128,7 @@ export class TerrainMeshBuilder {
 
   /** Release all meshes, materials and GPU buffers. */
   dispose(): void {
-    this.root?.dispose();
+    this.root?.dispose(false, true);
     this.root = null;
     this.waterBumpTexture = null;
     this.lastOriginX = null;

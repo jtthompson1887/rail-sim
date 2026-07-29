@@ -19,7 +19,8 @@
         "baseUrl": ".",
         "paths": {},
         "types": [],
-        "lib": ["es6", "dom", "dom.iterable", "es2015.collection", "scripthost"],
+        "lib": ["es2020", "dom", "dom.iterable"],
+        "skipLibCheck": true,
         "esModuleInterop": true,
         "allowSyntheticDefaultImports": true,
         "forceConsistentCasingInFileNames": true

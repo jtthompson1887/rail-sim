@@ -140,11 +140,6 @@ export interface FirstRouteBrowserHarness {
   snapshot(): FirstRouteBrowserSnapshot;
   setMode(mode: 'create' | 'play'): void;
   advanceFixedTicks(count: number): void;
-  advanceFixedFrames(
-    count: number,
-    deltaMs: number,
-    keys?: { readonly w?: boolean; readonly s?: boolean },
-  ): FirstRouteBrowserSnapshot;
   setTrainRuntime(
     trainId: string,
     runtime: Pick<
@@ -673,8 +668,6 @@ export default class WorldScene extends Phaser.Scene {
         snapshot: () => this.captureFirstRouteBrowserSnapshot(),
         setMode: (mode) => this.setFirstRouteBrowserMode(mode),
         advanceFixedTicks: (count) => this.advanceFirstRouteFixedTicks(count),
-        advanceFixedFrames: (count, deltaMs, keys) =>
-          this.advanceFirstRouteFixedFrames(count, deltaMs, keys),
         setTrainRuntime: (trainId, runtime) => {
           this.setFirstRouteTrainRuntime(trainId, runtime);
         },
@@ -1206,95 +1199,8 @@ export default class WorldScene extends Phaser.Scene {
     this.publishHUDState();
   }
 
-  private advanceFirstRouteFixedFrames(
-    count: number,
-    deltaMs: number,
-    keys?: { readonly w?: boolean; readonly s?: boolean },
-  ): FirstRouteBrowserSnapshot {
-    if (!Number.isSafeInteger(count) || count < 0 || count > 10_000) {
-      throw new RangeError('Fixed frame count must be between 0 and 10,000');
-    }
-    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
-      throw new RangeError('Fixed frame delta must be a positive number');
-    }
-    if (GameStateManager.worldMode !== 'play'
-      || GameStateManager.state !== 'playing') {
-      throw new Error('Fixed frames require play mode');
-    }
-
-    const previousHarness = this.firstRouteHarnessControlsRuntime;
-    this.firstRouteHarnessControlsRuntime = true;
-    const previousKeys = this.inputManager.getThrottleKeyState();
-    if (keys) {
-      this.inputManager.setThrottleKeys(
-        keys.w === true,
-        keys.s === true,
-      );
-    }
-
-    const matterWorld = this.matter.world as unknown as {
-      autoUpdate: boolean;
-      step(delta: number): void;
-    };
-    matterWorld.autoUpdate = false;
-
-    try {
-      let time = this.game.loop.time;
-      const delta = deltaMs;
-      for (let index = 0; index < count; index += 1) {
-        this.inputManager.handleTrainMovement(
-          this.trainManager.selectedTrain,
-          this.operationsLockedTrainIds,
-        );
-        this.trainManager.update(
-          time,
-          delta,
-          this.operationsLockedTrainIds,
-        );
-
-        matterWorld.step(delta);
-
-        if (this.operationsLockedTrainIds.size > 0) {
-          this.trainManager.stopFreightTrains(
-            Array.from(this.operationsLockedTrainIds).sort(),
-          );
-        }
-
-        const runtime = this.trainManager.trains.map(captureTrainRuntime);
-        const economyResult = this.economySystem.update(delta, true, runtime);
-        if (economyResult) {
-          this.applyEconomyUpdateResult(economyResult);
-        }
-
-        this.contentLoader.stations.forEach((station) => station.update(delta));
-        GameStateManager.tick(delta / 1_000);
-        if (index % 10 === 0) {
-          this.publishHUDState();
-          this.publishFreightPresentation(runtime);
-        }
-
-        time += delta;
-      }
-
-      this.publishHUDState();
-      this.publishFreightPresentation(
-        this.trainManager.trains.map(captureTrainRuntime),
-      );
-      return this.captureFirstRouteBrowserSnapshot();
-    } finally {
-      this.inputManager.setThrottleKeys(previousKeys.w, previousKeys.s);
-      this.firstRouteHarnessControlsRuntime = previousHarness;
-    }
-  }
-
   private releaseFirstRouteTrainControl(): void {
     this.firstRouteHarnessControlsRuntime = false;
-    const matterWorld = this.matter.world as unknown as {
-      autoUpdate: boolean;
-    };
-    if (matterWorld) {
-      matterWorld.autoUpdate = true;
-    }
   }
 
   private setFirstRouteTrainRuntime(

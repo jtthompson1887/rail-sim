@@ -1,7 +1,7 @@
 # 3-D Cab View — Phase 13 Evidence Review
 
-**Date:** 2026-07-26  
-**Feature:** Babylon.js 3-D cab view (`src/cab3d`)  
+**Date:** 2026-07-26
+**Feature:** Babylon.js 3-D cab view (`src/cab3d`)
 **Final commit:** `81fe9dc340ef63d8db8b1e22cf2a54e0045f0c65`
 
 ---
@@ -77,13 +77,13 @@ The `dist/cab3d.*.chunk.js` lazy chunk is present and well over the 500 KB Phase
 
 ## Known limitations and next steps
 
-1. **Manual playtest (human step)**  
+1. **Manual playtest (human step)**
    The plan requires a manual playtest on 3 recorded seeds: build a route, enter the cab, drive the full trip, toggle 10×, cycle quality tiers and weather, and save/reload mid-trip. Cash and economy tick must be byte-identical to a run with `CAB3D.ENABLED = false`. This cannot be automated by the agent and must be executed by a human operator.
 
 2. **Asset-size warnings**
    Webpack emitted expected size-limit warnings for `main.js` (1.39 MiB), the `cab3d` chunk (6.75 MiB), and several large source textures. These are pre-existing/expected for this milestone.
 
-4. **Baseline size**  
+4. **Baseline size**
    A pre-cab `dist/main.js` size should be captured before the next feature split so future phases can enforce the 2% main-bundle growth limit mechanically.
 
 ---

@@ -29,7 +29,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `npm run build:test-controls && npx serve dist -p ${port} -s --no-clipboard`,
+    command: `npm run build:test-controls && npx serve dist/client -p ${port} -s --no-clipboard`,
     url: serverUrl,
     timeout: 120_000,
     reuseExistingServer: false,

@@ -1,6 +1,6 @@
 # Rail Sim: 3D Cab View — Implementation Plan
 
-**Date:** 2026-07-26  
+**Date:** 2026-07-26
 **Scope:** Add a fully isolated Babylon.js 3D cab view to Rail Sim. It must not affect the existing game: no save-schema, economy, construction, input, or Phaser rendering changes.
 
 ---
@@ -322,7 +322,7 @@ Three LOD rings, re-centred when eye crosses 64 m boundary:
 
 ### Phase 6 — Cab interior geometry
 
-**Cab-local frame:** origin on rail head, track centreline, driver's eye station.  
+**Cab-local frame:** origin on rail head, track centreline, driver's eye station.
 **+X right, +Y up, +Z forward.**
 
 All parts are defined in frozen tables. The builder walks the tables and creates primitives.

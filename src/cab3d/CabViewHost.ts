@@ -24,6 +24,8 @@ const defaultRendererLoader: RendererLoader = async () => {
  */
 export class CabViewHost {
   private active = false;
+  private requestedActive = false;
+  private destroyed = false;
   private renderer: ICabRenderer | null = null;
   private rendererPromise: Promise<ICabRenderer> | null = null;
   private pendingQualityTier: string | null = null;
@@ -42,14 +44,15 @@ export class CabViewHost {
 
   /** Destroy the host and release the renderer and UI. */
   destroy(): void {
+    this.destroyed = true;
     EventBus.off('cab:toggle', this.handleToggle);
     EventBus.off('cab:quality', this.handleQualityChange);
     this.renderer?.hide();
     this.renderer?.destroy();
     this.renderer = null;
-    this.rendererPromise = null;
     this.pendingQualityTier = null;
     this.active = false;
+    this.requestedActive = false;
     this.toggleButton.destroy();
     this.hudOverlay.destroy();
   }
@@ -78,41 +81,68 @@ export class CabViewHost {
 
   private readonly handleToggle = (): void => {
     if (!CabConfig.ENABLED) return;
-    void this.setActive(!this.active);
+    this.requestedActive = !this.requestedActive;
+    void this.setActive(this.requestedActive);
   };
 
   private async setActive(active: boolean): Promise<void> {
-    if (this.active === active) return;
+    if (this.destroyed) return;
 
-    if (active) {
-      this.hudOverlay.show();
-
-      if (!this.renderer && !this.rendererPromise) {
-        this.rendererPromise = this.rendererLoader();
-        try {
-          this.renderer = await this.rendererPromise;
-        } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('[CabViewHost] failed to load cab renderer:', error);
-          this.hudOverlay.hide();
-          this.rendererPromise = null;
-          return;
-        }
-      }
-
-      if (this.pendingQualityTier && this.renderer?.setQualityTier) {
-        this.renderer.setQualityTier(this.pendingQualityTier);
-        this.pendingQualityTier = null;
-      }
-
-      this.renderer?.show();
-    } else {
+    if (!active) {
       this.hudOverlay.hide();
       this.renderer?.hide();
+      if (!this.active) return;
+      this.active = false;
+      EventBus.emit('cab:state', { active: false });
+      return;
     }
 
-    this.active = active;
-    EventBus.emit('cab:state', { active });
+    if (this.active) return;
+
+    this.hudOverlay.show();
+
+    if (!this.renderer) {
+      if (!this.rendererPromise) {
+        this.rendererPromise = this.rendererLoader();
+      }
+      const pendingRenderer = this.rendererPromise;
+      try {
+        const renderer = await pendingRenderer;
+        if (this.destroyed) {
+          if (this.rendererPromise === pendingRenderer) {
+            this.rendererPromise = null;
+            renderer.destroy();
+          }
+          return;
+        }
+        this.renderer = renderer;
+        if (this.rendererPromise === pendingRenderer) {
+          this.rendererPromise = null;
+        }
+      } catch (error) {
+        if (this.destroyed) return;
+        // eslint-disable-next-line no-console
+        console.error('[CabViewHost] failed to load cab renderer:', error);
+        this.hudOverlay.hide();
+        this.rendererPromise = null;
+        this.requestedActive = false;
+        return;
+      }
+    }
+
+    if (!this.requestedActive || this.active) {
+      if (!this.requestedActive) this.hudOverlay.hide();
+      return;
+    }
+
+    if (this.pendingQualityTier && this.renderer?.setQualityTier) {
+      this.renderer.setQualityTier(this.pendingQualityTier);
+      this.pendingQualityTier = null;
+    }
+
+    this.renderer?.show();
+    this.active = true;
+    EventBus.emit('cab:state', { active: true });
   }
 
   private readonly handleQualityChange = ({ tier }: { tier: string }): void => {

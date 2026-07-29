@@ -95,7 +95,7 @@ export class TrackMeshBuilder {
 
   /** Release all meshes and GPU buffers. */
   dispose(): void {
-    this.root?.dispose();
+    this.root?.dispose(false, true);
     this.root = null;
     this.leftRail = null;
     this.rightRail = null;

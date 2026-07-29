@@ -121,6 +121,30 @@ describe('CabViewHost', () => {
     expect(stateEvents.length).toBe(before);
   });
 
+  it('disposes a renderer that finishes loading after the host is destroyed', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+    const host = createHost(createSource(), loader);
+
+    EventBus.emit('cab:toggle', {});
+    await Promise.resolve();
+    host.destroy();
+    const eventsBeforeResolution = stateEvents.length;
+
+    resolveLoader(renderer);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(renderer.destroy).toHaveBeenCalledTimes(1);
+    expect(renderer.show).not.toHaveBeenCalled();
+    expect(host.isActive).toBe(false);
+    expect(stateEvents).toHaveLength(eventsBeforeResolution);
+  });
+
   it('forwards cab:quality to the renderer', async () => {
     const renderer = createRenderer();
     const host = createHost(createSource(), () => Promise.resolve(renderer));
@@ -154,5 +178,26 @@ describe('CabViewHost', () => {
 
     expect(renderer.setQualityTier).toHaveBeenCalledWith('ultra');
     host.destroy();
+  });
+
+  it('honours a second toggle while the renderer is still loading', async () => {
+    const renderer = createRenderer();
+    let resolveLoader: (renderer: ICabRenderer) => void = () => {};
+    const loader = () =>
+      new Promise<ICabRenderer>((resolve) => {
+        resolveLoader = resolve;
+      });
+    const host = createHost(createSource(), loader);
+
+    EventBus.emit('cab:toggle', {});
+    await Promise.resolve();
+    EventBus.emit('cab:toggle', {});
+    resolveLoader(renderer);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.isActive).toBe(false);
+    expect(renderer.show).not.toHaveBeenCalled();
+    expect(stateEvents).not.toContainEqual({ active: true });
   });
 });
