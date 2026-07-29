@@ -4,7 +4,11 @@ import { GameConfig } from '../config/GameConfig';
 import type { TrackNode } from './TrackNode';
 import Junction from './Junction';
 import { RailTrackRenderer } from './RailTrackRenderer';
-import { createPort, type TrackPort } from './TrackPort';
+import {
+  createPort,
+  type TrackEndpointSide,
+  type TrackPort,
+} from './TrackPort';
 import { TrackArcLengthIndex } from '../physics/TrackArcLengthIndex';
 import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import type {
@@ -262,4 +266,8 @@ export default class RailTrack extends Phaser.GameObjects.Container implements T
   get endPort(): TrackPort { return this._endPort; }
   /** Return all ports for graph traversal. */
   getPorts(): TrackPort[] { return [this._startPort, this._endPort]; }
+  /** Return the requested endpoint port for deterministic route traversal. */
+  getPort(side: TrackEndpointSide): TrackPort {
+    return side === 'start' ? this._startPort : this._endPort;
+  }
 }

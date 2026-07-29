@@ -18,6 +18,13 @@ export interface TrackPort {
   readonly connections: TrackPort[];
 }
 
+export type TrackEndpointSide = 'start' | 'end';
+
+export function trackEndpointSide(port: TrackPort): TrackEndpointSide | null {
+  if (port.id === 'start' || port.id === 'end') return port.id;
+  return null;
+}
+
 /**
  * Create a new TrackPort with the given owner, position, and id.
  */
