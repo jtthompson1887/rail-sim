@@ -11,6 +11,7 @@ import type {
   RailVehicleDefinition,
 } from '../../src/physics/RailVehicleModel';
 import { TrackGraphRouteResolver } from '../../src/physics/RouteCursor';
+import { createDerailmentHazardState } from '../../src/physics/DerailmentEvaluator';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -58,6 +59,7 @@ function vehicle(vehicleId: string, distance: number, speedMps = 0): OnRailVehic
     vehicleId,
     centre: { trackUUID: 'main', distance, direction: 1 },
     speedMps,
+    hazard: createDerailmentHazardState(vehicleId),
   };
 }
 

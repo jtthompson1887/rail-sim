@@ -80,6 +80,7 @@ export function runTrainPhysicsScenario(
   let maxCouplerForceN = 0;
   let maxAccelerationMps2 = 0;
   let maxJerkMps3 = 0;
+  let derailmentTick: number | null = null;
   const previousAcceleration = new Map<string, number>();
   const previousCentre = new Map<string, { x: number; y: number }>();
 
@@ -95,6 +96,9 @@ export function runTrainPhysicsScenario(
       config.fixedStepSeconds,
     );
     state = result.state;
+    if (derailmentTick === null && result.derailments.length > 0) {
+      derailmentTick = tick;
+    }
 
     for (const vehicle of state.vehicles) {
       const definition = built.definitions.get(vehicle.vehicleId);
@@ -163,7 +167,7 @@ export function runTrainPhysicsScenario(
     maxCouplerForceN,
     maxAccelerationMps2,
     maxJerkMps3,
-    derailmentTick: null,
+    derailmentTick,
     durationMs: now() - started,
   };
   scenario.assert(metrics);

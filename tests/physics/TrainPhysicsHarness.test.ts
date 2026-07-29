@@ -5,6 +5,9 @@ import {
   type TrainPhysicsScenario,
 } from '../../src/physics/TrainPhysicsHarness';
 import {
+  CURVE_OVERSPEED_SCENARIO,
+  CURVE_WARNING_SCENARIO,
+  SAFE_CURVE_SCENARIO,
   STRAIGHT_ACCELERATION_BRAKING_SCENARIO,
   TRAIN_PHYSICS_SCENARIOS,
 } from '../../src/physics/TrainPhysicsScenarios';
@@ -90,5 +93,17 @@ describe('TrainPhysicsHarness', () => {
       expect(metrics.maxFrontBogieError).toBeLessThan(0.01);
       expect(metrics.maxRearBogieError).toBeLessThan(0.01);
     }
+  });
+
+  it('replays safe, warning, and hard curve derailment ticks deterministically', () => {
+    const safe = runTrainPhysicsScenario(SAFE_CURVE_SCENARIO);
+    const warningFirst = runTrainPhysicsScenario(CURVE_WARNING_SCENARIO);
+    const warningReplay = runTrainPhysicsScenario(CURVE_WARNING_SCENARIO);
+    const overspeed = runTrainPhysicsScenario(CURVE_OVERSPEED_SCENARIO);
+
+    expect(safe.derailmentTick).toBeNull();
+    expect(warningFirst.derailmentTick).not.toBeNull();
+    expect(warningReplay.derailmentTick).toBe(warningFirst.derailmentTick);
+    expect(overspeed.derailmentTick).toBe(0);
   });
 });

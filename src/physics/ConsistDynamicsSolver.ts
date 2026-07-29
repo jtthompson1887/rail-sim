@@ -14,6 +14,10 @@ import {
   TRAIN_PHYSICS_CONFIG,
   type TrainPhysicsConfig,
 } from './TrainPhysicsConfig';
+import {
+  evaluateDerailment,
+  type DerailmentCause,
+} from './DerailmentEvaluator';
 
 export interface ConsistState {
   id: string;
@@ -42,6 +46,7 @@ export interface ConsistStepResult {
   state: ConsistState;
   forcesByVehicleId: Readonly<Record<string, VehicleForceBreakdown>>;
   brokenCouplerIds: readonly string[];
+  derailments: readonly { vehicleId: string; cause: DerailmentCause }[];
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -92,12 +97,16 @@ export class ConsistDynamicsSolver {
     let remaining = dtSeconds;
     let finalForces: Record<string, VehicleForceBreakdown> = {};
     const brokenCouplerIds = new Set<string>();
+    const derailments = new Map<string, DerailmentCause>();
     while (remaining > 1e-12) {
       const substep = Math.min(this.config.fixedStepSeconds, remaining);
       const result = this.substep(working, definitions, control, resolver, substep);
       working = result.state;
       finalForces = result.forces;
       result.brokenCouplerIds.forEach((id) => brokenCouplerIds.add(id));
+      result.derailments.forEach((item) => {
+        if (!derailments.has(item.vehicleId)) derailments.set(item.vehicleId, item.cause);
+      });
       remaining -= substep;
     }
 
@@ -105,6 +114,7 @@ export class ConsistDynamicsSolver {
       state: working,
       forcesByVehicleId: finalForces,
       brokenCouplerIds: Array.from(brokenCouplerIds),
+      derailments: Array.from(derailments, ([vehicleId, cause]) => ({ vehicleId, cause })),
     };
   }
 
@@ -118,6 +128,7 @@ export class ConsistDynamicsSolver {
     state: ConsistState;
     forces: Record<string, VehicleForceBreakdown>;
     brokenCouplerIds: string[];
+    derailments: Array<{ vehicleId: string; cause: DerailmentCause }>;
   } {
     const throttle = clamp(control.throttle, -1, 1);
     const brake = control.emergencyBrake ? 1 : clamp(control.brake, 0, 1);
@@ -204,14 +215,46 @@ export class ConsistDynamicsSolver {
       };
     });
 
+    const peakCouplerForceByVehicle = new Map<string, number>();
+    integratedCouplers.forEach((coupler) => {
+      const force = Math.abs(coupler.forceN);
+      peakCouplerForceByVehicle.set(
+        coupler.leadingVehicleId,
+        Math.max(peakCouplerForceByVehicle.get(coupler.leadingVehicleId) ?? 0, force),
+      );
+      peakCouplerForceByVehicle.set(
+        coupler.trailingVehicleId,
+        Math.max(peakCouplerForceByVehicle.get(coupler.trailingVehicleId) ?? 0, force),
+      );
+    });
+    const derailments: Array<{ vehicleId: string; cause: DerailmentCause }> = [];
+    const evaluatedVehicles = nextVehicles.map((vehicle) => {
+      const curvaturePerMetre = new RouteCursor(vehicle.centre, resolver)
+        .pose()
+        .curvature * this.config.worldUnitsPerMetre;
+      const decision = evaluateDerailment(vehicle.hazard, {
+        speedMps: vehicle.speedMps,
+        curvature: curvaturePerMetre,
+        peakCouplerForceN: peakCouplerForceByVehicle.get(vehicle.vehicleId) ?? 0,
+        collisionImpulseNs: 0,
+        routeContinuous: true,
+        conditionModifier: 1,
+      }, this.config.derailment, dtSeconds);
+      if (decision.kind === 'derail') {
+        derailments.push({ vehicleId: vehicle.vehicleId, cause: decision.cause });
+      }
+      return { ...vehicle, hazard: decision.hazard };
+    });
+
     return {
       state: {
         id: state.id,
-        vehicles: nextVehicles,
+        vehicles: evaluatedVehicles,
         couplers: integratedCouplers,
       },
       forces,
       brokenCouplerIds,
+      derailments,
     };
   }
 

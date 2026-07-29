@@ -3,6 +3,7 @@ import {
   type RouteCursorState,
   type RouteResolver,
 } from './RouteCursor';
+import type { DerailmentHazardState } from './DerailmentEvaluator';
 
 export interface RailVehicleDefinition {
   id: string;
@@ -20,6 +21,7 @@ export interface OnRailVehicleState {
   vehicleId: string;
   centre: RouteCursorState;
   speedMps: number;
+  hazard: DerailmentHazardState;
 }
 
 export interface RailVehiclePose {

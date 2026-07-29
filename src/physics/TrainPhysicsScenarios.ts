@@ -21,6 +21,7 @@ import type {
   TrainPhysicsScenario,
   TrainPhysicsScenarioState,
 } from './TrainPhysicsHarness';
+import { createDerailmentHazardState } from './DerailmentEvaluator';
 
 type Exit = 'start' | 'end';
 
@@ -115,6 +116,7 @@ function makeVehicle(
     vehicleId: id,
     centre: { trackUUID, distance, direction: 1 },
     speedMps,
+    hazard: createDerailmentHazardState(id),
   };
 }
 
@@ -228,10 +230,15 @@ export const STRAIGHT_ACCELERATION_BRAKING_SCENARIO = basicScenario(
   (tick) => (tick < 120 ? fixedControl(1) : fixedControl(0, 0.7)),
 );
 
-export const SAFE_CURVE_SCENARIO = basicScenario(
-  'safe-constant-radius-curve',
-  1,
-  () => {
+function constantRadiusScenario(
+  id: string,
+  speedMps: number,
+  durationSeconds: number,
+): TrainPhysicsScenario {
+  return basicScenario(
+    id,
+    durationSeconds,
+    () => {
     const rail = curve('curve', {
       geometryVersion: 1,
       p0: { x: 0, y: 0 },
@@ -242,12 +249,37 @@ export const SAFE_CURVE_SCENARIO = basicScenario(
     const resolver = new HarnessRouteResolver([rail]);
     const ids = ['loco'];
     return {
-      consist: makeConsist(ids, 'curve', rail.getArcLengthIndex().length / 2, 250, 8),
+      consist: makeConsist(
+        ids,
+        'curve',
+        rail.getArcLengthIndex().length / 2,
+        250,
+        speedMps,
+      ),
       definitions: definitionsFor(ids, new Set([0])),
       resolver,
     };
-  },
-  () => fixedControl(0.2),
+    },
+    () => fixedControl(0),
+  );
+}
+
+export const SAFE_CURVE_SCENARIO = constantRadiusScenario(
+  'safe-constant-radius-curve',
+  8,
+  1,
+);
+
+export const CURVE_WARNING_SCENARIO = constantRadiusScenario(
+  'warning-constant-radius-curve',
+  11.5,
+  2,
+);
+
+export const CURVE_OVERSPEED_SCENARIO = constantRadiusScenario(
+  'overspeed-constant-radius-curve',
+  12,
+  0.25,
 );
 
 export const S_CURVE_SCENARIO = basicScenario(
