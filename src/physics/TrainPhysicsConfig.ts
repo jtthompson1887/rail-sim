@@ -12,6 +12,8 @@ export interface DerailmentPhysicsConfig {
   hardLateralAccelerationMps2: number;
   warningCouplerLoadRatio: number;
   hazardPerSecondAtHardBoundary: number;
+  hardCouplerForceN: number;
+  hardCollisionImpulseNs: number;
 }
 
 export interface TrainPhysicsConfig {
@@ -47,5 +49,7 @@ export const TRAIN_PHYSICS_CONFIG: Readonly<TrainPhysicsConfig> = Object.freeze(
     hardLateralAccelerationMps2: 6,
     warningCouplerLoadRatio: 0.85,
     hazardPerSecondAtHardBoundary: 2,
+    hardCouplerForceN: 4_000_000,
+    hardCollisionImpulseNs: 1_000_000,
   },
 });
