@@ -6,12 +6,15 @@ import type {
   DeletionReviewDTO,
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
+import type { TrainIncidentRecord } from '../physics/CrashTransition';
 
 interface EventMap {
   'train:selected': { trainId: string };
   'train:deselected': Record<string, never>;
   'train:derailed': { trainId: string };
   'carriage:derailed': { carriageId: string };
+  'train:incident': TrainIncidentRecord;
+  'coupler:broken': { consistId: string; couplerId: string; forceN: number };
   'vehicle:type-changed': { type: 'locomotive' | 'passenger-carriage' };
   'junction:toggled': { junctionId: string; state: 'left' | 'right' };
   'passenger:boarded': { stationId: string; count: number };
