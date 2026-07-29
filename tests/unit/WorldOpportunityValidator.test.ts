@@ -21,6 +21,44 @@ function opportunity(): StarterOpportunityDef {
   return JSON.parse(JSON.stringify(result.opportunity)) as StarterOpportunityDef;
 }
 
+function opportunityWithCheapestCorridorCost(
+  cheapestCorridorCost: number,
+): {
+  value: StarterOpportunityDef;
+  analyzer: ConstructionAnalyzer;
+} {
+  const value = opportunity();
+  const desiredTotals = [cheapestCorridorCost, cheapestCorridorCost + 10_000];
+  value.corridors.forEach((corridor, index) => {
+    const desiredTotal = desiredTotals[index];
+    const delta = desiredTotal - corridor.estimatedCost;
+    const firstCosts = corridor.feasibilityWitness.segments[0].costs;
+    firstCosts.track += delta;
+    firstCosts.total += delta;
+    corridor.estimatedCost = desiredTotal;
+    corridor.feasibilityWitness.totalCost = desiredTotal;
+  });
+  const realAnalyzer = new ConstructionAnalyzer(terrain);
+  const details = value.corridors.flatMap((corridor) => (
+    corridor.feasibilityWitness.segments.map((segment) => {
+      const detail = realAnalyzer.analyzeDetailed(segment.geometry);
+      return {
+        ...detail,
+        proposal: {
+          ...detail.proposal,
+          costs: { ...segment.costs },
+        },
+      };
+    })
+  ));
+  const analyzeDetailed = jest.fn();
+  for (const detail of details) analyzeDetailed.mockReturnValueOnce(detail);
+  return {
+    value,
+    analyzer: { analyzeDetailed } as unknown as ConstructionAnalyzer,
+  };
+}
+
 describe('WorldOpportunityValidator', () => {
   it('accepts the generator witness against the same terrain authority', () => {
     expect(new WorldOpportunityValidator(terrain).validate(
@@ -84,5 +122,26 @@ describe('WorldOpportunityValidator', () => {
     );
 
     expect(validator.validate(opportunity(), config).valid).toBe(false);
+  });
+
+  it('accepts a cheapest corridor costing exactly £890,000', () => {
+    const fixture = opportunityWithCheapestCorridorCost(890_000);
+
+    expect(new WorldOpportunityValidator(terrain, fixture.analyzer).validate(
+      fixture.value,
+      config,
+    )).toEqual({ valid: true });
+  });
+
+  it('rejects a £890,001 cheapest corridor with the reserve reason', () => {
+    const fixture = opportunityWithCheapestCorridorCost(890_001);
+
+    expect(new WorldOpportunityValidator(terrain, fixture.analyzer).validate(
+      fixture.value,
+      config,
+    )).toEqual({
+      valid: false,
+      reason: 'opportunity breaches starter reserve',
+    });
   });
 });

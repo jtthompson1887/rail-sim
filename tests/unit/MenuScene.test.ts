@@ -205,6 +205,35 @@ function buildScene() {
 }
 
 describe('MenuScene', () => {
+  it('rebuilds owned preview state on a same-instance restart', () => {
+    const scene = buildScene();
+    const menu = new MenuScene();
+    Object.assign(menu, scene);
+
+    (menu as any).create();
+    const staleTrains = [...(menu as any).trains];
+    staleTrains.forEach((train) => {
+      train.update = jest.fn(() => {
+        throw new Error('destroyed preview train was updated');
+      });
+    });
+
+    (menu as any).create();
+
+    expect((menu as any).railTracks).toHaveLength(16);
+    expect((menu as any).trains).toHaveLength(2);
+    expect((menu as any).trainStartTracks).toHaveLength(2);
+    expect((menu as any).trainEnginePowers).toHaveLength(2);
+    expect((menu as any).previewSolvers).toHaveLength(2);
+    (menu as any).trains.forEach((train: any) => {
+      if (!staleTrains.includes(train)) train.update = jest.fn();
+    });
+    (menu as any).previewSolvers.forEach((solver: any) => {
+      solver.applyTrackFlowForces = jest.fn();
+    });
+    expect(() => (menu as any).update(0, 16)).not.toThrow();
+  });
+
   it('positions demo trains behind the UI panel so they do not flicker', () => {
     const scene = buildScene();
     const menu = new MenuScene();

@@ -70,6 +70,22 @@ describe('guideForceTowardsPoint()', () => {
     expect(Math.abs(f2.x)).toBeGreaterThan(Math.abs(f1.x));
   });
 
+  it('measures guidance error from an explicit contact origin', () => {
+    const obj = makeMockGameObject(0, 0);
+    const target = { x: 12, y: 5 } as any;
+    const contactOrigin = { x: 10, y: 5 };
+
+    const force = guideForceTowardsPoint(
+      obj as any,
+      target,
+      undefined,
+      contactOrigin,
+    );
+
+    expect(force.x).toBeCloseTo(4);
+    expect(force.y).toBeCloseTo(0);
+  });
+
   it('works with a PIDController', () => {
     const obj = makeMockGameObject(0, 0);
     const target = { x: 10, y: 0 } as any;

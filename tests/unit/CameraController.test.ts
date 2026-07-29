@@ -13,9 +13,19 @@ const { makeScene } = require('../../__mocks__/phaser');
 describe('CameraController', () => {
   let scene: any;
   let controller: CameraController;
+  let inputCallbacks: Map<string, Array<(...args: any[]) => void>>;
 
   beforeEach(() => {
     scene = makeScene();
+    inputCallbacks = new Map();
+    scene.input.on = jest.fn((
+      event: string,
+      callback: (pointer: any) => void,
+    ) => {
+      const callbacks = inputCallbacks.get(event) ?? [];
+      callbacks.push(callback);
+      inputCallbacks.set(event, callbacks);
+    });
     controller = new CameraController(scene);
   });
 
@@ -53,6 +63,51 @@ describe('CameraController', () => {
       controller.setInputLockOwner('editor-tool');
       controller.setInputLockOwner('camera');
       expect(controller.getInputLockOwner()).toBe('camera');
+    });
+
+    it('keeps panning when a healthy draggable emits dragstart', () => {
+      const fire = (event: string, ...args: any[]) => {
+        for (const callback of inputCallbacks.get(event) ?? []) {
+          callback(...args);
+        }
+      };
+      const pointer = {
+        id: 0,
+        x: 100,
+        y: 100,
+        button: 0,
+        leftButtonDown: () => true,
+        middleButtonDown: () => false,
+      };
+      fire('pointerdown', pointer);
+      fire('dragstart', pointer, { derailed: false });
+      pointer.x = 80;
+      fire('pointermove', pointer);
+
+      expect(scene.cameras.main.scrollX).toBe(20);
+    });
+
+    it('suppresses left panning while object-drag owns input', () => {
+      const fire = (event: string, ...args: any[]) => {
+        for (const callback of inputCallbacks.get(event) ?? []) {
+          callback(...args);
+        }
+      };
+      const pointer = {
+        id: 0,
+        x: 100,
+        y: 100,
+        button: 0,
+        leftButtonDown: () => true,
+        middleButtonDown: () => false,
+      };
+      controller.setInputLockOwner('object-drag');
+      fire('pointerdown', pointer);
+      fire('dragstart', pointer, { derailed: true });
+      pointer.x = 80;
+      fire('pointermove', pointer);
+
+      expect(scene.cameras.main.scrollX).toBe(0);
     });
   });
 

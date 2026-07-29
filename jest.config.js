@@ -3,9 +3,10 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jest-environment-jsdom',
   roots: ['<rootDir>/tests'],
-  testPathIgnorePatterns: ['<rootDir>/tests/e2e/'],
+  testPathIgnorePatterns: ['[\\\\/]tests[\\\\/]e2e[\\\\/]'],
   moduleNameMapper: {
     '^phaser$': '<rootDir>/__mocks__/phaser.js',
+    '^@babylonjs/core$': '<rootDir>/__mocks__/@babylonjs/core.ts',
   },
   coverageProvider: 'v8',
   collectCoverageFrom: [
@@ -16,6 +17,7 @@ module.exports = {
     '!src/managers/AudioManager.ts',
     '!src/systems/InputManager.ts',
     '!src/entities/Background.ts',
+    '!src/cab3d/renderer/**/*.ts',
   ],
   coverageThreshold: {
     global: {

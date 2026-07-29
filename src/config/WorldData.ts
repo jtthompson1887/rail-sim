@@ -1,4 +1,3 @@
-import type { VehicleType } from './VehicleTypes';
 import type { TrackGeometryDef } from '../systems/TrackGeometry';
 import {
   ENDPOINT_CONNECTION_COST,
@@ -22,6 +21,11 @@ import {
   getProduct,
   getRecipe,
 } from '../economy/ProductCatalog';
+import {
+  capacityForProduct,
+  getFreightSet,
+} from '../freight/FreightSetCatalog';
+import { countForwardRegionalDevelopmentGrants } from '../freight/FreightProgress';
 import {
   createCompanyState,
   validateCompanyState,
@@ -87,13 +91,32 @@ export interface WorldStationDef {
   passengerSpawnRate: number;
 }
 
-/** A serialised Train placed in the world. */
+export interface TrainCargoDef {
+  productId: string;
+  units: number;
+  loadedUnits: number;
+  originFacilityId: string;
+}
+
+export interface TrainOperationsDef {
+  currentTripRevenue: number;
+  currentTripRunningCost: number;
+  lastTripRevenue: number;
+  lastTripRunningCost: number;
+  lifetimeDeliveredUnits: number;
+  lifetimeRevenue: number;
+  lifetimeRunningCost: number;
+}
+
+/** An authoritative serialised freight train placed in the world. */
 export interface TrainDef {
   id: string;
+  freightSetId: string;
   trackUUID: string;
   trackT: number;
-  passengers: number;
-  type: VehicleType;
+  facing: 1 | -1;
+  cargo: TrainCargoDef | null;
+  operations: TrainOperationsDef;
 }
 
 /** Asset type identifiers for scenery objects. */
@@ -166,17 +189,25 @@ export interface EconomyStateDef {
   market: MarketStateDef;
 }
 
+export interface FreightProgressDef {
+  progressVersion: 1;
+  profitableLogDeliveryCompleted: boolean;
+  developmentGrantAwarded: boolean;
+  profitableStructuralTimberDeliveryCompleted: boolean;
+}
+
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 6;
+  schemaVersion: 8;
   revision: number;
   constructionRevision: number;
-  economyRevision: number;
+  operationsRevision: number;
   id: string;
   name: string;
   generationConfig: WorldGenerationConfigDef;
   company: CompanyStateDef;
   economy: EconomyStateDef;
+  freightProgress: FreightProgressDef;
   starterOpportunity: StarterOpportunityDef;
   tracks: TrackDef[];
   junctions: JunctionDef[];
@@ -201,10 +232,10 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 6,
+    schemaVersion: 8,
     revision: 0,
     constructionRevision: 0,
-    economyRevision: 0,
+    operationsRevision: 0,
     id: crypto.randomUUID(),
     name,
     generationConfig: {
@@ -217,6 +248,12 @@ export function createEmptyWorld(
       startingCashForDifficulty(constructionDifficultyId),
     ),
     economy: clonePlainData(economy),
+    freightProgress: {
+      progressVersion: 1,
+      profitableLogDeliveryCompleted: false,
+      developmentGrantAwarded: false,
+      profitableStructuralTimberDeliveryCompleted: false,
+    },
     starterOpportunity: clonePlainData(starterOpportunity),
     tracks: [],
     junctions: [],
@@ -544,13 +581,91 @@ function isStation(value: unknown): value is WorldStationDef {
     && isFiniteNumber(value.passengerSpawnRate);
 }
 
-function isTrain(value: unknown): value is TrainDef {
+const isNonNegativeSafeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+const hasOwn = (value: UnknownRecord, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+function hasValidTrainOperations(
+  value: unknown,
+): value is TrainOperationsDef {
   if (!isRecord(value)) return false;
-  return typeof value.id === 'string'
-    && typeof value.trackUUID === 'string'
-    && isFiniteNumber(value.trackT)
-    && isFiniteNumber(value.passengers)
-    && (value.type === 'locomotive' || value.type === 'passenger-carriage');
+  const totals = [
+    value.currentTripRevenue,
+    value.currentTripRunningCost,
+    value.lastTripRevenue,
+    value.lastTripRunningCost,
+    value.lifetimeDeliveredUnits,
+    value.lifetimeRevenue,
+    value.lifetimeRunningCost,
+  ];
+  return totals.every(isNonNegativeSafeInteger)
+    && (value.lifetimeRevenue as number)
+      >= (value.currentTripRevenue as number)
+    && (value.lifetimeRevenue as number)
+      >= (value.lastTripRevenue as number)
+    && (value.lifetimeRunningCost as number)
+      >= (value.currentTripRunningCost as number)
+    && (value.lifetimeRunningCost as number)
+      >= (value.lastTripRunningCost as number);
+}
+
+function isTrain(
+  value: unknown,
+  trackIds: Set<string>,
+  facilityIds: Set<string>,
+  trainIds: Set<string>,
+): value is TrainDef {
+  if (!isRecord(value)
+    || hasOwn(value, 'type')
+    || hasOwn(value, 'passengers')
+    || typeof value.id !== 'string'
+    || value.id.trim().length === 0
+    || trainIds.has(value.id)
+    || typeof value.freightSetId !== 'string'
+    || typeof value.trackUUID !== 'string'
+    || !trackIds.has(value.trackUUID)
+    || !isFiniteNumber(value.trackT)
+    || value.trackT < 0
+    || value.trackT > 1
+    || (value.facing !== 1 && value.facing !== -1)
+    || !hasValidTrainOperations(value.operations)) {
+    return false;
+  }
+
+  const set = getFreightSet(value.freightSetId);
+  if (!set) return false;
+  trainIds.add(value.id);
+
+  if (value.cargo === null) return true;
+  if (!isRecord(value.cargo)
+    || typeof value.cargo.productId !== 'string'
+    || typeof value.cargo.originFacilityId !== 'string'
+    || !facilityIds.has(value.cargo.originFacilityId)
+    || !Number.isSafeInteger(value.cargo.units)
+    || value.cargo.units <= 0
+    || !Number.isSafeInteger(value.cargo.loadedUnits)
+    || value.cargo.loadedUnits <= 0
+    || value.cargo.units > value.cargo.loadedUnits) {
+    return false;
+  }
+  const product = getProduct(value.cargo.productId);
+  const capacity = product && capacityForProduct(set, product);
+  return product !== undefined
+    && capacity !== undefined
+    && capacity.ok
+    && value.cargo.loadedUnits <= capacity.capacityUnits;
+}
+
+function isFreightProgress(
+  value: unknown,
+): value is FreightProgressDef {
+  return isRecord(value)
+    && value.progressVersion === 1
+    && typeof value.profitableLogDeliveryCompleted === 'boolean'
+    && typeof value.developmentGrantAwarded === 'boolean'
+    && typeof value.profitableStructuralTimberDeliveryCompleted === 'boolean';
 }
 
 function isScenery(value: unknown): value is SceneryObjectDef {
@@ -568,9 +683,6 @@ function isScenery(value: unknown): value is SceneryObjectDef {
     && isFiniteNumber(value.scale)
     && isFiniteNumber(value.variant);
 }
-
-const isNonNegativeSafeInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
 function isInventorySlot(
   value: unknown,
@@ -714,13 +826,14 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 6) {
+  if (raw.schemaVersion !== 8) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
   }
   if ('seed' in raw || 'terrainSeed' in raw || 'biome' in raw
-    || 'scenarios' in raw) {
+    || 'scenarios' in raw || hasOwn(raw, 'economyRevision')
+    || hasOwn(raw, 'firstRouteProgress')) {
     return incompatible(raw, 'legacy generation fields are not supported.');
   }
 
@@ -736,27 +849,51 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   }
 
   const company = raw.company;
+  const freightProgress = raw.freightProgress;
   const metadata = raw.metadata;
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
     || !isNonNegativeSafeInteger(raw.revision)
     || !isNonNegativeSafeInteger(raw.constructionRevision)
-    || !isNonNegativeSafeInteger(raw.economyRevision)
-    || (raw.constructionRevision as number) > (raw.revision as number)
-    || (raw.economyRevision as number)
-      > (raw.revision as number) - (raw.constructionRevision as number)
+    || !isNonNegativeSafeInteger(raw.operationsRevision)
+    || raw.revision !== (raw.constructionRevision as number)
+      + (raw.operationsRevision as number)
     || !Array.isArray(raw.tracks) || !raw.tracks.every(isTrack)
     || !Array.isArray(raw.junctions) || !raw.junctions.every(isJunction)
     || !Array.isArray(raw.stations) || !raw.stations.every(isStation)
-    || !Array.isArray(raw.trains) || !raw.trains.every(isTrain)
+    || !Array.isArray(raw.trains)
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
     || validateCompanyState(company).valid === false
     || !isEconomyState(raw.economy)
+    || !isFreightProgress(freightProgress)
     || !isStarterOpportunity(raw.starterOpportunity)
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 6.');
+    return incompatible(raw, 'data does not match schema version 8.');
+  }
+  const forwardGrantCount = countForwardRegionalDevelopmentGrants(
+    company as CompanyStateDef,
+  );
+  if (forwardGrantCount
+    !== (freightProgress.developmentGrantAwarded ? 1 : 0)) {
+    return incompatible(
+      raw,
+      'development grant progress does not match the company ledger.',
+    );
+  }
+
+  const trackIds = new Set(
+    (raw.tracks as TrackDef[]).map(({ uuid }) => uuid),
+  );
+  const facilityIds = new Set(
+    (raw.economy as EconomyStateDef).facilities.map(({ id }) => id),
+  );
+  const trainIds = new Set<string>();
+  for (const train of raw.trains) {
+    if (!isTrain(train, trackIds, facilityIds, trainIds)) {
+      return incompatible(raw, 'data does not match schema version 8.');
+    }
   }
 
   return { compatible: true, world: raw as unknown as WorldData };

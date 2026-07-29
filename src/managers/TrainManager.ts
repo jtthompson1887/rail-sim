@@ -61,6 +61,77 @@ export class TrainManager {
     return train;
   }
 
+  createFreightTrain(id: string, freightSetId: string): Train {
+    const train = new Train(this.scene, 0, 500, id, freightSetId);
+    train.getMatterBody().angle = 90;
+    this.trains.push(train);
+    this.trackSolvers.set(
+      train,
+      new TrackFlowSolver(this.trackManager, train),
+    );
+    TrainManager.bodyToTrain.set(train.getMatterBody(), train);
+    GameStateManager.setActiveTrains(this.trains.length);
+    return train;
+  }
+
+  placeFreightTrain(
+    train: Train,
+    trackUUID: string,
+    trackT: number,
+    facing: 1 | -1,
+  ): boolean {
+    if (this.trains.indexOf(train) === -1
+      || train.freightSetId === null
+      || !Number.isFinite(trackT)
+      || trackT < 0
+      || trackT > 1
+      || (facing !== 1 && facing !== -1)) return false;
+    const track = this.trackManager.getTrack(trackUUID);
+    if (!track) return false;
+    try {
+      const body = train.getMatterBody();
+      const point = track.getCurvePath().getPoint(trackT);
+      body.setPosition(point.x, point.y);
+      train.currentTrack = track;
+      body.setAngle(
+        track.getTrackAngle(body) + (facing === -1 ? 180 : 0),
+      );
+      train.enginePower = 0;
+      body.setVelocity(0, 0);
+      body.setAngularVelocity(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  removeFreightTrain(trainId: string): boolean {
+    const index = this.trains.findIndex(
+      (train) => train.getUUID() === trainId
+        && train.freightSetId !== null,
+    );
+    if (index === -1) return false;
+
+    const train = this.trains[index];
+    if (this._selectedTrain === train) this.deselectTrain();
+    this.trains.splice(index, 1);
+    this.trackSolvers.delete(train);
+    const body = train.getMatterBody();
+    TrainManager.bodyToTrain.delete(body);
+    body.destroy();
+    train.destroy();
+    GameStateManager.setActiveTrains(this.trains.length);
+    return true;
+  }
+
+  stopFreightTrains(trainIds: readonly string[]): void {
+    const requested = new Set(trainIds);
+    for (const train of this.trains) {
+      if (train.freightSetId !== null
+        && requested.has(train.getUUID())) train.enginePower = 0;
+    }
+  }
+
   createCarriage(id?: string): Carriage {
     const carriage = new Carriage(this.scene, 0, 500, id);
     carriage.getMatterBody().angle = 90;
@@ -72,13 +143,7 @@ export class TrainManager {
 
   handleTrainClick(train: Train, pointer: Phaser.Input.Pointer): void {
     if (pointer.button !== 0) return;
-    if (this._selectedTrain && this._selectedTrain !== train) {
-      this._selectedTrain.selected = false;
-    }
-    train.selected = true;
-    this._selectedTrain = train;
-    EventBus.emit('train:selected', { trainId: train.getUUID() });
-    this.cameraController.startFollow(train.getMatterBody());
+    this.selectTrain(train.getUUID());
   }
 
   /**
@@ -86,27 +151,42 @@ export class TrainManager {
    * Unlike handleTrainClick this does not require a pointer event, so it
    * can be called when entering play mode to auto-follow the first train.
    */
-  selectTrain(train: Train): void {
-    if (this._selectedTrain && this._selectedTrain !== train) {
-      this._selectedTrain.selected = false;
+  selectTrain(trainId: string | null): void {
+    const train = trainId === null
+      ? null
+      : this.trains.find((candidate) => candidate.getUUID() === trainId)
+        ?? null;
+    if (train === this._selectedTrain) return;
+
+    const releasedSelection = this._selectedTrain !== null;
+    if (releasedSelection) this.releaseSelectedTrain();
+
+    if (train) {
+      train.selected = true;
+      this._selectedTrain = train;
+      this.cameraController.startFollow(train.getMatterBody());
+      EventBus.emit('train:selected', { trainId: train.getUUID() });
+    } else if (releasedSelection) {
+      EventBus.emit('train:deselected', {});
     }
-    train.selected = true;
-    this._selectedTrain = train;
-    EventBus.emit('train:selected', { trainId: train.getUUID() });
-    this.cameraController.startFollow(train.getMatterBody());
   }
 
   deselectTrain(): void {
-    if (this._selectedTrain) {
-      this._selectedTrain.selected = false;
-      this._selectedTrain = null;
-      EventBus.emit('train:deselected', {});
-      this.cameraController.stopFollow();
-    }
+    if (!this._selectedTrain) return;
+    this.releaseSelectedTrain();
+    EventBus.emit('train:deselected', {});
   }
 
   get selectedTrain(): Train | null {
     return this._selectedTrain;
+  }
+
+  private releaseSelectedTrain(): void {
+    if (!this._selectedTrain) return;
+    this._selectedTrain.enginePower = 0;
+    this._selectedTrain.selected = false;
+    this._selectedTrain = null;
+    this.cameraController.stopFollow();
   }
 
   tryRecoverDerailedTrain(follower: ITrackFollower): boolean {
@@ -156,8 +236,16 @@ export class TrainManager {
     return { min: bounds.min, max: bounds.max, corners };
   }
 
-  update(time: number, delta: number): void {
+  update(
+    time: number,
+    delta: number,
+    operationsLockedTrainIds: ReadonlySet<string> = new Set(),
+  ): void {
     for (const train of this.trains) {
+      if (train.freightSetId !== null
+        && operationsLockedTrainIds.has(train.getUUID())) {
+        train.enginePower = 0;
+      }
       train.update(time, delta);
       const solver = this.trackSolvers.get(train);
       solver?.applyTrackFlowForces();

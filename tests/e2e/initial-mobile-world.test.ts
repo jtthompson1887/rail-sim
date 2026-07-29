@@ -25,6 +25,30 @@ async function cameraZoom(page: Page): Promise<number> {
   });
 }
 
+async function unobstructedCanvasPoint(
+  page: Page,
+): Promise<{ x: number; y: number }> {
+  return page.locator('canvas').evaluate((canvas) => {
+    const bounds = canvas.getBoundingClientRect();
+    const points: Array<{ x: number; y: number }> = [];
+    for (let y = bounds.top + 16; y < bounds.bottom - 16; y += 16) {
+      for (let x = bounds.left + 16; x < bounds.right - 16; x += 16) {
+        points.push({ x, y });
+      }
+    }
+    points.sort((first, second) => {
+      const centerX = bounds.left + bounds.width / 2;
+      const centerY = bounds.top + bounds.height / 2;
+      return Math.hypot(first.x - centerX, first.y - centerY)
+        - Math.hypot(second.x - centerX, second.y - centerY);
+    });
+    const point = points.find(({ x, y }) =>
+      document.elementFromPoint(x, y) === canvas);
+    if (!point) throw new Error('No unobstructed canvas point is available');
+    return point;
+  });
+}
+
 test('creates and initially frames a mobile world within continuous camera bounds', async ({
   page,
 }) => {
@@ -66,7 +90,8 @@ test('creates and initially frames a mobile world within continuous camera bound
   expect(initialZoom).toBeGreaterThanOrEqual(MIN_ZOOM);
   expect(initialZoom).toBeLessThanOrEqual(MAX_ZOOM);
 
-  await page.mouse.move(MOBILE_VIEWPORT.width / 2, MOBILE_VIEWPORT.height / 2);
+  const wheelPoint = await unobstructedCanvasPoint(page);
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
   await page.mouse.wheel(0, -100);
   await expect.poll(() => cameraZoom(page)).toBeGreaterThan(initialZoom);
   const zoomAfterOneWheelStep = await cameraZoom(page);

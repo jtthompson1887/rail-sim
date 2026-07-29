@@ -6,6 +6,7 @@ import { GameStateManager } from '../../src/managers/GameStateManager';
 import WorldScene from '../../src/scenes/WorldScene';
 import { GameConfig } from '../../src/config/GameConfig';
 import { EventBus } from '../../src/services/EventBus';
+import { makeFreightTrainDef } from '../fixtures/FirstFreightRouteFixture';
 
 describe('WorldScene persisted opportunity view', () => {
   beforeEach(() => {
@@ -63,7 +64,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(setZoom).toHaveBeenCalledWith(GameConfig.CAMERA.MIN_ZOOM);
   });
 
-  it('renders both persisted corridor guides without duplicate facility labels', () => {
+  it('renders both persisted corridor guides and one exact starter prompt', () => {
     const created = WorldManager.tryCreateNew(
       'Survey',
       'real-terrain-beta',
@@ -95,7 +96,11 @@ describe('WorldScene persisted opportunity view', () => {
     expect(graphics.beginPath).toHaveBeenCalledTimes(2);
     expect(graphics.strokePath).toHaveBeenCalledTimes(2);
     expect(graphics.fillCircle).not.toHaveBeenCalled();
-    expect(scene.add.text).toHaveBeenCalledTimes(2);
+    expect(scene.add.text).toHaveBeenCalledTimes(3);
+    expect(scene.add.text.mock.calls.map((call: unknown[]) => call[2]))
+      .toContain(
+        'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.',
+      );
     const direct = created.world.starterOpportunity.corridors[0];
     expect(scene.add.text.mock.calls[0][0]).toBeCloseTo(
       (direct.waypoints[0].x + direct.waypoints[1].x) / 2,
@@ -126,7 +131,7 @@ describe('WorldScene persisted opportunity view', () => {
       fillStyle: jest.fn().mockReturnThis(),
       fillCircle: jest.fn().mockReturnThis(),
     };
-    const labels = Array.from({ length: 2 }, () => ({
+    const labels = Array.from({ length: 3 }, () => ({
       setOrigin: jest.fn().mockReturnThis(),
       setDepth: jest.fn().mockReturnThis(),
       setScale: jest.fn().mockReturnThis(),
@@ -140,7 +145,7 @@ describe('WorldScene persisted opportunity view', () => {
     const renderedLabels = scene.starterOpportunityLabels;
     scene.updateStarterOpportunityLabelScale();
 
-    expect(renderedLabels).toHaveLength(2);
+    expect(renderedLabels).toHaveLength(3);
     for (const label of renderedLabels) {
       expect(label.setScale).toHaveBeenCalledWith(4);
     }
@@ -202,7 +207,7 @@ describe('WorldScene persisted opportunity view', () => {
     const scene = new WorldScene() as any;
     const createdViews: any[] = [];
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([]),
+      captureTopology: jest.fn().mockReturnValue([]),
     };
     scene.createFacilityView = jest.fn((
       placement: unknown,
@@ -234,7 +239,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(scene.facilityViews).toHaveLength(7);
   });
 
-  it('uses the exact endpoint-in-access-radius test without creating railway objects', () => {
+  it('uses persisted endpoints and captured topology without creating railway objects', () => {
     const created = WorldManager.tryCreateNew(
       'Rail access',
       'facility-rail-seed',
@@ -245,35 +250,44 @@ describe('WorldScene persisted opportunity view', () => {
     const facility = created.world.economy.facilities[0];
     const addTrack = jest.fn();
     const createStation = jest.fn();
-    const candidate = {
-      getControlPoints: () => ({
-        p0: {
-          x: facility.railAccess.x + facility.railAccess.radius - 1,
-          y: facility.railAccess.y,
-        },
-        p1: { x: 0, y: 0 },
-        p2: { x: 0, y: 0 },
-        p3: {
-          x: facility.railAccess.x + facility.railAccess.radius + 1,
-          y: facility.railAccess.y,
-        },
-      }),
-    };
+    created.world.tracks.push({
+      uuid: 'facility-endpoint',
+      geometryVersion: 1,
+      p0: {
+        x: facility.railAccess.x + facility.railAccess.radius,
+        y: facility.railAccess.y,
+      },
+      p1: { x: facility.railAccess.x + 20, y: facility.railAccess.y },
+      p2: { x: facility.railAccess.x + 40, y: facility.railAccess.y },
+      p3: { x: facility.railAccess.x + 60, y: facility.railAccess.y },
+      verticalProfile: {
+        profileVersion: 1,
+        knots: [
+          { t: 0, elevation: 0 },
+          { t: 1, elevation: 0 },
+        ],
+      },
+      structures: [],
+      paidBuildCost: 0,
+    });
     const scene = new WorldScene() as any;
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([candidate]),
+      captureTopology: jest.fn().mockReturnValue([{
+        kind: 'track',
+        uuid: 'facility-endpoint',
+        previous: null,
+        next: null,
+      }]),
       addTrack,
       createStation,
     };
 
     expect(scene.isFacilityRailConnected(facility)).toBe(true);
-    expect(scene.trackManager.getTracksInRadius).toHaveBeenCalledWith(
-      facility.railAccess,
-      facility.railAccess.radius,
-    );
+    expect(scene.trackManager.captureTopology).toHaveBeenCalledTimes(1);
     expect(addTrack).not.toHaveBeenCalled();
     expect(createStation).not.toHaveBeenCalled();
-    expect(created.world.tracks).toHaveLength(0);
+    expect(created.world.tracks.map((track) => track.uuid))
+      .toEqual(['facility-endpoint']);
     expect(created.world.stations).toHaveLength(0);
   });
 
@@ -299,7 +313,7 @@ describe('WorldScene persisted opportunity view', () => {
       deselectTrain: jest.fn(),
     };
     scene.trackManager = {
-      getTracksInRadius: jest.fn().mockReturnValue([]),
+      captureTopology: jest.fn().mockReturnValue([]),
     };
     const emit = jest.spyOn(EventBus, 'emit');
 
@@ -333,7 +347,7 @@ describe('WorldScene persisted opportunity view', () => {
       setSelected: jest.fn(),
       setSelectionEnabled: jest.fn(),
     };
-    const train = { id: 'live-train' };
+    const train = { getUUID: () => 'live-train' };
     scene.activeEditorTool = { cancel: jest.fn() };
     scene.selectionManager = { clearSelection: jest.fn() };
     scene.facilityViews = [facility];
@@ -343,6 +357,7 @@ describe('WorldScene persisted opportunity view', () => {
       trains: [train],
       selectTrain: jest.fn(),
     };
+    scene.cameraController = { setInputLockOwner: jest.fn() };
     const emit = jest.spyOn(EventBus, 'emit');
 
     scene.activatePlayMode();
@@ -352,7 +367,7 @@ describe('WorldScene persisted opportunity view', () => {
     expect(emit).toHaveBeenCalledWith('facility:deselected', {
       facilityId: 'sawmill',
     });
-    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith(train);
+    expect(scene.trainManager.selectTrain).toHaveBeenCalledWith('live-train');
     expect(facility.setSelected.mock.invocationCallOrder[0])
       .toBeLessThan(scene.trainManager.selectTrain.mock.invocationCallOrder[0]);
   });
@@ -368,8 +383,11 @@ describe('WorldScene persisted opportunity view', () => {
     scene.selectedFacilityId = 'sawmill';
     scene.activeTool = 'place-track';
     scene.trainManager = { trains: [] };
-    scene.cameraController = { stopFollow: jest.fn() };
-    scene.syncTrainsSaveAndReport = jest.fn();
+    scene.cameraController = {
+      stopFollow: jest.fn(),
+      setInputLockOwner: jest.fn(),
+    };
+    scene.saveWorldAndReport = jest.fn();
     const emit = jest.spyOn(EventBus, 'emit');
 
     scene.activateCreateMode();
@@ -382,5 +400,49 @@ describe('WorldScene persisted opportunity view', () => {
     });
 
     emit.mockRestore();
+  });
+
+  it('uses catalogue capacity rather than a 60-unit fallback for an unknown cargo', () => {
+    const world = WorldManager.createNew(
+      'Fallback capacity',
+      'fallback-capacity-seed',
+    );
+    world.trains = [{
+      ...makeFreightTrainDef(),
+      cargo: {
+        productId: 'removed-product',
+        units: 4,
+        loadedUnits: 4,
+        originFacilityId: 'managed-forest',
+      },
+    }];
+    const scene = new WorldScene() as any;
+    scene.trackManager = {
+      captureTopology: jest.fn().mockReturnValue([]),
+    };
+    scene.trainManager = {
+      selectedTrain: { getUUID: () => 'train-1' },
+    };
+    scene.cargoStatusByTrainId.clear();
+    const inspections: any[] = [];
+    const listener = ({ inspection }: { inspection: unknown }) => {
+      inspections.push(inspection);
+    };
+    EventBus.on('ui:train-inspection', listener);
+
+    scene.publishFreightPresentation([{
+      trainId: 'train-1',
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.5,
+      facing: 1,
+      x: 0,
+      y: 0,
+      speedWorldUnitsPerSecond: 0,
+      throttle: 0,
+      derailed: false,
+    }]);
+
+    expect(inspections.at(-1)?.transfer.capacityUnits).toBe(0);
+    EventBus.off('ui:train-inspection', listener);
   });
 });

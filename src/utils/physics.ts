@@ -6,9 +6,14 @@ import MatterBody = Phaser.Types.Physics.Matter.MatterBody;
 import {BodyType, Vector} from "matter";
 
 
-export function guideForceTowardsPoint(gameObject :GameObject, p0 : Phaser.Math.Vector2, pidController?: PIDController) : Vector2 {
+export function guideForceTowardsPoint(
+    gameObject: GameObject,
+    p0: Phaser.Math.Vector2,
+    pidController?: PIDController,
+    sourcePosition?: Readonly<{ x: number; y: number }>,
+): Vector2 {
     // Calculate the vector from the cart to the track
-    let position = gameObject.body.position;
+    let position = sourcePosition ?? gameObject.body.position;
     let forceVector = qVec().copy(p0).subtract(position)
 
     let forceConstant = 0.0020; // Reduced from 0.0008/0.0020 to make the force gentler

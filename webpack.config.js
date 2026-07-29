@@ -1,15 +1,23 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 
-module.exports = {
+module.exports = (env = {}) => ({
     entry: './src/main.ts',
     output: {
         filename: 'main.js',
         path: path.resolve(__dirname, 'dist'),
+        publicPath: 'auto',
+        chunkFilename: '[name].[contenthash].chunk.js',
     },
     resolve: {
         extensions: ['.tsx', '.ts', '.js'],
+    },
+    optimization: {
+        // Keep the lazy-loaded cab3d chunk together (Babylon + renderer) so
+        // main.js does not grow and the chunk is named cab3d.*.chunk.js.
+        splitChunks: false,
     },
     module: {
         rules: [
@@ -37,6 +45,11 @@ module.exports = {
         ],
     },
     plugins: [
+        new webpack.DefinePlugin({
+            __RAIL_SIM_TEST_CONTROLS__: JSON.stringify(
+                env.testControls === true || env.testControls === 'true',
+            ),
+        }),
         new HtmlWebpackPlugin({
             template: './src/index.html',
         }),
@@ -48,4 +61,4 @@ module.exports = {
             ],
         })
     ],
-};
+});

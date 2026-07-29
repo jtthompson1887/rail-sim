@@ -1,7 +1,7 @@
 import {
   ENDPOINT_CONNECTION_COST,
-  STANDARD_STARTING_CASH,
 } from '../config/ConstructionConfig';
+import { GameConfig } from '../config/GameConfig';
 import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
@@ -25,8 +25,16 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
-import { deriveAutomaticCubic } from './TrackGeometry';
-import { WorldOpportunityValidator } from './WorldOpportunityValidator';
+import { canonicalizeConstructionGridPoint } from './ConstructionGrid';
+import {
+  deriveAutomaticCubic,
+  deriveTrackEndpointOutward,
+} from './TrackGeometry';
+import {
+  MAX_STARTER_CORRIDOR_COST,
+  WorldOpportunityValidator,
+} from './WorldOpportunityValidator';
+import { clonePlainData } from '../utils/PlainData';
 
 export interface OpportunityGenerationDiagnostics {
   attemptsEvaluated: number;
@@ -49,10 +57,25 @@ export type OpportunityGenerationResult =
     };
   };
 
+export type OpportunityAcceptancePredicate = (
+  opportunity: Readonly<StarterOpportunityDef>,
+) => boolean;
+
 interface Candidate {
   x: number;
   y: number;
   elevation: number;
+}
+
+function canonicalConstructionPoint(
+  point: Readonly<{ x: number; y: number }>,
+): Vec2Def {
+  const canonical = canonicalizeConstructionGridPoint(
+    point.x,
+    point.y,
+    GameConfig.WORLD.SNAP_GRID_SIZE,
+  );
+  return { x: canonical.x, y: canonical.y };
 }
 
 function siteRelief(
@@ -122,7 +145,11 @@ export class WorldOpportunityGenerator {
   private readonly analyzer: ConstructionAnalyzer;
   private readonly validator: WorldOpportunityValidator;
 
-  constructor(private readonly terrain: TerrainHeightSource) {
+  constructor(
+    private readonly terrain: TerrainHeightSource,
+    private readonly acceptsOpportunity: OpportunityAcceptancePredicate =
+      () => true,
+  ) {
     this.analyzer = new ConstructionAnalyzer(terrain);
     this.validator = new WorldOpportunityValidator(terrain, this.analyzer);
   }
@@ -168,12 +195,19 @@ export class WorldOpportunityGenerator {
     const cellWidth = xLimit * 2 / gridSize;
     const cellHeight = yLimit * 2 / gridSize;
     const usable: Candidate[] = [];
+    const seenCoordinates = new Set<string>();
 
     for (let row = 0; row < gridSize; row++) {
       for (let column = 0; column < gridSize; column++) {
-        const candidate = {
+        const canonical = canonicalConstructionPoint({
           x: -xLimit + (column + 0.2 + random() * 0.6) * cellWidth,
           y: -yLimit + (row + 0.2 + random() * 0.6) * cellHeight,
+        });
+        const coordinateKey = `${canonical.x}:${canonical.y}`;
+        if (seenCoordinates.has(coordinateKey)) continue;
+        seenCoordinates.add(coordinateKey);
+        const candidate = {
+          ...canonical,
           elevation: 0,
         };
         candidate.elevation = this.terrain.getHeightAt(candidate.x, candidate.y);
@@ -193,10 +227,13 @@ export class WorldOpportunityGenerator {
   ): StarterOpportunityDef | null {
     if (candidates.length < 2) return null;
     const pairKeys = new Set<string>();
+    let evaluations = 0;
     for (
-      let evaluation = 0;
-      evaluation < WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
-      evaluation++
+      let draw = 0;
+      draw < MAX_SITE_CANDIDATES_PER_ATTEMPT
+        && evaluations
+          < WorldGenerationConfig.MAX_PAIR_EVALUATIONS_PER_ATTEMPT;
+      draw++
     ) {
       const firstIndex = Math.floor(random() * candidates.length);
       const secondIndex = Math.floor(random() * candidates.length);
@@ -208,8 +245,20 @@ export class WorldOpportunityGenerator {
       pairKeys.add(key);
       const first = candidates[firstIndex];
       const second = candidates[secondIndex];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      if (distance < WorldGenerationConfig.MIN_SITE_SEPARATION
+        || distance > WorldGenerationConfig.MAX_SITE_SEPARATION
+        || Math.abs(second.elevation - first.elevation)
+          < WorldGenerationConfig.MIN_SITE_ELEVATION_DIFFERENCE) {
+        continue;
+      }
+      evaluations += 1;
       const opportunity = this.buildOpportunity(config, attempt, first, second);
-      if (opportunity) return opportunity;
+      if (opportunity && this.acceptsOpportunity(
+        clonePlainData(opportunity),
+      )) {
+        return opportunity;
+      }
     }
     return null;
   }
@@ -243,32 +292,34 @@ export class WorldOpportunityGenerator {
       signedOffsets.push(offset, -offset);
     }
     for (const signedOffset of signedOffsets) {
-      const waypoint = {
+      const waypoint = canonicalConstructionPoint({
         x: (first.x + second.x) / 2 - dy * signedOffset,
         y: (first.y + second.y) / 2 + dx * signedOffset,
-      };
+      });
       if (Math.abs(waypoint.x) > WorldGenerationConfig.WORLD_HALF_WIDTH
         || Math.abs(waypoint.y) > WorldGenerationConfig.WORLD_HALF_HEIGHT) {
         continue;
       }
-      const through = { x: dx, y: dy };
       const firstDetail = this.analyzer.analyzeDetailed(
         deriveAutomaticCubic({
           start,
           end: waypoint,
-          endOutward: { x: -through.x, y: -through.y },
-        }),
-      );
-      const secondDetail = this.analyzer.analyzeDetailed(
-        deriveAutomaticCubic({
-          start: waypoint,
-          end,
-          startOutward: through,
         }),
       );
       const firstLeg = firstDetail.proposal;
+      if (!firstLeg.valid) continue;
+      const secondDetail = this.analyzer.analyzeDetailed(
+        deriveAutomaticCubic({
+          start: firstLeg.geometry.p3,
+          end,
+          startOutward: deriveTrackEndpointOutward(
+            firstLeg.geometry,
+            'end',
+          ),
+        }),
+      );
       const secondLeg = secondDetail.proposal;
-      if (!firstLeg.valid || !secondLeg.valid) continue;
+      if (!secondLeg.valid) continue;
 
       const detourLength = firstLeg.length + secondLeg.length;
       const directMeanGrade = meanAbsoluteEngineeredGrade([directDetail]);
@@ -301,7 +352,7 @@ export class WorldOpportunityGenerator {
         corridor('detour', [start, waypoint, end], [firstLeg, secondLeg], 'long-flat'),
       ];
       if (Math.min(...corridors.map((value) => value.estimatedCost))
-        > STANDARD_STARTING_CASH) {
+        > MAX_STARTER_CORRIDOR_COST) {
         continue;
       }
       const surveyPoints = [start, waypoint, end];
@@ -329,6 +380,8 @@ export class WorldOpportunityGenerator {
         / Math.max(1, paddedWidth);
       const heightZoom = WorldGenerationConfig.CAMERA_VIEWPORT_HEIGHT
         / Math.max(1, paddedHeight);
+      const fitZoom = Math.min(widthZoom, heightZoom)
+        * (1 - Number.EPSILON);
       const opportunity: StarterOpportunityDef = {
         opportunityVersion: 1,
         resolvedAttempt: attempt,
@@ -341,8 +394,7 @@ export class WorldOpportunityGenerator {
             WorldGenerationConfig.CAMERA_MIN_ZOOM,
             Math.min(
               WorldGenerationConfig.CAMERA_MAX_ZOOM,
-              widthZoom,
-              heightZoom,
+              fitZoom,
             ),
           ),
         },

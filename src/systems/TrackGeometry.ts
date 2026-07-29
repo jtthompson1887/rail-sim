@@ -40,6 +40,44 @@ function normalise(vector: Vec2Def, fallback: Vec2Def): Vec2Def {
   return { x: 1, y: 0 };
 }
 
+export function deriveTrackEndpointOutward(
+  def: TrackGeometryDef,
+  endpoint: 'start' | 'end',
+): Vec2Def {
+  const tangentCandidates = endpoint === 'start'
+    ? [{
+      x: def.p1.x - def.p0.x,
+      y: def.p1.y - def.p0.y,
+    }, {
+      x: def.p2.x - def.p0.x,
+      y: def.p2.y - def.p0.y,
+    }, {
+      x: def.p3.x - def.p0.x,
+      y: def.p3.y - def.p0.y,
+    }]
+    : [{
+      x: def.p3.x - def.p2.x,
+      y: def.p3.y - def.p2.y,
+    }, {
+      x: def.p3.x - def.p1.x,
+      y: def.p3.y - def.p1.y,
+    }, {
+      x: def.p3.x - def.p0.x,
+      y: def.p3.y - def.p0.y,
+    }];
+  const tangent = tangentCandidates.find(
+    (candidate) => candidate.x !== 0 || candidate.y !== 0,
+  ) ?? { x: 1, y: 0 };
+  const direction = normalise(tangent, { x: 1, y: 0 });
+  const outward = endpoint === 'start'
+    ? { x: -direction.x, y: -direction.y }
+    : direction;
+  return {
+    x: Object.is(outward.x, -0) ? 0 : outward.x,
+    y: Object.is(outward.y, -0) ? 0 : outward.y,
+  };
+}
+
 export function createTrackGeometry(def: TrackGeometryDef): TrackGeometry {
   const pointAt = (rawT: number): Vec2Def => {
     const t = clampUnit(rawT);

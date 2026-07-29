@@ -421,22 +421,26 @@ describe('ConstructionService', () => {
     expect(service.revalidateQuote(quote)).toBe(false);
   });
 
-  it('keeps a quote current across an economy-only batch', () => {
+  it('captures both cursors and rejects both quote paths after operations-only root advance', () => {
     const quote = service.createQuote(
       { x: 0, y: 0 },
       { x: 300, y: 0 },
-      'economy-independent',
+      'root-aware',
     )!;
     const world = WorldManager.world!;
+    expect(quote.rootRevision).toBe(world.revision);
+    expect(quote.constructionRevision).toBe(world.constructionRevision);
 
-    expect(WorldManager.applyEconomyBatch(
-      world.economyRevision,
-      (economy) => {
-        economy.tick += 1;
+    expect(WorldManager.applyOperationsBatch(
+      world.revision,
+      (draft) => {
+        draft.economy.tick += 1;
         return true;
       },
     )).toBe(true);
-    expect(service.revalidateQuote(quote)).toBe(true);
+    expect(world.constructionRevision).toBe(quote.constructionRevision);
+    expect(service.revalidateQuote(quote)).toBe(false);
+    expect(service.revalidateQuoteForRedo(quote, quote.expectedCash)).toBe(false);
   });
 
   it('rejects a quote when an unrelated live track crosses it after pricing', () => {

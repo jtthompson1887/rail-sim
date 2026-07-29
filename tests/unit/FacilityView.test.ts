@@ -14,16 +14,32 @@ function inspection(
     status: { code: 'waiting-input', label: 'Needs logs' },
     produces: ['structural-timber'],
     needs: ['logs'],
+    inputRows: [{
+      productId: 'logs',
+      displayName: 'Logs',
+      unitLabel: 'tonne',
+      requiredQuantity: 10,
+      availableQuantity: 0,
+      missingQuantity: 10,
+    }],
+    outputRows: [{
+      productId: 'structural-timber',
+      displayName: 'Structural Timber',
+      unitLabel: 'tonne',
+      cycleQuantity: 8,
+    }],
     inventories: [
       {
         productId: 'logs',
         displayName: 'Logs',
+        unitLabel: 'tonne',
         quantity: 0,
         capacity: 200,
       },
       {
         productId: 'structural-timber',
         displayName: 'Structural Timber',
+        unitLabel: 'tonne',
         quantity: 20,
         capacity: 160,
       },

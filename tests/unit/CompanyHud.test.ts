@@ -4,6 +4,17 @@
 import { EventBus } from '../../src/services/EventBus';
 import { CompanyHud } from '../../src/ui/CompanyHud';
 
+const operatingSummary = {
+  fromTick: 1,
+  throughTick: 24,
+  deliveryRevenue: 1_000,
+  contractBonuses: 250_000,
+  runningExpenses: 300,
+  operatingProfit: 700,
+  capitalExpenditure: 2_000,
+  cashFlow: 248_700,
+};
+
 describe('CompanyHud', () => {
   let hud: CompanyHud;
 
@@ -24,12 +35,14 @@ describe('CompanyHud', () => {
         saveState: 'saved' as const,
         economyTick: 0,
         constructionIndexBps: 10_000,
+        operatingSummary,
       },
       {
         cash: 997_200,
         saveState: 'unsaved' as const,
         economyTick: 25,
         constructionIndexBps: 10_125,
+        operatingSummary,
       },
     ]) {
       EventBus.emit('ui:company-state', state);
@@ -52,6 +65,7 @@ describe('CompanyHud', () => {
       saveState: 'saved',
       economyTick: 4,
       constructionIndexBps: 9_900,
+      operatingSummary,
     });
     hud.setVisible(true);
     expect(document.querySelector('[data-testid="company-hud"]')
@@ -66,6 +80,7 @@ describe('CompanyHud', () => {
       saveState: 'unsaved',
       economyTick: 5,
       constructionIndexBps: 9_875,
+      operatingSummary,
     });
     expect(document.querySelector('[data-testid="company-hud"]')).toBeNull();
   });
@@ -90,5 +105,91 @@ describe('CompanyHud', () => {
     expect(root.style.left).toBe('56px');
     expect(root.style.right).toBe('96px');
     expect(root.style.width).toBe('auto');
+  });
+
+  it('shows the saving state while preserving construction and time fields', () => {
+    EventBus.emit('ui:company-state', {
+      cash: 950_000,
+      saveState: 'saving',
+      economyTick: 12,
+      constructionIndexBps: 10_050,
+      operatingSummary,
+    });
+
+    expect(document.querySelector('[data-testid="company-save-state"]')?.textContent)
+      .toBe('Saving…');
+    const root = document.querySelector('[data-testid="company-hud"]') as HTMLElement;
+    expect(root.dataset.saveState).toBe('saving');
+    expect(document.querySelector('[data-testid="company-economy-time"]')?.textContent)
+      .toBe('Day 1 · Tick 12');
+  });
+
+  it('reports whether a screen point falls within its bounding box', () => {
+    const root = document.querySelector('[data-testid="company-hud"]') as HTMLElement;
+    jest.spyOn(root, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 20,
+      right: 300,
+      bottom: 80,
+      width: 200,
+      height: 60,
+      x: 100,
+      y: 20,
+      toJSON: () => {},
+    } as any);
+
+    expect(hud.containsScreenPoint(150, 50)).toBe(true);
+    expect(hud.containsScreenPoint(99, 50)).toBe(false);
+    expect(hud.containsScreenPoint(150, 81)).toBe(false);
+
+    hud.setVisible(false);
+    expect(hud.containsScreenPoint(150, 50)).toBe(false);
+  });
+
+  it('shows the inclusive operating summary with stable selectors', () => {
+    EventBus.emit('ui:company-state', {
+      cash: 100_000,
+      saveState: 'saved',
+      economyTick: 24,
+      constructionIndexBps: 10_000,
+      operatingSummary,
+    });
+
+    expect(document.querySelector(
+      '[data-testid="company-operating-period"]',
+    )?.textContent).toBe('Last 24 ticks');
+    expect(document.querySelector(
+      '[data-testid="company-delivery-revenue"]',
+    )?.textContent).toBe('Deliveries £1,000');
+    expect(document.querySelector(
+      '[data-testid="company-contract-bonuses"]',
+    )?.textContent).toBe('Development £250,000');
+    expect(document.querySelector(
+      '[data-testid="company-running-expenses"]',
+    )?.textContent).toBe('Running £300');
+    expect(document.querySelector(
+      '[data-testid="company-operating-profit"]',
+    )?.textContent).toBe('Rail profit £700');
+    expect(document.querySelector(
+      '[data-testid="company-capital-expenditure"]',
+    )?.textContent).toBe('Capex £2,000');
+    expect(document.querySelector(
+      '[data-testid="company-cash-flow"]',
+    )?.textContent).toBe('Cash flow £248,700');
+  });
+
+  it('shows one visible positive delivery cash pulse and removes its listener', () => {
+    EventBus.emit('ui:cash-pulse', { amount: 1_250 });
+    const pulse = document.querySelector(
+      '[data-testid="company-cash-pulse"]',
+    ) as HTMLElement;
+    expect(pulse.textContent).toBe('+£1,250');
+    expect(pulse.style.display).toBe('inline');
+
+    hud.destroy();
+    EventBus.emit('ui:cash-pulse', { amount: 500 });
+    expect(document.querySelector(
+      '[data-testid="company-cash-pulse"]',
+    )).toBeNull();
   });
 });

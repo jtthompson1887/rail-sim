@@ -58,6 +58,13 @@ export default class WorldSelectScene extends Phaser.Scene {
     }).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.scene.start('MenuScene'));
     back.setPadding(10);
+
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimScene = 'WorldSelectScene';
+    }
   }
 
   private renderWorldList(): void {

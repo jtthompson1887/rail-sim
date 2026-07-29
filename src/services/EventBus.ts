@@ -6,6 +6,17 @@ import type {
   DeletionReviewDTO,
   DeleteTracksIntent,
 } from '../ui/PropertiesPanel';
+import type {
+  FreightPurchaseQuote,
+  FreightPurchaseResult,
+} from '../freight/FreightPurchaseService';
+import type {
+  OperatingSummaryDto,
+  TrainInspectionDto,
+} from '../freight/FreightPresentation';
+import type { FreightObjectiveDto } from '../freight/FreightObjective';
+import type { FreightDeliveryEvent } from '../freight/CargoSystem';
+import { FLATBED_FREIGHT_SET_ID } from '../freight/FreightSetCatalog';
 
 interface EventMap {
   'train:selected': { trainId: string };
@@ -25,6 +36,10 @@ interface EventMap {
   'audio:play-sfx': { key: string };
   'audio:play-bgm': { key: string };
   'mobile:throttle': { value: number };
+  // Cab 3-D view events
+  'cab:toggle': Record<string, never>;
+  'cab:state': { active: boolean };
+  'cab:quality': { tier: string };
   // World / mode events
   'world:saved': { worldId: string };
   'world:loaded': { worldId: string };
@@ -55,6 +70,7 @@ interface EventMap {
   'ui:toolbar-undo-state': { canUndo: boolean; canRedo: boolean };
   'ui:toolbar-save-state': { state: 'saved' | 'unsaved' | 'saving' };
   'ui:toolbar-visible': { visible: boolean };
+  'ui:pause-visible': { visible: boolean };
   'ui:toolbar-select-tool': { tool: string };
   'editor:delete-tracks': DeleteTracksIntent;
   'ui:delete-request': DeleteReviewRequest;
@@ -68,7 +84,26 @@ interface EventMap {
     saveState: 'saved' | 'unsaved' | 'saving';
     economyTick: number;
     constructionIndexBps: number;
+    operatingSummary: OperatingSummaryDto;
   };
+  'ui:cash-pulse': { amount: number };
+  'freight:purchase-mode-requested': {
+    freightSetId: typeof FLATBED_FREIGHT_SET_ID;
+  };
+  'ui:freight-purchase-state': {
+    quote: FreightPurchaseQuote | null;
+    cash: number;
+    message: string;
+  };
+  'freight:purchase-confirmed': {
+    quote: FreightPurchaseQuote;
+  };
+  'freight:purchase-result': FreightPurchaseResult;
+  'ui:train-inspection': {
+    inspection: TrainInspectionDto | null;
+  };
+  'ui:freight-objective': FreightObjectiveDto;
+  'ui:freight-delivery-completed': FreightDeliveryEvent;
 }
 
 class EventBusClass {

@@ -1,5 +1,4 @@
 import type { FacilityInspectionDto } from '../economy/FacilityPresentation';
-import { getProduct } from '../economy/ProductCatalog';
 import { EventBus } from '../services/EventBus';
 
 const CURRENCY = new Intl.NumberFormat('en-GB', {
@@ -23,12 +22,15 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function productNames(productIds: ReadonlyArray<string>): string {
-  if (productIds.length === 0) return 'None';
-  return productIds.map(
-    (productId) => getProduct(productId)?.displayName ?? productId,
-  ).join(', ');
+function productNames(
+  products: ReadonlyArray<{ displayName: string }>,
+): string {
+  if (products.length === 0) return 'None';
+  return products.map(({ displayName }) => displayName).join(', ');
 }
+
+const units = (unitLabel: string, quantity: number): string =>
+  quantity === 1 ? unitLabel : `${unitLabel}s`;
 
 function factorText(id: string, basisPoints: number): string {
   const percent = (basisPoints - 10_000) / 100;
@@ -119,13 +121,24 @@ export class FacilityInspector {
     this.status.textContent = dto.status.label;
     this.status.dataset.status = dto.status.code;
     this.products.textContent = [
-      `Produces ${productNames(dto.produces)}`,
-      `Needs ${productNames(dto.needs)}`,
+      `Produces ${productNames(dto.outputRows)}`,
+      `Needs ${productNames(dto.inputRows)}`,
+      ...dto.inputRows.map((row) => row.missingQuantity === 0
+        ? `${row.displayName} received `
+          + `${row.availableQuantity.toLocaleString('en-GB')} / `
+          + `${row.requiredQuantity.toLocaleString('en-GB')} `
+          + units(row.unitLabel, row.requiredQuantity)
+        : `${row.displayName} needs `
+          + `${row.missingQuantity.toLocaleString('en-GB')} `
+          + units(row.unitLabel, row.missingQuantity)),
     ].join('\n');
     this.inventories.replaceChildren(...dto.inventories.map((slot) => {
       const row = document.createElement('div');
       const label = document.createElement('div');
-      label.textContent = `${slot.displayName} ${slot.quantity.toLocaleString('en-GB')} / ${slot.capacity.toLocaleString('en-GB')}`;
+      label.textContent = `${slot.displayName} `
+        + `${slot.quantity.toLocaleString('en-GB')} / `
+        + `${slot.capacity.toLocaleString('en-GB')} `
+        + units(slot.unitLabel, slot.capacity);
       const progress = document.createElement('progress');
       progress.max = slot.capacity;
       progress.value = slot.quantity;
@@ -135,11 +148,11 @@ export class FacilityInspector {
       return row;
     }));
     this.quotes.replaceChildren(...dto.quotes.map((quote) => {
-      const product = getProduct(quote.productId);
       const row = document.createElement('div');
       row.style.cssText = 'padding:7px 8px;border-radius:4px;background:#0c2638';
       const heading = document.createElement('strong');
-      heading.textContent = `${product?.displayName ?? quote.productId} · ${CURRENCY.format(quote.unitPrice)} / unit`;
+      heading.textContent = `${quote.displayName} · `
+        + `${CURRENCY.format(quote.unitPrice)} / ${quote.unitLabel}`;
       heading.style.cssText = 'display:block;color:#eaf8ff;margin-bottom:3px';
       const factors = document.createElement('div');
       factors.style.cssText = 'white-space:pre-line;color:#8ab4d0;font-size:11px';
@@ -158,14 +171,19 @@ export class FacilityInspector {
 
   private applyLayout(): void {
     const mobile = window.innerWidth <= 720;
+    const shortWide = mobile && window.innerWidth > window.innerHeight;
     this.root.dataset.layout = mobile ? 'mobile' : 'desktop';
     if (mobile) {
-      this.root.style.left = '56px';
+      this.root.style.left = shortWide
+        ? 'calc(50vw + 28px)'
+        : '56px';
       this.root.style.right = '8px';
       this.root.style.top = 'auto';
       this.root.style.bottom = '8px';
       this.root.style.width = 'auto';
-      this.root.style.maxHeight = '58vh';
+      this.root.style.maxHeight = shortWide
+        ? '58vh'
+        : 'calc(75vh - 208px)';
     } else {
       this.root.style.left = 'auto';
       this.root.style.right = '14px';
@@ -178,12 +196,9 @@ export class FacilityInspector {
 
   setVisible(visible: boolean): void {
     this.enabled = visible;
-    if (!visible) {
-      this.clear();
-      return;
-    }
-    this.root.style.display = this.current ? 'block' : 'none';
-    this.root.setAttribute('aria-hidden', this.current ? 'false' : 'true');
+    const displayed = visible && this.current !== null;
+    this.root.style.display = displayed ? 'block' : 'none';
+    this.root.setAttribute('aria-hidden', displayed ? 'false' : 'true');
   }
 
   clear(): void {

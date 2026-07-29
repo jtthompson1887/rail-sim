@@ -12,6 +12,7 @@ import type {
   WorldGenerationConfigDef,
 } from '../config/WorldData';
 import { validateStarterOpportunityData } from '../config/WorldData';
+import { STARTER_ROUTE_RESERVE } from '../freight/FreightSetCatalog';
 import {
   ConstructionAnalyzer,
   type ConstructionAnalysisDetail,
@@ -21,6 +22,9 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from './ConstructionGradeMetrics';
+
+export const MAX_STARTER_CORRIDOR_COST =
+  STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE;
 
 export type OpportunityValidationResult =
   | { valid: true }
@@ -229,8 +233,8 @@ export class WorldOpportunityValidator {
     const cheaper = Math.min(...opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
     ));
-    if (cheaper > STANDARD_STARTING_CASH) {
-      return invalid('opportunity is unaffordable');
+    if (cheaper > MAX_STARTER_CORRIDOR_COST) {
+      return invalid('opportunity breaches starter reserve');
     }
     return { valid: true };
   }

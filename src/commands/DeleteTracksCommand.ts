@@ -74,6 +74,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
   private transactions: RefundRecord[] | null = null;
   private topologyAfter: TrackTopologySnapshot | null = null;
   private applied = false;
+  private expectedRootRevision: number;
   private expectedConstructionRevision: number;
 
   constructor(
@@ -85,6 +86,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     this.uuids = Array.from(new Set(uuids));
     const world = WorldManager.world;
     this.worldIdentity = world;
+    this.expectedRootRevision = world?.revision ?? -1;
     this.expectedConstructionRevision = world?.constructionRevision ?? -1;
     this.worldTracksBefore = clonePlainData(world?.tracks ?? []);
     this.worldJunctionsBefore = clonePlainData(world?.junctions ?? []);
@@ -121,22 +123,27 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     return this.worldIdentity
       ? {
         authority: this.worldIdentity,
-        revision: this.expectedConstructionRevision,
+        rootRevision: this.expectedRootRevision,
+        constructionRevision: this.expectedConstructionRevision,
       }
       : null;
   }
 
   rebaseRevisionContext(context: CommandRevisionContext): boolean {
     if (context.authority !== this.worldIdentity
-      || !Number.isSafeInteger(context.revision)
-      || context.revision < 0) return false;
-    this.expectedConstructionRevision = context.revision;
+      || !Number.isSafeInteger(context.rootRevision)
+      || context.rootRevision < 0
+      || !Number.isSafeInteger(context.constructionRevision)
+      || context.constructionRevision < 0) return false;
+    this.expectedRootRevision = context.rootRevision;
+    this.expectedConstructionRevision = context.constructionRevision;
     return true;
   }
 
   execute(): boolean {
     const world = WorldManager.world;
     if (this.applied || !world || world !== this.worldIdentity
+      || world.revision !== this.expectedRootRevision
       || world.constructionRevision !== this.expectedConstructionRevision
       || this.uuids.length === 0
       || this.snapshots.length !== this.uuids.length
@@ -163,6 +170,12 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
         removedTracks.push(snapshot);
       }
       this.injectFailure?.('after-live-removal');
+      if (WorldManager.world !== this.worldIdentity
+        || WorldManager.world.revision !== this.expectedRootRevision
+        || WorldManager.world.constructionRevision
+          !== this.expectedConstructionRevision) {
+        throw new Error('construction cursor changed before demolition commit');
+      }
 
       const committed = WorldManager.applyConstructionBatch(
         this.expectedConstructionRevision,
@@ -206,6 +219,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       );
       if (!committed) throw new Error('persisted demolition transaction failed');
 
+      this.expectedRootRevision += 1;
       this.expectedConstructionRevision += 1;
       this.transactions = postedRefunds;
       this.topologyAfter = this.trackManager.captureTopology();
@@ -222,6 +236,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
     const world = WorldManager.world;
     if (!this.applied || !this.transactions || !world
       || world !== this.worldIdentity
+      || world.revision !== this.expectedRootRevision
       || world.constructionRevision !== this.expectedConstructionRevision
       || !equalPlainData(world.tracks, this.worldTracksAfter)
       || !equalPlainData(world.junctions, this.worldJunctionsAfter)
@@ -247,6 +262,12 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
         throw new Error('topology restore failed');
       }
       this.injectFailure?.('after-live-restore');
+      if (WorldManager.world !== this.worldIdentity
+        || WorldManager.world.revision !== this.expectedRootRevision
+        || WorldManager.world.constructionRevision
+          !== this.expectedConstructionRevision) {
+        throw new Error('construction cursor changed before demolition undo');
+      }
 
       const committed = WorldManager.applyConstructionBatch(
         this.expectedConstructionRevision,
@@ -281,6 +302,7 @@ export class DeleteTracksCommand implements RevisionAwareCommand {
       );
       if (!committed) throw new Error('persisted demolition undo transaction failed');
 
+      this.expectedRootRevision += 1;
       this.expectedConstructionRevision += 1;
       this.applied = false;
       return true;

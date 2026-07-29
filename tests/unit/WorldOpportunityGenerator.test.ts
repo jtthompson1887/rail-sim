@@ -18,6 +18,23 @@ import {
   ENGINEERED_GRADE_COMPARISON_EPSILON,
   meanAbsoluteEngineeredGrade,
 } from '../../src/systems/ConstructionGradeMetrics';
+import { TerrainGenerator } from '../../src/systems/TerrainGenerator';
+import {
+  deriveAutomaticCubic,
+  deriveTrackEndpointOutward,
+} from '../../src/systems/TrackGeometry';
+import TrackManager from '../../src/managers/TrackManager';
+import {
+  resolveTrackEndpoint,
+  SnapSystem,
+} from '../../src/systems/SnapSystem';
+import { ConstructionService } from '../../src/systems/ConstructionService';
+import { PlaceTrackCommand } from '../../src/commands/PlaceTrackCommand';
+import { WorldManager } from '../../src/managers/WorldManager';
+import { STARTER_ROUTE_RESERVE } from '../../src/freight/FreightSetCatalog';
+import { makeStarterOpportunity } from '../fixtures/StarterOpportunityFixture';
+
+const { makeScene } = require('../../__mocks__/phaser');
 
 const config = {
   generationConfigVersion: 1 as const,
@@ -34,6 +51,84 @@ const variedTerrain = {
       + Math.cos(y / 510) * 24;
   },
 };
+
+function generatorWithCheapestCorridorCost(
+  cheapestCorridorCost: number,
+): WorldOpportunityGenerator {
+  const generator = new WorldOpportunityGenerator(variedTerrain);
+  let analysisIndex = 0;
+  (generator as any).analyzer = {
+    analyzeDetailed: jest.fn((geometry: any) => {
+      const direct = analysisIndex++ % 3 === 0;
+      const length = direct ? 2_000 : 1_200;
+      const detourEngineeringTotal = cheapestCorridorCost + 10_000
+        - ENDPOINT_CONNECTION_COST;
+      const total = direct
+        ? cheapestCorridorCost
+        : analysisIndex % 3 === 2
+          ? Math.floor(detourEngineeringTotal / 2)
+          : Math.ceil(detourEngineeringTotal / 2);
+      return {
+        proposal: {
+          geometry,
+          verticalProfile: {
+            profileVersion: 1,
+            knots: direct
+              ? [{ t: 0, elevation: 0 }, { t: 1, elevation: 100 }]
+              : [{ t: 0, elevation: 0 }, { t: 1, elevation: 0 }],
+          },
+          length,
+          minimumRadius: Infinity,
+          maximumGradePercent: direct ? 5 : 0,
+          maximumGradeT: 1,
+          maximumGradeDistance: length,
+          structures: [{
+            type: 'surface',
+            startT: 0,
+            endT: 1,
+            startElevation: 0,
+            endElevation: direct ? 100 : 0,
+          }],
+          structureLengths: {
+            surface: length,
+            cut: 0,
+            fill: 0,
+            bridge: 0,
+            tunnel: 0,
+          },
+          costs: {
+            track: total,
+            earthworks: 0,
+            bridge: 0,
+            tunnel: 0,
+            total,
+          },
+          valid: true,
+          reasonCode: 'ok',
+          remedy: '',
+        },
+        curveSamples: [
+          {
+            t: 0,
+            point: geometry.p0,
+            distance: 0,
+            segmentLength: 0,
+          },
+          {
+            t: 1,
+            point: geometry.p3,
+            distance: length,
+            segmentLength: length,
+          },
+        ],
+      };
+    }),
+  };
+  (generator as any).validator = {
+    validate: jest.fn().mockReturnValue({ valid: true }),
+  };
+  return generator;
+}
 
 function expectSurveyFitsRecommendedCamera(
   opportunity: StarterOpportunityDef,
@@ -58,6 +153,436 @@ function expectSurveyFitsRecommendedCamera(
 }
 
 describe('WorldOpportunityGenerator', () => {
+  it('does not spend the pair-evaluation budget on invalid pair draws', () => {
+    const generator = new WorldOpportunityGenerator(variedTerrain);
+    const opportunity = makeStarterOpportunity('late-valid-pair');
+    const buildOpportunity = jest.spyOn(
+      generator as any,
+      'buildOpportunity',
+    ).mockReturnValue(opportunity);
+    const values = [
+      ...Array.from({ length: 48 }, () => 0.1),
+      0.1,
+      0.8,
+    ];
+    const random = jest.fn(() => values.shift() ?? 0.1);
+    const candidates = [
+      { x: 0, y: 0, elevation: 0 },
+      { x: 200, y: 0, elevation: 20 },
+      { x: 2_000, y: 0, elevation: 20 },
+    ];
+
+    expect((generator as any).tryAttempt(
+      config,
+      1,
+      candidates,
+      random,
+    )).toBe(opportunity);
+    expect(random).toHaveBeenCalledTimes(50);
+    expect(buildOpportunity).toHaveBeenCalledTimes(1);
+    expect(buildOpportunity).toHaveBeenCalledWith(
+      config,
+      1,
+      candidates[0],
+      candidates[2],
+    );
+  });
+
+  it('keeps invalid pair draws inside the hard site-candidate draw cap', () => {
+    const generator = new WorldOpportunityGenerator(variedTerrain);
+    const buildOpportunity = jest.spyOn(
+      generator as any,
+      'buildOpportunity',
+    );
+    const random = jest.fn(() => 0.1);
+
+    expect((generator as any).tryAttempt(
+      config,
+      1,
+      [
+        { x: 0, y: 0, elevation: 0 },
+        { x: 2_000, y: 0, elevation: 20 },
+      ],
+      random,
+    )).toBeNull();
+    expect(random).toHaveBeenCalledTimes(
+      MAX_SITE_CANDIDATES_PER_ATTEMPT * 2,
+    );
+    expect(buildOpportunity).not.toHaveBeenCalled();
+  });
+
+  it('continues its bounded deterministic search when acceptance rejects an otherwise-valid opportunity', () => {
+    const considered: StarterOpportunityDef[] = [];
+    const acceptAfterFirst = jest.fn((opportunity: StarterOpportunityDef) => {
+      considered.push(opportunity);
+      return considered.length === 2;
+    });
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      acceptAfterFirst,
+    ).generate(config);
+
+    expect(acceptAfterFirst).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.opportunity).toEqual(considered[1]);
+
+    const replayConsidered: StarterOpportunityDef[] = [];
+    const replay = new WorldOpportunityGenerator(
+      variedTerrain,
+      (opportunity) => {
+        replayConsidered.push(opportunity);
+        return replayConsidered.length === 2;
+      },
+    ).generate(config);
+    expect(replay).toEqual(result);
+    expect(replayConsidered).toEqual(considered);
+  });
+
+  it('honours the existing attempt bound when acceptance rejects every valid opportunity', () => {
+    const reject = jest.fn().mockReturnValue(false);
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      reject,
+    ).generate(config);
+
+    expect(reject).toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'opportunity-exhausted',
+        seed: config.seed,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
+      },
+    });
+  });
+
+  it('isolates an accepted opportunity from hostile predicate mutation', () => {
+    const baseline = new WorldOpportunityGenerator(variedTerrain).generate(
+      config,
+    );
+    const mutateAndAccept = jest.fn((opportunity: any) => {
+      opportunity.sites[0].x += 99_999;
+      opportunity.corridors[0].waypoints[0].y -= 99_999;
+      opportunity.corridors[0].feasibilityWitness.totalCost = -1;
+      opportunity.recommendedCamera.zoom = Number.NaN;
+      return true;
+    });
+
+    const result = new WorldOpportunityGenerator(
+      variedTerrain,
+      mutateAndAccept,
+    ).generate(config);
+
+    expect(mutateAndAccept).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(baseline);
+  });
+
+  it.each([
+    {
+      seed: 'task15-manual-ash-keydiag',
+      expectedCost: null,
+      guaranteesStarterReserve: false,
+    },
+    {
+      seed: 'task15-manual-larch',
+      expectedCost: 64_106,
+      guaranteesStarterReserve: true,
+    },
+  ])('persists $seed as exact production-sequential construction quotes', ({
+    seed,
+    expectedCost,
+    guaranteesStarterReserve,
+  }) => {
+    const terrain = new TerrainGenerator(seed);
+    const creation = WorldManager.tryCreateNew('Sequential detour', seed);
+
+    expect(creation.ok).toBe(true);
+    if (!creation.ok) return;
+    const opportunity = creation.world.starterOpportunity;
+    const detour = opportunity.corridors.find(
+      ({ id }) => id === 'detour',
+    );
+    expect(detour).toBeDefined();
+    if (!detour) return;
+    expect(detour.feasibilityWitness.segments).toHaveLength(2);
+    const [persistedFirst, persistedSecond] =
+      detour.feasibilityWitness.segments;
+
+    const scene = makeScene();
+    const manager = new TrackManager(scene);
+    try {
+      const service = new ConstructionService(
+        manager,
+        new ConstructionAnalyzer(terrain),
+      );
+      const snap = new SnapSystem(manager);
+      const firstStart = snap.snapConstructionPoint(
+        detour.waypoints[0].x,
+        detour.waypoints[0].y,
+      );
+      const firstEnd = snap.snapConstructionPoint(
+        detour.waypoints[1].x,
+        detour.waypoints[1].y,
+      );
+      expect(['none', 'grid']).toContain(firstStart.type);
+      expect(['none', 'grid']).toContain(firstEnd.type);
+      const firstPreview = service.createPreview(
+        firstStart.type === 'grid'
+          ? {
+            x: firstStart.x,
+            y: firstStart.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: firstStart.x,
+            y: firstStart.y,
+            snapped: false,
+            type: 'none',
+          },
+        firstEnd.type === 'grid'
+          ? {
+            x: firstEnd.x,
+            y: firstEnd.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: firstEnd.x,
+            y: firstEnd.y,
+            snapped: false,
+            type: 'none',
+          },
+        'keydiag-first',
+      );
+      expect(firstPreview?.proposal.valid).toBe(true);
+      expect(firstPreview?.quote).not.toBeNull();
+      expect(new PlaceTrackCommand(
+        scene,
+        manager,
+        service,
+        firstPreview!.quote!,
+      ).execute()).toBe(true);
+
+      const installedEndpoint = resolveTrackEndpoint(
+        manager,
+        detour.waypoints[1].x,
+        detour.waypoints[1].y,
+        0,
+      );
+      expect(installedEndpoint).toEqual(expect.objectContaining({
+        trackUUID: 'keydiag-first',
+        endpoint: 'end',
+        open: true,
+      }));
+      const secondEnd = snap.snapConstructionPoint(
+        detour.waypoints[2].x,
+        detour.waypoints[2].y,
+      );
+      expect(['none', 'grid']).toContain(secondEnd.type);
+      const secondPreview = service.createPreview(
+        {
+          ...installedEndpoint!,
+          snapped: true,
+          type: 'endpoint',
+        },
+        secondEnd.type === 'grid'
+          ? {
+            x: secondEnd.x,
+            y: secondEnd.y,
+            snapped: true,
+            type: 'grid',
+          }
+          : {
+            x: secondEnd.x,
+            y: secondEnd.y,
+            snapped: false,
+            type: 'none',
+          },
+        'keydiag-second',
+      );
+
+      expect(secondPreview?.proposal.valid).toBe(true);
+      expect(secondPreview?.quote).not.toBeNull();
+      expect(firstPreview!.proposal).toEqual(expect.objectContaining({
+        geometry: persistedFirst.geometry,
+        verticalProfile: persistedFirst.verticalProfile,
+        structures: persistedFirst.structures,
+        costs: persistedFirst.costs,
+      }));
+      expect(secondPreview!.proposal).toEqual(expect.objectContaining({
+        geometry: persistedSecond.geometry,
+        verticalProfile: persistedSecond.verticalProfile,
+        structures: persistedSecond.structures,
+        costs: persistedSecond.costs,
+      }));
+      expect(firstPreview!.quote!.totalCost).toBe(
+        persistedFirst.costs.total + persistedFirst.topologyCost,
+      );
+      expect(secondPreview!.quote!.totalCost).toBe(
+        persistedSecond.costs.total + persistedSecond.topologyCost,
+      );
+      expect(
+        firstPreview!.quote!.totalCost + secondPreview!.quote!.totalCost,
+      ).toBe(detour.estimatedCost);
+      expect(new PlaceTrackCommand(
+        scene,
+        manager,
+        service,
+        secondPreview!.quote!,
+      ).execute()).toBe(true);
+      const built = WorldManager.world!;
+      const authoritativeCost = built.tracks.reduce(
+        (sum, track) => sum + track.paidBuildCost,
+        0,
+      );
+      expect(authoritativeCost).toBe(detour.estimatedCost);
+      expect(built.company.ledger
+        .filter(({ category }) => category === 'construction-capex')
+        .reduce((sum, entry) => sum + Math.abs(entry.amount), 0))
+        .toBe(authoritativeCost);
+      expect(built.company.cash)
+        .toBe(STANDARD_STARTING_CASH - authoritativeCost);
+      if (expectedCost !== null) {
+        expect(authoritativeCost).toBe(expectedCost);
+      }
+      if (guaranteesStarterReserve) {
+        const cheapest = [...opportunity.corridors].sort((
+          left,
+          right,
+        ) => left.estimatedCost - right.estimatedCost
+          || left.id.localeCompare(right.id))[0];
+        expect(cheapest.estimatedCost).toBeLessThanOrEqual(
+          STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE,
+        );
+        expect(authoritativeCost).toBeLessThanOrEqual(
+          STANDARD_STARTING_CASH - STARTER_ROUTE_RESERVE,
+        );
+        expect(built.company.cash).toBeGreaterThanOrEqual(STARTER_ROUTE_RESERVE);
+      }
+    } finally {
+      WorldManager.reset();
+    }
+  });
+
+  it('exposes the old raw diagnostic route as too steep after real construction snapping', () => {
+    const seed = 'task15-manual-ash-dry';
+    const terrain = new TerrainGenerator(seed);
+    const snap = new SnapSystem(new TrackManager(makeScene()));
+    const rawStart = {
+      x: -3480.908468775451,
+      y: -6246.389408730858,
+    };
+    const rawEnd = {
+      x: -4950.662778654892,
+      y: -7176.117067981511,
+    };
+
+    const snappedStart = snap.snapConstructionPoint(rawStart.x, rawStart.y);
+    const snappedEnd = snap.snapConstructionPoint(rawEnd.x, rawEnd.y);
+    expect(snappedStart).toEqual({
+      x: -3500,
+      y: -6250,
+      snapped: true,
+      type: 'grid',
+    });
+    expect(snappedEnd).toEqual({
+      x: -4950,
+      y: -7200,
+      snapped: true,
+      type: 'grid',
+    });
+
+    const analyzer = new ConstructionAnalyzer(terrain);
+    const uiProposal = analyzer.analyzeDetailed(
+      deriveAutomaticCubic({
+        start: snappedStart,
+        end: snappedEnd,
+      }),
+    ).proposal;
+    expect(uiProposal.valid).toBe(false);
+    expect(uiProposal.reasonCode).toBe('grade');
+    expect(uiProposal.maximumGradePercent)
+      .toBeGreaterThan(ConstructionConfig.MAX_GRADE_PERCENT);
+  });
+
+  it('keeps the known seeded witnesses feasible at construction-grid coordinates', () => {
+    const seed = 'task15-manual-ash-dry';
+    const terrain = new TerrainGenerator(seed);
+    const result = new WorldOpportunityGenerator(terrain).generate({
+      generationConfigVersion: 1,
+      seed,
+      biome: 'temperate',
+      constructionDifficultyId: 'standard',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const analyzer = new ConstructionAnalyzer(terrain);
+    const snap = new SnapSystem(new TrackManager(makeScene()));
+    for (const site of result.opportunity.sites) {
+      const snapped = snap.snapConstructionPoint(site.x, site.y);
+      expect({ x: snapped.x, y: snapped.y })
+        .toEqual({ x: site.x, y: site.y });
+    }
+    for (const corridor of result.opportunity.corridors) {
+      for (const waypoint of corridor.waypoints) {
+        const snapped = snap.snapConstructionPoint(waypoint.x, waypoint.y);
+        expect({ x: snapped.x, y: snapped.y }).toEqual(waypoint);
+      }
+      for (const segment of corridor.feasibilityWitness.segments) {
+        const snappedStart = snap.snapConstructionPoint(
+          segment.geometry.p0.x,
+          segment.geometry.p0.y,
+        );
+        const snappedEnd = snap.snapConstructionPoint(
+          segment.geometry.p3.x,
+          segment.geometry.p3.y,
+        );
+        expect({ x: snappedStart.x, y: snappedStart.y })
+          .toEqual(segment.geometry.p0);
+        expect({ x: snappedEnd.x, y: snappedEnd.y })
+          .toEqual(segment.geometry.p3);
+        expect(analyzer.analyzeDetailed({
+          ...segment.geometry,
+          p0: { x: snappedStart.x, y: snappedStart.y },
+          p3: { x: snappedEnd.x, y: snappedEnd.y },
+        }).proposal.valid)
+          .toBe(true);
+      }
+    }
+
+    const cheapest = [...result.opportunity.corridors].sort((
+      left,
+      right,
+    ) => left.estimatedCost - right.estimatedCost
+      || left.id.localeCompare(right.id))[0];
+    expect(cheapest.feasibilityWitness.segments).toHaveLength(1);
+    const cheapestSegment = cheapest.feasibilityWitness.segments[0];
+    const uiCanonicalStart = snap.snapConstructionPoint(
+      cheapestSegment.geometry.p0.x,
+      cheapestSegment.geometry.p0.y,
+    );
+    const uiCanonicalEnd = snap.snapConstructionPoint(
+      cheapestSegment.geometry.p3.x,
+      cheapestSegment.geometry.p3.y,
+    );
+    const uiProposal = analyzer.analyzeDetailed(deriveAutomaticCubic({
+      start: uiCanonicalStart,
+      end: uiCanonicalEnd,
+    })).proposal;
+
+    expect(uiProposal.valid).toBe(true);
+    expect(uiProposal.reasonCode).toBe('ok');
+    expect(uiProposal.maximumGradePercent)
+      .toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
+  });
+
   it('replays identical sites, corridors, witnesses, attempt, and camera for one seed', () => {
     const generator = new WorldOpportunityGenerator(variedTerrain);
     const first = generator.generate(config);
@@ -150,7 +675,7 @@ describe('WorldOpportunityGenerator', () => {
     ))).toBeCloseTo(ConstructionConfig.MAX_GRADE_PERCENT, 10);
   });
 
-  it('keeps estimates quote-equivalent, chain-priced, and affordable', () => {
+  it('keeps estimates quote-equivalent, chain-priced, and within the starter reserve', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -172,10 +697,34 @@ describe('WorldOpportunityGenerator', () => {
     )).toEqual([0, ENDPOINT_CONNECTION_COST]);
     expect(Math.min(...result.opportunity.corridors.map(
       (corridor) => corridor.estimatedCost,
-    ))).toBeLessThanOrEqual(STANDARD_STARTING_CASH);
+    ))).toBeLessThanOrEqual(890_000);
   });
 
-  it('chains the two-leg detour exactly with a continuous through tangent', () => {
+  it('accepts an exact £890,000 cheapest corridor', () => {
+    const result = generatorWithCheapestCorridorCost(890_000).generate(config);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Math.min(...result.opportunity.corridors.map(
+      (corridor) => corridor.estimatedCost,
+    ))).toBe(890_000);
+  });
+
+  it('rejects a £890,001 cheapest corridor within the fixed attempt bound', () => {
+    const result = generatorWithCheapestCorridorCost(890_001).generate(config);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'opportunity-exhausted',
+        seed: config.seed,
+        attemptsEvaluated: MAX_OPPORTUNITY_ATTEMPTS,
+        maxSiteCandidatesEvaluated: MAX_SITE_CANDIDATES_PER_ATTEMPT,
+      },
+    });
+  });
+
+  it('chains the two-leg detour with exact shared endpoint control geometry', () => {
     const result = new WorldOpportunityGenerator(variedTerrain).generate(config);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -184,20 +733,12 @@ describe('WorldOpportunityGenerator', () => {
       (corridor) => corridor.dominantTradeoff === 'long-flat',
     )!;
     const [first, second] = detour.feasibilityWitness.segments;
+    expect(second.geometry).toEqual(deriveAutomaticCubic({
+      start: first.geometry.p3,
+      end: second.geometry.p3,
+      startOutward: deriveTrackEndpointOutward(first.geometry, 'end'),
+    }));
     expect(first.geometry.p3).toEqual(second.geometry.p0);
-
-    const incoming = {
-      x: first.geometry.p3.x - first.geometry.p2.x,
-      y: first.geometry.p3.y - first.geometry.p2.y,
-    };
-    const outgoing = {
-      x: second.geometry.p1.x - second.geometry.p0.x,
-      y: second.geometry.p1.y - second.geometry.p0.y,
-    };
-    const cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
-    const dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
-    expect(Math.abs(cross)).toBeLessThan(1e-8);
-    expect(dot).toBeGreaterThan(0);
   });
 
   it('centres the recommendation on the complete opportunity envelope', () => {

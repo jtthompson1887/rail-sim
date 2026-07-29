@@ -48,9 +48,9 @@ export class CameraController {
   private lastPinchDist: number = 0;
 
   /**
-   * True while any Phaser drag event is active (a game object is being dragged,
-   * e.g. a track reshape handle or a derailed train body). During this time
-   * single-pointer panning is suppressed to prevent the camera from jumping.
+   * True while any Phaser drag event is active. Suppression additionally
+   * requires explicit object-drag ownership because healthy trains are
+   * draggable for selection but are not editor object drags.
    */
   private _objectDragActive: boolean = false;
 
@@ -88,8 +88,6 @@ export class CameraController {
     // we can suppress single-pointer camera panning during that drag.
     scene.input.on('dragstart', () => {
       this._objectDragActive = true;
-      // Cancel any camera drag that may have started on the same pointerdown
-      this.isDragging = false;
     });
     scene.input.on('dragend', () => {
       this._objectDragActive = false;
@@ -106,7 +104,7 @@ export class CameraController {
       }
 
       // Left-button single-pointer pan (only in pan-allowed mode and no object drag)
-      if (pointer.leftButtonDown() && this._inputLockOwner === 'camera' && !this._objectDragActive && this.pinchPointers.size < 2) {
+      if (pointer.leftButtonDown() && this._inputLockOwner === 'camera' && this.pinchPointers.size < 2) {
         this.isDragging = true;
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
@@ -132,7 +130,8 @@ export class CameraController {
 
     scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       // Stop camera pan the moment an object drag takes over
-      if (this._objectDragActive) {
+      if (this._objectDragActive
+        && this._inputLockOwner === 'object-drag') {
         this.isDragging = false;
       }
 

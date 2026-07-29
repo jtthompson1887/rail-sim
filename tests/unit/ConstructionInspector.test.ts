@@ -48,8 +48,8 @@ function preview(overrides: Record<string, unknown> = {}): any {
       engineeringSubtotal: 300,
       topologyCost: 2_500,
       totalCost: 2_800,
-      cashBefore: 10_000,
-      cashAfter: 7_200,
+      cashBefore: 1_000_000,
+      cashAfter: 997_200,
       structureLengths: {
         surface: 300,
         cut: 0,
@@ -62,6 +62,7 @@ function preview(overrides: Record<string, unknown> = {}): any {
       stale: false,
       message: 'Click or press Enter to build this section.',
       actions: ['confirm', 'backstep', 'cancel'],
+      breachesStarterReserve: false,
       ...overrides,
     },
   };
@@ -85,7 +86,7 @@ describe('ConstructionInspector', () => {
     EventBus.emit('construction:preview', preview());
 
     expect(document.querySelector('[data-testid="construction-primary"]')?.textContent)
-      .toBe('Build £2,800 · Cash after £7,200 · Affordable');
+      .toBe('Build £2,800 · Cash after £997,200 · Affordable');
     expect(document.querySelector('[data-testid="construction-engineering-subtotal"]')?.textContent)
       .toBe('Engineering subtotal £300');
     const detail = document.querySelector('[data-testid="construction-detail"]')?.textContent;
@@ -98,6 +99,54 @@ describe('ConstructionInspector', () => {
     expect(document.querySelectorAll('[data-testid="construction-remedy"]')).toHaveLength(1);
     expect(document.querySelector('[data-testid="construction-remedy"]')?.textContent)
       .toBe('Click or press Enter to build this section.');
+    expect(document.querySelector('[data-testid="construction-objective"]')?.textContent)
+      .toBe(
+        'Connect Managed Forest to Sawmill. Keep £110,000 for a timber train and operating reserve.',
+      );
+  });
+
+  it('shows an amber reserve warning without disabling an affordable build', () => {
+    EventBus.emit('construction:preview', preview({
+      cashAfter: 110_000,
+      breachesStarterReserve: false,
+    }));
+    expect(document.querySelector('[data-testid="construction-remedy"]')?.textContent)
+      .toBe('Click or press Enter to build this section.');
+
+    EventBus.emit('construction:preview', preview({
+      cashAfter: 109_999,
+      breachesStarterReserve: true,
+    }));
+
+    const remedy = document.querySelector(
+      '[data-testid="construction-remedy"]',
+    ) as HTMLElement;
+    expect(remedy.textContent)
+      .toBe('Build leaves less than the £110,000 train and operating reserve');
+    expect(remedy.dataset.tone).toBe('amber');
+    expect((document.querySelector(
+      '[data-testid="construction-confirm"]',
+    ) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows a hard construction blocker ahead of the reserve advisory', () => {
+    EventBus.emit('construction:preview', preview({
+      affordable: true,
+      canConfirm: false,
+      breachesStarterReserve: true,
+      message: 'Maximum grade exceeds the engineering limit.',
+      actions: ['backstep', 'cancel'],
+    }));
+
+    const remedy = document.querySelector(
+      '[data-testid="construction-remedy"]',
+    ) as HTMLElement;
+    expect(remedy.textContent)
+      .toBe('Maximum grade exceeds the engineering limit.');
+    expect(remedy.dataset.tone).toBe('default');
+    expect((document.querySelector(
+      '[data-testid="construction-confirm"]',
+    ) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('emits display-only intents and never confirms invalid or unaffordable work', () => {

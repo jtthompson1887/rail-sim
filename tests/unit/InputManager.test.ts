@@ -1,4 +1,7 @@
-import { InputManager } from '../../src/systems/InputManager';
+import {
+  InputManager,
+  isGameplayInputFocused,
+} from '../../src/systems/InputManager';
 import { TrainManager } from '../../src/managers/TrainManager';
 import Train from '../../src/entities/Train';
 import RailTrack from '../../src/entities/RailTrack';
@@ -235,5 +238,96 @@ describe('InputManager drag recovery regression', () => {
       y: -84,
     });
     expect(scene.cameras.main.getWorldPoint).toHaveBeenCalledWith(400, 200);
+  });
+
+  it('does not let held keyboard or mobile throttle repower an operations-locked train', () => {
+    const train = trainManager.createInitialTrain('locked-train');
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = 0;
+
+    inputManager.handleTrainMovement(
+      train,
+      new Set(['locked-train']),
+    );
+
+    expect(train.enginePower).toBe(0);
+
+    (inputManager as any).wKey.isDown = false;
+    EventBus.emit('mobile:throttle', { value: 1 });
+    inputManager.handleTrainMovement(
+      train,
+      new Set(['locked-train']),
+    );
+
+    expect(train.enginePower).toBe(0);
+  });
+
+  it.each([
+    ['button', null],
+    ['input', null],
+    ['select', null],
+    ['textarea', null],
+    ['span', 'construction-inspector'],
+    ['span', 'facility-inspector'],
+    ['span', 'vehicle-purchase-panel'],
+    ['span', 'train-inspector'],
+    ['span', 'freight-objective'],
+  ])('recognises focused %s controls inside %s', (tag, testId) => {
+    const parent = document.createElement('section');
+    if (testId) parent.dataset.testid = testId;
+    const child = document.createElement(tag);
+    parent.append(child);
+    document.body.append(parent);
+
+    expect(isGameplayInputFocused(child)).toBe(true);
+    expect(isGameplayInputFocused(document.body)).toBe(false);
+    parent.remove();
+  });
+
+  it('shields W/S over the freight card but not the removed first-route selector', () => {
+    const train = trainManager.createInitialTrain('objective-focus-train');
+    const current = document.createElement('section');
+    current.dataset.testid = 'freight-objective';
+    const focused = document.createElement('span');
+    focused.tabIndex = 0;
+    current.append(focused);
+    document.body.append(current);
+    focused.focus();
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = -0.25;
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+
+    current.remove();
+    const removed = document.createElement('section');
+    removed.dataset.testid = 'first-route-objective';
+    const legacyFocused = document.createElement('span');
+    legacyFocused.tabIndex = 0;
+    removed.append(legacyFocused);
+    document.body.append(removed);
+    legacyFocused.focus();
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(GameConfig.TRAIN.ENGINE_POWER);
+    removed.remove();
+  });
+
+  it('sets no new keyboard or mobile throttle while gameplay input is focused', () => {
+    const train = trainManager.createInitialTrain('focused-train');
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    (inputManager as any).wKey.isDown = true;
+    train.enginePower = -0.25;
+
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+
+    (inputManager as any).wKey.isDown = false;
+    EventBus.emit('mobile:throttle', { value: 1 });
+    inputManager.handleTrainMovement(train);
+    expect(train.enginePower).toBe(-0.25);
+    input.remove();
   });
 });

@@ -31,13 +31,28 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Expose scene identity and derail counter for E2E tests
-    window.__railSimScene = 'MenuScene';
-    window.__railSimMenuDerailCount = 0;
+    this.railTracks = [];
+    this.trains = [];
+    this.trainStartTracks = [];
+    this.trainEnginePowers = [];
+    this.previewSolvers = [];
+    this.camControl = undefined;
+
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimMenuDerailCount = 0;
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      window.__railSimMenuTrains = undefined;
-      window.__railSimMenuTracks = undefined;
+      if (
+        typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+        && __RAIL_SIM_TEST_CONTROLS__
+      ) {
+        window.__railSimMenuTrains = undefined;
+        window.__railSimMenuTracks = undefined;
+      }
     });
 
     const { width, height } = this.scale;
@@ -107,8 +122,13 @@ export default class MenuScene extends Phaser.Scene {
     this.trainEnginePowers.push(42);
     this.previewSolvers.push(new TrackFlowSolver(this.railTracks, train2));
 
-    window.__railSimMenuTrains = this.trains;
-    window.__railSimMenuTracks = this.railTracks;
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimMenuTrains = this.trains;
+      window.__railSimMenuTracks = this.railTracks;
+    }
 
     // Right-side menu panel
     const panelWidth = width * 0.42;
@@ -207,6 +227,12 @@ export default class MenuScene extends Phaser.Scene {
 
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('WorldSelectScene'));
     this.input.keyboard.once('keydown-ENTER', () => this.scene.start('WorldSelectScene'));
+    if (
+      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+      && __RAIL_SIM_TEST_CONTROLS__
+    ) {
+      window.__railSimScene = 'MenuScene';
+    }
   }
 
   update(time: number, delta: number): void {
@@ -221,7 +247,12 @@ export default class MenuScene extends Phaser.Scene {
         this.recoverTrain(this.trains[i], i);
         // Only count permanent derailments (where recovery itself fails).
         if (this.trains[i].derailed) {
-          window.__railSimMenuDerailCount += 1;
+          if (
+            typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
+            && __RAIL_SIM_TEST_CONTROLS__
+          ) {
+            window.__railSimMenuDerailCount += 1;
+          }
         }
       }
     }

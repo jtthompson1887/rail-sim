@@ -28,6 +28,7 @@ export interface ConstructionPreviewModel {
   readonly stale: boolean;
   readonly message: string;
   readonly actions: ReadonlyArray<'confirm' | 'backstep' | 'cancel'>;
+  readonly breachesStarterReserve: boolean;
 }
 
 export interface ConstructionPreviewEvent {

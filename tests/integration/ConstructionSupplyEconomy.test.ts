@@ -21,6 +21,12 @@ import {
 } from '../../src/economy/IndustrySystem';
 import { transferProduct } from '../../src/economy/Inventory';
 import { applyConstructionTransaction } from '../../src/systems/ConstructionEconomy';
+import {
+  ECONOMY_TICK_MS,
+  EconomySystem,
+} from '../../src/economy/EconomySystem';
+import { WorldManager } from '../../src/managers/WorldManager';
+import { installFirstFreightRoutePhase } from '../fixtures/FirstFreightRouteFixture';
 
 const requireDefinition = (id: string): FacilityDefinition => {
   const definition = INITIAL_FACILITY_DEFINITIONS.find(
@@ -426,11 +432,61 @@ describe('Integration: complete construction-supply economy', () => {
     )).toBe(finalCompany.cash);
     expect(finalCompany.cash).toBe(480_900);
     expect(summariseProfitAndLoss(finalCompany, 1, 3)).toEqual({
-      revenue: 1_200,
+      deliveryRevenue: 1_200,
+      contractBonuses: 0,
       operatingExpenses: 300,
-      operatingProfit: 900,
+      railwayOperatingProfit: 900,
       capitalExpenditure: 20_000,
       cashFlow: -19_100,
     });
+  });
+
+  it('posts exactly one aggregate running-cost entry per tick and preserves lifetime attribution', () => {
+    localStorage.clear();
+    const world = installFirstFreightRoutePhase({ cash: 1_000 });
+    const economy = new EconomySystem(WorldManager);
+    const runtime = [{
+      trainId: 'train-1',
+      trackUUID: 'forest-sawmill-track',
+      trackT: 0.5,
+      facing: 1 as const,
+      x: 0,
+      y: 0,
+      speedWorldUnitsPerSecond: 12,
+      throttle: 1 as const,
+      derailed: false,
+    }];
+
+    for (let tick = 1; tick <= 3; tick += 1) {
+      expect(economy.update(
+        ECONOMY_TICK_MS,
+        true,
+        runtime,
+      ).ticksAdvanced).toBe(1);
+      expect(world.trains[0].operations.lifetimeRunningCost).toBe(tick * 20);
+    }
+
+    expect(world.company.cash).toBe(940);
+    expect(world.company.ledger.filter(
+      ({ category }) => category === 'train-running-cost',
+    )).toEqual([
+      expect.objectContaining({
+        tick: 1,
+        amount: -20,
+        referenceId: 'active-trains:1',
+      }),
+      expect.objectContaining({
+        tick: 2,
+        amount: -20,
+        referenceId: 'active-trains:2',
+      }),
+      expect.objectContaining({
+        tick: 3,
+        amount: -20,
+        referenceId: 'active-trains:3',
+      }),
+    ]);
+    WorldManager.reset();
+    localStorage.clear();
   });
 });

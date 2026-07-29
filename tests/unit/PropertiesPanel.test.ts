@@ -27,20 +27,16 @@ describe('PropertiesPanel', () => {
     panel.destroy();
   });
 
-  it('destroys the previous selector objects before rebuilding after a click', () => {
+  it('does not expose legacy locomotive or passenger selectors for the one freight SKU', () => {
     EventBus.emit('tool:changed', { tool: 'place-vehicle' });
-    const initialObjects = [...(panel as any).vehicleTypeObjects];
-    const firstButton = initialObjects[0];
-    const pointerDown = firstButton.on.mock.calls.find(
-      ([event]: [string]) => event === 'pointerdown',
-    )[1];
 
-    pointerDown();
-
-    for (const object of initialObjects) {
-      expect(object.destroy).toHaveBeenCalled();
-    }
-    expect((panel as any).vehicleTypeObjects).toHaveLength(initialObjects.length);
+    expect((panel as any).vehicleTypeObjects).toEqual([]);
+    expect((panel as any).isVisible).toBe(false);
+    expect(scene.add.text.mock.calls.some(
+      ([, , text]: [number, number, string]) => (
+        text === 'Locomotive' || text === 'Passenger Carriage'
+      ),
+    )).toBe(false);
   });
 
   it('keeps selection-only actions hidden for an empty selection', () => {
@@ -53,30 +49,19 @@ describe('PropertiesPanel', () => {
     )).toBe(false);
   });
 
-  it.each([
-    ['place-vehicle', 'vehicleTypeObjects'],
-  ])('hides and disables %s controls in play, then restores them in create', (tool, objectsKey) => {
-    EventBus.emit('tool:changed', { tool: tool as any });
-    const beforePlay = [...(panel as any)[objectsKey]];
-    expect(beforePlay.length).toBeGreaterThan(0);
+  it('keeps the legacy vehicle selector absent across play/create visibility', () => {
+    EventBus.emit('tool:changed', { tool: 'place-vehicle' });
 
     (panel as any).setVisible(false);
 
     const container = scene.add.container.mock.results[0].value;
     expect(container.setVisible).toHaveBeenLastCalledWith(false);
-    const interactiveObjects = beforePlay.filter((object: any) =>
-      object.setInteractive.mock.calls.length > 0,
-    );
-    expect(interactiveObjects.length).toBeGreaterThan(0);
-    for (const object of interactiveObjects) {
-      expect(object.disableInteractive).toHaveBeenCalled();
-    }
 
     EventBus.emit('selection:changed', { uuids: [] });
     (panel as any).setVisible(true);
 
-    const afterCreate = (panel as any)[objectsKey];
-    expect(afterCreate.length).toBeGreaterThan(0);
+    expect((panel as any).vehicleTypeObjects).toEqual([]);
+    expect((panel as any).isVisible).toBe(false);
     expect(container.setVisible).toHaveBeenLastCalledWith(true);
     expect((panel as any).deleteBtn.setVisible).toHaveBeenLastCalledWith(false);
   });
@@ -396,16 +381,16 @@ describe('PropertiesPanel', () => {
     expect((panel as any).isVisible).toBe(false);
   });
 
-  it('yields the right edge to a facility and restores the active tool after deselection', () => {
+  it('leaves the one-SKU purchase UI to its dedicated panel around facility selection', () => {
     EventBus.emit('tool:changed', { tool: 'place-vehicle' });
-    expect((panel as any).isVisible).toBe(true);
+    expect((panel as any).isVisible).toBe(false);
 
     EventBus.emit('facility:selected', { facilityId: 'sawmill' });
     expect((panel as any).isVisible).toBe(false);
 
     EventBus.emit('facility:deselected', { facilityId: 'sawmill' });
-    expect((panel as any).isVisible).toBe(true);
-    expect((panel as any).vehicleTypeObjects.length).toBeGreaterThan(0);
+    expect((panel as any).isVisible).toBe(false);
+    expect((panel as any).vehicleTypeObjects).toEqual([]);
   });
 
   it('does not reopen track properties from a late deletion review while a facility owns the inspector', () => {

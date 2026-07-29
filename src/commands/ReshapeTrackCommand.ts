@@ -14,6 +14,7 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
   private beforeDef: TrackDef;
   private afterDef: TrackDef;
   private readonly worldIdentity: WorldData | null;
+  private expectedRootRevision: number;
   private expectedConstructionRevision: number;
 
   constructor(
@@ -27,6 +28,7 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
     this.beforeDef = before;
     this.afterDef = after;
     this.worldIdentity = WorldManager.world;
+    this.expectedRootRevision = this.worldIdentity?.revision ?? -1;
     this.expectedConstructionRevision =
       this.worldIdentity?.constructionRevision ?? -1;
   }
@@ -35,16 +37,20 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
     return this.worldIdentity
       ? {
           authority: this.worldIdentity,
-          revision: this.expectedConstructionRevision,
+          rootRevision: this.expectedRootRevision,
+          constructionRevision: this.expectedConstructionRevision,
         }
       : null;
   }
 
   rebaseRevisionContext(context: CommandRevisionContext): boolean {
     if (context.authority !== this.worldIdentity
-      || !Number.isSafeInteger(context.revision)
-      || context.revision < 0) return false;
-    this.expectedConstructionRevision = context.revision;
+      || !Number.isSafeInteger(context.rootRevision)
+      || context.rootRevision < 0
+      || !Number.isSafeInteger(context.constructionRevision)
+      || context.constructionRevision < 0) return false;
+    this.expectedRootRevision = context.rootRevision;
+    this.expectedConstructionRevision = context.constructionRevision;
     return true;
   }
 
@@ -54,11 +60,19 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
   private apply(def: TrackDef): boolean {
     const track = this.trackManager.getTrack(this.uuid);
     if (!track || WorldManager.world !== this.worldIdentity
+      || WorldManager.world?.revision !== this.expectedRootRevision
       || WorldManager.world?.constructionRevision
         !== this.expectedConstructionRevision
       || !WorldManager.canAdvanceRevision()) return false;
     const current = WorldManager.world!.tracks.find((item) => item.uuid === this.uuid);
     if (!current || !this.trackManager.applyTrackDef(def)) return false;
+    if (WorldManager.world !== this.worldIdentity
+      || WorldManager.world.revision !== this.expectedRootRevision
+      || WorldManager.world.constructionRevision
+        !== this.expectedConstructionRevision) {
+      this.trackManager.applyTrackDef(current);
+      return false;
+    }
     if (!WorldManager.applyConstructionBatch(
       this.expectedConstructionRevision,
       (draft) => draft.updateTrack(def),
@@ -66,6 +80,7 @@ export class ReshapeTrackCommand implements RevisionAwareCommand {
       this.trackManager.applyTrackDef(current);
       return false;
     }
+    this.expectedRootRevision += 1;
     this.expectedConstructionRevision += 1;
     return true;
   }

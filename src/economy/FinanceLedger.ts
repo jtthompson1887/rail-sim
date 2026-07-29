@@ -46,9 +46,10 @@ export type LedgerPostResult =
   };
 
 export interface ProfitAndLoss {
-  revenue: number;
+  deliveryRevenue: number;
+  contractBonuses: number;
   operatingExpenses: number;
-  operatingProfit: number;
+  railwayOperatingProfit: number;
   capitalExpenditure: number;
   cashFlow: number;
 }
@@ -362,7 +363,8 @@ export const summariseProfitAndLoss = (
     throw new RangeError('Ledger period must use ordered safe integer ticks.');
   }
 
-  let revenue = 0;
+  let deliveryRevenue = 0;
+  let contractBonuses = 0;
   let operatingExpenses = 0;
   let capitalExpenditure = 0;
   let cashFlow = 0;
@@ -371,8 +373,10 @@ export const summariseProfitAndLoss = (
     if (entry.tick < fromTick || entry.tick > throughTick) return;
 
     cashFlow = checkedTotal(cashFlow, entry.amount);
-    if (entry.ledgerClass === 'revenue') {
-      revenue = checkedTotal(revenue, entry.amount);
+    if (entry.category === 'delivery-revenue') {
+      deliveryRevenue = checkedTotal(deliveryRevenue, entry.amount);
+    } else if (entry.category === 'contract-bonus') {
+      contractBonuses = checkedTotal(contractBonuses, entry.amount);
     } else if (entry.ledgerClass === 'operating-expense') {
       operatingExpenses = checkedTotal(operatingExpenses, -entry.amount);
     } else if (entry.ledgerClass === 'capital-expenditure') {
@@ -384,9 +388,13 @@ export const summariseProfitAndLoss = (
   });
 
   return {
-    revenue,
+    deliveryRevenue,
+    contractBonuses,
     operatingExpenses,
-    operatingProfit: checkedTotal(revenue, -operatingExpenses),
+    railwayOperatingProfit: checkedTotal(
+      deliveryRevenue,
+      -operatingExpenses,
+    ),
     capitalExpenditure,
     cashFlow,
   };
