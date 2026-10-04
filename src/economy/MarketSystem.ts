@@ -134,7 +134,8 @@ export const quoteLocalProduct = (
     return { ok: false, code: 'invalid-market-state' };
   }
   const regionalDemandBps =
-    market.regionalDemandBpsByProduct[productId];
+    market.regionalDemandBpsByProduct[productId]
+      ?? (product.marketSector === 'construction' ? undefined : BASIS_POINTS);
   if (!isBpsWithin(
     regionalDemandBps,
     REGIONAL_MIN_BPS,
@@ -161,10 +162,10 @@ export const quoteLocalProduct = (
     PRESSURE_MAX_BPS,
   );
   const factors = [
-    {
+    ...(product.marketSector === 'construction' ? [{
       id: 'global-construction' as const,
       basisPoints: market.constructionIndexBps,
-    },
+    }] : []),
     {
       id: 'regional-demand' as const,
       basisPoints: regionalDemandBps,

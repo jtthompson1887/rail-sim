@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import {
-  PIDController,
   projectVector,
   qVec,
   isCurveTight,
@@ -10,50 +9,6 @@ import {
 
 // Phaser is mocked via __mocks__/phaser.js, which provides a real Vector2
 const Vector2 = Phaser.Math.Vector2 as any;
-
-describe('PIDController', () => {
-  it('constructs with default gains', () => {
-    const pid = new PIDController();
-    expect(pid).toBeDefined();
-  });
-
-  it('constructs with custom gains', () => {
-    const pid = new PIDController(1, 0.1, 0.5);
-    expect(pid).toBeDefined();
-  });
-
-  it('calculate() returns proportional output when I and D terms are zero', () => {
-    const pid = new PIDController(1, 0, 0);
-    pid.setCurrentDelta(1);
-    const result = pid.calculate(10);
-    // With KP=1, KI=0, KD=0, integral=0, prevError=0, output = 1*10 = 10
-    expect(result).toBeCloseTo(10);
-  });
-
-  it('calculate() applies derivative term to dampen oscillation', () => {
-    const pid = new PIDController(0, 0, 1);
-    pid.setCurrentDelta(1);
-    const first = pid.calculate(5);  // prevError=0 → d = (5-0)/1 = 5
-    expect(first).toBeCloseTo(5);
-    const second = pid.calculate(5); // prevError=5 → d = (5-5)/1 = 0
-    expect(second).toBeCloseTo(0);
-  });
-
-  it('calculate() accumulates integral', () => {
-    const pid = new PIDController(0, 1, 0);
-    pid.setCurrentDelta(1);
-    pid.calculate(2); // integral = 2
-    const result = pid.calculate(2); // integral = 4, output = 1*4 = 4
-    expect(result).toBeCloseTo(4);
-  });
-
-  it('setCurrentDelta() affects derivative calculation', () => {
-    const pid = new PIDController(0, 0, 1);
-    pid.setCurrentDelta(2);
-    const result = pid.calculate(4); // d = (4-0)/2 = 2
-    expect(result).toBeCloseTo(2);
-  });
-});
 
 describe('qVec()', () => {
   it('creates a zero vector by default', () => {

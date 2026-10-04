@@ -64,12 +64,6 @@ describe('Carriage', () => {
       expect(carriage.currentTrack).toBeNull();
     });
 
-    it('has PID controllers', () => {
-      const carriage = new Carriage(scene, 0, 0);
-      expect(carriage.pidControllerFront).toBeDefined();
-      expect(carriage.pidControllerRear).toBeDefined();
-    });
-
     it('passenger capacity is 40', () => {
       const carriage = new Carriage(scene, 0, 0);
       expect(carriage.passengerCapacity).toBe(40);
@@ -168,23 +162,6 @@ describe('Carriage', () => {
     it('unload returns 0 when no passengers', () => {
       const carriage = new Carriage(scene, 0, 0);
       expect(carriage.unloadPassengers()).toBe(0);
-    });
-  });
-
-  describe('update()', () => {
-    it('does not throw when called with a stopped carriage', () => {
-      const carriage = new Carriage(scene, 0, 0);
-      expect(() => carriage.update(0, 16)).not.toThrow();
-    });
-
-    it('does not apply self-propulsion', () => {
-      const carriage = new Carriage(scene, 100, 100);
-      carriage.enginePower = 0.1;
-      const body = carriage.getMatterBody();
-      const forceBefore = { x: (body.body as any).force.x, y: (body.body as any).force.y };
-      carriage.update(0, 16);
-      expect((body.body as any).force.x).toBe(forceBefore.x);
-      expect((body.body as any).force.y).toBe(forceBefore.y);
     });
   });
 

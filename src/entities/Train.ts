@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
-import { PIDController } from '../utils/math';
 import type RailTrack from './RailTrack';
-import { applyForceToGameObject, matterScaling } from '../utils/physics';
+import { matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { IVehicle, VehicleType } from '../config/VehicleTypes';
+import type { PersistedVehicleDynamics } from '../config/WorldData';
 
 interface TrainMatterImage extends Phaser.Physics.Matter.Image {
   parentTrain?: Train;
@@ -13,8 +13,6 @@ interface TrainMatterImage extends Phaser.Physics.Matter.Image {
 export default class Train extends Phaser.GameObjects.Container implements IVehicle {
   private _trainBody!: TrainMatterImage;
   private texture: string;
-  private readonly _pidControllerFront: PIDController;
-  private readonly _pidControllerRear: PIDController;
   private _currentTrack: RailTrack | null = null;
   private _derailed: boolean = false;
   private _enginePower: number = 0;
@@ -23,9 +21,9 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   private readonly uuid: string;
   private passengers: number = 0;
   readonly freightSetId: string | null;
+  persistedDynamics: PersistedVehicleDynamics | null = null;
   readonly vehicleType: VehicleType = 'locomotive';
   readonly passengerCapacity: number = 20;
-  public debugGraphics!: Phaser.GameObjects.Graphics;
 
   constructor(
     scene: Phaser.Scene,
@@ -40,8 +38,6 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
     this.texture = 'train1';
     this.uuid = id ?? crypto.randomUUID();
     this.freightSetId = freightSetId;
-    this._pidControllerFront = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
-    this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);
 
     this._trainBody = scene.matter.add.image(x, y, this.texture, undefined) as TrainMatterImage;
@@ -59,19 +55,6 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
     this._trainBody.setInteractive({ cursor: 'pointer' });
     this._trainBody.parentTrain = this;
 
-    this.debugGraphics = this.scene.add.graphics();
-    this.debugGraphics.setDepth(1000);
-  }
-
-  update(time: number, delta: number): void {
-    this.pidControllerRear.setCurrentDelta(Math.max(delta, 1));
-    this.pidControllerFront.setCurrentDelta(Math.max(delta, 1));
-    if (!this.derailed && this._enginePower !== 0) {
-      const angle = this._trainBody.rotation;
-      const forceMagnitude = this._enginePower;
-      const forceVec = new Phaser.Math.Vector2(Math.cos(angle) * forceMagnitude, Math.sin(angle) * forceMagnitude);
-      applyForceToGameObject(this._trainBody, forceVec);
-    }
   }
 
   getUUID(): string {
@@ -128,14 +111,6 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
     return this._trainBody;
   }
 
-  get pidControllerFront(): PIDController {
-    return this._pidControllerFront;
-  }
-
-  get pidControllerRear(): PIDController {
-    return this._pidControllerRear;
-  }
-
   getPassengerCount(): number {
     return this.passengers;
   }
@@ -155,7 +130,7 @@ export default class Train extends Phaser.GameObjects.Container implements IVehi
   /**
    * Reset a derailed train back to its normal running state.
    * Restores texture, scale, mass, and zeroes velocity so the
-   * TrackFlowSolver can guide the train back onto the track.
+   * The manager recreates its bogie-constrained state after recovery.
    */
   recover(): void {
     if (!this._derailed) return;

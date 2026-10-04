@@ -63,24 +63,47 @@ const makeFacility = (
 
 export const makeFreightTrainDef = (
   overrides: Partial<TrainDef> = {},
-): TrainDef => ({
-  id: 'train-1',
-  freightSetId: 'flatbed-freight-set',
-  trackUUID: 'forest-sawmill-track',
-  trackT: 0.1,
-  facing: 1,
-  cargo: null,
-  operations: {
-    currentTripRevenue: 0,
-    currentTripRunningCost: 0,
-    lastTripRevenue: 0,
-    lastTripRunningCost: 0,
-    lifetimeDeliveredUnits: 0,
-    lifetimeRevenue: 0,
-    lifetimeRunningCost: 0,
-  },
-  ...overrides,
-});
+): TrainDef => {
+  const base: TrainDef = {
+    id: 'train-1',
+    freightSetId: 'flatbed-freight-set',
+    trackUUID: 'forest-sawmill-track',
+    trackT: 0.1,
+    facing: 1,
+    cargo: null,
+    operations: {
+      currentTripRevenue: 0,
+      currentTripRunningCost: 0,
+      lastTripRevenue: 0,
+      lastTripRunningCost: 0,
+      lifetimeDeliveredUnits: 0,
+      lifetimeRevenue: 0,
+      lifetimeRunningCost: 0,
+    },
+    dynamics: {
+      mode: 'on-rail',
+      trackUUID: 'forest-sawmill-track',
+      distance: 0,
+      direction: 1,
+      speedMps: 0,
+      consistId: 'consist-train-1',
+      consistOrder: 0,
+    },
+  };
+  const merged = { ...base, ...overrides };
+  if (!overrides.dynamics) {
+    merged.dynamics = {
+      mode: 'on-rail',
+      trackUUID: merged.trackUUID,
+      distance: 0,
+      direction: merged.facing,
+      speedMps: 0,
+      consistId: `consist-${merged.id}`,
+      consistOrder: 0,
+    };
+  }
+  return merged;
+};
 
 export const makeFirstFreightRouteWorld = (): WorldData => {
   const world = createEmptyWorld(

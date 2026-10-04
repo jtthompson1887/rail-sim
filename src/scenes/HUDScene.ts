@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GameStateManager } from '../managers/GameStateManager';
+import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
 import { isMobileWidth, responsiveFontSize, touchSafeSize, scalePx } from '../utils/responsive';
 
@@ -10,6 +11,9 @@ export default class HUDScene extends Phaser.Scene {
   private modeLabelText!: Phaser.GameObjects.Text;
   private mobileControls: Phaser.GameObjects.GameObject[] = [];
   private mobileThrottleHeld = false;
+  private readonly regionalEnabledHandler = () => {
+    if (this.isRegionalWorld()) this.destroyMobileControls(true);
+  };
 
   constructor() {
     super({ key: 'HUDScene' });
@@ -72,9 +76,11 @@ export default class HUDScene extends Phaser.Scene {
       this.createMobileControls();
     }
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    EventBus.on('railway:enabled', this.regionalEnabledHandler);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.destroyMobileControls(true);
       this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+      EventBus.off('railway:enabled', this.regionalEnabledHandler);
     });
   }
 
@@ -127,6 +133,11 @@ export default class HUDScene extends Phaser.Scene {
     });
   }
 
+  private isRegionalWorld(): boolean {
+    const world = WorldManager.world;
+    return !!world?.management && world.id === GameStateManager.currentWorldId;
+  }
+
   private destroyMobileControls(neutralize: boolean): void {
     if (neutralize && this.mobileThrottleHeld) {
       this.emitMobileThrottle(0);
@@ -147,6 +158,7 @@ export default class HUDScene extends Phaser.Scene {
     width = this.scale.width,
     height = this.scale.height,
   ): void {
+    if (this.isRegionalWorld()) return;
 
     // Button size: 15% of viewport width, but at least MIN_TOUCH_TARGET_PX and
     // no more than 120 px, so they're comfortably tappable on any screen.

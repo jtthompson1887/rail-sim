@@ -12,7 +12,7 @@ import { createCompanyState } from '../../src/economy/FinanceLedger';
 
 function makeWorld(id: string, name: string, seed: string, timestamp: number): WorldData {
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -81,7 +81,7 @@ describe('SaveService', () => {
     expect(loaded.economy).toEqual(world.economy);
     expect(loaded.constructionRevision).toBe(0);
     expect((loaded as any).operationsRevision).toBe(0);
-    expect(loaded.schemaVersion).toBe(10);
+    expect(loaded.schemaVersion).toBe(11);
     expect((loaded as any).freightProgress).toEqual(world.freightProgress);
     expect(loaded).not.toHaveProperty('firstRouteProgress');
     expect(loaded.tracks[0].paidBuildCost).toBe(12_345);

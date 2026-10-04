@@ -62,6 +62,8 @@ const loadedTrain = (
   trackUUID: 'track-1',
   trackT: 0,
   facing: 1,
+  dynamics: { mode: 'on-rail', trackUUID: 'track-1', distance: 0, direction: 1,
+    speedMps: 0, consistId: 'consist-train-1', consistOrder: 0 },
   cargo: {
     productId: 'logs',
     units,

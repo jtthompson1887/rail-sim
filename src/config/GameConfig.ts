@@ -17,16 +17,32 @@ export const GameConfig = {
     SCALE_Y: 0.15,
     DERAIL_SCALE: 0.4,
   },
+  VEHICLES: {
+    LOCOMOTIVE: {
+      RENDER_SCALE_X: 0.15,
+      RENDER_SCALE_Y: 0.15,
+      MASS_KG: 180_000,
+      BODY_LENGTH_WORLD_UNITS: 200,
+      WHEELBASE_WORLD_UNITS: 140,
+      COUPLER_OFFSET_WORLD_UNITS: 105,
+      MAX_TRACTIVE_EFFORT_N: 320_000,
+      MAX_BRAKE_FORCE_N: 420_000,
+    },
+    PASSENGER_CARRIAGE: {
+      RENDER_SCALE_X: 0.15,
+      RENDER_SCALE_Y: 0.15,
+      MASS_KG: 55_000,
+      BODY_LENGTH_WORLD_UNITS: 240,
+      WHEELBASE_WORLD_UNITS: 180,
+      COUPLER_OFFSET_WORLD_UNITS: 125,
+      MAX_TRACTIVE_EFFORT_N: 0,
+      MAX_BRAKE_FORCE_N: 180_000,
+    },
+  },
   TRACK: {
     RAIL_TRACK_WIDTH: 866 * 0.85,
     SCALE: 0.05,
     MAX_CLOSE_DISTANCE: 100,
-    /** Minimum distance advantage (px) a candidate track must have over the current track before a switch is allowed. */
-    SWITCH_HYSTERESIS: 20,
-    /** Minimum time (ms) that must elapse between automatic track switches to prevent rapid oscillation. */
-    SWITCH_COOLDOWN_MS: 250,
-    /** Minimum lateral separation (px) below which a candidate track is ignored when the train is already on a track. */
-    PARALLEL_DEADBAND: 30,
     /** Minimum allowed Bézier curve radius in world-units (px). Tighter curves fail validation. */
     MIN_CURVE_RADIUS_PX: 150,
     /** Maximum angle difference (degrees) allowed at a track–track join before flagging as misaligned. */
@@ -39,8 +55,6 @@ export const GameConfig = {
     MAX_CONTROL_DISTANCE_PX: 400,
   },
   JUNCTION: { LENGTH: 400, LEFT_ANGLE_DEG: -15, RIGHT_ANGLE_DEG: 15 },
-  FORCE: { GUIDE_CONSTANT: 0.002 },
-  PID: { KP: 0.5, KI: 0.0, KD: 0.7 },
   GENERATION: {
     MAIN: { SECTIONS: 4, MIN_LENGTH: 400, MAX_LENGTH: 800, CURVE_PROB: 0.4, MIN_ANGLE: 15, MAX_ANGLE: 45, SMOOTHNESS: 0.8 },
     BRANCH: { SECTIONS: 4, MIN_LENGTH: 300, MAX_LENGTH: 600, CURVE_PROB: 0.6, MIN_ANGLE: 20, MAX_ANGLE: 60, SMOOTHNESS: 0.7 }

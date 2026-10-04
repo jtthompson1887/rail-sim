@@ -40,12 +40,6 @@ describe('GameConfig', () => {
     expect(GameConfig.JUNCTION.LENGTH).toBeGreaterThan(0);
   });
 
-  it('has valid PID coefficients', () => {
-    expect(GameConfig.PID.KP).toBeGreaterThan(0);
-    expect(GameConfig.PID.KI).toBeGreaterThanOrEqual(0);
-    expect(GameConfig.PID.KD).toBeGreaterThan(0);
-  });
-
   it('has valid audio volumes between 0 and 1', () => {
     expect(GameConfig.AUDIO.BGM_VOLUME).toBeGreaterThan(0);
     expect(GameConfig.AUDIO.BGM_VOLUME).toBeLessThanOrEqual(1);
@@ -199,7 +193,7 @@ describe('LevelData', () => {
 });
 
 describe('WorldData current-schema validation', () => {
-  it('creates schema 10 with the exact regional freight progress authority', () => {
+  it('creates schema 11 with the exact regional freight progress authority', () => {
     const world = createEmptyWorld(
       'Mineral freight',
       'mineral-seed',
@@ -207,7 +201,7 @@ describe('WorldData current-schema validation', () => {
       makeStarterOpportunity('mineral-seed'),
     );
 
-    expect(world.schemaVersion).toBe(10);
+    expect(world.schemaVersion).toBe(11);
     expect(world.freightProgress).toEqual({
       progressVersion: 1,
       profitableLogDeliveryCompleted: false,

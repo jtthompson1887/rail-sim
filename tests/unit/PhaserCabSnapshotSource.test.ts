@@ -115,6 +115,15 @@ describe('PhaserCabSnapshotSource', () => {
     expect(result.vehicle!.throttle).toBe(-1);
   });
 
+  it('reads authoritative rail speed when automatic train bodies are static', () => {
+    const train = { ...createTrain({ vx: 0, vy: 0 }), persistedDynamics: {
+      mode: 'on-rail', trackUUID: 'route', distance: 100, direction: 1,
+      speedMps: 12.5, consistId: 'consist', consistOrder: 0,
+    } };
+    const result = createSource(train).capture(0, 16);
+    expect(result.vehicle!.speedMps).toBe(12.5);
+  });
+
   it('reports off-track when the train has no current track', () => {
     const train = createTrain({ currentTrack: null });
     const source = createSource(train);

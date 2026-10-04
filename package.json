@@ -1,15 +1,25 @@
 {
   "name": "train-game",
   "version": "1.0.0",
-  "description": "A train game",
-  "main": "src/main.ts",
+  "description": "Design a railway. Rehearse it. Transform a region.",
+  "main": "native/electron/main.cjs",
   "scripts": {
     "start": "webpack-dev-server --open --mode=development",
     "build": "webpack --mode production",
     "build:test-controls": "webpack --mode production --env testControls=true",
     "test": "jest --coverage",
     "test:e2e": "npx playwright test",
+    "native:desktop": "npm run build && electron .",
+    "native:windows": "npm run build && electron-builder --win --config electron-builder.yml",
+    "native:sync": "npm run build && cap sync && node native/configure-mobile.cjs",
+    "native:android": "cap open android",
+    "native:ios": "cap open ios",
+    "native:configure": "node native/configure-mobile.cjs",
+    "test:native": "node tests/native/electron-smoke.cjs",
     "benchmark:construction-drag": "node tests/performance/run-construction-drag-browser.js",
+    "benchmark:train-physics": "jest tests/performance/TrainPhysicsBenchmark.test.ts --runInBand --coverage=false",
+    "benchmark:train-physics-browser": "node tests/performance/run-train-physics-browser.js",
+    "benchmark:rehearsal": "jest tests/performance/RehearsalBenchmark.test.ts --runInBand --coverage=false",
     "benchmark:world-generation": "node tests/performance/run-world-generation-browser.js"
   },
   "keywords": [
@@ -21,10 +31,13 @@
   "devDependencies": {
     "@babel/core": "^7.0.0",
     "@babel/preset-env": "^7.0.0",
+    "@capacitor/cli": "^8.5.2",
     "@playwright/test": "^1.60.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^16.0.0",
     "babel-loader": "^8.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "file-loader": "^6.0.0",
     "html-webpack-plugin": "^5.5.3",
     "jest": "^29.7.0",
@@ -40,6 +53,11 @@
   "dependencies": {
     "@babylonjs/core": "^9.14.0",
     "@babylonjs/materials": "^9.14.0",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capacitor/ios": "^8.5.2",
     "copy-webpack-plugin": "^11.0.0",
     "matter-js": "^0.19.0",
     "phaser": "^3.60.0"

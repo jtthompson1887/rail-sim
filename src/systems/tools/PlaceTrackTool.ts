@@ -15,6 +15,15 @@ import type {
 } from '../ConstructionService';
 import type { SnapResult, SnapSystem } from '../SnapSystem';
 import {
+  DRAFT_HANDLE_TARGET_PX,
+  draftHandlePoint,
+  isDirectionHandle,
+  rotateDraftHandle,
+  type TrackCurveControls,
+  type TrackDraftHandle,
+  type TrackDraftIntent,
+} from '../TrackDraft';
+import {
   ConstructionPreviewOverlay,
   type ConstructionPreviewModel,
   type ConstructionToolPhase,
@@ -30,6 +39,12 @@ interface PreviewOverlay {
 interface PreviewCache {
   readonly key: string;
   readonly preview: ConstructionPreview;
+}
+
+interface DraftState {
+  readonly start: SnapResult;
+  readonly end: SnapResult;
+  readonly controls?: TrackCurveControls;
 }
 
 function semanticAnchor(anchor: SnapResult): string {
@@ -87,13 +102,20 @@ function nearestStarterWaypoint(
 export class PlaceTrackTool implements IEditorTool {
   private currentPhase: ConstructionToolPhase = 'idle';
   private start: SnapResult | null = null;
+  private end: SnapResult | null = null;
+  private controls: TrackCurveControls | undefined;
+  private selectedHandle: TrackDraftHandle | null = null;
+  private readonly draftHistory: DraftState[] = [];
+  private gestureBefore: DraftState | null = null;
+  private gestureOrigin: { x: number; y: number } | null = null;
+  private gestureMoved = false;
   private currentPreview: ConstructionPreview | null = null;
   private currentModel: ConstructionPreviewModel | null = null;
   private cache: PreviewCache | null = null;
   private pendingUUID: string | null = null;
   private activePointerId: number | null = null;
-  private suppressNextPointerUp = false;
   private lastHintKey = '';
+  private readonly shapeIntentHandler = (intent: TrackDraftIntent) => this.adjustDraft(intent);
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -102,7 +124,9 @@ export class PlaceTrackTool implements IEditorTool {
     private readonly constructionService: ConstructionService,
     private readonly commandStack: CommandStack,
     private readonly overlay: PreviewOverlay = new ConstructionPreviewOverlay(scene),
-  ) {}
+  ) {
+    EventBus.on('construction:shape-intent', this.shapeIntentHandler);
+  }
 
   get phase(): ConstructionToolPhase {
     return this.currentPhase;
@@ -141,8 +165,19 @@ export class PlaceTrackTool implements IEditorTool {
     }
     if (pointer.button !== 0) return;
     if (this.currentPhase === 'review') {
-      this.suppressNextPointerUp = true;
-      this.confirm();
+      if (this.gestureBefore) return;
+      const hit = this.hitHandle(worldX, worldY);
+      if (hit) this.selectedHandle = hit;
+      if (!this.selectedHandle) return;
+      this.gestureBefore = this.captureDraft();
+      this.gestureOrigin = { x: worldX, y: worldY };
+      this.gestureMoved = false;
+      this.activePointerId = Number.isFinite(pointer.id) ? pointer.id : null;
+      if (!hit) {
+        this.moveHandle(worldX, worldY);
+        this.gestureMoved = true;
+      }
+      this.publishModel(this.currentModel?.stale ?? false);
       return;
     }
     if (this.currentPhase !== 'idle') return;
@@ -158,28 +193,49 @@ export class PlaceTrackTool implements IEditorTool {
     worldY: number,
     pointer: Phaser.Input.Pointer,
   ): void {
+    if (this.currentPhase === 'review') {
+      if (!this.gestureBefore || !this.selectedHandle) return;
+      if (this.activePointerId !== null && pointer.id !== this.activePointerId) return;
+      const zoom = this.scene.cameras?.main?.zoom || 1;
+      if (!this.gestureMoved && this.gestureOrigin
+        && Math.hypot(worldX - this.gestureOrigin.x, worldY - this.gestureOrigin.y) * zoom < 3) return;
+      this.gestureMoved = true;
+      this.moveHandle(worldX, worldY);
+      return;
+    }
     if (this.currentPhase !== 'dragging' && this.currentPhase !== 'chained') return;
     if (this.activePointerId !== null && pointer.id !== this.activePointerId) return;
     if (!this.start || !this.pendingUUID) return;
 
-    const end = this.snapConstructionPoint(worldX, worldY);
-    const key = this.previewKey(this.start, end, this.pendingUUID);
+    this.end = this.snapConstructionPoint(worldX, worldY);
+    this.refreshPreview();
+  }
+
+  private refreshPreview(): void {
+    if (!this.start || !this.end || !this.pendingUUID) return;
+    const key = this.previewKey(this.start, this.end, this.pendingUUID);
     let preview: ConstructionPreview | null;
     if (this.cache?.key === key) {
       preview = this.cache.preview;
     } else {
       const startInput = this.serviceAnchor(this.start);
-      const endInput = this.serviceAnchor(end);
+      const endInput = this.serviceAnchor(this.end);
       preview = startInput && endInput
         ? this.constructionService.createPreview(
           startInput,
           endInput,
           this.pendingUUID,
+          ...(this.controls ? [this.controls] : []),
         )
         : null;
       if (preview) this.cache = { key, preview };
     }
     if (!preview) {
+      if (this.currentPhase === 'review' && this.currentPreview) {
+        this.cache = null;
+        this.publishModel(true);
+        return;
+      }
       this.currentPreview = null;
       this.currentModel = null;
       this.overlay.clear();
@@ -196,8 +252,14 @@ export class PlaceTrackTool implements IEditorTool {
     worldY: number,
     pointer: Phaser.Input.Pointer,
   ): void {
-    if (this.suppressNextPointerUp) {
-      this.suppressNextPointerUp = false;
+    if (this.currentPhase === 'review' && this.gestureBefore) {
+      if (pointer.button !== 0
+        || (this.activePointerId !== null && pointer.id !== this.activePointerId)) return;
+      if (this.gestureMoved) this.moveHandle(worldX, worldY);
+      const before = this.gestureBefore;
+      this.clearGesture();
+      if (this.gestureChanged(before)) this.rememberDraft(before);
+      this.publishModel(this.currentModel?.stale ?? false);
       return;
     }
     if (pointer.button !== 0) return;
@@ -215,10 +277,22 @@ export class PlaceTrackTool implements IEditorTool {
 
   onPointerCancel(pointer: Phaser.Input.Pointer): void {
     if (this.activePointerId === null || pointer.id !== this.activePointerId) return;
+    if (this.gestureBefore) {
+      const before = this.gestureBefore;
+      this.clearGesture();
+      this.restoreDraft(before);
+      return;
+    }
     this.resetToIdle();
   }
 
   onKeyDown(event: KeyboardEvent): void {
+    if (this.currentPhase === 'review' && !this.gestureBefore
+      && event.code === 'Backspace') {
+      this.adjustDraft({ action: 'undo' });
+      event.preventDefault?.();
+      return;
+    }
     if (event.code === 'Enter' || event.code === 'Space') {
       this.confirm();
       return;
@@ -233,6 +307,7 @@ export class PlaceTrackTool implements IEditorTool {
     const preview = this.currentPreview;
     if (this.currentPhase !== 'review'
       || !model?.canConfirm
+      || !!this.gestureBefore
       || !preview?.quote) return false;
 
     const command = new PlaceTrackCommand(
@@ -255,7 +330,16 @@ export class PlaceTrackTool implements IEditorTool {
 
   backstep(): void {
     if (this.currentPhase === 'review') {
+      if (this.gestureBefore) {
+        const before = this.gestureBefore;
+        this.clearGesture();
+        this.restoreDraft(before);
+      }
+      this.selectedHandle = null;
+      this.controls = undefined;
+      this.draftHistory.length = 0;
       this.setPhase('dragging');
+      this.refreshPreview();
       this.publishModel(false);
       return;
     }
@@ -265,6 +349,7 @@ export class PlaceTrackTool implements IEditorTool {
   }
 
   destroy(): void {
+    EventBus.off('construction:shape-intent', this.shapeIntentHandler);
     this.overlay.destroy();
     this.currentPreview = null;
     this.currentModel = null;
@@ -314,6 +399,11 @@ export class PlaceTrackTool implements IEditorTool {
         open: true,
       };
     this.pendingUUID = crypto.randomUUID();
+    this.end = null;
+    this.controls = undefined;
+    this.selectedHandle = null;
+    this.draftHistory.length = 0;
+    this.clearGesture();
     this.currentPreview = null;
     this.currentModel = null;
     this.cache = null;
@@ -337,7 +427,7 @@ export class PlaceTrackTool implements IEditorTool {
       && preview.proposal.valid
       && affordable
       && preview.quote !== null;
-    const canConfirm = engineeringReady && this.currentPhase === 'review';
+    const canConfirm = engineeringReady && this.currentPhase === 'review' && !this.gestureBefore;
     let message = '';
     if (stale) {
       message = 'Route changed — move the endpoint to refresh the quote.';
@@ -350,7 +440,9 @@ export class PlaceTrackTool implements IEditorTool {
     } else if (preview.status === 'endpoint-unavailable') {
       message = preview.message;
     } else if (engineeringReady && this.currentPhase === 'review') {
-      message = 'Click or press Enter to build this section.';
+      message = this.gestureBefore
+        ? 'Release to finish adjusting this draft.'
+        : 'Shape the direction handles, then press Build or Enter.';
     } else if (
       engineeringReady
       && (this.currentPhase === 'dragging' || this.currentPhase === 'chained')
@@ -380,6 +472,12 @@ export class PlaceTrackTool implements IEditorTool {
       guidance,
       breachesReserve:
         affordable && preview.cashAfter < guidance.reserve,
+      draft: Object.freeze({
+        selectedHandle: this.selectedHandle,
+        startDirectionLocked: !!preview.startAnchor.endpoint,
+        endDirectionLocked: !!preview.endAnchor.endpoint,
+        canUndo: this.draftHistory.length > 0 && !this.gestureBefore,
+      }),
     });
     this.overlay.render(this.currentModel);
     this.dispatchPreview();
@@ -395,12 +493,16 @@ export class PlaceTrackTool implements IEditorTool {
   private resetToIdle(): void {
     this.currentPhase = 'idle';
     this.start = null;
+    this.end = null;
+    this.controls = undefined;
+    this.selectedHandle = null;
+    this.draftHistory.length = 0;
+    this.clearGesture();
     this.currentPreview = null;
     this.currentModel = null;
     this.cache = null;
     this.pendingUUID = null;
     this.activePointerId = null;
-    this.suppressNextPointerUp = false;
     this.overlay.clear();
     this.dispatchPreview();
     this.dispatchHint('ok', '');
@@ -430,6 +532,7 @@ export class PlaceTrackTool implements IEditorTool {
       pendingUUID,
       semanticAnchor(start),
       semanticAnchor(end),
+      this.controls ? JSON.stringify(this.controls) : 'automatic',
       this.snapSystem.endpointEnabled,
       this.snapSystem.gridEnabled,
       this.snapSystem.gridSize,
@@ -437,6 +540,117 @@ export class PlaceTrackTool implements IEditorTool {
       world?.constructionRevision ?? 'none',
       world?.company.cash ?? 'none',
     ].join('|');
+  }
+
+  /** Shape controls are independent of money, live tracks, and construction undo. */
+  adjustDraft(intent: TrackDraftIntent): void {
+    if (this.currentPhase !== 'review' || this.gestureBefore || !this.currentPreview) return;
+    if (intent.action === 'select') {
+      this.selectedHandle = intent.handle;
+      this.publishModel(this.currentModel?.stale ?? false);
+      return;
+    }
+    if (intent.action === 'undo') {
+      const previous = this.draftHistory.pop();
+      if (previous) this.restoreDraft(previous);
+      return;
+    }
+    const before = this.captureDraft();
+    if (!before) return;
+    if (intent.action === 'reset') {
+      this.controls = undefined;
+      this.selectedHandle = null;
+      this.cache = null;
+      this.rememberDraft(before);
+      this.refreshPreview();
+      return;
+    }
+    const handle = this.selectedHandle;
+    if (!handle || !isDirectionHandle(handle)) return;
+    const start = handle === 'start-direction';
+    const locked = start ? this.currentPreview.startAnchor.endpoint : this.currentPreview.endAnchor.endpoint;
+    if (intent.action === 'rotate' && (locked || !Number.isFinite(intent.degrees))) return;
+    if (intent.action === 'reach' && (!Number.isFinite(intent.factor) || intent.factor <= 0)) return;
+    const geometry = this.currentPreview.proposal.geometry;
+    const anchor = start ? geometry.p0 : geometry.p3;
+    const point = start ? geometry.p1 : geometry.p2;
+    const requested = intent.action === 'rotate'
+      ? rotateDraftHandle(anchor, point, intent.degrees)
+      : {
+        x: anchor.x + (point.x - anchor.x) * intent.factor,
+        y: anchor.y + (point.y - anchor.y) * intent.factor,
+      };
+    this.rememberDraft(before);
+    this.moveHandle(requested.x, requested.y);
+  }
+
+  private hitHandle(x: number, y: number): TrackDraftHandle | null {
+    if (!this.currentPreview) return null;
+    const geometry = this.currentPreview.proposal.geometry;
+    const zoom = this.scene.cameras?.main?.zoom || 1;
+    const handles: TrackDraftHandle[] = ['start-direction', 'end-direction', 'start', 'end'];
+    return handles.map((handle) => {
+      const point = draftHandlePoint(geometry, handle);
+      return { handle, distance: Math.hypot(point.x - x, point.y - y) * zoom };
+    }).filter(({ distance }) => distance <= DRAFT_HANDLE_TARGET_PX)
+      .sort((left, right) => left.distance - right.distance)[0]?.handle ?? null;
+  }
+
+  private moveHandle(x: number, y: number): void {
+    if (!this.selectedHandle || !this.currentPreview || !this.start || !this.end) return;
+    const geometry = this.currentPreview.proposal.geometry;
+    const p1 = { ...geometry.p1 };
+    const p2 = { ...geometry.p2 };
+    if (this.selectedHandle === 'start-direction') {
+      p1.x = x;
+      p1.y = y;
+    } else if (this.selectedHandle === 'end-direction') {
+      p2.x = x;
+      p2.y = y;
+    } else if (this.selectedHandle === 'start') {
+      this.start = this.snapConstructionPoint(x, y);
+      p1.x += this.start.x - geometry.p0.x;
+      p1.y += this.start.y - geometry.p0.y;
+    } else {
+      this.end = this.snapConstructionPoint(x, y);
+      p2.x += this.end.x - geometry.p3.x;
+      p2.y += this.end.y - geometry.p3.y;
+    }
+    this.controls = { p1, p2 };
+    this.refreshPreview();
+  }
+
+  private captureDraft(): DraftState | null {
+    if (!this.start || !this.end) return null;
+    return {
+      start: { ...this.start, ...(this.start.outward ? { outward: { ...this.start.outward } } : {}) },
+      end: { ...this.end, ...(this.end.outward ? { outward: { ...this.end.outward } } : {}) },
+      controls: this.controls ? { p1: { ...this.controls.p1 }, p2: { ...this.controls.p2 } } : undefined,
+    };
+  }
+
+  private gestureChanged(before: DraftState): boolean {
+    return JSON.stringify(before) !== JSON.stringify(this.captureDraft());
+  }
+
+  private rememberDraft(before: DraftState): void {
+    this.draftHistory.push(before);
+    if (this.draftHistory.length > 40) this.draftHistory.shift();
+  }
+
+  private restoreDraft(before: DraftState): void {
+    this.start = before.start;
+    this.end = before.end;
+    this.controls = before.controls;
+    this.cache = null;
+    this.refreshPreview();
+  }
+
+  private clearGesture(): void {
+    this.gestureBefore = null;
+    this.gestureOrigin = null;
+    this.gestureMoved = false;
+    this.activePointerId = null;
   }
 
   private serviceAnchor(anchor: SnapResult): ConstructionInputAnchor | null {

@@ -1,0 +1,16 @@
+Use case: stylized-concept
+Asset type: one isolated overhead railway-game locomotive bitmap candidate, not an asset sheet.
+
+Primary request: Create ONE original fictional D16 Mixed Traffic diesel locomotive for a richly illustrated modern British/European railway game. Single locomotive only. It must read as a long, slim, believable 19-metre double-ended locomotive with a 3.2-metre body width: approximately SIX times as long as it is wide. Do not make a squat toy train. Body length excludes the modest couplers.
+
+Camera and composition: Exact orthographic 90-degree top-down plan view, camera directly above the roof. NO perspective, isometric tilt, foreshortening, visible vertical sides or facades. The entire roof is viewed straight down. Locomotive lies horizontally along the image X axis, designated forward end toward the RIGHT. One centred locomotive, fully visible including small couplers at both ends, with generous clean transparent margins on all sides. Wide landscape canvas. The body should occupy roughly three-quarters of canvas width, with substantial clear space above and below. Preserve the actual 19:3.2 body proportions regardless of canvas aspect ratio.
+
+Shape and engineering: Original modern European double-ended, double-cab diesel silhouette, restrained chamfered cab ends, clean long rectangular central body. Two believable bogies with bogie centres 12.35 metres apart: their centres are approximately 17.5% and 82.5% along the 19-metre body. From this exact top-down angle most underframe and wheels are correctly concealed; only small symmetrical dark wheel/chassis edges may peek out where necessary, never a side elevation. Include believable modest centrally aligned couplers. No wagons.
+
+Palette: Deep muted maroon painted body and narrow upper body shoulders; thin cream trim; muted warm yellow cab-end top surfaces; a slate-grey central roof. Keep the silhouette and roof divisions clear at low game resolution.
+
+Roof detail: A restrained arrangement of two readable circular cooling fans, one exhaust outlet, a few broad ventilation grilles, cab-roof hatches and subtle roof equipment. Details belong on horizontal roof surfaces and have clear simple shapes. Do not fill the body with noisy repetitive vents or tiny mechanical texture. No visible long vertical side panels or windows. Cabs should be legible from their roof shape.
+
+Style and materials: Clean, rich illustrated brush/vector-like game art. Confident shapes, controlled linework and softened hand-painted tonal variation. Matte painted metal with modest believable wear only. Readable when reduced to a small overhead sprite. Simplify material texture instead of photorealistic grain, scratches or microtexture. Roof-local shading may describe its shapes, but lighting must not bake in an external world shadow.
+
+Transparency and constraints: The background must be genuinely fully TRANSPARENT, not a checkerboard painted into the image. The locomotive has a clean alpha edge with no cast shadow, glow, blur, fringe, halo or ground reflection. No rails, sleepers, ground, scenery, background, extra objects, labels, arrows, text, numbers, insignia, logos, real branding or watermark. Do not imitate a named real locomotive. No dramatic lighting and no photographic product-shot perspective.

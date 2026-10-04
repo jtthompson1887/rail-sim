@@ -1,7 +1,10 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
+import { writeFile } from 'node:fs/promises';
 import {
   expect,
   test,
   type Page,
+  type TestInfo,
   type ViewportSize,
 } from '@playwright/test';
 import type { FirstRouteBrowserSnapshot } from '../../src/scenes/WorldScene';
@@ -94,6 +97,35 @@ const categoryMagnitude = (
 ): number => state.world.company.ledger
   .filter((entry) => entry.category === category)
   .reduce((total, entry) => total + Math.abs(entry.amount), 0);
+
+const assertModuleProductionConservation = (
+  state: RegionalBrowserSnapshot,
+  opening: Facility,
+  deliveredSteelUnits: number,
+  expectedBatches: number,
+): void => {
+  const current = facility(state, 'prefabrication-plant');
+  const timberConsumed = opening.inventories['structural-timber'].quantity
+    - current.inventories['structural-timber'].quantity;
+  const completedBatches = timberConsumed / 8;
+  expect(Number.isSafeInteger(completedBatches)).toBe(true);
+  expect(completedBatches).toBe(expectedBatches);
+  expect(opening.inventories.cement.quantity
+    - current.inventories.cement.quantity).toBe(completedBatches * 8);
+  expect(opening.inventories.steel.quantity + deliveredSteelUnits
+    - current.inventories.steel.quantity).toBe(completedBatches * 6);
+  const storedModules = state.world.economy.facilities.reduce(
+    (total, candidate) => total
+      + (candidate.inventories['building-modules']?.quantity ?? 0),
+    0,
+  );
+  const carriedModules = state.world.trains.reduce(
+    (total, train) => total
+      + (train.cargo?.productId === 'building-modules' ? train.cargo.units : 0),
+    0,
+  );
+  expect(storedModules + carriedModules).toBe(completedBatches * 4);
+};
 
 const stableWorld = (
   world: RegionalBrowserSnapshot['world'],
@@ -216,27 +248,11 @@ async function createFixedSeedWorld(
     { timeout: 120_000 },
   );
   await page.keyboard.press('Enter');
-  await page.waitForFunction(
-    () => window.__railSimScene === 'WorldSelectScene',
-    undefined,
-    { timeout: 30_000 },
-  );
-  const canvas = page.locator('canvas');
-  const pickerPanelHeight = Math.min(690, viewport.height - 40);
-  const seedY = viewport.height / 2 - pickerPanelHeight / 2 + 126;
-  const confirmY = viewport.height / 2 + pickerPanelHeight / 2 - 44;
-  await canvas.click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await canvas.click({ position: { x: viewport.width / 2, y: seedY } });
-  await canvas.click({
-    position: { x: viewport.width / 2, y: confirmY },
-  });
+  await createLegacyWorld(page, seed);
   await waitForHarness(page);
 
   const created = await snapshot(page);
-  expect(created.world.schemaVersion).toBe(10);
+  expect(created.world.schemaVersion).toBe(11);
   expect(created.world.generationConfig.seed).toBe(seed);
   expect(created.world.economy.facilities).toHaveLength(7);
   expect(created.world.tracks).toHaveLength(0);
@@ -654,22 +670,47 @@ async function purchaseFreightSet(
 }
 
 async function enterPlay(page: Page): Promise<void> {
-  const state = await snapshot(page);
+  await waitForRenderedFrame(page);
+  const button = await page.evaluate(() => {
+    const hud = window.__railSimGame.scene.getScene('HUDScene') as unknown as {
+      modeToggleBtn: { text: string; getBounds(): { centerX: number; centerY: number } };
+      scale: { width: number; height: number };
+    };
+    const bounds = hud.modeToggleBtn.getBounds();
+    return {
+      text: hud.modeToggleBtn.text,
+      x: bounds.centerX,
+      y: bounds.centerY,
+      width: hud.scale.width,
+      height: hud.scale.height,
+    };
+  });
   const canvas = page.locator('canvas');
   const box = await canvas.boundingBox();
   if (!box) throw new Error('Canvas is not visible');
-  await canvas.click({
-    position: {
-      x: (state.camera.width - 70) * box.width / state.camera.width,
-      y: 34 * box.height / state.camera.height,
-    },
-  });
+  if (button.text === '▶ Play') {
+    await canvas.click({
+      position: {
+        x: button.x * box.width / button.width,
+        y: button.y * box.height / button.height,
+      },
+    });
+  } else {
+    expect(button.text).toBe('✎ Edit World');
+  }
+  await expect.poll(() => page.evaluate(() => (
+    window.__railSimGame.scene.getScene('HUDScene') as unknown as {
+      modeToggleBtn: { text: string };
+    }
+  ).modeToggleBtn.text)).toBe('✎ Edit World');
   await expect(page.locator('[data-testid="vehicle-purchase-panel"]'))
     .toBeHidden();
 }
 
 async function returnToCreate(page: Page): Promise<void> {
-  await page.keyboard.press('Escape');
+  const alreadyPaused = await page.evaluate(() =>
+    window.__railSimGame.scene.isActive('PauseScene'));
+  if (!alreadyPaused) await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="company-hud"]')).toBeHidden();
   const canvas = page.locator('canvas');
   const box = await canvas.boundingBox();
@@ -830,6 +871,12 @@ async function moveSelectedTrainClearOfFacility(
   } finally {
     await page.keyboard.up(key);
   }
+  expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+    .toBe(trainId);
+  await page.locator('[data-testid="train-inspector"]')
+    .getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(async () => runtimeById(await snapshot(page), trainId)
+    .speedWorldUnitsPerSecond).toBeLessThanOrEqual(2);
 }
 
 async function driveSelectedTrainToPoint(
@@ -882,13 +929,26 @@ async function driveSelectedTrainToPoint(
         });
         if (parkingRecent.length > 12) parkingRecent.shift();
         if (!parked) {
-          if (motion === 'receding') {
+          if (distance <= parkingTolerance) {
+            await page.keyboard.up('w');
+            await page.keyboard.up('s');
+            expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+              .toBe(trainId);
+            await page.locator('[data-testid="train-inspector"]')
+              .getByRole('button', { name: 'Stop', exact: true }).click();
+          } else if (motion === 'receding') {
+            await page.locator('[data-testid="train-inspector"]')
+              .getByRole('button', { name: 'Stop', exact: true }).click();
             await pulse(propulsion, 20);
-          } else if (distance <= parkingTolerance
-            && live.speedWorldUnitsPerSecond > 2) {
-            await pulse(oppositeKey(propulsion), 20);
+          } else if (distance <= 400) {
+            if (live.speedWorldUnitsPerSecond > 12) {
+              await page.locator('[data-testid="train-inspector"]')
+                .getByRole('button', { name: 'Stop', exact: true }).click();
+            } else if (live.speedWorldUnitsPerSecond < 8) {
+              await pulse(propulsion, 20);
+            }
           } else if (live.speedWorldUnitsPerSecond < 46) {
-            await pulse(propulsion, distance <= 400 ? 20 : 60);
+            await pulse(propulsion, 60);
           } else if (live.speedWorldUnitsPerSecond > 54) {
             await pulse(oppositeKey(propulsion), 40);
           }
@@ -910,6 +970,15 @@ async function driveSelectedTrainToPoint(
     await page.keyboard.up('w');
     await page.keyboard.up('s');
   }
+  expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+    .toBe(trainId);
+  await page.locator('[data-testid="train-inspector"]')
+    .getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(async () => {
+    const live = runtimeById(await snapshot(page), trainId);
+    return distanceTo(live, target) <= parkingTolerance
+      && live.speedWorldUnitsPerSecond <= 2;
+  }).toBe(true);
 }
 
 async function buildPortParkingTail(
@@ -1430,6 +1499,7 @@ async function driveWithKeyboardToFacility(
   let bestDistance = openingDistance;
   let travelledDistance = 0;
   let maxObservedSpeed = 0;
+  let lastProgressAt = Date.now();
   let motion: 'approaching' | 'receding' | 'stationary' = 'stationary';
   const visitedTrackUUIDs = new Set<string>();
   const recent: Array<Record<string, unknown>> = [];
@@ -1444,6 +1514,20 @@ async function driveWithKeyboardToFacility(
     await page.keyboard.down(key);
     await page.waitForTimeout(duration);
     await page.keyboard.up(key);
+  };
+  const stopSelectedTrain = async (): Promise<void> => {
+    await hold(null);
+    await page.keyboard.up('w');
+    await page.keyboard.up('s');
+    expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+      .toBe(trainId);
+    await page.locator('[data-testid="train-inspector"]')
+      .getByRole('button', { name: 'Stop', exact: true }).click();
+    // A new throttle command must follow the rendered Stop; otherwise the
+    // keyboard can cancel its pending brake before the game consumes it.
+    await waitForRenderedFrame(page);
+    await expect.poll(async () => runtimeById(await snapshot(page), trainId)
+      .speedWorldUnitsPerSecond).toBeLessThanOrEqual(0.1);
   };
   try {
     try {
@@ -1467,6 +1551,15 @@ async function driveWithKeyboardToFacility(
         );
         if (live.trackUUID) visitedTrackUUIDs.add(live.trackUUID);
         const propulsion = keyToward(state, live, destination);
+        if (Date.now() - lastProgressAt >= 60_000) {
+          lastProgressAt = Date.now();
+          console.info(JSON.stringify({
+            regionalJourney: destinationDefinitionId,
+            distance: Math.round(distance),
+            speed: live.speedWorldUnitsPerSecond,
+            cargo: trainById(state, trainId).cargo,
+          }));
+        }
         recent.push({
           tick: state.world.economy.tick,
           distance,
@@ -1505,36 +1598,32 @@ async function driveWithKeyboardToFacility(
             recent,
           }));
         } else if (distance <= holdingDistance) {
-          await hold(null);
-          if (motion === 'receding') {
-            await pulse(propulsion, 20);
-          } else if (live.speedWorldUnitsPerSecond > 2) {
-            await pulse(
-              oppositeKey(propulsion),
-              live.speedWorldUnitsPerSecond > 20 ? 60 : 20,
-            );
-          }
+          await stopSelectedTrain();
         } else if (distance <= destination.radius * 1.2) {
-          await hold(null);
           if (motion === 'receding') {
-            await pulse(propulsion, 20);
+            await stopSelectedTrain();
+            await hold(propulsion);
           } else if (live.speedWorldUnitsPerSecond > 8) {
-            await pulse(oppositeKey(propulsion), 35);
+            await stopSelectedTrain();
           } else if (live.speedWorldUnitsPerSecond < 4) {
-            await pulse(propulsion, 20);
+            await hold(propulsion);
+          } else {
+            await hold(null);
           }
         } else if (distance <= destination.radius * 2) {
-          await hold(null);
           if (motion === 'receding') {
-            await pulse(propulsion, 20);
+            await stopSelectedTrain();
+            await hold(propulsion);
           } else if (live.speedWorldUnitsPerSecond > 28) {
-            await pulse(oppositeKey(propulsion), 20);
+            await stopSelectedTrain();
           } else if (live.speedWorldUnitsPerSecond < 24) {
-            await pulse(propulsion, 20);
+            await hold(propulsion);
+          } else {
+            await hold(null);
           }
         } else if (motion === 'receding') {
-          await hold(null);
-          await pulse(propulsion, 20);
+          await stopSelectedTrain();
+          await hold(propulsion);
         } else {
           await hold(null);
           if (live.speedWorldUnitsPerSecond < 46) {
@@ -1685,6 +1774,85 @@ async function liveTrainPersistedGeometry(
   }, { id: trainId, t: trackT });
 }
 
+interface LiveBogieGeometry {
+  readonly dynamics: Extract<Train['dynamics'], { mode: 'on-rail' }>;
+  readonly arcAnchor: Point;
+  readonly bogieCentre: Point;
+  readonly adapterCentre: Point;
+  readonly gameObject: Point;
+  readonly matterBody: Point;
+  readonly derailed: boolean;
+}
+
+/** Read the two-bogie pose separately from its saved arc cursor; never change it. */
+async function liveTrainBogieGeometry(page: Page, trainId: string): Promise<LiveBogieGeometry> {
+  return page.evaluate((id) => {
+    const scene = window.__railSimGame.scene.getScene('WorldScene') as unknown as {
+      trainManager: {
+        trains: Array<{
+          getUUID(): string;
+          derailed: boolean;
+          persistedDynamics: LiveBogieGeometry['dynamics'] | null;
+          currentTrack: {
+            getArcLengthIndex(): { poseAtDistance(distance: number): { point: Point } };
+          } | null;
+          getMatterBody(): { x: number; y: number; body: { position: Point } };
+        }>;
+        getDynamicsAdapter(consistId: string): {
+          getCurrentRailPoses(): ReadonlyMap<string, {
+            centre: Point;
+            frontBogie: Point;
+            rearBogie: Point;
+          }>;
+        } | undefined;
+      };
+    };
+    const train = scene.trainManager.trains.find((candidate) => candidate.getUUID() === id);
+    const dynamics = train?.persistedDynamics;
+    if (!train || !dynamics || dynamics.mode !== 'on-rail' || !train.currentTrack) {
+      throw new Error(`Missing on-rail bogie state for ${id}`);
+    }
+    const pose = scene.trainManager.getDynamicsAdapter(dynamics.consistId)
+      ?.getCurrentRailPoses().get(id);
+    if (!pose) throw new Error(`Missing deterministic bogie pose for ${id}`);
+    const body = train.getMatterBody();
+    return {
+      dynamics: { ...dynamics },
+      arcAnchor: train.currentTrack.getArcLengthIndex().poseAtDistance(dynamics.distance).point,
+      bogieCentre: {
+        x: (pose.frontBogie.x + pose.rearBogie.x) / 2,
+        y: (pose.frontBogie.y + pose.rearBogie.y) / 2,
+      },
+      adapterCentre: { ...pose.centre },
+      gameObject: { x: body.x, y: body.y },
+      matterBody: { ...body.body.position },
+      derailed: train.derailed,
+    };
+  }, trainId);
+}
+
+async function stoppedTrainBogieGeometry(page: Page, trainId: string): Promise<LiveBogieGeometry> {
+  let observed: LiveBogieGeometry | null = null;
+  await expect.poll(async () => {
+    await waitForRenderedFrame(page);
+    observed = await liveTrainBogieGeometry(page, trainId);
+    return {
+      stopped: Math.abs(observed.dynamics.speedMps) <= 1e-9,
+      derailed: observed.derailed,
+      adapterAtBogieCentre: distanceTo(observed.adapterCentre, observed.bogieCentre) <= 0.01,
+      spriteAtBogieCentre: distanceTo(observed.gameObject, observed.bogieCentre) <= 0.01,
+      matterAtBogieCentre: distanceTo(observed.matterBody, observed.bogieCentre) <= 0.01,
+    };
+  }, { timeout: 500, intervals: [16, 20, 25] }).toEqual({
+    stopped: true,
+    derailed: false,
+    adapterAtBogieCentre: true,
+    spriteAtBogieCentre: true,
+    matterAtBogieCentre: true,
+  });
+  return observed!;
+}
+
 async function crossFacilityBoundaryWithKeyboard(
   page: Page,
   trainId: string,
@@ -1694,6 +1862,8 @@ async function crossFacilityBoundaryWithKeyboard(
     | null,
   saveReload = true,
   allowCargoChangeOnArrival = false,
+  afterArrivalBeforeCheckpoint?: () => Promise<void | 'create'>,
+  pauseOnCargo?: { readonly productId: string; readonly units: number },
 ): Promise<void> {
   const opening = await snapshot(page);
   const destination = facility(
@@ -1720,17 +1890,35 @@ async function crossFacilityBoundaryWithKeyboard(
   };
   const pulse = async (key: 'w' | 's', duration: number): Promise<void> => {
     await page.keyboard.down(key);
-    await page.waitForTimeout(duration);
+    await page.waitForTimeout(Math.max(duration, 20));
     await page.keyboard.up(key);
   };
+  // Crossing has a narrow engineering boundary. Keep the authoritative cargo,
+  // tracks and runtime evidence, without transporting unrelated terrain for
+  // every control sample while the train is moving.
+  const crossingSnapshot = async (): Promise<RegionalBrowserSnapshot> =>
+    page.evaluate(() => {
+      const harness = window.__railSimFirstRouteHarness;
+      if (!harness) throw new Error('Regional browser harness is unavailable');
+      const state = harness.snapshot();
+      return {
+        world: {
+          trains: state.world.trains,
+          tracks: state.world.tracks,
+          economy: { tick: state.world.economy.tick },
+        },
+        runtime: state.runtime,
+      } as RegionalBrowserSnapshot;
+    });
   let previousDistance = distanceTo(
     runtimeById(opening, trainId),
     destination,
   );
   let motion: 'approaching' | 'receding' | 'stationary' = 'stationary';
+  let pausedOnArrival = false;
   try {
     await expect.poll(async () => {
-      const state = await snapshot(page);
+      const state = await crossingSnapshot();
       const live = runtimeById(state, trainId);
       const distance = distanceTo(live, destination);
       const delta = distance - previousDistance;
@@ -1742,9 +1930,12 @@ async function crossFacilityBoundaryWithKeyboard(
       previousDistance = distance;
       assertCargo(state);
       if (distance <= destination.radius) {
-        throw new Error(
-          `${trainId} crossed ${destinationDefinitionId} before near staging`,
-        );
+        throw new Error(JSON.stringify({
+          message: `${trainId} crossed ${destinationDefinitionId} before near staging`,
+          openingDistance: distanceTo(runtimeById(opening, trainId), destination),
+          distance, motion, speed: live.speedWorldUnitsPerSecond,
+          throttle: live.throttle, facing: live.facing, trackUUID: live.trackUUID,
+        }));
       }
       if (live.derailed) {
         throw new Error(`${trainId} derailed staging ${destinationDefinitionId}`);
@@ -1758,9 +1949,12 @@ async function crossFacilityBoundaryWithKeyboard(
       if (!ready) {
         if (motion === 'receding') {
           await pulse(propulsion, 5);
-        } else if (live.speedWorldUnitsPerSecond > 8) {
-          await pulse(oppositeKey(propulsion), 5);
-        } else {
+        } else if (live.speedWorldUnitsPerSecond > 4) {
+          expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+            .toBe(trainId);
+          await page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: 'Stop', exact: true }).click();
+        } else if (live.speedWorldUnitsPerSecond < 2) {
           await pulse(propulsion, nearBoundary ? 5 : 12);
         }
       }
@@ -1780,7 +1974,7 @@ async function crossFacilityBoundaryWithKeyboard(
     > | null = null;
     try {
       await expect.poll(async () => {
-        const state = await snapshot(page);
+        const state = await crossingSnapshot();
         const live = runtimeById(state, trainId);
         const distance = distanceTo(live, destination);
         const delta = distance - previousDistance;
@@ -1825,10 +2019,77 @@ async function crossFacilityBoundaryWithKeyboard(
           && projectedDistance <= destination.radius;
         const persistableInside =
           inside && live.speedWorldUnitsPerSecond <= 2;
-        if (motion === 'receding') {
+        if (inside) {
+          await page.keyboard.up('w');
+          await page.keyboard.up('s');
+          expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+            .toBe(trainId);
+          await page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: 'Stop', exact: true }).click();
+          if (pauseOnCargo) {
+            // Freeze the actual first loading batch before expensive full-world
+            // inspection can consume its one-tick window. Stop, loading and
+            // pause all use the same public controls as ordinary play.
+            await expect.poll(async () => {
+              const stopped = await crossingSnapshot();
+              const stoppedRuntime = runtimeById(stopped, trainId);
+              const stoppedTrack = stopped.world.tracks.find(
+                ({ uuid }) => uuid === stoppedRuntime.trackUUID,
+              );
+              const cargo = trainById(stopped, trainId).cargo;
+              return {
+                actualInside: distanceTo(stoppedRuntime, destination) <= destination.radius,
+                serializedInside: stoppedTrack !== undefined && stoppedRuntime.trackT !== null
+                  && distanceTo(bezierPoint(stoppedTrack, stoppedRuntime.trackT), destination)
+                    <= destination.radius,
+                derailed: stoppedRuntime.derailed,
+                stopped: stoppedRuntime.speedWorldUnitsPerSecond <= 0.1,
+                throttle: stoppedRuntime.throttle,
+                cargo: cargo && {
+                  productId: cargo.productId,
+                  units: cargo.units,
+                  loadedUnits: cargo.loadedUnits,
+                },
+              };
+            }, { timeout: 10_000, intervals: [10, 15, 20] }).toEqual({
+              actualInside: true,
+              serializedInside: true,
+              derailed: false,
+              stopped: true,
+              throttle: 0,
+              cargo: {
+                productId: pauseOnCargo.productId,
+                units: pauseOnCargo.units,
+                loadedUnits: pauseOnCargo.units,
+              },
+            });
+            await page.keyboard.press('Escape');
+            await expect.poll(() => page.evaluate(() =>
+              window.__railSimGame.scene.isActive('PauseScene'))).toBe(true);
+            await expect(page.locator('[data-testid="company-hud"]')).toBeHidden();
+            const paused = await crossingSnapshot();
+            const pausedRuntime = runtimeById(paused, trainId);
+            const pausedTrack = paused.world.tracks.find(
+              ({ uuid }) => uuid === pausedRuntime.trackUUID,
+            );
+            expect(pausedTrack).toBeDefined();
+            expect(pausedRuntime.trackT).not.toBeNull();
+            expect(distanceTo(pausedRuntime, destination)).toBeLessThanOrEqual(destination.radius);
+            expect(distanceTo(bezierPoint(pausedTrack!, pausedRuntime.trackT!), destination))
+              .toBeLessThanOrEqual(destination.radius);
+            expect(pausedRuntime.speedWorldUnitsPerSecond).toBeLessThanOrEqual(0.1);
+            expect(pausedRuntime.throttle).toBe(0);
+            expect(pausedRuntime.derailed).toBe(false);
+            expect(trainById(paused, trainId).cargo).toMatchObject({
+              productId: pauseOnCargo.productId,
+              units: pauseOnCargo.units,
+              loadedUnits: pauseOnCargo.units,
+            });
+            pausedOnArrival = true;
+            return { persistableInside: true };
+          }
+        } else if (motion === 'receding') {
           await pulse(propulsion, 5);
-        } else if (inside && !persistableInside) {
-          await pulse(oppositeKey(propulsion), 5);
         } else {
           if (!persistableInside) await pulse(propulsion, 5);
         }
@@ -1855,8 +2116,10 @@ async function crossFacilityBoundaryWithKeyboard(
   const inspectorStop = page.locator(
     '[data-testid="train-inspector"] [data-throttle="0"]',
   );
-  await expect(inspectorStop).toBeVisible();
-  await inspectorStop.click();
+  if (!pausedOnArrival) {
+    await expect(inspectorStop).toBeVisible();
+    await inspectorStop.click();
+  }
   await expect.poll(async () => {
     const state = await snapshot(page);
     const live = runtimeById(state, trainId);
@@ -1898,9 +2161,12 @@ async function crossFacilityBoundaryWithKeyboard(
     destination,
   )).toBeLessThanOrEqual(destination.radius);
   assertCargo(arrived, true);
+  // Delivery notifications and transfer batches describe this live arrival;
+  // the saved world preserves its result, but does not replay those UI events.
+  const arrivalMode = await afterArrivalBeforeCheckpoint?.();
   if (!saveReload) return;
 
-  await returnToCreate(page);
+  if (arrivalMode !== 'create') await returnToCreate(page);
   await waitForRenderedFrame(page);
   await page.keyboard.press('Control+S');
   await expect(page.locator('[data-testid="company-save-state"]'))
@@ -2061,9 +2327,7 @@ async function clickFacilityThroughMobilePointer(
   definitionId: string,
 ): Promise<void> {
   await page.setViewportSize(DESKTOP);
-  if (await page.locator('[data-testid="company-hud"]').isVisible()) {
-    await enterPlay(page);
-  }
+  await enterPlay(page);
   await waitForRenderedFrame(page);
   const opening = await snapshot(page);
   const desiredMobile = { x: 80, y: 420 };
@@ -2088,6 +2352,9 @@ async function clickFacilityThroughMobilePointer(
     facility(state, definitionId).railAccess,
     state,
   );
+  expect(await page.evaluate(({ x, y }) => (
+    document.elementFromPoint(x, y) instanceof HTMLCanvasElement
+  ), point)).toBe(true);
   await page.mouse.click(point.x, point.y);
   await expect(page.locator('[data-testid="facility-inspector"]'))
     .toBeVisible();
@@ -2199,6 +2466,102 @@ async function findClearCanvasPoint(page: Page): Promise<Point> {
   return result;
 }
 
+interface TownDeliveryDomTexts {
+  readonly deliveryText: string;
+  readonly statusText: string;
+  readonly batchText: string;
+}
+
+interface TownDeliveryDomCapture {
+  witness: TownDeliveryDomTexts | null;
+  latest: TownDeliveryDomTexts;
+  expired: boolean;
+  dispose(): void;
+}
+
+type TownDeliveryDomWindow = Window & {
+  __railSimTownDeliveryDomCapture?: TownDeliveryDomCapture;
+};
+
+/** Retain the genuine one-tick unloading display while geometry is inspected. */
+async function armTownDeliveryDomWitness(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const targetWindow = window as TownDeliveryDomWindow;
+    targetWindow.__railSimTownDeliveryDomCapture?.dispose();
+    const delivery = document.querySelector('[data-testid="company-last-delivery"]');
+    const status = document.querySelector('[data-testid="train-transfer-status"]');
+    const batch = document.querySelector('[data-testid="train-transfer-progress"]')
+      ?.previousElementSibling;
+    if (!delivery || !status || !batch) {
+      throw new Error('Town delivery DOM witness targets are unavailable');
+    }
+    const read = (): TownDeliveryDomTexts => ({
+      deliveryText: delivery.textContent?.trim() ?? '',
+      statusText: status.textContent?.trim() ?? '',
+      batchText: batch.textContent?.trim() ?? '',
+    });
+    let expiry: number;
+    const capture: TownDeliveryDomCapture = {
+      witness: null,
+      latest: read(),
+      expired: false,
+      dispose: () => {
+        observer.disconnect();
+        window.clearTimeout(expiry);
+      },
+    };
+    const observe = (): void => {
+      capture.latest = read();
+      if (capture.latest.deliveryText.includes(
+        'Building Modules delivered to Town Construction Market',
+      ) && capture.latest.statusText === 'Unloading'
+        && capture.latest.batchText === 'Batch 4 / 4 modules') {
+        capture.witness = capture.latest;
+        capture.dispose();
+      }
+    };
+    const observer = new MutationObserver(observe);
+    for (const target of [delivery, status, batch]) {
+      observer.observe(target, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+    expiry = window.setTimeout(() => {
+      capture.latest = read();
+      capture.expired = true;
+      capture.dispose();
+    }, 90_000);
+    targetWindow.__railSimTownDeliveryDomCapture = capture;
+    observe();
+  });
+}
+
+async function disposeTownDeliveryDomWitness(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const targetWindow = window as TownDeliveryDomWindow;
+    targetWindow.__railSimTownDeliveryDomCapture?.dispose();
+    delete targetWindow.__railSimTownDeliveryDomCapture;
+  });
+}
+
+async function writeRegionalCheckpoint(
+  testInfo: TestInfo,
+  stage: string,
+  world: RegionalBrowserSnapshot['world'],
+): Promise<void> {
+  const checkpointPath = testInfo.outputPath(`regional-${PRIMARY_SEED}-${stage}.json`);
+  await writeFile(checkpointPath, JSON.stringify(world, null, 2));
+  console.info(JSON.stringify({
+    regionalCheckpoint: stage,
+    seed: world.generationConfig.seed,
+    capturedAt: new Date().toISOString(),
+    path: checkpointPath,
+    tick: world.economy.tick,
+  }));
+}
+
 function captureErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -2273,6 +2636,10 @@ test.describe('regional construction supply browser journey', () => {
       'sawmill',
       700,
     );
+    expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+      .toBe(firstId);
+    await page.locator('[data-testid="train-inspector"]')
+      .getByRole('button', { name: 'Stop', exact: true }).click();
     await returnToCreate(page);
     const secondId = await purchaseFreightSet(
       page,
@@ -2303,7 +2670,7 @@ test.describe('regional construction supply browser journey', () => {
 
   test('playtest-825 completes the regional chain through real controls', async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(4_200_000);
     const errors = captureErrors(page);
     const opening = await createFixedSeedWorld(page, PRIMARY_SEED);
@@ -2324,6 +2691,12 @@ test.describe('regional construction supply browser journey', () => {
       [aggregateId, cementId],
       parkingTail.tailTrackUUIDs,
     );
+
+    const productionOpening = facility(await snapshot(page), 'prefabrication-plant');
+    expect(productionOpening.inventories['structural-timber'].quantity).toBe(60);
+    expect(productionOpening.inventories.cement.quantity).toBe(80);
+    expect(productionOpening.inventories.steel.quantity).toBe(0);
+    expect(productionOpening.inventories['building-modules'].quantity).toBe(0);
 
     await assertBoundaryInspectorOnMobile(page, 'port-interchange');
     await expect(page.locator('[data-testid="facility-name"]'))
@@ -2356,7 +2729,10 @@ test.describe('regional construction supply browser journey', () => {
     }
 
     await page.setViewportSize(DESKTOP);
-    await page.keyboard.press('Escape');
+    await waitForRenderedFrame(page);
+    const inspectorDismissPoint = await findClearCanvasPoint(page);
+    await page.mouse.click(inspectorDismissPoint.x, inspectorDismissPoint.y);
+    await expect(page.locator('[data-testid="facility-inspector"]')).toBeHidden();
     await selectTrainThroughPointer(page, flatbedId);
     const emptyPortRoute = await driveWithKeyboardToFacility(
       page,
@@ -2372,17 +2748,27 @@ test.describe('regional construction supply browser journey', () => {
       flatbedId,
       'port-interchange',
       null,
+      true,
+      true,
+      async () => {
+        await waitForCargo(page, flatbedId, 'steel', 10, 15_000);
+        await returnToCreate(page);
+        expect(trainById(await snapshot(page), flatbedId).cargo).toMatchObject({
+          productId: 'steel',
+          units: 10,
+          loadedUnits: 10,
+        });
+        return 'create';
+      },
+      { productId: 'steel', units: 10 },
     );
-    await enterPlay(page);
-    await selectTrainThroughPointer(page, flatbedId);
-    await waitForCargo(page, flatbedId, 'steel', 10, 15_000);
-    await page.locator('[data-throttle="0"]').click();
+    // Keep both durable checkpoints in Create: resuming merely to select the
+    // stopped train would let the Port load another batch before departure.
     expect(trainById(await snapshot(page), flatbedId).cargo).toMatchObject({
       productId: 'steel',
       units: 10,
       loadedUnits: 10,
     });
-    await returnToCreate(page);
     await page.keyboard.press('Control+S');
     await expect(page.locator('[data-testid="company-save-state"]'))
       .toHaveText('Saved');
@@ -2402,6 +2788,10 @@ test.describe('regional construction supply browser journey', () => {
       units: 10,
       loadedUnits: 10,
     });
+    await panWorldPointToCentre(
+      page,
+      runtimeById(restoredLossCheckpoint, flatbedId),
+    );
     await enterPlay(page);
     await selectTrainThroughPointer(page, flatbedId);
 
@@ -2421,8 +2811,9 @@ test.describe('regional construction supply browser journey', () => {
         'cement-works',
         { productId: 'steel', units: 10 },
       );
-      let detours = 0;
-      while (detours < 3) {
+      // Three return detours require a fourth approach to finish at Prefab.
+      // Each drive verifies the real train is stopped outside its access area.
+      for (let approach = 1; approach <= 4; approach += 1) {
         await selectTrainThroughPointer(page, flatbedId);
         await driveWithKeyboardToFacility(
           page,
@@ -2430,7 +2821,6 @@ test.describe('regional construction supply browser journey', () => {
           'prefabrication-plant',
           { productId: 'steel', units: 10 },
         );
-        detours += 1;
         const detourState = await snapshot(page);
         const quote = quoteLocalProduct(
           'steel',
@@ -2447,11 +2837,55 @@ test.describe('regional construction supply browser journey', () => {
           detourState,
           flatbedId,
         ).operations.currentTripRunningCost;
-        if (cost >= quote.unitPrice * 10) break;
+        const requiredRunningCost = quote.unitPrice * 10 + 200;
+        if (cost >= requiredRunningCost) break;
+        if (approach === 4) break;
         await arriveAtFacilityWithoutCheckpoint(
           page,
           flatbedId,
           'cement-works',
+          { productId: 'steel', units: 10 },
+        );
+      }
+      // Faster approaches can leave the final full detour just short of the
+      // loss margin. Accrue the remainder through bounded physical shunts,
+      // staying outside the genuine transfer boundary with all ten steel.
+      for (let shunt = 0; shunt <= 2; shunt += 1) {
+        const shuntState = await snapshot(page);
+        const shuntQuote = quoteLocalProduct(
+          'steel',
+          shuntState.world.economy.market,
+          facility(shuntState, 'prefabrication-plant').inventories.steel,
+        );
+        if (!shuntQuote.ok) {
+          throw new Error(`Steel quote unavailable: ${shuntQuote.code}`);
+        }
+        const shuntCost = trainById(shuntState, flatbedId)
+          .operations.currentTripRunningCost;
+        const requiredShuntCost = shuntQuote.unitPrice * 10 + 200;
+        if (shuntCost >= requiredShuntCost) break;
+        if (shunt === 2) {
+          throw new Error(JSON.stringify({
+            message: 'Bounded physical shunts did not establish a loss margin',
+            runningCost: shuntCost,
+            requiredRunningCost: requiredShuntCost,
+            distance: distanceTo(
+              runtimeById(shuntState, flatbedId),
+              facility(shuntState, 'prefabrication-plant').railAccess,
+            ),
+          }));
+        }
+        await moveSelectedTrainClearOfFacility(
+          page,
+          flatbedId,
+          'prefabrication-plant',
+          'cement-works',
+          300,
+        );
+        await driveWithKeyboardToFacility(
+          page,
+          flatbedId,
+          'prefabrication-plant',
           { productId: 'steel', units: 10 },
         );
       }
@@ -2476,8 +2910,126 @@ test.describe('regional construction supply browser journey', () => {
         flatbedId,
         'prefabrication-plant',
         { productId: 'steel', units: 10 },
+        false,
+        true,
+        async () => {
+          await expect(page.locator('[data-testid="company-last-delivery"]'))
+            .toHaveAttribute('data-tone', 'loss');
+          await expect(page.locator('[data-testid="company-last-delivery"]'))
+            .toContainText('Trip loss');
+        },
+      );
+      // This loss shipment still supplies a real recipe. Depart immediately
+      // under held propulsion so its eventual output cannot load into the
+      // empty flatbed while menus, saving and reload are exercised.
+      expect(trainById(await snapshot(page), flatbedId).cargo).toBeNull();
+      await moveSelectedTrainClearOfFacility(
+        page,
+        flatbedId,
+        'prefabrication-plant',
+        'port-interchange',
+      );
+      await expect.poll(async () => runtimeById(await snapshot(page), flatbedId)
+        .speedWorldUnitsPerSecond).toBeLessThanOrEqual(0.1);
+      const clearedLoss = await snapshot(page);
+      const clearedLossRuntime = runtimeById(clearedLoss, flatbedId);
+      const prefabAccess = facility(clearedLoss, 'prefabrication-plant').railAccess;
+      const clearedLossTrack = clearedLoss.world.tracks.find(
+        ({ uuid }) => uuid === clearedLossRuntime.trackUUID,
+      );
+      if (!clearedLossTrack || clearedLossRuntime.trackT === null) {
+        throw new Error('Loss departure has no persistable track geometry');
+      }
+      const clearedLossPoint = bezierPoint(clearedLossTrack, clearedLossRuntime.trackT);
+      expect(distanceTo(clearedLossRuntime, prefabAccess))
+        .toBeGreaterThan(prefabAccess.radius + 100);
+      expect(distanceTo(clearedLossPoint, prefabAccess))
+        .toBeGreaterThan(prefabAccess.radius + 100);
+      // The body follows the chord midpoint between bogies; its saved cursor
+      // follows the arc. These are distinct valid positions on a curved rail.
+      const clearedLossBogie = await stoppedTrainBogieGeometry(page, flatbedId);
+      const clearedLossDynamics = clearedLossBogie.dynamics;
+      expect(clearedLossDynamics.trackUUID).toBe(clearedLossRuntime.trackUUID);
+      expect(distanceTo(clearedLossBogie.arcAnchor, clearedLossPoint)).toBeLessThanOrEqual(0.01);
+      expect(distanceTo(clearedLossRuntime, clearedLossBogie.bogieCentre)).toBeLessThanOrEqual(0.01);
+      expect(distanceTo(clearedLossBogie.matterBody, prefabAccess))
+        .toBeGreaterThan(prefabAccess.radius + 100);
+      expect(clearedLossRuntime.derailed).toBe(false);
+      expect(clearedLossRuntime.throttle).toBe(0);
+      expect(trainById(clearedLoss, flatbedId).cargo).toBeNull();
+
+      await returnToCreate(page);
+      const editedLossBogie = await liveTrainBogieGeometry(page, flatbedId);
+      expect(editedLossBogie.dynamics).toEqual(clearedLossDynamics);
+      expect(distanceTo(editedLossBogie.gameObject, clearedLossBogie.bogieCentre))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(editedLossBogie.matterBody, clearedLossBogie.bogieCentre))
+        .toBeLessThanOrEqual(0.01);
+      await page.keyboard.press('Control+S');
+      await expect(page.locator('[data-testid="company-save-state"]')).toHaveText('Saved');
+      const outsideLossCheckpoint = (await snapshot(page)).world;
+      await reloadSavedWorldFromCreate(page);
+      const restoredOutsideLoss = await snapshot(page);
+      expect(stableWorld(restoredOutsideLoss.world))
+        .toEqual(stableWorld(outsideLossCheckpoint));
+      const outsideAuthority = trainById(restoredOutsideLoss, flatbedId);
+      expect(outsideAuthority.trackUUID).toBe(clearedLossRuntime.trackUUID);
+      expect(outsideAuthority.trackT).toBe(clearedLossRuntime.trackT);
+      expect(outsideAuthority.dynamics).toEqual(clearedLossDynamics);
+      expect(outsideAuthority.cargo).toBeNull();
+      // Create reload restores the saved arc anchor. Play reconstructs the
+      // same physical bogie midpoint from that unchanged cursor below.
+      await expect.poll(async () => {
+        await waitForRenderedFrame(page);
+        const geometry = await liveTrainPersistedGeometry(
+          page,
+          flatbedId,
+          outsideAuthority.trackT,
+        );
+        return {
+          trackUUID: geometry.trackUUID,
+          curveSynchronized: geometry.curvePoint !== null
+            && distanceTo(geometry.curvePoint, clearedLossPoint) <= 0.01,
+          matterSynchronized: distanceTo(geometry.matterBody, clearedLossPoint) <= 0.01,
+          gameObjectSynchronized: distanceTo(geometry.gameObject, geometry.matterBody) <= 0.01,
+          stopped: geometry.speedWorldUnitsPerSecond <= 0.01,
+        };
+      }, { timeout: 500, intervals: [16, 20, 25] }).toEqual({
+        trackUUID: outsideAuthority.trackUUID,
+        curveSynchronized: true,
+        matterSynchronized: true,
+        gameObjectSynchronized: true,
+        stopped: true,
+      });
+      const restoredOutsideGeometry = await liveTrainPersistedGeometry(
+        page,
+        flatbedId,
+        outsideAuthority.trackT,
+      );
+      expect(distanceTo(restoredOutsideGeometry.curvePoint!, clearedLossPoint))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(restoredOutsideGeometry.matterBody, clearedLossPoint))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(restoredOutsideGeometry.gameObject, restoredOutsideGeometry.matterBody))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(restoredOutsideGeometry.matterBody, prefabAccess))
+        .toBeGreaterThan(prefabAccess.radius + 100);
+      await panWorldPointToCentre(
+        page,
+        runtimeById(await snapshot(page), flatbedId),
       );
       await enterPlay(page);
+      const resumedLossBogie = await stoppedTrainBogieGeometry(page, flatbedId);
+      expect(resumedLossBogie.dynamics).toEqual(clearedLossDynamics);
+      expect(distanceTo(resumedLossBogie.arcAnchor, clearedLossPoint)).toBeLessThanOrEqual(0.01);
+      expect(distanceTo(resumedLossBogie.bogieCentre, clearedLossBogie.bogieCentre))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(resumedLossBogie.gameObject, clearedLossBogie.bogieCentre))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(resumedLossBogie.matterBody, clearedLossBogie.bogieCentre))
+        .toBeLessThanOrEqual(0.01);
+      expect(distanceTo(resumedLossBogie.matterBody, prefabAccess))
+        .toBeGreaterThan(prefabAccess.radius + 100);
       await expect.poll(async () => trainById(
         await snapshot(page),
         flatbedId,
@@ -2494,10 +3046,6 @@ test.describe('regional construction supply browser journey', () => {
       ).toBeLessThanOrEqual(0);
       expect(lossState.world.freightProgress
         .profitableSteelDeliveryCompleted).toBe(false);
-      await expect(page.locator('[data-testid="company-last-delivery"]'))
-        .toHaveAttribute('data-tone', 'loss');
-      await expect(page.locator('[data-testid="company-last-delivery"]'))
-        .toContainText('Trip loss');
       await expectRegionalObjectiveDom(page, 'Supply regional construction', {
         'connect-port': 'complete',
         'deliver-steel-profitably': 'current',
@@ -2516,6 +3064,14 @@ test.describe('regional construction supply browser journey', () => {
         lossEnding.world.economy.tick - lossOpeningTick;
       expect(lossWallElapsedMs).toBeLessThanOrEqual(600_000);
       expect(lossEconomySeconds).toBeLessThanOrEqual(600);
+      await writeRegionalCheckpoint(testInfo, 'outside-loss', restoredOutsideLoss.world);
+      console.info(JSON.stringify({
+        regionalMilestone: 'loss-complete',
+        tick: lossEnding.world.economy.tick,
+        tripProfit: lossOperations.lastTripRevenue - lossOperations.lastTripRunningCost,
+        wallElapsedMs: lossWallElapsedMs,
+        economySeconds: lossEconomySeconds,
+      }));
     }, { timeout: 600_000 });
 
     await arriveAtFacilityWithoutCheckpoint(
@@ -2527,6 +3083,13 @@ test.describe('regional construction supply browser journey', () => {
     );
     await waitForCargo(page, flatbedId, 'steel', 60);
     await returnToCreate(page);
+    const afterLossProduction = await snapshot(page);
+    const lossPrefab = facility(afterLossProduction, 'prefabrication-plant');
+    expect(lossPrefab.inventories['structural-timber'].quantity).toBe(52);
+    expect(lossPrefab.inventories.cement.quantity).toBe(72);
+    expect(lossPrefab.inventories.steel.quantity).toBe(4);
+    expect(lossPrefab.inventories['building-modules'].quantity).toBe(4);
+    assertModuleProductionConservation(afterLossProduction, productionOpening, 10, 1);
     await page.keyboard.press('Control+S');
     await expect(page.locator('[data-testid="company-save-state"]'))
       .toHaveText('Saved');
@@ -2540,6 +3103,12 @@ test.describe('regional construction supply browser journey', () => {
     expect(stableWorld(current.world)).toEqual(stableWorld(loadedCheckpoint));
     expect(runtimeById(current, flatbedId).trackUUID)
       .toBe(loadedTrackUUID);
+    await writeRegionalCheckpoint(testInfo, 'loaded-steel-60', current.world);
+    console.info(JSON.stringify({
+      regionalMilestone: 'loaded-steel-checkpoint',
+      tick: current.world.economy.tick,
+      cargo: trainById(current, flatbedId).cargo,
+    }));
 
     await enterPlay(page);
     await selectTrainThroughPointer(page, flatbedId);
@@ -2550,56 +3119,86 @@ test.describe('regional construction supply browser journey', () => {
       { productId: 'steel', units: 60 },
     );
     expect(steelRoute.visitedTrackUUIDs.length).toBeGreaterThan(0);
+    // The live economy may complete the delivery as soon as the train crosses
+    // the genuine access boundary. Capture its baseline before that event.
+    const steelDeliveredBefore = trainById(
+      await snapshot(page),
+      flatbedId,
+    ).operations.lifetimeDeliveredUnits;
     await crossFacilityBoundaryWithKeyboard(
       page,
       flatbedId,
       'prefabrication-plant',
       { productId: 'steel', units: 60 },
+      true,
+      true,
+      async () => {
+        await clickFacilityThroughPointer(page, 'prefabrication-plant');
+        for (const factor of [
+          'Global construction',
+          'Regional demand',
+          'Inventory pressure',
+        ]) {
+          await expect(page.locator('[data-testid="facility-quotes"]'))
+            .toContainText(factor);
+        }
+        await expect.poll(
+          () => page.locator('[data-testid="facility-status"]').textContent(),
+          { timeout: 15_000, intervals: [50, 100, 250] },
+        ).toMatch(/Working [1-5] \/ 6 ticks/);
+        await expect(page.locator('[data-testid="company-last-delivery"]'))
+          .toContainText('Steel delivered to Prefabrication Plant', {
+            timeout: 30_000,
+          });
+        await expect(page.locator('[data-testid="company-last-delivery"]'))
+          .toContainText('Running');
+        await expect(page.locator('[data-testid="company-last-delivery"]'))
+          .toContainText('Trip profit');
+      },
     );
-    const steelDeliveredBefore = trainById(
-      await snapshot(page),
-      flatbedId,
-    ).operations.lifetimeDeliveredUnits;
     await enterPlay(page);
-    await clickFacilityThroughPointer(page, 'prefabrication-plant');
-    for (const factor of [
-      'Global construction',
-      'Regional demand',
-      'Inventory pressure',
-    ]) {
-      await expect(page.locator('[data-testid="facility-quotes"]'))
-        .toContainText(factor);
-    }
-    await expect.poll(
-      () => page.locator('[data-testid="facility-status"]').textContent(),
-      { timeout: 15_000, intervals: [50, 100, 250] },
-    ).toMatch(/Working [1-5] \/ 6 ticks/);
     await expect.poll(async () => {
       current = await snapshot(page);
+      const prefab = facility(current, 'prefabrication-plant');
+      const cargo = trainById(current, flatbedId).cargo;
       return {
         delivered: trainById(
           current,
           flatbedId,
         ).operations.lifetimeDeliveredUnits,
-        modules: facility(
-          current,
-          'prefabrication-plant',
-        ).inventories['building-modules'].quantity,
+        recipeProgressTicks: prefab.recipeProgressTicks,
+        timber: prefab.inventories['structural-timber'].quantity,
+        cement: prefab.inventories.cement.quantity,
+        steel: prefab.inventories.steel.quantity,
+        modules: prefab.inventories['building-modules'].quantity,
+        cargo: cargo && {
+          productId: cargo.productId,
+          units: cargo.units,
+          loadedUnits: cargo.loadedUnits,
+        },
       };
     }, {
-      timeout: 30_000,
+      timeout: 60_000,
       intervals: [100, 250, 500],
     }).toEqual({
       delivered: steelDeliveredBefore + 60,
-      modules: 4,
+      recipeProgressTicks: 0,
+      timber: 4,
+      cement: 24,
+      steel: 28,
+      modules: 24,
+      cargo: { productId: 'building-modules', units: 4, loadedUnits: 4 },
     });
-    expect(trainById(current, flatbedId).cargo).toBeNull();
+    // Both steel deliveries are useful inputs regardless of profitability.
+    // Sixty timber limits seventy steel and eighty cement to seven batches:
+    // twenty-four modules remain here and four fill the departing flatbed.
+    assertModuleProductionConservation(current, productionOpening, 10 + 60, 7);
     expect(current.world.freightProgress
       .profitableSteelDeliveryCompleted).toBe(true);
     expect(facility(
       current,
       'prefabrication-plant',
-    ).inventories['building-modules'].quantity).toBe(4);
+    ).inventories['building-modules'].quantity).toBe(24);
     expect(current.objective.steps).toEqual([
       expect.objectContaining({ id: 'connect-port', state: 'complete' }),
       expect.objectContaining({
@@ -2616,12 +3215,6 @@ test.describe('regional construction supply browser journey', () => {
         state: 'current',
       }),
     ]);
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Steel delivered to Prefabrication Plant');
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Running');
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Trip profit');
     await expectRegionalObjectiveDom(page, 'Supply regional construction', {
       'connect-port': 'complete',
       'deliver-steel-profitably': 'complete',
@@ -2636,13 +3229,21 @@ test.describe('regional construction supply browser journey', () => {
     );
 
     await waitForCargo(page, flatbedId, 'building-modules', 4, 30_000);
+    console.info(JSON.stringify({
+      regionalMilestone: 'seven-batches-complete',
+      tick: current.world.economy.tick,
+      timber: facility(current, 'prefabrication-plant').inventories['structural-timber'].quantity,
+      cement: facility(current, 'prefabrication-plant').inventories.cement.quantity,
+      steel: facility(current, 'prefabrication-plant').inventories.steel.quantity,
+      storedModules: facility(current, 'prefabrication-plant').inventories['building-modules'].quantity,
+      cargo: trainById(current, flatbedId).cargo,
+    }));
     await returnToCreate(page);
     await page.keyboard.press('Control+S');
     await expect(page.locator('[data-testid="company-save-state"]'))
       .toHaveText('Saved');
     const moduleCheckpoint = (await snapshot(page)).world;
-    await enterPlay(page);
-    await reloadOnlySavedWorld(page);
+    await reloadSavedWorldFromCreate(page);
     const restoredModules = await snapshot(page);
     expect(stableWorld(restoredModules.world))
       .toEqual(stableWorld(moduleCheckpoint));
@@ -2651,6 +3252,7 @@ test.describe('regional construction supply browser journey', () => {
       units: 4,
       loadedUnits: 4,
     });
+    await writeRegionalCheckpoint(testInfo, 'loaded-modules-4', restoredModules.world);
 
     await enterPlay(page);
     await selectTrainThroughPointer(page, flatbedId);
@@ -2821,13 +3423,53 @@ test.describe('regional construction supply browser journey', () => {
       await snapshot(page),
       flatbedId,
     ).operations.lifetimeDeliveredUnits;
-    await crossFacilityBoundaryWithKeyboard(
-      page,
-      flatbedId,
-      'town-construction-market',
-      { productId: 'building-modules', units: 4 },
-    );
+    await armTownDeliveryDomWitness(page);
+    try {
+      await crossFacilityBoundaryWithKeyboard(
+        page,
+        flatbedId,
+        'town-construction-market',
+        { productId: 'building-modules', units: 4 },
+        true,
+        true,
+        async () => {
+          try {
+            await Promise.all([
+              expect.poll(() => page.evaluate(() => {
+                const capture = (window as TownDeliveryDomWindow)
+                  .__railSimTownDeliveryDomCapture;
+                return capture && {
+                  witness: capture.witness,
+                  latest: capture.latest,
+                  expired: capture.expired,
+                };
+              }), { timeout: 5_000, intervals: [25, 50, 100] }).toMatchObject({
+                witness: {
+                  deliveryText: expect.stringContaining(
+                    'Building Modules delivered to Town Construction Market',
+                  ),
+                  statusText: 'Unloading',
+                  batchText: 'Batch 4 / 4 modules',
+                },
+                expired: false,
+              }),
+              expect(page.locator('[data-testid="company-last-delivery"]'))
+                .toContainText('Building Modules delivered to Town Construction Market'),
+              expect(page.locator('[data-testid="company-last-delivery"]'))
+                .toContainText('Running'),
+              expect(page.locator('[data-testid="company-last-delivery"]'))
+                .toContainText('Trip profit'),
+            ]);
+          } finally {
+            await disposeTownDeliveryDomWitness(page);
+          }
+        },
+      );
+    } finally {
+      await disposeTownDeliveryDomWitness(page);
+    }
     await enterPlay(page);
+    await selectTrainThroughPointer(page, flatbedId);
     await page.setViewportSize(MOBILE);
     await waitForRenderedFrame(page);
     await expect(trainInspector).toHaveAttribute('data-layout', 'mobile');
@@ -2857,6 +3499,9 @@ test.describe('regional construction supply browser journey', () => {
       current,
       'town-construction-market',
     ).inventories['building-modules'].quantity).toBe(4);
+    expect(facility(current, 'prefabrication-plant')
+      .inventories['building-modules'].quantity).toBe(24);
+    assertModuleProductionConservation(current, productionOpening, 10 + 60, 7);
     expect(current.world.freightProgress).toMatchObject({
       profitableSteelDeliveryCompleted: true,
       profitableBuildingModuleDeliveryCompleted: true,
@@ -2888,13 +3533,6 @@ test.describe('regional construction supply browser journey', () => {
         'deliver-building-modules-profitably': 'complete',
       },
     );
-    await expect(trainInspector).toContainText('Batch 4 / 4 modules');
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Building Modules delivered to Town Construction Market');
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Running');
-    await expect(page.locator('[data-testid="company-last-delivery"]'))
-      .toContainText('Trip profit');
     const moduleOperations = trainById(current, flatbedId).operations;
     await expect(page.locator('[data-testid="train-last-delivery-profit"]'))
       .toHaveText(CASH.format(
@@ -2920,6 +3558,13 @@ test.describe('regional construction supply browser journey', () => {
     );
 
     await page.keyboard.press('Escape');
+    console.info(JSON.stringify({
+      regionalMilestone: 'town-complete',
+      tick: current.world.economy.tick,
+      townModules: facility(current, 'town-construction-market').inventories['building-modules'].quantity,
+      tripProfit: moduleOperations.lastTripRevenue - moduleOperations.lastTripRunningCost,
+      objectiveAchieved: current.objective.achieved,
+    }));
     for (const selector of [
       '[data-testid="company-hud"]',
       '[data-testid="train-inspector"]',

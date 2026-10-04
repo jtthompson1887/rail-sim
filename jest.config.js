@@ -3,7 +3,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jest-environment-jsdom',
   roots: ['<rootDir>/tests'],
-  testPathIgnorePatterns: ['[\\\\/]tests[\\\\/]e2e[\\\\/]'],
+  testPathIgnorePatterns: ['/tests/e2e/'],
   moduleNameMapper: {
     '^phaser$': '<rootDir>/__mocks__/phaser.js',
     '^@babylonjs/core$': '<rootDir>/__mocks__/@babylonjs/core.ts',

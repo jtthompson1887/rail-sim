@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GameConfig } from '../config/GameConfig';
+import { shapeLandscapeHeight, type LandscapePresetId } from '../config/WorldGeneration';
 
 /** Terrain band identifier. */
 export type TerrainBand = 'WATER' | 'LOWLAND' | 'MIDLAND' | 'HIGHLAND' | 'PEAK';
@@ -28,7 +29,7 @@ export class TerrainGenerator {
   private readonly halfW: number;
   private readonly halfH: number;
 
-  constructor(seed: string) {
+  constructor(seed: string, private readonly landscapePreset?: LandscapePresetId) {
     this.rng = new Phaser.Math.RandomDataGenerator([seed]);
 
     // Build permutation table
@@ -161,7 +162,7 @@ export class TerrainGenerator {
       for (let xi = 0; xi < this.widthSamples; xi++) {
         const wx = xi * TC.SAMPLE_STEP - this.halfW;
         const wy = yi * TC.SAMPLE_STEP - this.halfH;
-        this.heightmap[yi * this.widthSamples + xi] = this.fbm(wx, wy);
+        this.heightmap[yi * this.widthSamples + xi] = shapeLandscapeHeight(this.landscapePreset, wx, wy, this.fbm(wx, wy));
       }
     }
   }

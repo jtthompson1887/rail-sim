@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
@@ -92,25 +93,7 @@ async function createFixedSeedWorld(page: Page, seed: string): Promise<void> {
     { timeout: 25_000 },
   );
   await page.keyboard.press('Enter');
-  await page.locator('canvas').click({
-    position: {
-      x: DESKTOP_VIEWPORT.width / 2,
-      y: DESKTOP_VIEWPORT.height - 90,
-    },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await page.locator('canvas').click({
-    position: {
-      x: DESKTOP_VIEWPORT.width / 2,
-      y: DESKTOP_VIEWPORT.height / 2 - 219,
-    },
-  });
-  await page.locator('canvas').click({
-    position: {
-      x: DESKTOP_VIEWPORT.width / 2,
-      y: DESKTOP_VIEWPORT.height / 2 + 301,
-    },
-  });
+  await createLegacyWorld(page, seed);
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'WorldScene'
       && typeof window.__railSimConstructionSnapshot === 'function',
@@ -227,24 +210,26 @@ async function scrollPanelNormally(page: Page, panel: Locator): Promise<void> {
 }
 
 test.describe('Task 9 fixed-seed construction playtest', () => {
+  // Joint opportunity/economy acceptance changed these witnesses before f92ff.
+  // Replayed committed f92ff and current legacy generation agree on these quotes.
   const terrainCases = [
     {
       name: 'cheap low-earthworks route',
-      seed: 'playtest-632',
-      attempt: 2,
+      seed: 'playtest-1627',
+      attempt: 1,
       direct: {
-        estimatedTotal: 30_127,
-        total: 30_127,
-        track: 17_500,
-        earthworks: 12_627,
+        estimatedTotal: 44_534,
+        total: 44_534,
+        track: 22_897,
+        earthworks: 21_637,
         bridge: 0,
         tunnel: 0,
       },
       detour: {
-        estimatedTotal: 51_388,
-        total: 48_888,
-        track: 19_488,
-        earthworks: 29_400,
+        estimatedTotal: 51_721,
+        total: 49_221,
+        track: 24_455,
+        earthworks: 24_766,
         bridge: 0,
         tunnel: 0,
       },
@@ -255,22 +240,22 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     {
       name: 'rolling earthworks choice',
       seed: 'playtest-601',
-      attempt: 3,
+      attempt: 1,
       direct: {
-        estimatedTotal: 185_131,
-        total: 185_131,
-        track: 27_893,
-        earthworks: 136_953,
-        bridge: 7_607,
-        tunnel: 12_678,
+        estimatedTotal: 225_857,
+        total: 225_857,
+        track: 33_305,
+        earthworks: 142_280,
+        bridge: 0,
+        tunnel: 50_272,
       },
       detour: {
-        estimatedTotal: 119_718,
-        total: 117_218,
-        track: 33_821,
-        earthworks: 83_397,
+        estimatedTotal: 211_777,
+        total: 209_277,
+        track: 34_307,
+        earthworks: 124_334,
         bridge: 0,
-        tunnel: 0,
+        tunnel: 50_636,
       },
       expectedPreviewStructure: 'tunnel',
       liveCostProfile: 'earthworks',
@@ -279,21 +264,21 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     {
       name: 'tunnel versus bridge tradeoff',
       seed: 'playtest-657',
-      attempt: 6,
+      attempt: 23,
       direct: {
-        estimatedTotal: 286_794,
-        total: 286_794,
-        track: 37_710,
-        earthworks: 197_952,
+        estimatedTotal: 244_134,
+        total: 244_134,
+        track: 30_956,
+        earthworks: 156_321,
         bridge: 0,
-        tunnel: 51_132,
+        tunnel: 56_857,
       },
       detour: {
-        estimatedTotal: 253_739,
-        total: 251_239,
-        track: 44_617,
-        earthworks: 168_679,
-        bridge: 37_943,
+        estimatedTotal: 246_840,
+        total: 244_340,
+        track: 32_045,
+        earthworks: 169_921,
+        bridge: 42_374,
         tunnel: 0,
       },
       expectedPreviewStructure: 'tunnel',
@@ -389,29 +374,30 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
   }
 
   test('shows deterministic unaffordability and readable blocking UI on mobile', async ({ page }) => {
-    await createFixedSeedWorld(page, 'playtest-607');
+    // The old playtest-607 quote predates joint acceptance; keep a verified surface-only route.
+    await createFixedSeedWorld(page, 'playtest-049');
     const generated = await snapshot(page);
     const [direct, detour] = generated.world.starterOpportunity.corridors;
 
     expect(generated.world.company.cash).toBe(1_000_000);
     expect(generated.world.starterOpportunity.resolvedAttempt).toBe(1);
-    expect(direct.estimatedCost).toBe(98_077);
+    expect(direct.estimatedCost).toBe(107_719);
     expect(aggregateWitnessCosts(direct)).toEqual({
-      total: 98_077,
-      track: 31_579,
-      earthworks: 66_498,
+      total: 107_719,
+      track: 30_149,
+      earthworks: 77_570,
       bridge: 0,
       tunnel: 0,
     });
     expect(direct.feasibilityWitness.segments.map(
       (segment) => segment.topologyCost,
     )).toEqual([0]);
-    expect(detour.estimatedCost).toBe(100_953);
-    expect(detour.feasibilityWitness.totalCost).toBe(100_953);
+    expect(detour.estimatedCost).toBe(66_892);
+    expect(detour.feasibilityWitness.totalCost).toBe(66_892);
     expect(aggregateWitnessCosts(detour)).toEqual({
-      total: 98_453,
-      track: 32_754,
-      earthworks: 65_699,
+      total: 64_392,
+      track: 31_267,
+      earthworks: 33_125,
       bridge: 0,
       tunnel: 0,
     });
@@ -435,7 +421,7 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     await page.reload();
     await openOnlySavedWorld(page);
     const lowCash = await snapshot(page);
-    expect(lowCash.world.company.cash).toBe(98_076);
+    expect(lowCash.world.company.cash).toBe(107_718);
     expect(lowCash.world.tracks).toHaveLength(0);
 
     const reviewed = await reviewDirectCorridor(page);
@@ -474,6 +460,6 @@ test.describe('Task 9 fixed-seed construction playtest', () => {
     await page.keyboard.press('Enter');
     const rejected = await snapshot(page);
     expect(rejected.world.tracks).toHaveLength(0);
-    expect(rejected.world.company.cash).toBe(98_076);
+    expect(rejected.world.company.cash).toBe(107_718);
   });
 });

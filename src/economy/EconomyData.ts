@@ -18,7 +18,7 @@ export interface ProductDefinition {
   readonly unitMassKg: number;
   readonly unitVolumeLitres: number;
   readonly basePrice: number;
-  readonly marketSector: 'construction';
+  readonly marketSector: 'construction' | 'agriculture' | 'recycling';
 }
 
 export interface RecipeDefinition {

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29
 
-**Status:** Approved design; implementation planning pending
+**Status:** Implemented and verified
 
 **Product intent:** Trains must flow convincingly through curves in normal
 operation while retaining dangerous, costly, physically expressive derailments
@@ -384,3 +384,20 @@ Implementation should proceed in narrow, reviewable slices:
 The existing centre-force follower remains in place until the new single-car
 and consist gates pass. The final switch removes the obsolete PID rail-guidance
 path rather than maintaining two competing normal-operation solvers.
+
+## 10. Verification record
+
+Verified on 2026-07-29:
+
+- `npx jest --runInBand --coverage=false`: 97 suites, 1,283 tests passed.
+- `npm run test:e2e`: production build completed and all 33 Playwright tests
+  passed, including continuous menu running and derailment recovery.
+- `npm run benchmark:train-physics`: standard corpus completed in 1,472 ms;
+  the 100-car stress case completed in 2,007 ms.
+- `npm run benchmark:train-physics-browser`: safe curve, distributed-power
+  consist and 40-car acceptance all produced finite metrics with matching
+  browser/headless replay hashes; the 40-car candidate completed in 65.4 ms.
+- `npx tsc --noEmit`, `npm run build`, and `git diff --check` completed
+  successfully.
+- The final source/test audit found no remaining centre-force solver, rail PID
+  controller, contact-point approximation or obsolete guidance-force path.

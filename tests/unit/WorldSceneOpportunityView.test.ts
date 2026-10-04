@@ -382,7 +382,7 @@ describe('WorldScene persisted opportunity view', () => {
     scene.facilityViews = [facility];
     scene.selectedFacilityId = 'sawmill';
     scene.activeTool = 'place-track';
-    scene.trainManager = { trains: [] };
+    scene.trainManager = { trains: [], carriages: [] };
     scene.cameraController = {
       stopFollow: jest.fn(),
       setInputLockOwner: jest.fn(),

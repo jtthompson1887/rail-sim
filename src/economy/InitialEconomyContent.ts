@@ -283,3 +283,33 @@ export const INITIAL_FACILITY_DEFINITIONS = freezeFacilities([
     boundary: 'town-consumer',
   },
 ]);
+
+/** Launch additions are separate so existing generated worlds keep their seven-site witnesses. */
+export const SECONDARY_PRODUCTS = freezeProducts([
+  { id: 'grain', displayName: 'Grain', category: 'raw-material', cargoClass: 'bulk', unitLabel: 'tonne', unitMassKg: 1_000, unitVolumeLitres: 1_300, basePrice: 80, marketSector: 'agriculture' },
+  { id: 'flour', displayName: 'Flour', category: 'processed-material', cargoClass: 'covered', unitLabel: 'tonne', unitMassKg: 1_000, unitVolumeLitres: 1_600, basePrice: 170, marketSector: 'agriculture' },
+  { id: 'food', displayName: 'Food', category: 'finished-good', cargoClass: 'covered', unitLabel: 'tonne', unitMassKg: 1_000, unitVolumeLitres: 2_000, basePrice: 360, marketSector: 'agriculture' },
+  { id: 'scrap', displayName: 'Scrap Metal', category: 'raw-material', cargoClass: 'bulk', unitLabel: 'tonne', unitMassKg: 1_000, unitVolumeLitres: 1_500, basePrice: 70, marketSector: 'recycling' },
+]);
+
+export const SECONDARY_RECIPES = freezeRecipes([
+  { id: 'grain-harvest', kind: 'resource-extraction', cycleTicks: 6, inputs: [], outputs: [{ productId: 'grain', quantity: 10 }] },
+  { id: 'grain-milling', kind: 'processing', cycleTicks: 5, inputs: [{ productId: 'grain', quantity: 10 }], outputs: [{ productId: 'flour', quantity: 8 }] },
+  { id: 'food-production', kind: 'processing', cycleTicks: 6, inputs: [{ productId: 'flour', quantity: 8 }], outputs: [{ productId: 'food', quantity: 6 }] },
+  { id: 'scrap-collection', kind: 'resource-extraction', cycleTicks: 8, inputs: [], outputs: [{ productId: 'scrap', quantity: 6 }] },
+  { id: 'steel-recycling', kind: 'processing', cycleTicks: 10, inputs: [{ productId: 'scrap', quantity: 12 }], outputs: [{ productId: 'steel', quantity: 8 }] },
+]);
+
+const slot = (productId: string, initialQuantity = 0) => ({ productId, capacity: 240, targetStock: 120, initialQuantity });
+export const SECONDARY_FACILITY_DEFINITIONS = freezeFacilities([
+  { id: 'grain-farm', displayName: 'Grain Farm', recipeIds: ['grain-harvest'], inventory: [slot('grain', 60)], boundary: 'none' },
+  { id: 'flour-mill', displayName: 'Flour Mill', recipeIds: ['grain-milling'], inventory: [slot('grain'), slot('flour')], boundary: 'none' },
+  { id: 'food-factory', displayName: 'Food Factory', recipeIds: ['food-production'], inventory: [slot('flour'), slot('food')], boundary: 'none' },
+  { id: 'town-food-market', displayName: 'Town Food Market', recipeIds: [], inventory: [slot('food')], boundary: 'town-consumer' },
+  { id: 'scrap-yard', displayName: 'Scrap Yard', recipeIds: ['scrap-collection'], inventory: [slot('scrap', 48)], boundary: 'none' },
+  { id: 'recycling-works', displayName: 'Recycling Works', recipeIds: ['steel-recycling'], inventory: [slot('scrap'), slot('steel')], boundary: 'none' },
+]);
+
+export const LAUNCH_PRODUCTS = Object.freeze([...INITIAL_PRODUCTS, ...SECONDARY_PRODUCTS]);
+export const LAUNCH_RECIPES = Object.freeze([...INITIAL_RECIPES, ...SECONDARY_RECIPES]);
+export const LAUNCH_FACILITY_DEFINITIONS = Object.freeze([...INITIAL_FACILITY_DEFINITIONS, ...SECONDARY_FACILITY_DEFINITIONS]);

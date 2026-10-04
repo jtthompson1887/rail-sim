@@ -40,7 +40,7 @@ export class WorldContentLoader {
     for (const def of world.trains)   { this.restoreVehicle(def); }
   }
 
-  private restoreTrack(def: TrackDef): void {
+  restoreTrack(def: TrackDef): void {
     const p0 = new Phaser.Math.Vector2(def.p0.x, def.p0.y);
     const p1 = new Phaser.Math.Vector2(def.p1.x, def.p1.y);
     const p2 = new Phaser.Math.Vector2(def.p2.x, def.p2.y);
@@ -55,7 +55,7 @@ export class WorldContentLoader {
     this.trackManager.addTrack(track);
   }
 
-  private restoreStation(def: WorldStationDef): void {
+  restoreStation(def: WorldStationDef): void {
     const track = this.trackManager.getTrack(def.trackUUID);
     if (!track) return;
     const stationDef = {
@@ -68,24 +68,12 @@ export class WorldContentLoader {
     this.stations.push(new Station(this.scene, stationDef, track));
   }
 
-  private restoreVehicle(def: TrainDef): void {
-    const track = this.trackManager.getTrack(def.trackUUID);
-    if (!track) return;
-
+  restoreVehicle(def: TrainDef): void {
     const vehicle = this.trainManager.createFreightTrain(
       def.id,
       def.freightSetId,
     );
-    const body = vehicle.getMatterBody();
-    const point = track.getCurvePath().getPoint(def.trackT);
-    body.setPosition(point.x, point.y);
-    vehicle.currentTrack = track;
-    body.setAngle(
-      track.getTrackAngle(body) + (def.facing === -1 ? 180 : 0),
-    );
-    vehicle.enginePower = 0;
-    body.setVelocity(0, 0);
-    body.setAngularVelocity(0);
+    this.trainManager.restoreVehicleDynamics(vehicle, def.dynamics);
   }
 
 }

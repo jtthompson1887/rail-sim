@@ -1,3 +1,5 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
+import { accessibleWorldPoint } from './helpers/AccessibleWorldPoint';
 import { expect, test, type Page } from '@playwright/test';
 import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
@@ -259,16 +261,7 @@ async function createFixedSeedWorld(
     { timeout: 40_000 },
   );
   await page.keyboard.press('Enter');
-  await page.locator('canvas').click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await page.locator('canvas').click({
-    position: { x: viewport.width / 2, y: viewport.height / 2 - 219 },
-  });
-  await page.locator('canvas').click({
-    position: { x: viewport.width / 2, y: viewport.height / 2 + 301 },
-  });
+  await createLegacyWorld(page, seed);
   await waitForFirstRouteHarness(page);
   expect((await snapshot(page)).world.generationConfig.seed).toBe(seed);
 }
@@ -500,9 +493,8 @@ async function purchaseTimberSetAtForest(
     ),
   ).toBeLessThanOrEqual(forest.railAccess.radius);
 
+  const screen = await accessibleWorldPoint(page, placement.point);
   await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
-  const state = await snapshot(page);
-  const screen = await toScreen(page, placement.point, state);
   await page.mouse.dblclick(screen.x, screen.y);
   const confirm = page.locator('[data-testid="freight-purchase-confirm"]');
   await expect(
@@ -510,7 +502,7 @@ async function purchaseTimberSetAtForest(
   ).toContainText('£90,000');
   await expect(page.locator('[data-testid="freight-purchase-remedy"]'))
     .not.toContainText('Purchase already in progress');
-  await expect(confirm).toBeEnabled();
+  await expect(confirm, await page.locator('[data-testid="freight-purchase-remedy"]').textContent() ?? 'Purchase quote should be valid').toBeEnabled();
   await confirm.click();
   await page.waitForFunction(
     () => window.__railSimFirstRouteHarness?.snapshot().world.trains.length === 1
@@ -1253,16 +1245,15 @@ test.describe('UX: off-track click inside Managed Forest rail access', () => {
       ),
     ).toBeLessThanOrEqual(forest.railAccess.radius);
 
+    const screen = await accessibleWorldPoint(page, clickPoint);
     await page.locator('[data-testid="flatbed-freight-set-buy"]').click();
-    const afterBuy = await snapshot(page);
-    const screen = await toScreen(page, clickPoint, afterBuy);
 
     await page.mouse.click(screen.x, screen.y);
     const confirm = page.locator('[data-testid="freight-purchase-confirm"]');
     await expect(
       page.locator('[data-testid="vehicle-purchase-panel"]'),
     ).toContainText('£90,000');
-    await expect(confirm).toBeEnabled();
+    await expect(confirm, await page.locator('[data-testid="freight-purchase-remedy"]').textContent() ?? 'Off-track access should permit placement').toBeEnabled();
     await confirm.click();
 
     await page.waitForFunction(

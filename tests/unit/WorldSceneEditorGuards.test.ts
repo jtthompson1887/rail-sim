@@ -1681,6 +1681,8 @@ describe('WorldScene disabled construction bypass guards', () => {
           draft.trains[0].trackUUID = 'newer-track';
           draft.trains[0].trackT = 0.8;
           draft.trains[0].facing = -1;
+          draft.trains[0].dynamics = { mode: 'on-rail', trackUUID: 'newer-track',
+            distance: 800, direction: -1, speedMps: 0, consistId: 'consist-newer', consistOrder: 0 };
           return true;
         },
       ) && false);
@@ -2682,6 +2684,7 @@ describe('WorldScene disabled construction bypass guards', () => {
         getPoint: jest.fn().mockReturnValue({ x: 125, y: 250 }),
       }),
       getTrackAngle: jest.fn().mockReturnValue(35),
+      getArcLengthIndex: jest.fn().mockReturnValue({ distanceForPoint: () => 125 }),
     };
     const trackManager = {
       getTrack: jest.fn().mockReturnValue(liveTrack),

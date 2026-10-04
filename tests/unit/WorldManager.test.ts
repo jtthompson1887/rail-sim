@@ -316,9 +316,9 @@ describe('WorldManager', () => {
       expect(w.generationConfig.seed).toBe('my-seed-123');
     });
 
-    it('creates schema 10 with a generated economy and conserved opening balance', () => {
+    it('creates schema 11 with a generated economy and conserved opening balance', () => {
       const w: any = WorldManager.createNew('Versioned', 'seed-v1', 'alpine');
-      expect(w.schemaVersion).toBe(10);
+      expect(w.schemaVersion).toBe(11);
       expect(w.revision).toBe(0);
       expect(w.constructionRevision).toBe(0);
       expect(w.operationsRevision).toBe(0);

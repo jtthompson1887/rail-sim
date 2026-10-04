@@ -297,4 +297,61 @@ describe('ConstructionInspector', () => {
     expect(root.querySelector('[data-testid="construction-remedy"]')?.textContent)
       .toBe('This section exceeds your cash.');
   });
+
+  it('offers keyboard and touch shape controls without emitting a build intent', () => {
+    const emit = jest.spyOn(EventBus, 'emit');
+    EventBus.emit('construction:preview', preview({
+      draft: {
+        selectedHandle: 'start-direction',
+        startDirectionLocked: false,
+        endDirectionLocked: false,
+        canUndo: true,
+      },
+    }));
+    const rotate = document.querySelector('[data-testid="construction-rotate-left"]') as HTMLButtonElement;
+    rotate.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'Enter', key: 'Enter', bubbles: true, cancelable: true,
+    }));
+    expect(emit).toHaveBeenCalledWith('construction:shape-intent', { action: 'rotate', degrees: -5 });
+    expect(emit).not.toHaveBeenCalledWith('construction:intent', { action: 'confirm' });
+    const finish = document.querySelector('[data-testid="construction-end-direction"]') as HTMLButtonElement;
+    finish.click();
+    expect(emit).toHaveBeenCalledWith('construction:shape-intent', {
+      action: 'select', handle: 'end-direction',
+    });
+    expect(rotate.style.minHeight).toBe('44px');
+    expect(document.querySelector('[data-testid="construction-start-direction"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('explains locked joining directions, permits approach adjustment, and hides inactive controls', () => {
+    EventBus.emit('construction:preview', preview({
+      draft: {
+        selectedHandle: 'end-direction',
+        startDirectionLocked: false,
+        endDirectionLocked: true,
+        canUndo: false,
+      },
+    }));
+    expect((document.querySelector('[data-testid="construction-rotate-right"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('[data-testid="construction-longer"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(document.querySelector('[data-testid="construction-shape-help"]')?.textContent).toContain('Direction matches connected rail');
+    EventBus.emit('construction:preview', { phase: 'idle', preview: null });
+    expect((document.querySelector('[data-testid="construction-shape-controls"]') as HTMLElement).style.display).toBe('none');
+  });
+
+  it('keeps summary keyboard activation inside the panel instead of building through world shortcuts', () => {
+    EventBus.emit('construction:preview', preview());
+    const worldShortcut = jest.fn();
+    document.addEventListener('keydown', worldShortcut);
+    const summary = document.querySelector('[data-testid="construction-engineering"] summary')!;
+    summary.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'Space', key: ' ', bubbles: true, cancelable: true,
+    }));
+    expect(worldShortcut).not.toHaveBeenCalled();
+    summary.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'Escape', key: 'Escape', bubbles: true,
+    }));
+    expect(worldShortcut).toHaveBeenCalledTimes(1);
+    document.removeEventListener('keydown', worldShortcut);
+  });
 });

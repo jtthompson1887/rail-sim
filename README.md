@@ -1,9 +1,30 @@
 # Rail Sim
 
-A terrain-aware railway management game in development. Every new game starts
-from a generated, empty landscape: the player surveys route opportunities,
-builds a railway that fits the terrain and budget, and grows it into a modern
-freight network.
+A terrain-aware railway management game in development: design a railway,
+rehearse its operation, and transform a region. Generated landscapes offer
+construction, food and recycling supply chains, automated freight and passenger
+services, and regional development projects. Offline native shells share the
+same gameplay with the browser build.
+
+## Regional play
+
+Create a region with a landscape preset and difficulty, then open **Railway**.
+New regions start paused. Use **Plans** to sketch an industry connection or a
+passing loop; the quoted design can include platforms, trains and services.
+Choose **Fleet** to buy a train and **Services** to choose its stops. Freight
+loads at its first stop and unloads at subsequent stops. Start the clock with
+1×, 2× or 4×; construction tools remain available independently.
+
+**Plans** runs detached ghost rehearsals and keeps two saved alternatives.
+Engineering results and demand assumptions are shown separately. **Projects**
+offers developments whose deliveries and passenger arrivals change both the
+landscape and future traffic. **Company** provides liveries, durable saving and
+portable JSON world files and browser import/export. Native Android/iOS
+document sharing remains a platform task. Compatible older worlds retain their original
+gameplay until **Start regional play** is selected.
+
+This is an implemented development slice, not a release candidate. See
+[implementation status and remaining gates](docs/full-game/IMPLEMENTATION.md).
 
 ## Construction
 
@@ -52,7 +73,25 @@ npm test -- --runInBand
 npx playwright test --retries=0
 npm run benchmark:construction-drag
 npm run benchmark:world-generation
+npm run benchmark:train-physics
+npm run benchmark:train-physics-browser
+npm run benchmark:rehearsal
 npm run build
+npm run test:native
+git diff --check
 ```
+
+Native development:
+
+```powershell
+npm run native:desktop
+npm run native:windows
+npm run native:sync
+npm run native:android
+npm run native:ios
+```
+
+Android needs a configured Android SDK/JDK. Building iOS requires macOS/Xcode.
+Device suspend/resume, memory and thermal testing are required before release.
 
 The long-term design and milestone plans live in `docs/superpowers`.

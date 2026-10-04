@@ -7,6 +7,9 @@ import {
   INITIAL_FACILITY_DEFINITIONS,
   INITIAL_PRODUCTS,
   INITIAL_RECIPES,
+  LAUNCH_PRODUCTS,
+  LAUNCH_RECIPES,
+  LAUNCH_FACILITY_DEFINITIONS,
 } from './InitialEconomyContent';
 
 export type ContentValidationResult =
@@ -27,13 +30,13 @@ const VALID_BOUNDARIES = new Set<string>([
 ]);
 
 const productById = new Map(
-  INITIAL_PRODUCTS.map((product) => [product.id, product]),
+  LAUNCH_PRODUCTS.map((product) => [product.id, product]),
 );
 const recipeById = new Map(
-  INITIAL_RECIPES.map((recipe) => [recipe.id, recipe]),
+  LAUNCH_RECIPES.map((recipe) => [recipe.id, recipe]),
 );
 const facilityById = new Map(
-  INITIAL_FACILITY_DEFINITIONS.map((facility) => [facility.id, facility]),
+  LAUNCH_FACILITY_DEFINITIONS.map((facility) => [facility.id, facility]),
 );
 
 const invalid = (
@@ -90,7 +93,7 @@ export const validateEconomyContent = (
       || !isNonEmptyString(product.displayName)
       || !isNonEmptyString(product.category)
       || !isNonEmptyString(product.unitLabel)
-      || product.marketSector !== 'construction') {
+      || !['construction', 'agriculture', 'recycling'].includes(product.marketSector as string)) {
       return invalid(
         'invalid-product',
         isRecord(product) && isNonEmptyString(product.id)

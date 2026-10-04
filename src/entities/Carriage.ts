@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
-import { PIDController } from '../utils/math';
 import type RailTrack from './RailTrack';
 import { matterScaling } from '../utils/physics';
 import { GameConfig } from '../config/GameConfig';
 import { EventBus } from '../services/EventBus';
 import type { IVehicle, VehicleType } from '../config/VehicleTypes';
+import type { PersistedVehicleDynamics } from '../config/WorldData';
 
 interface CarriageMatterImage extends Phaser.Physics.Matter.Image {
   parentCarriage?: Carriage;
@@ -13,17 +13,15 @@ interface CarriageMatterImage extends Phaser.Physics.Matter.Image {
 export default class Carriage extends Phaser.GameObjects.Container implements IVehicle {
   private _carriageBody!: CarriageMatterImage;
   private texture: string;
-  private readonly _pidControllerFront: PIDController;
-  private readonly _pidControllerRear: PIDController;
   private _currentTrack: RailTrack | null = null;
   private _derailed: boolean = false;
   private _mass: number = GameConfig.TRAIN.DEFAULT_MASS * 0.8;
   private _selected: boolean = false;
   private readonly uuid: string;
   private passengers: number = 0;
+  persistedDynamics: PersistedVehicleDynamics | null = null;
   readonly vehicleType: VehicleType = 'passenger-carriage';
   readonly passengerCapacity: number = 40;
-  public debugGraphics!: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene, x: number, y: number, id?: string) {
     super(scene);
@@ -31,8 +29,6 @@ export default class Carriage extends Phaser.GameObjects.Container implements IV
     this.scene.add.existing(this);
     this.texture = 'train1';
     this.uuid = id ?? crypto.randomUUID();
-    this._pidControllerFront = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
-    this._pidControllerRear = new PIDController(GameConfig.PID.KP, GameConfig.PID.KI, GameConfig.PID.KD);
     this.setDepth(100);
 
     this._carriageBody = scene.matter.add.image(x, y, this.texture, undefined) as CarriageMatterImage;
@@ -50,14 +46,6 @@ export default class Carriage extends Phaser.GameObjects.Container implements IV
     this._carriageBody.setInteractive({ cursor: 'pointer' });
     this._carriageBody.parentCarriage = this;
 
-    this.debugGraphics = this.scene.add.graphics();
-    this.debugGraphics.setDepth(1000);
-  }
-
-  update(time: number, delta: number): void {
-    this.pidControllerRear.setCurrentDelta(Math.max(delta, 1));
-    this.pidControllerFront.setCurrentDelta(Math.max(delta, 1));
-    // Carriages have no self-propulsion; TrackFlowSolver handles alignment
   }
 
   getUUID(): string {
@@ -114,14 +102,6 @@ export default class Carriage extends Phaser.GameObjects.Container implements IV
     return this._carriageBody;
   }
 
-  get pidControllerFront(): PIDController {
-    return this._pidControllerFront;
-  }
-
-  get pidControllerRear(): PIDController {
-    return this._pidControllerRear;
-  }
-
   getPassengerCount(): number {
     return this.passengers;
   }
@@ -141,7 +121,7 @@ export default class Carriage extends Phaser.GameObjects.Container implements IV
   /**
    * Reset a derailed carriage back to its normal running state.
    * Restores texture, scale, mass, and zeroes velocity so the
-   * TrackFlowSolver can guide the carriage back onto the track.
+   * The manager recreates its bogie-constrained state after recovery.
    */
   recover(): void {
     if (!this._derailed) return;

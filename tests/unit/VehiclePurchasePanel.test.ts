@@ -62,7 +62,7 @@ describe('VehiclePurchasePanel', () => {
     ) as HTMLElement;
     expect(root.textContent).toContain('General Flatbed Set');
     expect(root.textContent).toContain('£90,000');
-    expect(root.textContent).toContain('60 tonnes');
+    expect(root.textContent).toContain('60 t Logs');
     expect(root.textContent).toContain('Logs · Structural Timber');
     expect(root.textContent).toContain('£20 / active tick');
     expect(root.textContent).toContain('Cash after £110,000');
@@ -188,7 +188,7 @@ describe('VehiclePurchasePanel', () => {
 
     expect(flatbed.textContent).toContain('General Flatbed Set');
     expect(flatbed.textContent).toContain('£90,000');
-    expect(flatbed.textContent).toContain('60 tonnes');
+    expect(flatbed.textContent).toContain('60 t Logs');
     expect(flatbed.textContent).toContain('Logs · Structural Timber');
     expect(flatbed.textContent).toContain('£20 / active tick');
     expect(aggregate.textContent).toContain('Aggregate Hopper Set');

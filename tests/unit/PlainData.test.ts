@@ -1,6 +1,14 @@
 import { clonePlainData, equalPlainData } from '../../src/utils/PlainData';
 
 describe('lossless plain-data authority helpers', () => {
+  it('preserves own prototype-looking JSON keys without changing any object prototype', () => {
+    const source=JSON.parse('{"__proto__":{"phase":"blocked"},"constructor":{"id":7}}');
+    const copied=clonePlainData(source);
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(copied,'__proto__')).toBe(true);
+    expect(copied.__proto__).toEqual({phase:'blocked'});
+    expect(({} as any).phase).toBeUndefined();expect(equalPlainData(copied,source)).toBe(true);
+  });
   it('clones Infinity, negative Infinity, NaN, and negative zero losslessly', () => {
     const source = {
       values: [Infinity, -Infinity, NaN, -0],

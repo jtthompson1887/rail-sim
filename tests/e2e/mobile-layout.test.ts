@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 /**
  * E2E tests: Mobile-responsive layout verification
  *
@@ -79,24 +80,7 @@ async function openFreshWorld(
     { timeout: 60_000 },
   );
   await page.keyboard.press('Enter');
-  await page.waitForFunction(
-    () => (window as any).__railSimScene === 'WorldSelectScene',
-    undefined,
-    { timeout: 25_000 },
-  );
-  const canvas = page.locator('canvas');
-  await canvas.click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await canvas.click({ position: { x: viewport.width / 2, y: 146 } });
-  const pickerHeight = Math.min(690, viewport.height - 40);
-  await canvas.click({
-    position: {
-      x: viewport.width / 2,
-      y: viewport.height / 2 + pickerHeight / 2 - 44,
-    },
-  });
+  await createLegacyWorld(page, seed);
   await page.waitForFunction(
     () => (window as any).__railSimScene === 'WorldScene',
     undefined,

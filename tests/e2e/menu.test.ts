@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 /**
  * E2E tests for the MenuScene.
  *
@@ -57,10 +58,7 @@ test.describe('MenuScene – self-driving trains', () => {
     ).toBe('WorldSelectScene');
 
     const canvas = page.locator('canvas');
-    await canvas.click({ position: { x: 960, y: 1310 } });
-    page.once('dialog', (dialog) => dialog.accept('playtest-753'));
-    await canvas.click({ position: { x: 960, y: 481 } });
-    await canvas.click({ position: { x: 960, y: 1001 } });
+    await createLegacyWorld(page, 'playtest-753');
     await expect.poll(
       () => page.evaluate(
         () => (window as unknown as Record<string, string>).__railSimScene,

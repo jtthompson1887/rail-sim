@@ -1040,14 +1040,18 @@ git commit -m "feat: add train physics visual laboratory"
 
 ---
 
-### Task 10: Remove the obsolete follower and prove game acceptance
+### Task 10: Remove every obsolete train-motion path and prove game acceptance
 
 **Files:**
 
 - Delete: `src/systems/TrackFlowSolver.ts`
-- Delete or rewrite: `tests/unit/TrackFlowSolver.test.ts`
+- Delete: `tests/unit/TrackFlowSolver.test.ts`
 - Modify: every remaining import reported by
-  `rg -n "TrackFlowSolver|pidControllerFront|pidControllerRear" src tests`
+  `rg -n "TrackFlowSolver|applyTrackFlowForces|guideForceTowardsPoint|getFrontContactPoint|getRearContactPoint|pidControllerFront|pidControllerRear|GameConfig\\.PID|GameConfig\\.FORCE" src tests`
+- Delete or rewrite: legacy recovery, force-guidance, PID, mock and
+  characterization tests that assert the previous train-motion behaviour
+- Delete: obsolete train-specific constants, interfaces, helpers, mocks and
+  comments that become unused after the new adapter is authoritative
 - Modify: `tests/e2e/menu.test.ts`
 - Create: `tests/integration/TrainDynamicsAcceptance.test.ts`
 - Modify: `docs/superpowers/specs/2026-07-29-dual-mode-train-dynamics-design.md`
@@ -1055,7 +1059,8 @@ git commit -m "feat: add train physics visual laboratory"
 **Interfaces:**
 
 - Consumes: all prior tasks.
-- Produces: one production train-motion path and complete acceptance evidence.
+- Produces: exactly one production train-motion path, no legacy compatibility
+  layer, and complete acceptance evidence.
 
 - [ ] **Step 1: Write the final RED acceptance test**
 
@@ -1070,18 +1075,38 @@ Assert:
 - incident severity is finite and non-zero;
 - unrelated cars remain on rail unless coupler loads exceed their threshold.
 
-- [ ] **Step 2: Remove TrackFlowSolver and PID rail guidance**
+- [ ] **Step 2: Remove TrackFlowSolver, centre-force guidance and PID rail guidance**
 
 Use:
 
 ```powershell
-rg -n "TrackFlowSolver|pidControllerFront|pidControllerRear" src tests
+rg -n "TrackFlowSolver|applyTrackFlowForces|guideForceTowardsPoint|getFrontContactPoint|getRearContactPoint|pidControllerFront|pidControllerRear|GameConfig\\.PID|GameConfig\\.FORCE" src tests
 ```
 
-Expected after removal: no production match. Retain the generic `PIDController`
-utility only if another system imports it.
+Expected after removal: no match in production or tests. Remove the
+train-specific `GameConfig.PID`, `GameConfig.FORCE`, follower PID properties,
+old force arrows and old contact-point approximation. Retain the generic
+`PIDController` utility only if a non-train system still imports it.
 
-- [ ] **Step 3: Run the complete physics gates**
+- [ ] **Step 3: Remove tests and test infrastructure for the deleted approach**
+
+Delete tests whose only purpose was to validate `TrackFlowSolver`, centre-force
+guidance, PID recovery or the old follower update loop. Rewrite only the
+user-visible recovery and derailment behaviours that remain requirements,
+targeting `TrainDynamicsAdapter` and dual-mode state transitions. Remove
+legacy-only mock methods and fixtures once `rg` proves they have no current
+consumer. Do not retain skipped tests, compatibility shims or dead aliases.
+
+Run:
+
+```powershell
+rg -n "TrackFlowSolver|applyTrackFlowForces|guideForceTowardsPoint|getFrontContactPoint|getRearContactPoint|pidControllerFront|pidControllerRear|GameConfig\\.PID|GameConfig\\.FORCE" .
+```
+
+Expected: no source, test, documentation or configuration match outside the
+historical implementation-plan description of what was removed.
+
+- [ ] **Step 4: Run the complete physics gates**
 
 ```powershell
 npx jest tests/physics tests/integration/TrainDynamicsAcceptance.test.ts tests/unit/TrainManager.test.ts tests/unit/TrainSerializer.test.ts tests/unit/WorldSchemaValidation.test.ts --runInBand --coverage=false
@@ -1095,7 +1120,7 @@ git diff --check
 Expected: all pass; headless standard corpus `< 2_000 ms`; 40-car acceptance
 and 100-car stress finite; browser/headless replay hashes match.
 
-- [ ] **Step 4: Run the wider regression suite**
+- [ ] **Step 5: Run the wider regression suite**
 
 ```powershell
 npx jest --runInBand --coverage=false
@@ -1104,7 +1129,7 @@ npm run test:e2e
 
 Expected: all pass.
 
-- [ ] **Step 5: Review tuning output**
+- [ ] **Step 6: Review tuning output**
 
 Inspect the browser laboratory for:
 
@@ -1117,9 +1142,9 @@ Inspect the browser laboratory for:
 - slow derailment;
 - head-on crash.
 
-No configuration change is accepted without rerunning Task 10 Steps 3 and 4.
+No configuration change is accepted without rerunning Task 10 Steps 4 and 5.
 
-- [ ] **Step 6: Record acceptance and commit**
+- [ ] **Step 7: Record acceptance and commit**
 
 Update the design status to `Implemented and verified`, add exact command
 results, then:

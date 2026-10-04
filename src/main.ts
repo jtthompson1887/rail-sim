@@ -14,6 +14,9 @@ import SettingsScene from './scenes/SettingsScene';
 import WorldSelectScene from './scenes/WorldSelectScene';
 import WorldScene from './scenes/WorldScene';
 import { recoverDerailedFollowerOnTrack } from './managers/TrainManager';
+import { WorldManager } from './managers/WorldManager';
+import { SaveService } from './services/SaveService';
+import { EventBus } from './services/EventBus';
 
 /** Expose game instance for Playwright / E2E tests. */
 declare global {
@@ -64,6 +67,11 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 const game = new Phaser.Game(config);
+window.railSimStorage?.onBeforeClose?.(async () => {
+  EventBus.emit('app:prepare-close', {});
+  if (WorldManager.world && !WorldManager.save()) throw new Error('The current world could not be saved.');
+  await SaveService.flush();
+});
 if (
   typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
   && __RAIL_SIM_TEST_CONTROLS__

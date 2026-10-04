@@ -61,7 +61,7 @@ function currentWorld() {
     'alpine',
     undefined as any,
   ) as any;
-  world.schemaVersion = 10;
+  world.schemaVersion = 11;
   world.revision = 0;
   world.constructionRevision = 0;
   world.operationsRevision = 0;
@@ -222,11 +222,20 @@ function worldWithTrain() {
 }
 
 describe('world schema validation', () => {
+  it('rejects imported reserved root keys and malformed train collections without throwing', () => {
+    const world = currentWorld();
+    for (const key of ['__proto__', 'constructor', 'prototype']) {
+      const hostile = JSON.parse(JSON.stringify(world));
+      Object.defineProperty(hostile, key, { value: { management: {} }, enumerable: true });
+      expect(validateWorldData(hostile).compatible).toBe(false);
+    }
+    expect(validateWorldData({ ...world, trains: {} }).compatible).toBe(false);
+  });
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('creates the exact empty schema-10 freight progress authority', () => {
+  it('creates the exact empty schema-11 freight progress authority', () => {
     const world = createEmptyWorld(
       'Freight',
       'seed',
@@ -235,7 +244,7 @@ describe('world schema validation', () => {
     ) as any;
 
     expect(world).toMatchObject({
-      schemaVersion: 10,
+      schemaVersion: 11,
       revision: 0,
       constructionRevision: 0,
       operationsRevision: 0,
@@ -283,7 +292,7 @@ describe('world schema validation', () => {
     expect(second.freightProgress.profitableSteelDeliveryCompleted).toBe(false);
   });
 
-  it('round-trips schema 10 with exact construction and operations revisions', () => {
+  it('round-trips schema 11 with exact construction and operations revisions', () => {
     const world = currentWorld();
     world.revision = 7;
     world.constructionRevision = 3;
@@ -304,7 +313,8 @@ describe('world schema validation', () => {
     ['schema-seven', 7],
     ['schema-eight', 8],
     ['schema-nine', 9],
-    ['unsupported', 11],
+    ['schema-ten', 10],
+    ['unsupported', 12],
   ])('rejects a %s world schema with the new-world action', (_label, schemaVersion) => {
     const raw = { ...currentWorld(), schemaVersion };
     const result = validateWorldData(raw);
@@ -324,7 +334,7 @@ describe('world schema validation', () => {
     }));
   });
 
-  it('rejects the deprecated firstRouteProgress authority on schema 10', () => {
+  it('rejects the deprecated firstRouteProgress authority on schema 11', () => {
     const raw = currentWorld();
     raw.firstRouteProgress = {
       objectiveVersion: 1,
@@ -383,7 +393,7 @@ describe('world schema validation', () => {
     ['invalid camera', (world: any) => {
       world.starterOpportunity.recommendedCamera.zoom = Number.NaN;
     }],
-  ])('rejects schema 10 with %s', (_label, mutate) => {
+  ])('rejects schema 11 with %s', (_label, mutate) => {
     const raw = currentWorld();
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -433,7 +443,7 @@ describe('world schema validation', () => {
       world.constructionRevision = Number.MAX_SAFE_INTEGER;
       world.operationsRevision = 1;
     }],
-  ])('rejects schema 10 with %s', (_label, mutate) => {
+  ])('rejects schema 11 with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw).compatible).toBe(false);
@@ -954,7 +964,7 @@ describe('world schema validation', () => {
     ['ledger cash mismatch', (world: any) => {
       world.company.cash -= 1;
     }],
-  ])('rejects schema 10 company state with %s', (_label, mutate) => {
+  ])('rejects schema 11 company state with %s', (_label, mutate) => {
     const raw = currentWorld() as any;
     mutate(raw);
     expect(validateWorldData(raw)).toEqual(expect.objectContaining({
@@ -969,7 +979,7 @@ describe('world schema validation', () => {
     expect(validateWorldData(raw)).toEqual({ compatible: true, world: raw });
   });
 
-  it('rejects scenarios as removed schema-10 state', () => {
+  it('rejects scenarios as removed schema-11 state', () => {
     const raw = currentWorld() as any;
     raw.scenarios = [];
     expect(validateWorldData(raw).compatible).toBe(false);

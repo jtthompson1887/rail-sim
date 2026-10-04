@@ -7,11 +7,22 @@ export function clonePlainData<T>(value: T): T {
     const clone: Record<string, unknown> = {};
     const record = value as Record<string, unknown>;
     for (const key of Object.keys(record)) {
-      clone[key] = clonePlainData(record[key]);
+      Object.defineProperty(clone,key,{value:clonePlainData(record[key]),enumerable:true,writable:true,configurable:true});
     }
     return clone as T;
   }
   return value;
+}
+
+/** Preserve the receiving world identity without invoking inherited setters. */
+export function copyPlainDataInto<T extends object>(target: T, source: T): void {
+  const detached = clonePlainData(source);
+  for (const key of Object.keys(detached)) {
+    Object.defineProperty(target, key, {
+      value: (detached as Record<string, unknown>)[key],
+      enumerable: true, writable: true, configurable: true,
+    });
+  }
 }
 
 /** Structural equality for plain data, using Object.is for numeric authority. */

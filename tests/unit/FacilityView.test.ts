@@ -9,6 +9,7 @@ function inspection(
   overrides: Partial<FacilityInspectionDto> = {},
 ): FacilityInspectionDto {
   return {
+    boundaryTrade: null,
     id: 'sawmill',
     name: 'Sawmill',
     status: { code: 'waiting-input', label: 'Needs logs' },

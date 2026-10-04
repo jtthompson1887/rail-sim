@@ -56,6 +56,8 @@ export default class EditorUIScene extends Phaser.Scene {
   private constructionDecisionActive = false;
   private trackToolActive = false;
   private initialVisible = true;
+  private regionalPlay = false;
+  private readonly regionalEnabledHandler = () => { this.regionalPlay = true; this.syncVehiclePurchaseVisibility(); this.freightObjectiveCard.setVisible(false); this.trainInspector.setVisible(false); };
   private initialCash = 0;
   private initialSaveState: 'saved' | 'unsaved' | 'saving' = 'saved';
   private initialSaveErrorMessage: string | null = null;
@@ -110,9 +112,9 @@ export default class EditorUIScene extends Phaser.Scene {
     this.facilityInspector.setVisible(worldOverlayVisible);
     this.syncVehiclePurchaseVisibility();
     this.trainInspector.setVisible(
-      worldOverlayVisible && !this.editorControlsVisible,
+      worldOverlayVisible && !this.editorControlsVisible && !this.regionalPlay,
     );
-    this.freightObjectiveCard.setVisible(worldOverlayVisible);
+    this.freightObjectiveCard.setVisible(worldOverlayVisible && !this.regionalPlay);
     this.validationHint.setVisible(editorVisible);
     this.minimapVisible = editorVisible;
     if (this.pauseOverlayVisible) this.contextMenu.close();
@@ -150,6 +152,7 @@ export default class EditorUIScene extends Phaser.Scene {
     trackManager: TrackManager;
     selectionManager: SelectionManager;
     visible?: boolean;
+    regionalPlay?: boolean;
     companyCash?: number;
     saveState?: 'saved' | 'unsaved' | 'saving';
     saveErrorMessage?: string;
@@ -163,6 +166,7 @@ export default class EditorUIScene extends Phaser.Scene {
     this.trackManager = data.trackManager;
     this.selectionManager = data.selectionManager;
     this.initialVisible = data.visible ?? true;
+    this.regionalPlay = data.regionalPlay ?? false;
     this.initialCash = data.companyCash ?? 0;
     this.initialSaveState = data.saveState ?? 'saved';
     this.initialSaveErrorMessage = data.saveErrorMessage ?? null;
@@ -221,6 +225,7 @@ export default class EditorUIScene extends Phaser.Scene {
     EventBus.on('ui:toolbar-undo-state', this.undoStateHandler);
     EventBus.on('ui:toolbar-save-state', this.saveStateHandler);
     EventBus.on('ui:toolbar-visible',    this.visibleHandler);
+    EventBus.on('railway:enabled', this.regionalEnabledHandler);
     EventBus.on('ui:pause-visible', this.pauseVisibleHandler);
     EventBus.on('ui:toolbar-select-tool', this.selectToolHandler);
     EventBus.on('tool:changed', this.toolChangedHandler);
@@ -239,6 +244,7 @@ export default class EditorUIScene extends Phaser.Scene {
       EventBus.off('ui:toolbar-undo-state',  this.undoStateHandler);
       EventBus.off('ui:toolbar-save-state',  this.saveStateHandler);
       EventBus.off('ui:toolbar-visible',     this.visibleHandler);
+      EventBus.off('railway:enabled', this.regionalEnabledHandler);
       EventBus.off('ui:pause-visible', this.pauseVisibleHandler);
       EventBus.off('ui:toolbar-select-tool', this.selectToolHandler);
       EventBus.off('tool:changed', this.toolChangedHandler);
@@ -264,6 +270,7 @@ export default class EditorUIScene extends Phaser.Scene {
   private syncVehiclePurchaseVisibility(): void {
     this.vehiclePurchasePanel.setVisible(
       !this.pauseOverlayVisible
+        && !this.regionalPlay
         && this.editorControlsVisible
         && !this.trackToolActive
         && !this.constructionDecisionActive,

@@ -353,7 +353,7 @@ describe('PlaceTrackTool live construction workflow', () => {
     expect(harness.tool.phase).toBe('review');
     expect(harness.tool.previewModel).toEqual(expect.objectContaining({
       canConfirm: true,
-      message: 'Click or press Enter to build this section.',
+      message: 'Shape the direction handles, then press Build or Enter.',
     }));
     expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(1);
     harness.tool.onPointerMove(350, 0, pointer());
@@ -407,7 +407,7 @@ describe('PlaceTrackTool live construction workflow', () => {
     emit.mockRestore();
   });
 
-  it('keeps chained state after the pointer-up paired with click-to-confirm', () => {
+  it('keeps review editable when clicking the endpoint instead of implicitly building', () => {
     const harness = makeHarness();
     const click = pointer();
     harness.tool.onPointerDown(0, 0, click);
@@ -417,8 +417,9 @@ describe('PlaceTrackTool live construction workflow', () => {
     harness.tool.onPointerDown(300, 0, click);
     harness.tool.onPointerUp(300, 0, click);
 
-    expect(harness.commandStack.push).toHaveBeenCalledTimes(1);
-    expect(harness.tool.phase).toBe('chained');
+    expect(harness.commandStack.push).not.toHaveBeenCalled();
+    expect(harness.tool.phase).toBe('review');
+    expect(harness.tool.previewModel?.draft?.selectedHandle).toBe('end');
     expect(harness.constructionService.createPreview).toHaveBeenCalledTimes(1);
   });
 

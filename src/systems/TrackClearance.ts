@@ -1,4 +1,4 @@
-import type { Vec2Def } from '../config/WorldData';
+import type { Vec2Def, JunctionDef } from '../config/WorldData';
 import {
   CURVE_FLATNESS_TOLERANCE,
   type ConstructionCurveSample,
@@ -8,6 +8,8 @@ import type { TrackGeometryDef } from './TrackGeometry';
 export const TRACK_CENTERLINE_CLEARANCE = 48;
 export const TRACK_CLEARANCE_FLATNESS_ADJUSTMENT = 2 * CURVE_FLATNESS_TOLERANCE;
 export const TRACK_CLEARANCE_ENDPOINT_EPSILON = 1e-6;
+/** Maximum shared approach permitted for a declared, geometrically verified turnout. */
+export const MAX_TURNOUT_THROAT_LENGTH = 320;
 
 const DISTANCE_EPSILON = 1e-9;
 const OPPOSITE_DIRECTION_EPSILON = 1e-6;
@@ -19,8 +21,18 @@ export interface ClearanceTrack {
 }
 
 export interface ClearanceCandidate {
+  readonly trackUUID?: string;
   readonly geometry: TrackGeometryDef;
   readonly curveSamples: readonly ConstructionCurveSample[];
+}
+
+export interface ClearanceTurnout {
+  readonly junction: JunctionDef;
+  readonly tracks: readonly ClearanceTrack[];
+}
+
+interface ValidatedTurnout {
+  branches: readonly [{ id: string; endpoint: 'start' | 'end'; geometry: TrackGeometryDef }, { id: string; endpoint: 'start' | 'end'; geometry: TrackGeometryDef }];
 }
 
 export interface ClearanceEndpointConnection {
@@ -257,6 +269,7 @@ export function hasConstructionClearance(
   candidate: ClearanceCandidate,
   existingTracks: readonly ClearanceTrack[],
   predictedConnections: readonly ClearanceEndpointConnection[],
+  turnouts: readonly ClearanceTurnout[] = [],
 ): boolean {
   // Deliberately plan-view only: bridge/tunnel classification is not yet
   // authoritative grade-separated topology and therefore grants no exemption.
@@ -269,6 +282,7 @@ export function hasConstructionClearance(
   const protectedDistance = TRACK_CENTERLINE_CLEARANCE
     + TRACK_CLEARANCE_FLATNESS_ADJUSTMENT;
   const protectedDistanceSquared = protectedDistance * protectedDistance;
+  const validTurnouts = turnouts.map(validateTurnout).filter((turnout): turnout is ValidatedTurnout => turnout !== null);
 
   const orderedExisting = [...existingTracks].sort((left, right) => (
     left.trackUUID < right.trackUUID ? -1 : left.trackUUID > right.trackUUID ? 1 : 0
@@ -301,6 +315,15 @@ export function hasConstructionClearance(
           existingIndex,
           predictedConnections,
         )) continue;
+        if (candidate.trackUUID && validTurnouts.some(turnout => {
+          const a = turnout.branches.find(branch => branch.id === candidate.trackUUID);
+          const b = turnout.branches.find(branch => branch.id === existing.trackUUID);
+          if (!a || !b || a.id === b.id) return false;
+          if (!(['p0', 'p1', 'p2', 'p3'] as const).every(key => pointsMatch(a.geometry[key], candidate.geometry[key]) && pointsMatch(b.geometry[key], existing.geometry[key]))) return false;
+          const candidateDistance = segmentDistanceFromEndpoint(candidate.curveSamples, newIndex, a.endpoint) + candidate.curveSamples[newIndex + 1].segmentLength;
+          const existingDistance = segmentDistanceFromEndpoint(existing.curveSamples, existingIndex, b.endpoint) + existing.curveSamples[existingIndex + 1].segmentLength;
+          return candidateDistance <= MAX_TURNOUT_THROAT_LENGTH && existingDistance <= MAX_TURNOUT_THROAT_LENGTH;
+        })) continue;
         const distanceSquared = segmentToSegmentSquaredDistance(
           newStart,
           newEnd,
@@ -315,3 +338,52 @@ export function hasConstructionClearance(
   }
   return true;
 }
+
+function pointAtDistance(track: ClearanceTrack, endpoint: 'start' | 'end', distance: number): Vec2Def {
+  const samples = track.curveSamples;
+  const total = samples[samples.length - 1].distance;
+  const target = endpoint === 'start' ? distance : total - distance;
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].distance >= target) {
+      const fraction = (target - samples[i - 1].distance) / (samples[i].distance - samples[i - 1].distance);
+      return { x: samples[i - 1].point.x + (samples[i].point.x - samples[i - 1].point.x) * fraction, y: samples[i - 1].point.y + (samples[i].point.y - samples[i - 1].point.y) * fraction };
+    }
+  }
+  return samples[samples.length - 1].point;
+}
+
+/** Invalid declarations never enlarge the clearance exemption. Interior turnouts need an explicit split. */
+function validateTurnout(input: ClearanceTurnout): ValidatedTurnout | null {
+  const junction = input.junction;
+  if (!junction || !junction.uuid || (junction.position !== 0 && junction.position !== 1)) return null;
+  const ids = [junction.mainTrackUUID, junction.leftTrackUUID, junction.rightTrackUUID];
+  if (new Set(ids).size !== 3) return null;
+  const tracks = ids.map(id => input.tracks.find(track => track.trackUUID === id));
+  if (tracks.some(track => !track || !samplesAreUsable(track.curveSamples) || !samplesMatchGeometry(track.geometry, track.curveSamples))) return null;
+  const main = tracks[0]!;
+  const mainEndpoint = junction.position === 0 ? 'start' : 'end';
+  const point = geometryEndpoint(main.geometry, mainEndpoint);
+  const mainOutward = outwardVector(main.geometry, mainEndpoint);
+  if (!mainOutward) return null;
+  const branches: Array<{ id: string; endpoint: 'start' | 'end'; geometry: TrackGeometryDef }> = [];
+  for (const branch of tracks.slice(1)) {
+    const endpoint = pointsMatch(branch.geometry.p0, point) ? 'start' : pointsMatch(branch.geometry.p3, point) ? 'end' : null;
+    if (!endpoint) return null;
+    const outward = outwardVector(branch.geometry, endpoint);
+    if (!outward || mainOutward.x * outward.x + mainOutward.y * outward.y > -1 + OPPOSITE_DIRECTION_EPSILON || branch.curveSamples[branch.curveSamples.length - 1].distance <= MAX_TURNOUT_THROAT_LENGTH) return null;
+    branches.push({ id: branch.trackUUID, endpoint, geometry: branch.geometry });
+  }
+  let lastSeparation = 0;
+  for (let i = 1; i <= 16; i++) {
+    const distance = MAX_TURNOUT_THROAT_LENGTH * i / 16;
+    const left = pointAtDistance(tracks[1]!, branches[0].endpoint, distance);
+    const right = pointAtDistance(tracks[2]!, branches[1].endpoint, distance);
+    const separation = Math.sqrt(squaredDistance(left, right));
+    if (separation < lastSeparation - TRACK_CLEARANCE_FLATNESS_ADJUSTMENT) return null;
+    lastSeparation = separation;
+  }
+  if (lastSeparation < TRACK_CENTERLINE_CLEARANCE + TRACK_CLEARANCE_FLATNESS_ADJUSTMENT) return null;
+  return { branches: [branches[0], branches[1]] };
+}
+
+export function isValidClearanceTurnout(input: ClearanceTurnout): boolean { return validateTurnout(input) !== null; }

@@ -79,7 +79,7 @@ describe('Integration: generated structural timber link', () => {
     const harness = createStructuralTimberLinkHarness('playtest-753');
     try {
       expect(harness.world).toMatchObject({
-        schemaVersion: 10,
+        schemaVersion: 11,
         tracks: [],
         junctions: [],
         stations: [],

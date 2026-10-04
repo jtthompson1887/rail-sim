@@ -98,6 +98,8 @@ const makeBenchmarkTrain = (
   trackT,
   facing: 1,
   cargo,
+  dynamics: { mode: 'on-rail', trackUUID: BENCHMARK_TRACK_ID, distance: 2_400 * trackT,
+    direction: 1, speedMps: 0, consistId: `consist-${id}`, consistOrder: 0 },
   operations: {
     currentTripRevenue: 0,
     currentTripRunningCost: 0,

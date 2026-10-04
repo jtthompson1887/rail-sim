@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 import {
   expect,
   test,
@@ -390,25 +391,11 @@ async function createFixedSeedWorld(
     { timeout: 60_000 },
   );
   await page.keyboard.press('Enter');
-  const canvas = page.locator('canvas');
-  const pickerPanelHeight = Math.min(690, viewport.height - 40);
-  const pickerSeedY = viewport.height / 2 - pickerPanelHeight / 2 + 126;
-  const pickerConfirmY =
-    viewport.height / 2 + pickerPanelHeight / 2 - 44;
-  await canvas.click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await canvas.click({
-    position: { x: viewport.width / 2, y: pickerSeedY },
-  });
-  await canvas.click({
-    position: { x: viewport.width / 2, y: pickerConfirmY },
-  });
+  await createLegacyWorld(page, seed);
   await waitForHarness(page);
 
   const created = await snapshot(page);
-  expect(created.world.schemaVersion).toBe(10);
+  expect(created.world.schemaVersion).toBe(11);
   expect(created.world.generationConfig.seed).toBe(seed);
   expect(created.world.economy.facilities).toHaveLength(7);
   expect(created.world.tracks).toHaveLength(0);
@@ -606,7 +593,11 @@ async function panWorldPointToCentre(
   page: Page,
   target: Point,
   viewportRatio: Point = { x: 0.5, y: 0.5 },
+  framing: { readonly maximumDrag: number; readonly tolerance: number } | null = null,
 ): Promise<void> {
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   const operating = await page.locator(
     '[data-testid="train-inspector"]',
   ).isVisible();
@@ -664,14 +655,15 @@ async function panWorldPointToCentre(
     const internal = worldToCameraPoint(target, state.camera);
     const dx = state.camera.width * viewportRatio.x - internal.x;
     const dy = state.camera.height * viewportRatio.y - internal.y;
-    if (Math.abs(dx) <= 8 && Math.abs(dy) <= 8) return;
+    const tolerance = framing?.tolerance ?? 8;
+    if (Math.abs(dx) <= tolerance && Math.abs(dy) <= tolerance) return;
     const scaleX = canvas.width / state.camera.width;
     const scaleY = canvas.height / state.camera.height;
     const maxMoveX = state.camera.width <= 720
-      ? 35
+      ? framing?.maximumDrag ?? 35
       : Math.min(100, canvas.width * 0.1);
     const maxMoveY = state.camera.width <= 720
-      ? 35
+      ? framing?.maximumDrag ?? 35
       : Math.min(100, canvas.height * 0.1);
     const moveX = Math.max(-maxMoveX, Math.min(
       maxMoveX,
@@ -741,23 +733,95 @@ async function fitExtension(
   });
   const canvas = await page.locator('canvas').boundingBox();
   if (!canvas) throw new Error('Canvas is not visible');
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    // Measure the space the player actually has while laying track. The
+    // vehicle picker is displayed in pan mode, but construction closes it.
+    // Keeping that unrelated picker open here made a valid portrait-phone
+    // route appear impossible to fit even at the minimum camera zoom.
+    await page.keyboard.press('p');
+    await waitForRenderedFrame(page);
     const state = await snapshot(page);
     const startInternal = worldToCameraPoint(start, state.camera);
     const endInternal = worldToCameraPoint(end, state.camera);
-    const insetX = state.camera.width <= 720 ? 60 : 90;
-    const insetY = state.camera.width <= 720 ? 80 : 110;
+    const mobile = state.camera.width <= 720;
+    const insetX = mobile ? 8 : 90;
+    // The actual DOM/Phaser coverage checks below define the usable phone
+    // canvas; broad fixed insets would exclude its uncovered upper corner.
+    const insetY = mobile ? 8 : 110;
+    // Pointer-down opens the decision inspector before the drag finishes.
+    // Reserve its maximum visible footprint when fitting the route, so a
+    // destination that is clear now will still receive the later pointer.
+    const decisionBounds = mobile ? await page.evaluate(() => {
+      const inspector = document.querySelector('[data-testid="construction-inspector"]');
+      if (!(inspector instanceof HTMLElement)) throw new Error('Construction inspector is unavailable');
+      const style = getComputedStyle(inspector);
+      const left = Number.parseFloat(style.left);
+      const right = Number.parseFloat(style.right);
+      const bottom = Number.parseFloat(style.bottom);
+      const height = Number.parseFloat(style.maxHeight);
+      return { x: left, y: innerHeight - bottom - height,
+        width: innerWidth - left - right, height };
+    }) : null;
+    const clearsDecision = (point: Point): boolean => !decisionBounds
+      || point.x < decisionBounds.x - 2
+      || point.x > decisionBounds.x + decisionBounds.width + 2
+      || point.y < decisionBounds.y - 2
+      || point.y > decisionBounds.y + decisionBounds.height + 2;
     if ([startInternal, endInternal].every((point) => (
       point.x >= insetX
       && point.x <= state.camera.width - insetX
       && point.y >= insetY
       && point.y <= state.camera.height - insetY
-    ))) return;
-    await page.mouse.move(
-      canvas.x + canvas.width / 2,
-      canvas.y + canvas.height / 2,
-    );
+    ))) {
+      const startCoverage = await findCanvasDragOrigin(page,
+        [await toPagePoint(page, start, state)], { x: 0, y: 0 });
+      const endCoverage = await findCanvasDragOrigin(page,
+        [await toPagePoint(page, end, state)], { x: 0, y: 0 });
+      if (startCoverage.origin && endCoverage.origin
+        && clearsDecision(startCoverage.origin) && clearsDecision(endCoverage.origin)) return;
+      const offset = {
+        x: (endInternal.x - startInternal.x) * canvas.width / state.camera.width,
+        y: (endInternal.y - startInternal.y) * canvas.height / state.camera.height,
+      };
+      const phoneCandidates: Point[] = [];
+      if (mobile) {
+        for (let y = canvas.y + insetY; y <= canvas.y + canvas.height - insetY; y += 8) {
+          for (let x = canvas.x + insetX; x <= canvas.x + canvas.width - insetX; x += 8) {
+            phoneCandidates.push({ x, y });
+          }
+        }
+      }
+      const candidates = [...canvasDragCandidates(canvas), ...phoneCandidates].filter((point) =>
+        [point, { x: point.x + offset.x, y: point.y + offset.y }].every((endpoint) => (
+          endpoint.x >= canvas.x + insetX
+          && endpoint.x <= canvas.x + canvas.width - insetX
+          && endpoint.y >= canvas.y + insetY
+          && endpoint.y <= canvas.y + canvas.height - insetY
+          && clearsDecision(endpoint)
+        )));
+      const accessiblePath = await findCanvasDragOrigin(page, candidates, offset);
+      if (accessiblePath.origin) {
+        await panWorldPointToCentre(page, {
+          x: (start.x + end.x) / 2,
+          y: (start.y + end.y) / 2,
+        }, {
+          x: (accessiblePath.origin.x + offset.x / 2 - canvas.x) / canvas.width,
+          y: (accessiblePath.origin.y + offset.y / 2 - canvas.y) / canvas.height,
+        }, mobile ? { maximumDrag: 8, tolerance: 1 } : null);
+        continue;
+      }
+    }
+    // Camera gestures belong to the pan tool. The next iteration returns to
+    // construction before testing either endpoint against the visible UI.
+    await page.keyboard.press('h');
+    await waitForRenderedFrame(page);
+    const wheelCoverage = await findCanvasDragOrigin(page,
+      canvasDragCandidates(canvas), { x: 0, y: 0 });
+    expect(wheelCoverage.origin, 'zoom must target uncovered canvas, so the wheel reaches the railway camera')
+      .not.toBeNull();
+    await page.mouse.move(wheelCoverage.origin!.x, wheelCoverage.origin!.y);
     await page.mouse.wheel(0, 600);
+    await waitForRenderedFrame(page);
   }
   const finalState = await snapshot(page);
   throw new Error(JSON.stringify({
@@ -964,10 +1028,14 @@ async function driveSelectedTrainToFacility(
   let previousDistance = distanceTo(runtimeById(opening, trainId), access);
   let motion: 'approaching' | 'receding' | 'stationary' = 'stationary';
   let unloadingStarted = false;
+  let parkedForUnloading = false;
   let firstInsideTick: number | null = null;
   let firstUnloadTick: number | null = null;
   let heldKey: 'w' | 's' | null = null;
   let maxObservedSpeed = 0;
+  let arrivalSnapshot: StructuralBrowserSnapshot | null = null;
+  let departureButtonPoint: Point | null = null;
+  const departAfterDelivery = destination === 'sawmill' && opening.world.trains.length > 1;
   const driveStartedAt = Date.now();
   const recent: Array<Record<string, unknown>> = [];
   const setHeldKey = async (next: 'w' | 's' | null): Promise<void> => {
@@ -1034,8 +1102,22 @@ async function driveSelectedTrainToFacility(
           }));
         }
 
-        if (unloadingStarted) {
+        if (!parkedForUnloading && distance <= access.radius * 0.75) {
           await setHeldKey(null);
+          expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+            .toBe(trainId);
+          await page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: 'Stop', exact: true }).click();
+          parkedForUnloading = true;
+        } else if (unloadingStarted) {
+          await setHeldKey(null);
+          if (!parkedForUnloading && distance <= access.radius) {
+            expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+              .toBe(trainId);
+            await page.locator('[data-testid="train-inspector"]')
+              .getByRole('button', { name: 'Stop', exact: true }).click();
+            parkedForUnloading = true;
+          }
           if (
             distance > access.radius
             && (
@@ -1083,6 +1165,26 @@ async function driveSelectedTrainToFacility(
           }
         }
 
+        if (departAfterDelivery && unloadingStarted && cargoUnits <= 10 && !departureButtonPoint) {
+          const departureKey = keyToward(state, live, facility(state, 'managed-forest').railAccess);
+          const button = page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: departureKey === 'w' ? 'Forward' : 'Reverse', exact: true });
+          const bounds = await button.boundingBox();
+          if (!bounds) throw new Error('The public departure throttle must be visible');
+          departureButtonPoint = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+          await page.mouse.move(departureButtonPoint.x, departureButtonPoint.y);
+        }
+        if (distance <= access.radius && live.speedWorldUnitsPerSecond <= 2 && currentTrain.cargo === null) {
+          arrivalSnapshot = state;
+          if (departAfterDelivery) {
+            expect(departureButtonPoint).not.toBeNull();
+            expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+              .toBe(trainId);
+            await page.mouse.down();
+            await page.mouse.up();
+          }
+        }
+
         return {
           inside: distance <= access.radius,
           stopped: live.speedWorldUnitsPerSecond <= 2,
@@ -1116,6 +1218,10 @@ async function driveSelectedTrainToFacility(
           trackUUID: finalRuntime.trackUUID,
           trackT: finalRuntime.trackT,
         },
+        allTrains: finalState.runtime.map((runtime) => ({
+          ...runtime,
+          dynamics: trainById(finalState, runtime.trainId).dynamics,
+        })),
         recent,
       }));
     }
@@ -1132,7 +1238,9 @@ async function driveSelectedTrainToFacility(
       maxObservedSpeed,
     },
   }));
-  return snapshot(page);
+  // Return the stopped, completed-delivery observation; the public departure
+  // throttle may already be moving the empty return service out of loading range.
+  return arrivalSnapshot ?? snapshot(page);
 }
 
 async function moveSelectedTrainClearOfFacility(
@@ -1164,7 +1272,77 @@ async function moveSelectedTrainClearOfFacility(
   } finally {
     await page.keyboard.up(key);
   }
+  expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+    .toBe(trainId);
+  await page.locator('[data-testid="train-inspector"]')
+    .getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(async () => runtimeById(await snapshot(page), trainId)
+    .speedWorldUnitsPerSecond).toBeLessThanOrEqual(2);
   return snapshot(page);
+}
+
+async function parkFirstTrainOnExtension(
+  page: Page,
+  trainId: string,
+  extensionTrackId: string,
+): Promise<StructuralBrowserSnapshot> {
+  await selectTrainThroughPointer(page, trainId);
+  const opening = await snapshot(page);
+  const sawmillAccess = facility(opening, 'sawmill').railAccess;
+  const toward = facility(opening, 'prefabrication-plant').railAccess;
+  const recent: Array<Record<string, unknown>> = [];
+  let heldKey: 'w' | 's' | null = null;
+  const release = async (): Promise<void> => {
+    if (heldKey) await page.keyboard.up(heldKey);
+    heldKey = null;
+  };
+  try {
+    await expect.poll(async () => {
+      const state = await snapshot(page);
+      const live = runtimeById(state, trainId);
+      const distance = distanceTo(live, sawmillAccess);
+      const onExtension = live.trackUUID === extensionTrackId;
+      recent.push({ ...live, distance });
+      if (recent.length > 12) recent.shift();
+      if (live.derailed) throw new Error(JSON.stringify({
+        message: 'First train derailed while clearing the incoming line', recent,
+        allTrains: state.runtime,
+        dynamics: trainById(state, trainId).dynamics,
+      }));
+      if (onExtension && distance >= 170) {
+        await release();
+        expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+          .toBe(trainId);
+        await page.locator('[data-testid="train-inspector"]')
+          .getByRole('button', { name: 'Stop', exact: true }).click();
+        return true;
+      }
+      const key = keyToward(state, live, toward);
+      if (live.speedWorldUnitsPerSecond < 14) {
+        if (heldKey !== key) {
+          await release();
+          heldKey = key;
+          await page.keyboard.down(key);
+        }
+      } else {
+        await release();
+      }
+      return false;
+    }, { timeout: 90_000, intervals: [50, 75, 100, 150] }).toBe(true);
+  } finally {
+    await release();
+  }
+  const parked = await snapshot(page);
+  const first = runtimeById(parked, trainId);
+  expect(first.trackUUID).toBe(extensionTrackId);
+  expect(first.derailed).toBe(false);
+  expect(first.speedWorldUnitsPerSecond).toBeLessThanOrEqual(2);
+  expect(distanceTo(first, sawmillAccess)).toBeGreaterThanOrEqual(170);
+  expect(distanceTo(first, sawmillAccess)).toBeLessThanOrEqual(sawmillAccess.radius);
+  expect(parked.runtime.every((other) => other.trainId === trainId
+    || distanceTo(first, other) > 200)).toBe(true);
+  console.info(JSON.stringify({ firstTrainParkedOnExtension: first }));
+  return parked;
 }
 
 async function buildAnchoredExtension(
@@ -1180,14 +1358,84 @@ async function buildAnchoredExtension(
     start.y - sawmill.railAccess.y,
   )).toBeLessThanOrEqual(sawmill.railAccess.radius);
 
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.keyboard.press('Escape');
+  await waitForRenderedFrame(page);
   await fitExtension(page, start, end);
   await page.keyboard.press('p');
+  await waitForRenderedFrame(page);
+  await expect.poll(async () => (await snapshot(page)).construction.phase).toBe('idle');
   const framed = await snapshot(page);
-  await dragTrack(
-    page,
-    await toPagePoint(page, start, framed),
-    await toPagePoint(page, end, framed),
-  );
+  const moveToWorld = async (target: Point): Promise<void> => {
+    await waitForRenderedFrame(page);
+    let pagePoint = await toPagePoint(page, target, await snapshot(page));
+    const recent: Array<Record<string, unknown>> = [];
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await page.mouse.move(pagePoint.x, pagePoint.y, { steps: 4 });
+      await waitForRenderedFrame(page);
+      const observed = await page.evaluate(() => {
+        const scene = window.__railSimGame.scene.getScene('WorldScene');
+        const pointer = scene.input.activePointer;
+        const world = scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        const element = document.elementFromPoint(pointer.x, pointer.y);
+        return {
+          pointer: { x: pointer.x, y: pointer.y },
+          world: { x: world.x, y: world.y },
+          topElement: element?.tagName,
+        };
+      });
+      const state = await snapshot(page);
+      recent.push({ pagePoint, observed, camera: state.camera });
+      if (distanceTo(observed.world, target) <= Math.SQRT2 / state.camera.zoom + 0.25) return;
+      const desired = worldToCameraPoint(target, state.camera);
+      const canvas = await page.locator('canvas').boundingBox();
+      if (!canvas) throw new Error('Canvas is not visible');
+      pagePoint = {
+        x: pagePoint.x + (desired.x - observed.pointer.x) * canvas.width / state.camera.width,
+        y: pagePoint.y + (desired.y - observed.pointer.y) * canvas.height / state.camera.height,
+      };
+    }
+    throw new Error(JSON.stringify({ message: 'Could not acquire construction endpoint', target, recent }));
+  };
+  const initialStart = await toPagePoint(page, start, framed);
+  await page.mouse.move(initialStart.x + 24, initialStart.y + 24);
+  const anchorAttempts: Array<Record<string, unknown>> = [];
+  let acquiredEndpoint = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await moveToWorld(start);
+    const beforeDown = await snapshot(page);
+    await page.mouse.down();
+    await waitForRenderedFrame(page);
+    const down = await page.evaluate(() => {
+      const scene = window.__railSimGame.scene.getScene('WorldScene');
+      const tool = (scene as unknown as {
+        activeEditorTool?: { startAnchor?: Point & { type: string; trackUUID?: string } };
+      }).activeEditorTool;
+      const pointer = scene.input.activePointer;
+      const point = scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      return { anchor: tool?.startAnchor ?? null, pointer: { x: pointer.x, y: pointer.y },
+        point: { x: point.x, y: point.y } };
+    });
+    anchorAttempts.push({ attempt, beforeCamera: beforeDown.camera,
+      afterCamera: (await snapshot(page)).camera, ...down });
+    if (down.anchor?.type === 'endpoint' && down.anchor.x === start.x && down.anchor.y === start.y) {
+      acquiredEndpoint = true;
+      break;
+    }
+    await page.mouse.up();
+    await page.keyboard.press('Escape');
+    await waitForRenderedFrame(page);
+    await expect.poll(async () => (await snapshot(page)).construction.phase).toBe('idle');
+  }
+  expect(acquiredEndpoint, JSON.stringify({
+    message: 'The extension must acquire the existing endpoint before any committed build',
+    start, anchorAttempts,
+  })).toBe(true);
+  await moveToWorld(end);
+  await page.mouse.up();
+  expect((await snapshot(page)).construction.preview?.predictedConnections).toHaveLength(1);
   const confirm = page.locator('[data-testid="construction-confirm"]');
   if (framed.camera.width <= 720) {
     for (const selector of [
@@ -1671,12 +1919,16 @@ test.describe('real structural-timber browser journey', () => {
         await returnToCreateThroughPause(page);
         const secondTrainId = await purchaseFlatbedAtForest(page);
         const extended = await buildAnchoredExtension(page);
+        const extensionTrackId = extended.world.tracks.find(({ uuid }) =>
+          !starter.world.tracks.some((track) => track.uuid === uuid))?.uuid;
+        expect(extensionTrackId).toBeDefined();
         expect(extended.world.trains).toHaveLength(2);
         expect(extended.world.company.cash).toBeGreaterThanOrEqual(
           OPERATING_RESERVE,
         );
 
         await enterOperateThroughCanvas(page);
+        await parkFirstTrainOnExtension(page, firstTrainId, extensionTrackId!);
         let handoffState = await snapshot(page);
         await panWorldPointToCentre(
           page,
@@ -1775,6 +2027,9 @@ test.describe('real structural-timber browser journey', () => {
         );
         expect(runtimeById(secondDelivered, secondTrainId)
           .speedWorldUnitsPerSecond).toBeLessThanOrEqual(2);
+        expect(runtimeById(secondDelivered, firstTrainId).trackUUID).toBe(extensionTrackId);
+        expect(distanceTo(runtimeById(secondDelivered, firstTrainId),
+          runtimeById(secondDelivered, secondTrainId))).toBeGreaterThan(200);
         const secondCleared = await moveSelectedTrainClearOfFacility(
           page,
           secondTrainId,

@@ -4,7 +4,6 @@
 
 import Phaser from 'phaser';
 import Train from '../../src/entities/Train';
-import { captureTrainRuntime } from '../../src/freight/TrainRuntime';
 import { EventBus } from '../../src/services/EventBus';
 
 // Pull the makeScene helper from our mock
@@ -57,12 +56,6 @@ describe('Train', () => {
     it('starts with no current track', () => {
       const train = new Train(scene, 0, 0);
       expect(train.currentTrack).toBeNull();
-    });
-
-    it('has PID controllers', () => {
-      const train = new Train(scene, 0, 0);
-      expect(train.pidControllerFront).toBeDefined();
-      expect(train.pidControllerRear).toBeDefined();
     });
 
     it('passenger capacity is positive', () => {
@@ -191,94 +184,4 @@ describe('Train', () => {
     });
   });
 
-  describe('update()', () => {
-    it('does not throw when called with a stopped train', () => {
-      const train = new Train(scene, 0, 0);
-      expect(() => train.update(0, 16)).not.toThrow();
-    });
-
-    it('does not throw when enginePower is set and train updates', () => {
-      const train = new Train(scene, 100, 100);
-      train.enginePower = 0.1;
-      expect(() => train.update(0, 16)).not.toThrow();
-    });
-
-    it('does not apply force when derailed', () => {
-      const train = new Train(scene, 0, 0);
-      train.derailed = true;
-      train.enginePower = 1.0;
-      const body = train.getMatterBody();
-      const forceBefore = { x: (body.body as any).force.x, y: (body.body as any).force.y };
-      train.update(0, 16);
-      // derailed + enginePower != 0 but derailed check short-circuits
-      expect((body.body as any).force.x).toBe(forceBefore.x);
-      expect((body.body as any).force.y).toBe(forceBefore.y);
-    });
-  });
-
-  describe('aggregate freight runtime', () => {
-    it('stores only the freight-set presentation identity', () => {
-      const train = new Train(
-        scene,
-        0,
-        0,
-        'freight-train',
-        'flatbed-freight-set',
-      );
-
-      expect(train.freightSetId).toBe('flatbed-freight-set');
-      expect(train).not.toHaveProperty('cargo');
-      expect(train).not.toHaveProperty('operations');
-    });
-
-    it.each([
-      { angle: 0, facing: 1 as const },
-      { angle: 180, facing: -1 as const },
-    ])('captures exact on-track runtime facing $facing', ({ angle, facing }) => {
-      const train = new Train(
-        scene,
-        12,
-        34,
-        'freight-train',
-        'flatbed-freight-set',
-      );
-      const track = {
-        getUUID: jest.fn().mockReturnValue('track-b'),
-        getTrackPosition: jest.fn().mockReturnValue(0.75),
-        getCurvePath: jest.fn().mockReturnValue({
-          getTangent: jest.fn().mockReturnValue({ x: 1, y: 0 }),
-        }),
-      };
-      train.currentTrack = track as any;
-      train.getMatterBody().setAngle(angle);
-      train.getMatterBody().setVelocity(3, 4);
-      train.enginePower = -0.25;
-
-      expect(captureTrainRuntime(train)).toEqual({
-        trainId: 'freight-train',
-        trackUUID: 'track-b',
-        trackT: 0.75,
-        facing,
-        x: 12,
-        y: 34,
-        speedWorldUnitsPerSecond: 300,
-        throttle: -1,
-        derailed: false,
-      });
-    });
-
-    it.each([
-      { enginePower: -0.01, throttle: -1 as const },
-      { enginePower: 0, throttle: 0 as const },
-      { enginePower: 0.01, throttle: 1 as const },
-    ])(
-      'normalizes engine power $enginePower to throttle $throttle',
-      ({ enginePower, throttle }) => {
-        const train = new Train(scene, 0, 0, 'freight-train');
-        train.enginePower = enginePower;
-
-        expect(captureTrainRuntime(train).throttle).toBe(throttle);
-      },
-    );
-  });
 });

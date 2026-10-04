@@ -22,6 +22,8 @@ interface RunningCostTickInput {
   readonly company: CompanyStateDef;
   readonly trains: readonly TrainDef[];
   readonly runtime: readonly TrainRuntimeSnapshot[];
+  /** Authoritative vehicle-family rates; omitted callers retain freight-set pricing. */
+  readonly rateByTrainId?: Readonly<Record<string, number>>;
 }
 
 interface TrainCostUpdate {
@@ -68,7 +70,7 @@ export function proposeRunningCosts(
     })
     .sort((left, right) => left.id.localeCompare(right.id));
   const activeTrainIds = activeTrains.map((train) => train.id);
-  const blockerByTrainId: Record<string, CargoBlockerCode | null> = {};
+  const blockerByTrainId: Record<string, CargoBlockerCode | null> = Object.create(null);
   [...trains]
     .sort((left, right) => left.id.localeCompare(right.id))
     .forEach((train) => {
@@ -92,23 +94,25 @@ export function proposeRunningCosts(
   const updates: TrainCostUpdate[] = [];
   for (const train of activeTrains) {
     const freightSet = getFreightSet(train.freightSetId);
-    if (!freightSet
-      || !Number.isSafeInteger(freightSet.runningCostPerActiveTick)
-      || freightSet.runningCostPerActiveTick <= 0) {
+    const rate = input.rateByTrainId && Object.prototype.hasOwnProperty.call(input.rateByTrainId, train.id)
+      ? input.rateByTrainId[train.id]
+      : freightSet?.runningCostPerActiveTick;
+    if (!Number.isSafeInteger(rate)
+      || rate <= 0) {
       return unchanged(0);
     }
 
     const nextAggregate = safeAdd(
       aggregateCost,
-      freightSet.runningCostPerActiveTick,
+      rate,
     );
     const currentTripRunningCost = safeAdd(
       train.operations.currentTripRunningCost,
-      freightSet.runningCostPerActiveTick,
+      rate,
     );
     const lifetimeRunningCost = safeAdd(
       train.operations.lifetimeRunningCost,
-      freightSet.runningCostPerActiveTick,
+      rate,
     );
     if (nextAggregate === null
       || currentTripRunningCost === null

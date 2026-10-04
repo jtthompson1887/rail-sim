@@ -1,5 +1,24 @@
 import { GameConfig } from './GameConfig';
 
+export type LandscapePresetId = 'lowlands' | 'coastal' | 'mountains';
+export const LANDSCAPE_PRESET_IDS: readonly LandscapePresetId[] = ['lowlands', 'coastal', 'mountains'];
+
+/** Stable v1 landscape shaping. Undefined preserves every legacy seed's original heightfield. */
+export function shapeLandscapeHeight(preset: LandscapePresetId | undefined, x: number, y: number, noiseHeight: number): number {
+  if (preset === 'lowlands') return 95 + noiseHeight * 0.32;
+  if (preset === 'coastal') {
+    const shorelineX = -1_800 + 700 * Math.sin(y / 2_200);
+    const coastalShelf = Math.max(-140, Math.min(100, (x - shorelineX) * 0.03));
+    return coastalShelf + noiseHeight * 0.23;
+  }
+  if (preset === 'mountains') {
+    const valleyAxis = x + 600 * Math.sin(y / 3_000);
+    const ridge = Math.sin(valleyAxis / 2_700 + 0.4);
+    return 65 + 320 * ridge * ridge + noiseHeight * 0.65;
+  }
+  return noiseHeight;
+}
+
 export const MAX_OPPORTUNITY_ATTEMPTS = 26;
 export const MAX_SITE_CANDIDATES_PER_ATTEMPT = 256;
 export const MAX_ECONOMY_SITE_CANDIDATES = 256;

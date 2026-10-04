@@ -468,6 +468,15 @@ describe('FreightPurchaseService', () => {
         lifetimeRevenue: 0,
         lifetimeRunningCost: 0,
       },
+      dynamics: {
+        mode: 'on-rail',
+        trackUUID: 'forest-sawmill-track',
+        distance: 0,
+        direction: 1,
+        speedMps: 0,
+        consistId: 'consist-purchased-train',
+        consistOrder: 0,
+      },
     }]);
     expect(world.company.cash).toBe(before.cash - 90_000);
     expect(world.company.ledger).toHaveLength(before.ledgerLength + 1);

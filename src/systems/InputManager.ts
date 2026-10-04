@@ -49,6 +49,7 @@ export class InputManager {
     this.mobileStopRequested = data.value === 0 && data.hardStop;
   };
   private clickHandlingSetup: boolean = false;
+  private trainManager: TrainManager | null = null;
 
   constructor(scene: Phaser.Scene, cameraController: CameraController) {
     this.scene = scene;
@@ -65,6 +66,7 @@ export class InputManager {
   }
 
   setupClickHandling(trainManager: TrainManager): void {
+    this.trainManager = trainManager;
     for (const train of trainManager.trains) {
       this.scene.input.setDraggable(train.getMatterBody(), true);
     }
@@ -76,6 +78,12 @@ export class InputManager {
     this.clickHandlingSetup = true;
 
     this.scene.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: any) => {
+      // Phaser emits this before pointerdown. Following a train here would move
+      // the camera before the editor converts that same click to world space.
+      if (this.cameraController.getInputLockOwner() !== 'camera') {
+        this.clickedGameObject = false;
+        return;
+      }
       this.clickedGameObject = true;
       const mapped = TrainManager.bodyToTrain.get(gameObject);
       if (mapped && this.isTrain(mapped)) {
@@ -86,10 +94,12 @@ export class InputManager {
     });
 
     this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button === 0 && !this.clickedGameObject) {
+      const clickedGameObject = this.clickedGameObject;
+      this.clickedGameObject = false;
+      if (this.cameraController.getInputLockOwner() !== 'camera') return;
+      if (pointer.button === 0 && !clickedGameObject) {
         trainManager.deselectTrain();
       }
-      this.clickedGameObject = false;
     });
 
     // Set input lock to object-drag when dragging starts to suppress camera panning
@@ -164,6 +174,7 @@ export class InputManager {
     } else {
       selectedTrain.enginePower = 0;
       if (this.mobileStopRequested) {
+        this.trainManager?.stopTrainImmediately(selectedTrain);
         const body = selectedTrain.getMatterBody();
         body.setVelocity(0, 0);
         body.setAngularVelocity(0);

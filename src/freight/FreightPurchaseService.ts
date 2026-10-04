@@ -230,6 +230,7 @@ const facingFromSourceEndpoint = (
 const createPurchasedTrainDef = (
   trainId: string,
   quote: FreightPurchaseQuote,
+  train: Train,
 ): TrainDef => ({
   id: trainId,
   freightSetId: quote.freightSetId,
@@ -246,6 +247,17 @@ const createPurchasedTrainDef = (
     lifetimeRevenue: 0,
     lifetimeRunningCost: 0,
   },
+  dynamics: train.persistedDynamics
+    ? { ...train.persistedDynamics }
+    : {
+        mode: 'on-rail',
+        trackUUID: quote.trackUUID,
+        distance: 0,
+        direction: quote.facing,
+        speedMps: 0,
+        consistId: `consist-${trainId}`,
+        consistOrder: 0,
+      },
 });
 
 export class FreightPurchaseService {
@@ -499,7 +511,7 @@ export class FreightPurchaseService {
             });
             if (!posted.ok) return false;
             draft.company = posted.company;
-            draft.trains.push(createPurchasedTrainDef(trainId, quote));
+            draft.trains.push(createPurchasedTrainDef(trainId, quote, train));
             return true;
           },
         );

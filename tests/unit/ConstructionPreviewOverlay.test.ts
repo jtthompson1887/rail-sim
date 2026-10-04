@@ -159,4 +159,37 @@ describe('ConstructionPreviewOverlay', () => {
     );
     expect(gfx.lineTo.mock.calls.length).toBeGreaterThan(1);
   });
+
+  it('draws independently selectable direction handles at a constant screen size', () => {
+    const gfx = graphics();
+    const scene = { cameras: { main: { zoom: 0.5 } }, add: { graphics: jest.fn().mockReturnValue(gfx) } };
+    const overlay = new ConstructionPreviewOverlay(scene as any);
+    const reviewed = model();
+    (reviewed as any).phase = 'review';
+    (reviewed as any).draft = {
+      selectedHandle: 'start-direction', startDirectionLocked: false,
+      endDirectionLocked: true, canUndo: false,
+    };
+    overlay.render(reviewed);
+    expect(gfx.fillCircle).toHaveBeenCalledWith(100, 0, 20);
+    expect(gfx.fillCircle).toHaveBeenCalledWith(200, 0, 20);
+    expect(gfx.lineStyle).toHaveBeenCalledWith(4, 0x67e6ff, 0.7);
+    expect(scene.add.graphics).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks invalid geometry clearly even when engineering returned priced structures', () => {
+    const gfx = graphics();
+    const overlay = new ConstructionPreviewOverlay({ add: { graphics: () => gfx } } as any);
+    const invalid = model();
+    invalid.proposal.valid = false;
+    invalid.proposal.reasonCode = 'clearance';
+    overlay.render(invalid);
+    expect(gfx.lineStyle).toHaveBeenCalledWith(
+      INVALID_PREVIEW_STYLE.width, INVALID_PREVIEW_STYLE.color, INVALID_PREVIEW_STYLE.alpha,
+    );
+    expect(gfx.lineStyle).not.toHaveBeenCalledWith(
+      PREVIEW_STRUCTURE_STYLES.surface.width, PREVIEW_STRUCTURE_STYLES.surface.color,
+      PREVIEW_STRUCTURE_STYLES.surface.alpha,
+    );
+  });
 });

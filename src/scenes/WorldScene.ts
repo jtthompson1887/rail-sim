@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import TrackManager from '../managers/TrackManager';
 import type { TrackTopologySnapshot } from '../managers/TrackManager';
 import { TrainManager } from '../managers/TrainManager';
@@ -68,6 +69,8 @@ import {
   type RailAccessConnectivityResult,
 } from '../freight/RailAccessConnectivity';
 import { TrainSerializer } from '../utils/TrainSerializer';
+import { RailwayController } from '../management/RailwayController';
+import { SaveService } from '../services/SaveService';
 import type { WorldData } from '../config/WorldData';
 import type {
   ConstructionPreviewModel,
@@ -201,7 +204,10 @@ function deletionBlockingReason(
   if (stationIds.size > 0) {
     return 'Deletion blocked · Remove stations from these tracks first';
   }
-  if (world.trains.some((train) => selected.has(train.trackUUID))) {
+  if (world.trains.some((train) => (
+    train.dynamics.mode === 'on-rail'
+    && selected.has(train.dynamics.trackUUID)
+  ))) {
     return 'Deletion blocked · Move trains off these tracks first';
   }
   return '';
@@ -265,6 +271,10 @@ export default class WorldScene extends Phaser.Scene {
   private activeTool: CreateTool = 'none';
   private worldLoadFailed = false;
   private economySystem = new EconomySystem();
+  private railway: RailwayController | null = null;
+  private managedCompanyPresentationKey = '';
+  private saveGeneration = 0;
+  private readonly handledKeyboardEvents = new WeakSet<KeyboardEvent>();
   private cabViewHost: CabViewHost | null = null;
   private freightPurchaseService!: FreightPurchaseService;
   private readonly operationsLockedTrainIds = new Set<string>();
@@ -289,6 +299,7 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly cabStateHandler = ({ active }: { active: boolean }) => {
+    this.railway?.setVisible(!active);
     this.cameraController.setInputLockOwner(active ? 'ui' : 'camera');
     this.scene.setVisible(!active);
     this.scene.setVisible(!active, EDITOR_UI_SCENE_KEY);
@@ -554,7 +565,7 @@ export default class WorldScene extends Phaser.Scene {
     const terrainSeed = world?.generationConfig.seed ?? 'default';
     const biome = world?.generationConfig.biome ?? 'temperate';
 
-    this.terrainGenerator    = new TerrainGenerator(terrainSeed);
+    this.terrainGenerator    = new TerrainGenerator(terrainSeed, world?.generationConfig.landscapePreset);
     this.terrainValidator    = new TerrainValidator(this.terrainGenerator);
     this.terrainChunkManager = new TerrainChunkManager(this, this.terrainGenerator, biome);
     this.sceneryManager      = new SceneryManager(this, this.terrainGenerator, biome, terrainSeed);
@@ -620,6 +631,15 @@ export default class WorldScene extends Phaser.Scene {
     // Load world content
     this.contentLoader = new WorldContentLoader(this, this.trackManager, this.trainManager);
     this.contentLoader.load();
+    this.railway = new RailwayController({
+      scene: this, terrain: this.terrainGenerator, trains: this.trainManager, content: this.contentLoader,
+      preview: () => (this.toolRegistry.get('place-track') as PlaceTrackTool | undefined)?.previewModel ?? null,
+      refreshFacilities: () => this.renderFacilities(),
+      save: async () => {
+        if (!this.saveWorldAndReport()) return false;
+        try { await SaveService.flush(); return true; } catch { return false; }
+      },
+    });
 
     // HUD and debug overlays
     this.scene.launch('HUDScene');
@@ -687,6 +707,7 @@ export default class WorldScene extends Phaser.Scene {
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.railway?.destroy(); this.railway = null;
       EventBus.off('mode:changed',        this.modeChangedHandler);
       EventBus.off('tool:changed',        this.toolChangedHandler);
       EventBus.off('editor:undo',         this.undoHandler);
@@ -768,6 +789,7 @@ export default class WorldScene extends Phaser.Scene {
       trackManager: this.trackManager,
       selectionManager: this.selectionManager,
       visible: GameStateManager.worldMode === 'create',
+      regionalPlay: !!world?.management,
       companyCash: world?.company.cash ?? 0,
       economyTick: world?.economy.tick ?? 0,
       constructionIndexBps:
@@ -1037,7 +1059,7 @@ export default class WorldScene extends Phaser.Scene {
 
     const playActive = GameStateManager.worldMode === 'play'
       && GameStateManager.state === 'playing';
-    if (playActive && !this.firstRouteHarnessControlsRuntime) {
+    if (playActive && !this.firstRouteHarnessControlsRuntime && !this.railway?.active) {
       this.inputManager.handleTrainMovement(
         this.trainManager.selectedTrain,
         this.operationsLockedTrainIds,
@@ -1047,7 +1069,13 @@ export default class WorldScene extends Phaser.Scene {
       (train) => captureTrainRuntime(train),
     );
     const operating = playActive && !this.scene.isPaused();
-    const economyResult = this.firstRouteHarnessControlsRuntime
+    const managed = !this.firstRouteHarnessControlsRuntime && (this.railway?.update(time, delta, runtime) ?? false);
+    if (managed) this.publishManagedCompanyState();
+    if (managed && (WorldManager.world?.management?.speed ?? 0) > 0) {
+      this.constructionHistoryClearedForOperations = false;
+      this.clearConstructionHistoryForOperations();
+    }
+    const economyResult = this.firstRouteHarnessControlsRuntime || managed
       ? null
       : this.economySystem.update(
         delta,
@@ -1083,14 +1111,14 @@ export default class WorldScene extends Phaser.Scene {
       }
       GameStateManager.tick(delta / 1000);
     } else if (playActive) {
-      if (!this.firstRouteHarnessControlsRuntime) {
+      if (!this.firstRouteHarnessControlsRuntime && !managed) {
         this.trainManager.update(
           time,
           delta,
           this.operationsLockedTrainIds,
         );
       }
-      this.contentLoader.stations.forEach((s) => s.update(delta));
+      if (!managed) this.contentLoader.stations.forEach((s) => s.update(delta));
       GameStateManager.tick(delta / 1000);
       this.publishHUDState();
     }
@@ -1100,6 +1128,12 @@ export default class WorldScene extends Phaser.Scene {
       ),
     );
     this.cabViewHost?.update(time, delta);
+    if (managed && GameStateManager.worldMode === 'play') {
+      this.autoSaveTimer += delta / 1000;
+      if (this.autoSaveTimer >= GameConfig.WORLD.AUTO_SAVE_INTERVAL_SECS) {
+        this.autoSaveTimer = 0; this.saveWorldAndReport(false);
+      }
+    }
   }
 
   private applyEconomyUpdateResult(
@@ -1280,6 +1314,25 @@ export default class WorldScene extends Phaser.Scene {
       Math.cos(body.rotation) * speedPerFrame,
       Math.sin(body.rotation) * speedPerFrame,
     );
+    if (runtime.derailed) {
+      this.trainManager.restoreVehicleDynamics(train, {
+        mode: 'free-body', x: body.x, y: body.y, angleRad: body.rotation,
+        velocityX: Math.cos(body.rotation) * runtime.speedWorldUnitsPerSecond / TRAIN_PHYSICS_CONFIG.worldUnitsPerMetre,
+        velocityY: Math.sin(body.rotation) * runtime.speedWorldUnitsPerSecond / TRAIN_PHYSICS_CONFIG.worldUnitsPerMetre,
+        angularVelocityRadPerSec: 0,
+      });
+    } else if (train.currentTrack) {
+      const track = train.currentTrack;
+      const distance = track.getArcLengthIndex().distanceForPoint({ x: body.x, y: body.y });
+      const tangent = track.getArcLengthIndex().poseAtDistance(distance).tangent;
+      const direction = Math.cos(body.rotation) * tangent.x + Math.sin(body.rotation) * tangent.y >= 0 ? 1 : -1;
+      const persisted = train.persistedDynamics?.mode === 'on-rail' ? train.persistedDynamics : null;
+      this.trainManager.restoreVehicleDynamics(train, {
+        mode: 'on-rail', trackUUID: track.getUUID(), distance, direction,
+        speedMps: runtime.speedWorldUnitsPerSecond / TRAIN_PHYSICS_CONFIG.worldUnitsPerMetre,
+        consistId: persisted?.consistId ?? 'consist-' + trainId, consistOrder: persisted?.consistOrder ?? 0,
+      });
+    }
     this.publishFreightPresentation(
       this.trainManager.trains.map(captureTrainRuntime),
     );
@@ -1560,6 +1613,7 @@ export default class WorldScene extends Phaser.Scene {
     WorldManager.applyOperationsBatch(world.revision, (draft) => {
       let changed = false;
       draft.trains = draft.trains.map((authoritative) => {
+        if (this.railway?.controlledTrainIds().has(authoritative.id)) return authoritative;
         const runtime = runtimeById.get(authoritative.id);
         const merged = runtime
           ? TrainSerializer.mergeRuntime(authoritative, runtime)
@@ -1584,7 +1638,15 @@ export default class WorldScene extends Phaser.Scene {
   ): boolean {
     this.reportSaveState('saving');
     const saved = persist();
-    this.reportSaveState(saved ? 'saved' : 'unsaved');
+    if (saved && SaveService.getStorageKind() !== 'localStorage') {
+      const generation = ++this.saveGeneration;
+      void SaveService.flush().then(() => {
+        if (generation === this.saveGeneration) this.reportSaveState('saved');
+      }).catch(() => {
+        if (generation === this.saveGeneration) this.reportSaveState('unsaved');
+        if (showFailureToast) EventBus.emit('ui:toast', { message: SAVE_FAILURE_MESSAGE, type: 'error' });
+      });
+    } else this.reportSaveState(saved ? 'saved' : 'unsaved');
     if (!saved && showFailureToast) {
       if (this.capturingStartupSaveOutcome) {
         this.pendingStartupSaveError = SAVE_FAILURE_MESSAGE;
@@ -1599,6 +1661,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private runPeriodicSafetySave(): void {
+    if (this.railway?.active) { this.saveWorldAndReport(false); return; }
     if (this.lastReportedSaveState === 'saved') return;
     this.saveWorldAndReport(false);
   }
@@ -1628,6 +1691,7 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Return true if the pointer's screen position overlaps any editor UI panel. */
   private isPointerOverUI(pointer: Phaser.Input.Pointer): boolean {
+    if (this.railway?.panel.contains(pointer.x, pointer.y)) return true;
     const editorUI = this.scene?.get?.(EDITOR_UI_SCENE_KEY) as EditorUIScene | null;
     if (editorUI?.containsScreenPoint(pointer.x, pointer.y)) return true;
     const { width, height } = this.scale;
@@ -1695,6 +1759,16 @@ export default class WorldScene extends Phaser.Scene {
           cashFlow: 0,
         },
     });
+  }
+
+  private publishManagedCompanyState(): void {
+    const world = WorldManager.world;
+    if (!world) return;
+    const key = [world.id, world.economy.tick, world.company.cash,
+      world.company.nextLedgerId, world.economy.market.constructionIndexBps].join(':');
+    if (key === this.managedCompanyPresentationKey) return;
+    this.managedCompanyPresentationKey = key;
+    this.publishCompanyState(this.lastReportedSaveState);
   }
 
   private publishFreightPresentation(
@@ -1803,6 +1877,9 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    // Phaser can process the same queued DOM event more than once before its next frame.
+    if (this.handledKeyboardEvents.has(event)) return;
+    this.handledKeyboardEvents.add(event);
     if (isGameplayInputFocused(event.target as Element | null)) return;
 
     if (GameStateManager.worldMode === 'play' && GameConfig.CAB3D.ENABLED) {

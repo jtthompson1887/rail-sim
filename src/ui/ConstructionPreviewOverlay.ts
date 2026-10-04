@@ -6,6 +6,7 @@ import type {
 import type { ConstructionProposal } from '../systems/ConstructionAnalyzer';
 import { createTrackGeometry } from '../systems/TrackGeometry';
 import type { ConstructionGuidanceDto } from '../freight/ConstructionGuidance';
+import type { TrackDraftHandle } from '../systems/TrackDraft';
 
 export type ConstructionToolPhase =
   | 'idle'
@@ -31,6 +32,12 @@ export interface ConstructionPreviewModel {
   readonly actions: ReadonlyArray<'confirm' | 'backstep' | 'cancel'>;
   readonly guidance: ConstructionGuidanceDto;
   readonly breachesReserve: boolean;
+  readonly draft?: {
+    readonly selectedHandle: TrackDraftHandle | null;
+    readonly startDirectionLocked: boolean;
+    readonly endDirectionLocked: boolean;
+    readonly canUndo: boolean;
+  };
 }
 
 export interface ConstructionPreviewEvent {
@@ -72,7 +79,7 @@ const CONNECTION_COLOR = 0x58ffad;
 export class ConstructionPreviewOverlay {
   private readonly graphics: Phaser.GameObjects.Graphics;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(private readonly scene: Phaser.Scene) {
     this.graphics = scene.add.graphics()
       .setDepth(598)
       .setScrollFactor(1);
@@ -82,7 +89,7 @@ export class ConstructionPreviewOverlay {
     this.graphics.clear();
     const geometry = createTrackGeometry(model.proposal.geometry);
 
-    const intervals = model.proposal.structures.length > 0
+    const intervals = model.proposal.valid && model.proposal.structures.length > 0
       ? model.proposal.structures.map((interval) => ({
         startT: interval.startT,
         endT: interval.endT,
@@ -128,6 +135,46 @@ export class ConstructionPreviewOverlay {
     for (const connection of model.predictedConnections) {
       this.graphics.fillCircle(connection.point.x, connection.point.y, 7);
     }
+    if (model.phase === 'review' && model.draft) this.drawDraftHandles(model);
+  }
+
+  private drawDraftHandles(model: ConstructionPreviewModel): void {
+    const { p0, p1, p2, p3 } = model.proposal.geometry;
+    const zoom = this.scene.cameras?.main?.zoom || 1;
+    const scale = 1 / zoom;
+    const selected = model.draft!.selectedHandle;
+    const pairs = [
+      { anchor: p0, control: p1, handle: 'start-direction', locked: model.draft!.startDirectionLocked, color: 0x67e6ff },
+      { anchor: p3, control: p2, handle: 'end-direction', locked: model.draft!.endDirectionLocked, color: 0xffd17c },
+    ];
+    for (const pair of pairs) {
+      this.graphics.lineStyle(2 * scale, pair.color, 0.7);
+      this.graphics.beginPath();
+      this.graphics.moveTo(pair.anchor.x, pair.anchor.y);
+      this.graphics.lineTo(pair.control.x, pair.control.y);
+      this.graphics.strokePath();
+      // Arrowheads communicate direction without requiring colour recognition.
+      const incoming = pair.handle === 'end-direction';
+      const angle = Math.atan2(pair.control.y - pair.anchor.y, pair.control.x - pair.anchor.x)
+        + (incoming ? Math.PI : 0);
+      const tip = {
+        x: pair.anchor.x + Math.cos(angle) * (incoming ? -16 : 28) * scale,
+        y: pair.anchor.y + Math.sin(angle) * (incoming ? -16 : 28) * scale,
+      };
+      this.graphics.beginPath();
+      this.graphics.moveTo(tip.x - Math.cos(angle - 0.5) * 10 * scale, tip.y - Math.sin(angle - 0.5) * 10 * scale);
+      this.graphics.lineTo(tip.x, tip.y);
+      this.graphics.lineTo(tip.x - Math.cos(angle + 0.5) * 10 * scale, tip.y - Math.sin(angle + 0.5) * 10 * scale);
+      this.graphics.strokePath();
+      this.graphics.fillStyle(selected === pair.handle ? 0xffffff : pair.color, 1);
+      this.graphics.fillCircle(pair.control.x, pair.control.y, 10 * scale);
+      this.graphics.fillStyle(0x102c42, 1);
+      this.graphics.fillCircle(pair.control.x, pair.control.y, (pair.locked ? 5 : 3) * scale);
+    }
+    this.graphics.fillStyle(selected === 'start' ? 0x67e6ff : 0xffffff, 1);
+    this.graphics.fillCircle(p0.x, p0.y, 7 * scale);
+    this.graphics.fillStyle(selected === 'end' ? 0xffd17c : 0xffffff, 1);
+    this.graphics.fillCircle(p3.x, p3.y, 7 * scale);
   }
 
   clear(): void {

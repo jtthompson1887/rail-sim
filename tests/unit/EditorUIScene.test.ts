@@ -155,6 +155,7 @@ describe('EditorUIScene construction UI boundary', () => {
       inventories: [],
       quotes: [],
       railConnected: true,
+      boundaryTrade: null,
     });
     const facilityRoot = document.querySelector(
       '[data-testid="facility-inspector"]',
@@ -428,6 +429,7 @@ describe('EditorUIScene construction UI boundary', () => {
         inventories: [],
         quotes: [],
         railConnected: true,
+        boundaryTrade: null,
       });
 
       expect(facility.dataset.layout).toBe(_layout);

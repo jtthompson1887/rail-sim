@@ -31,6 +31,10 @@ import {
   validateCompanyState,
 } from '../economy/FinanceLedger';
 import { clonePlainData } from '../utils/PlainData';
+import type { TravelDirection } from '../physics/RouteCursor';
+import type { ManagementState, BlueprintDraft } from '../simulation/SimulationTypes';
+import type { RegionState } from '../region/RegionalProjects';
+import { validateManagementData } from '../management/WorldManagementValidation';
 
 export type StructureType = 'surface' | 'cut' | 'fill' | 'bridge' | 'tunnel';
 
@@ -70,6 +74,7 @@ export interface TrackDef extends TrackGeometryDef {
   verticalProfile: VerticalProfileDef;
   structures: StructureInterval[];
   paidBuildCost: number;
+  electrified?: boolean;
 }
 
 /** A serialised Junction referencing three track UUIDs. */
@@ -89,6 +94,7 @@ export interface WorldStationDef {
   trackUUID: string;
   trackT: number;
   passengerSpawnRate: number;
+  platformLengthMetres?: number;
 }
 
 export interface TrainCargoDef {
@@ -108,7 +114,27 @@ export interface TrainOperationsDef {
   lifetimeRunningCost: number;
 }
 
-/** An authoritative serialised freight train placed in the world. */
+export type PersistedVehicleDynamics =
+  | {
+      mode: 'on-rail';
+      trackUUID: string;
+      distance: number;
+      direction: TravelDirection;
+      speedMps: number;
+      consistId: string;
+      consistOrder: number;
+    }
+  | {
+      mode: 'free-body';
+      x: number;
+      y: number;
+      angleRad: number;
+      velocityX: number;
+      velocityY: number;
+      angularVelocityRadPerSec: number;
+    };
+
+/** An authoritative freight train with rail-constrained or free-body state. */
 export interface TrainDef {
   id: string;
   freightSetId: string;
@@ -117,6 +143,9 @@ export interface TrainDef {
   facing: 1 | -1;
   cargo: TrainCargoDef | null;
   operations: TrainOperationsDef;
+  dynamics: PersistedVehicleDynamics;
+  vehicleFamilyId?: string;
+  livery?: string;
 }
 
 /** Asset type identifiers for scenery objects. */
@@ -146,6 +175,8 @@ export interface WorldGenerationConfigDef {
   seed: string;
   biome: BiomeType;
   constructionDifficultyId: ConstructionDifficultyId;
+  landscapePreset?: 'lowlands' | 'coastal' | 'mountains';
+  gameDifficulty?: 'standard' | 'expert' | 'sandbox';
 }
 
 export interface PlanningSiteDef {
@@ -202,7 +233,7 @@ export interface FreightProgressDef {
 
 /** The root world data blob persisted to localStorage. */
 export interface WorldData {
-  schemaVersion: 10;
+  schemaVersion: 11;
   revision: number;
   constructionRevision: number;
   operationsRevision: number;
@@ -212,6 +243,10 @@ export interface WorldData {
   company: CompanyStateDef;
   economy: EconomyStateDef;
   freightProgress: FreightProgressDef;
+  management?: ManagementState;
+  region?: RegionState;
+  blueprints?: BlueprintDraft[];
+  companyStyle?: { name: string; colour: string };
   starterOpportunity: StarterOpportunityDef;
   tracks: TrackDef[];
   junctions: JunctionDef[];
@@ -236,7 +271,7 @@ export function createEmptyWorld(
   const now = Date.now();
   const constructionDifficultyId: ConstructionDifficultyId = 'standard';
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     revision: 0,
     constructionRevision: 0,
     operationsRevision: 0,
@@ -620,6 +655,46 @@ function hasValidTrainOperations(
       >= (value.lastTripRunningCost as number);
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length
+    && actual.every((key, index) => key === wanted[index]);
+}
+
+function isPersistedVehicleDynamics(value: unknown): value is PersistedVehicleDynamics {
+  if (!isRecord(value)) return false;
+  if (value.mode === 'on-rail') {
+    return hasExactKeys(value, [
+      'mode', 'trackUUID', 'distance', 'direction', 'speedMps',
+      'consistId', 'consistOrder',
+    ])
+      && typeof value.trackUUID === 'string'
+      && value.trackUUID.length > 0
+      && isFiniteNumber(value.distance)
+      && value.distance >= 0
+      && (value.direction === 1 || value.direction === -1)
+      && isFiniteNumber(value.speedMps)
+      && typeof value.consistId === 'string'
+      && value.consistId.length > 0
+      && Number.isSafeInteger(value.consistOrder)
+      && (value.consistOrder as number) >= 0;
+  }
+  if (value.mode === 'free-body') {
+    return hasExactKeys(value, [
+      'mode', 'x', 'y', 'angleRad', 'velocityX', 'velocityY',
+      'angularVelocityRadPerSec',
+    ])
+      && isFiniteNumber(value.x)
+      && isFiniteNumber(value.y)
+      && isFiniteNumber(value.angleRad)
+      && isFiniteNumber(value.velocityX)
+      && isFiniteNumber(value.velocityY)
+      && isFiniteNumber(value.angularVelocityRadPerSec);
+  }
+  return false;
+}
+
 function isTrain(
   value: unknown,
   trackIds: Set<string>,
@@ -639,7 +714,11 @@ function isTrain(
     || value.trackT < 0
     || value.trackT > 1
     || (value.facing !== 1 && value.facing !== -1)
-    || !hasValidTrainOperations(value.operations)) {
+    || !hasValidTrainOperations(value.operations)
+    || !isPersistedVehicleDynamics(value.dynamics)
+    || (value.dynamics.mode === 'on-rail'
+      && (!trackIds.has(value.dynamics.trackUUID)
+        || value.dynamics.trackUUID !== value.trackUUID))) {
     return false;
   }
 
@@ -792,10 +871,8 @@ function isMarketState(value: unknown): value is MarketStateDef {
     .sort();
   const actualProductIds = Object.keys(value.regionalDemandBpsByProduct)
     .sort();
-  if (actualProductIds.length !== expectedProductIds.length
-    || actualProductIds.some((productId, index) => (
-      productId !== expectedProductIds[index]
-    ))) return false;
+  if (expectedProductIds.some((productId) => !actualProductIds.includes(productId))
+    || actualProductIds.some((productId) => !getProduct(productId))) return false;
   return actualProductIds.every((productId) => {
     const factor = value.regionalDemandBpsByProduct[productId];
     return Number.isSafeInteger(factor)
@@ -850,7 +927,11 @@ function incompatible(raw: unknown, reason: string): IncompatibleWorldResult {
  */
 export function validateWorldData(raw: unknown): WorldValidationResult {
   if (!isRecord(raw)) return incompatible(raw, 'invalid world data.');
-  if (raw.schemaVersion !== 10) {
+  if (['__proto__', 'constructor', 'prototype'].some(key => hasOwn(raw, key))) {
+    return incompatible(raw, 'reserved world property.');
+  }
+  if (!validateManagementData(raw)) return incompatible(raw, 'invalid railway management data.');
+  if (raw.schemaVersion !== 11) {
     return incompatible(raw, raw.schemaVersion === undefined
       ? 'missing schema version.'
       : `unsupported schema version ${String(raw.schemaVersion)}.`);
@@ -868,13 +949,26 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || generationConfig.generationConfigVersion !== 1
     || typeof generationConfig.seed !== 'string'
     || biomes.indexOf(generationConfig.biome as BiomeType) === -1
-    || difficulties.indexOf(generationConfig.constructionDifficultyId as ConstructionDifficultyId) === -1) {
+    || difficulties.indexOf(generationConfig.constructionDifficultyId as ConstructionDifficultyId) === -1
+    || (generationConfig.landscapePreset !== undefined && !['lowlands','coastal','mountains'].includes(generationConfig.landscapePreset as string))
+    || (generationConfig.gameDifficulty !== undefined && !['standard','expert','sandbox'].includes(generationConfig.gameDifficulty as string))) {
     return incompatible(raw, 'invalid generation configuration.');
   }
 
   const company = raw.company;
   const freightProgress = raw.freightProgress;
   const metadata = raw.metadata;
+  const consistPositions = new Set<string>();
+  const hasDuplicateConsistPosition = Array.isArray(raw.trains) && raw.trains.some((train) => {
+    if (!isRecord(train)
+      || !isPersistedVehicleDynamics(train.dynamics)
+      || train.dynamics.mode !== 'on-rail') return false;
+    const key = `${train.dynamics.consistId}:${train.dynamics.consistOrder}`;
+    if (consistPositions.has(key)) return true;
+    consistPositions.add(key);
+    return false;
+  });
+
   if (typeof raw.id !== 'string'
     || typeof raw.name !== 'string'
     || !isNonNegativeSafeInteger(raw.revision)
@@ -886,6 +980,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !Array.isArray(raw.junctions) || !raw.junctions.every(isJunction)
     || !Array.isArray(raw.stations) || !raw.stations.every(isStation)
     || !Array.isArray(raw.trains)
+    || hasDuplicateConsistPosition
     || !Array.isArray(raw.scenery) || !raw.scenery.every(isScenery)
     || validateCompanyState(company).valid === false
     || !isEconomyState(raw.economy)
@@ -894,7 +989,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
     || !isRecord(metadata)
     || !isFiniteNumber(metadata.createdAt)
     || !isFiniteNumber(metadata.updatedAt)) {
-    return incompatible(raw, 'data does not match schema version 10.');
+    return incompatible(raw, 'data does not match schema version 11.');
   }
   const forwardGrantCount = countForwardRegionalDevelopmentGrants(
     company as CompanyStateDef,
@@ -916,7 +1011,7 @@ export function validateWorldData(raw: unknown): WorldValidationResult {
   const trainIds = new Set<string>();
   for (const train of raw.trains) {
     if (!isTrain(train, trackIds, facilityIds, trainIds)) {
-      return incompatible(raw, 'data does not match schema version 9.');
+      return incompatible(raw, 'data does not match schema version 11.');
     }
   }
 

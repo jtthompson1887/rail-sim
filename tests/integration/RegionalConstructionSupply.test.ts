@@ -382,6 +382,7 @@ describe('Integration: complete regional construction supply', () => {
           speedWorldUnitsPerSecond: 0,
           throttle: 0,
           derailed: false,
+          dynamics: authority.dynamics,
         });
         expect(Number.isFinite(savedRuntime.x)).toBe(true);
         expect(Number.isFinite(savedRuntime.y)).toBe(true);
@@ -392,10 +393,12 @@ describe('Integration: complete regional construction supply', () => {
           speedWorldUnitsPerSecond: 0,
           throttle: 0,
           derailed: false,
+          dynamics: authority.dynamics,
         });
         expect(restoredRuntime.trackT).toBeCloseTo(authority.trackT, 3);
         expect(Object.keys(restoredRuntime).sort()).toEqual([
           'derailed',
+          'dynamics',
           'facing',
           'speedWorldUnitsPerSecond',
           'throttle',

@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 import {
   expect,
   test,
@@ -13,7 +14,7 @@ import type { ConstructionPreviewModel } from '../../src/ui/ConstructionPreviewO
 
 const DESKTOP = { width: 1920, height: 1400 };
 const MOBILE = { width: 375, height: 667 };
-const EXPECTED_SCHEMA_VERSION = 10;
+const EXPECTED_SCHEMA_VERSION = 11;
 const CASH = new Intl.NumberFormat('en-GB', {
   style: 'currency',
   currency: 'GBP',
@@ -162,18 +163,7 @@ async function createFixedSeedWorld(
     { timeout: 60_000 },
   );
   await page.keyboard.press('Enter');
-  const canvas = page.locator('canvas');
-  const pickerPanelHeight = Math.min(690, viewport.height - 40);
-  const seedY = viewport.height / 2 - pickerPanelHeight / 2 + 126;
-  const confirmY = viewport.height / 2 + pickerPanelHeight / 2 - 44;
-  await canvas.click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await canvas.click({ position: { x: viewport.width / 2, y: seedY } });
-  await canvas.click({
-    position: { x: viewport.width / 2, y: confirmY },
-  });
+  await createLegacyWorld(page, seed);
   await waitForHarness(page);
 
   const created = await snapshot(page);
@@ -327,6 +317,7 @@ async function dragTrack(
     let pagePoint = await toPagePoint(page, target, await snapshot(page));
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await page.mouse.move(pagePoint.x, pagePoint.y, { steps: 4 });
+      await waitForRenderedFrame(page);
       const observed = await page.evaluate(() => {
         const scene = window.__railSimGame.scene.getScene('WorldScene');
         const pointer = scene.input.activePointer;
@@ -336,8 +327,14 @@ async function dragTrack(
           world: { x: world.x, y: world.y },
         };
       });
-      if (distanceTo(observed.world, target) <= 2) return;
       const state = await snapshot(page);
+      const canvasBounds = await page.locator('canvas').boundingBox();
+      if (!canvasBounds) throw new Error('Canvas is not visible');
+      // Browser pointer coordinates are whole CSS pixels. At a zoomed-out view,
+      // two world units can be smaller than one addressable pixel.
+      const pointerResolution = 2 * Math.max(state.camera.width / canvasBounds.width,
+        state.camera.height / canvasBounds.height) / state.camera.zoom;
+      if (distanceTo(observed.world, target) <= Math.max(2, pointerResolution)) return;
       const desired = await worldToCameraPoint(page, target);
       const canvas = await page.locator('canvas').boundingBox();
       if (!canvas) throw new Error('Canvas is not visible');
@@ -350,7 +347,14 @@ async function dragTrack(
         ) * canvas.height / state.camera.height,
       };
     }
-    throw new Error(`Could not move pointer to ${JSON.stringify(target)}`);
+    const details = await page.evaluate(({ x, y }) => ({
+      layers: document.elementsFromPoint(x, y).slice(0, 4).map((element) => ({
+        tag: element.tagName, testId: element.getAttribute('data-testid'),
+      })),
+      pointer: { x: window.__railSimGame.scene.getScene('WorldScene').input.activePointer.x,
+        y: window.__railSimGame.scene.getScene('WorldScene').input.activePointer.y },
+    }), pagePoint);
+    throw new Error(`Could not move pointer to ${JSON.stringify({ target, pagePoint, details })}`);
   };
   const startPage = await toPagePoint(
     page,
@@ -570,12 +574,16 @@ const tangentAt = (
 const placementInsideAccess = (
   state: CementBrowserSnapshot,
   access: Point & { readonly radius: number },
+  destination?: Point & { readonly radius: number },
 ): {
   readonly point: Point;
   readonly trackT: number;
   readonly trackUUID: string;
 } => {
-  const candidates = state.world.tracks.flatMap((track) => {
+  const candidates = state.world.tracks.filter((track) => !destination
+    || (distanceTo(track.p0, access) <= access.radius && distanceTo(track.p3, destination) <= destination.radius)
+    || (distanceTo(track.p3, access) <= access.radius && distanceTo(track.p0, destination) <= destination.radius))
+    .flatMap((track) => {
     const points: Array<{
       point: Point;
       trackT: number;
@@ -611,7 +619,10 @@ async function purchaseFreightSetAtSource(
   const before = await snapshot(page);
   const existingIds = new Set(before.world.trains.map(({ id }) => id));
   const source = facility(before, sourceDefinitionId);
-  const placement = placementInsideAccess(before, source.railAccess);
+  // The cement terminal has an incoming mineral line and an outgoing line to Prefab.
+  const destinationAccess = sourceDefinitionId === 'cement-works'
+    ? facility(before, 'prefabrication-plant').railAccess : undefined;
+  const placement = placementInsideAccess(before, source.railAccess, destinationAccess);
   await panWorldPointToCentre(page, placement.point);
   const panel = page.locator('[data-testid="vehicle-purchase-panel"]');
   await expect(panel).toBeVisible();
@@ -690,13 +701,19 @@ async function setMode(
     await canvas.click({
       position: { x: box.width / 2, y: box.height * 0.56 },
     });
+    // Wait for the resumed editor to own input before issuing its shortcuts.
+    // The purchase panel stays hidden until the previous track tool is cancelled.
+    await expect(page.locator('[data-testid="company-hud"]')).toBeVisible();
+    await waitForRenderedFrame(page);
     await page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
     });
     await page.keyboard.press('h');
+    await waitForRenderedFrame(page);
     await page.keyboard.press('Escape');
+    await waitForRenderedFrame(page);
     await expect(page.locator('[data-testid="facility-inspector"]'))
       .toBeHidden();
     await expect(purchasePanel).toBeVisible();
@@ -842,6 +859,7 @@ async function driveLoadedTrainWithKeyboard(
   let bestDistance = openingDistance;
   let movingToward = true;
   let observedMotion = false;
+  let parkedForUnloading = false;
   const hold = async (next: 'w' | 's' | null): Promise<void> => {
     if (held === next) return;
     if (held) await page.keyboard.up(held);
@@ -871,13 +889,22 @@ async function driveLoadedTrainWithKeyboard(
       const propulsion = keyToward(state, runtime, destination);
       if (cargoUnits < expectedUnits) {
         await hold(null);
+        if (!parkedForUnloading) {
+          expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+            .toBe(trainId);
+          // Neutral coasts on a gradient; the public Stop control applies the parking brake.
+          await page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: 'Stop', exact: true }).click();
+          parkedForUnloading = true;
+        }
       } else if (distance <= destination.radius * 0.72) {
         await hold(null);
-        if (runtime.speedWorldUnitsPerSecond > 2) {
-          await pulse(
-            movingToward ? oppositeKey(propulsion) : propulsion,
-            runtime.speedWorldUnitsPerSecond > 20 ? 60 : 25,
-          );
+        if (!parkedForUnloading) {
+          expect(await page.evaluate(() => window.__railSimTrainManager?.selectedTrain?.getUUID()))
+            .toBe(trainId);
+          await page.locator('[data-testid="train-inspector"]')
+            .getByRole('button', { name: 'Stop', exact: true }).click();
+          parkedForUnloading = true;
         }
       } else if (distance <= destination.radius * 2) {
         await hold(null);
@@ -1000,6 +1027,9 @@ async function establishCementObjective(
   } else {
     await runFixedLogTrip(page, flatbedId);
   }
+  // Inspect the rolling financial window while the railway is paused for editing.
+  // Otherwise tick advancement can change the HUD between the snapshot and assertions.
+  await setMode(page, 'create');
   let state = await snapshot(page);
   expect(state.world.freightProgress.profitableLogDeliveryCompleted)
     .toBe(true);
@@ -1013,7 +1043,6 @@ async function establishCementObjective(
   )).toBe(true);
   await expectOperatingSummary(page, state);
 
-  await setMode(page, 'create');
   await buildGeneratedExtensions(page);
   await stopTrainAt(page, flatbedId, 'managed-forest');
   await setMode(page, 'play');
@@ -1376,10 +1405,31 @@ async function provePrimaryCementJourney(
   ).toBe(80);
   expect(state.world.freightProgress.profitableCementDeliveryCompleted)
     .toBe(true);
-  expect(state.objective).toMatchObject({
-    id: 'cement-supply-chain',
-    achieved: true,
+  expect(state.world.freightProgress).toMatchObject({
+    profitableStructuralTimberDeliveryCompleted: true,
+    profitableLimestoneDeliveryCompleted: true,
+    profitableSteelDeliveryCompleted: false,
+    profitableBuildingModuleDeliveryCompleted: false,
   });
+  expect(state.objective).toMatchObject({
+    id: 'regional-construction-supply',
+    achieved: false,
+    status: 'Supply regional construction',
+    steps: [
+      { id: 'connect-port', state: 'current' },
+      { id: 'deliver-steel-profitably', state: 'pending' },
+      { id: 'assemble-building-modules', state: 'pending' },
+      { id: 'connect-town', state: 'pending' },
+      { id: 'deliver-building-modules-profitably', state: 'pending' },
+    ],
+  });
+  const regionalObjective = page.getByRole('region', {
+    name: 'Regional construction supply objective',
+  });
+  await expect(regionalObjective.getByRole('heading'))
+    .toHaveText('Regional construction supply');
+  await expect(regionalObjective)
+    .toContainText('Current: Connect Port Interchange');
   await expect(page.locator('[data-testid="company-last-delivery"]'))
     .toHaveAttribute('data-tone', 'profit');
   await expect(page.locator('[data-testid="company-last-delivery"]'))

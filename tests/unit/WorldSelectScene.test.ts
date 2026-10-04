@@ -132,6 +132,9 @@ describe('WorldSelectScene generated-world picker', () => {
       'World 1',
       '11111111-1111-4111-8111-111111111111',
       'temperate',
+      undefined,
+      undefined,
+      { landscapePreset: 'lowlands', gameDifficulty: 'standard', regional: true },
     );
     expect(objects.some((object) => (
       !object.destroyed
@@ -161,5 +164,37 @@ describe('WorldSelectScene generated-world picker', () => {
     );
     expect(scene.scene.start).not.toHaveBeenCalled();
     randomUUID.mockRestore();
+    createSpy.mockRestore();
+  });
+
+  it('offers the three difficulty modes and three real landscape presets', () => {
+    const { scene, objects } = pickerScene();
+    scene.showBiomePicker();
+    expect(scene.pickerDifficulty).toBe('standard');
+    expect(scene.pickerLandscape).toBe('lowlands');
+    for (const expected of ['expert', 'sandbox', 'standard']) {
+      objects.find(object => !object.destroyed && object.value?.startsWith('Mode:'))!.handlers.pointerdown();
+      expect(scene.pickerDifficulty).toBe(expected);
+    }
+    expect(objects.filter(object => !object.destroyed).map(object => object.value)).toEqual(expect.arrayContaining(['Rolling Lowlands', 'Coastal Estuary', 'Highland Valleys']));
+  });
+
+  it('edits name and seed through real inputs without browser prompt support', () => {
+    const { scene, objects } = pickerScene();
+    const promptSpy = jest.spyOn(window, 'prompt').mockImplementation(() => { throw new Error('not available in Electron'); });
+    scene.showBiomePicker();
+    objects.find(object => !object.destroyed && object.value?.startsWith('Name:'))!.handlers.pointerdown();
+    const name = document.querySelector('input[aria-label="Region name"]') as HTMLInputElement;
+    name.value = 'Northern Railway';
+    name.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(scene.pickerName).toBe('Northern Railway');
+    expect(document.querySelector('input')).toBeNull();
+    objects.find(object => !object.destroyed && object.value?.startsWith('Seed:'))!.handlers.pointerdown();
+    const seed = document.querySelector('input[aria-label="World seed"]') as HTMLInputElement;
+    seed.value = 'planned-region';
+    seed.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(scene.pickerSeed).toBe('planned-region');
+    expect(promptSpy).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
   });
 });

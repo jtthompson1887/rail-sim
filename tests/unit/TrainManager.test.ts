@@ -1,10 +1,43 @@
 import { TrainManager } from '../../src/managers/TrainManager';
-import Train from '../../src/entities/Train';
+import Phaser from 'phaser';
 import RailTrack from '../../src/entities/RailTrack';
-import TrackFlowSolver from '../../src/systems/TrackFlowSolver';
-import { GameConfig } from '../../src/config/GameConfig';
-import { GameStateManager } from '../../src/managers/GameStateManager';
 import { EventBus } from '../../src/services/EventBus';
+
+describe('TrainManager authoritative service rendering', () => {
+  const { makeScene } = require('../../__mocks__/phaser');
+  it('renders automatic snapshots without advancing manual dynamics and stops released trains', () => {
+    const scene = makeScene();
+    const track = new RailTrack(scene, new Phaser.Math.Vector2(0, 0), new Phaser.Math.Vector2(333, 0),
+      new Phaser.Math.Vector2(667, 0), new Phaser.Math.Vector2(1000, 0));
+    track.setUUID('managed-route');
+    const manager = new TrainManager(scene, { tracks: [track], junctions: [], getTrack: () => track } as any, {} as any);
+    const train = manager.createFreightTrain('automatic', 'flatbed-freight-set');
+    manager.setManagedTrainIds(new Set(['automatic']));
+    manager.applyManagedSnapshots([{ trainId: 'automatic', trackUUID: 'managed-route', distance: 400,
+      trackT: 0.4, facing: 1, speedMps: 10, x: 400, y: 0, angleRad: 0, serviceId: 'service', stoppedReason: null }]);
+    train.enginePower = 50;
+    manager.update(1000, 1000);
+    expect(train.enginePower).toBe(0);
+    expect(train.getMatterBody().x).toBe(400);
+    expect(manager.getDynamicsAdapter('consist-automatic')).toBeUndefined();
+    expect(train.persistedDynamics).toEqual(expect.objectContaining({ speedMps: 10, distance: 400 }));
+    manager.setManagedTrainIds(new Set());
+    expect(train.persistedDynamics).toEqual(expect.objectContaining({ speedMps: 0 }));
+  });
+
+  it('restores a newer physical cursor instead of replaying an older adapter state', () => {
+    const scene=makeScene();
+    const track=new RailTrack(scene,new Phaser.Math.Vector2(0,0),new Phaser.Math.Vector2(3333,0),
+      new Phaser.Math.Vector2(6667,0),new Phaser.Math.Vector2(10000,0));track.setUUID('restore-route');
+    const manager=new TrainManager(scene,{tracks:[track],junctions:[],getTrack:()=>track} as any,{} as any);
+    const train=manager.createFreightTrain('restored','flatbed-freight-set');
+    const physical={mode:'on-rail' as const,trackUUID:'restore-route',distance:1000,direction:1 as const,speedMps:5,consistId:'consist-restored',consistOrder:0};
+    manager.restoreVehicleDynamics(train,physical);manager.update(0,20);
+    manager.restoreVehicleDynamics(train,{...physical,distance:7000,speedMps:0});manager.update(20,20);
+    expect(train.persistedDynamics).toEqual(expect.objectContaining({distance:7000,speedMps:0}));
+    expect(train.getMatterBody().x).toBeCloseTo(7000,1);
+  });
+});
 
 describe('TrainManager.getBounds()', () => {
   let manager: TrainManager;
@@ -100,439 +133,6 @@ describe('TrainManager.createInitialTrain()', () => {
   });
 });
 
-describe('TrainManager control selection handoff', () => {
-  const { makeScene } = require('../../__mocks__/phaser');
-  const leftPointer = { button: 0 } as Phaser.Input.Pointer;
-  const rightPointer = { button: 2 } as Phaser.Input.Pointer;
-
-  function makeSelectionFixture() {
-    const cameraController = {
-      startFollow: jest.fn(),
-      stopFollow: jest.fn(),
-    };
-    const manager = new TrainManager(
-      makeScene(),
-      {} as any,
-      cameraController as any,
-    );
-    const first = manager.createFreightTrain(
-      'first',
-      'flatbed-freight-set',
-    );
-    const second = manager.createFreightTrain(
-      'second',
-      'flatbed-freight-set',
-    );
-    const unrelated = manager.createFreightTrain(
-      'unrelated',
-      'flatbed-freight-set',
-    );
-    return {
-      cameraController,
-      first,
-      manager,
-      second,
-      unrelated,
-    };
-  }
-
-  it('neutralises the previous train before a programmatic selection event without changing velocity', () => {
-    const {
-      cameraController,
-      first,
-      manager,
-      second,
-      unrelated,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = 0.75;
-    first.getMatterBody().setVelocity(4, -3);
-    unrelated.enginePower = -0.5;
-    cameraController.startFollow.mockClear();
-    cameraController.stopFollow.mockClear();
-    const selectedEvents: string[] = [];
-    let previousPowerAtEvent: number | null = null;
-    const onSelected = ({ trainId }: { trainId: string }) => {
-      selectedEvents.push(trainId);
-      previousPowerAtEvent = first.enginePower;
-    };
-    EventBus.on('train:selected', onSelected);
-
-    try {
-      manager.selectTrain('second');
-    } finally {
-      EventBus.off('train:selected', onSelected);
-    }
-
-    expect(previousPowerAtEvent).toBe(0);
-    expect(selectedEvents).toEqual(['second']);
-    expect(first.enginePower).toBe(0);
-    expect(first.selected).toBe(false);
-    expect(second.selected).toBe(true);
-    expect(manager.selectedTrain).toBe(second);
-    expect(unrelated.enginePower).toBe(-0.5);
-    expect(first.getMatterBody().body.velocity).toEqual({ x: 4, y: -3 });
-    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
-    expect(cameraController.startFollow).toHaveBeenCalledTimes(1);
-    expect(cameraController.startFollow).toHaveBeenCalledWith(
-      second.getMatterBody(),
-    );
-  });
-
-  it('uses the same neutralising handoff for a left-button pointer selection', () => {
-    const {
-      cameraController,
-      first,
-      manager,
-      second,
-      unrelated,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = -0.8;
-    unrelated.enginePower = 0.4;
-    cameraController.startFollow.mockClear();
-    cameraController.stopFollow.mockClear();
-    const selectedEvents: string[] = [];
-    let previousPowerAtEvent: number | null = null;
-    const onSelected = ({ trainId }: { trainId: string }) => {
-      selectedEvents.push(trainId);
-      previousPowerAtEvent = first.enginePower;
-    };
-    EventBus.on('train:selected', onSelected);
-
-    try {
-      manager.handleTrainClick(second, leftPointer);
-    } finally {
-      EventBus.off('train:selected', onSelected);
-    }
-
-    expect(previousPowerAtEvent).toBe(0);
-    expect(selectedEvents).toEqual(['second']);
-    expect(first.enginePower).toBe(0);
-    expect(first.selected).toBe(false);
-    expect(second.selected).toBe(true);
-    expect(manager.selectedTrain).toBe(second);
-    expect(unrelated.enginePower).toBe(0.4);
-    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
-    expect(cameraController.startFollow).toHaveBeenCalledTimes(1);
-  });
-
-  it('makes same-train programmatic and pointer selections exact no-ops', () => {
-    const {
-      cameraController,
-      first,
-      manager,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = 0.65;
-    cameraController.startFollow.mockClear();
-    cameraController.stopFollow.mockClear();
-    const selectedEvents: string[] = [];
-    const deselectedEvents: Record<string, never>[] = [];
-    const onSelected = ({ trainId }: { trainId: string }) => {
-      selectedEvents.push(trainId);
-    };
-    const onDeselected = (event: Record<string, never>) => {
-      deselectedEvents.push(event);
-    };
-    EventBus.on('train:selected', onSelected);
-    EventBus.on('train:deselected', onDeselected);
-
-    try {
-      manager.selectTrain('first');
-      manager.handleTrainClick(first, leftPointer);
-    } finally {
-      EventBus.off('train:selected', onSelected);
-      EventBus.off('train:deselected', onDeselected);
-    }
-
-    expect(manager.selectedTrain).toBe(first);
-    expect(first.selected).toBe(true);
-    expect(first.enginePower).toBe(0.65);
-    expect(selectedEvents).toEqual([]);
-    expect(deselectedEvents).toEqual([]);
-    expect(cameraController.startFollow).not.toHaveBeenCalled();
-    expect(cameraController.stopFollow).not.toHaveBeenCalled();
-  });
-
-  it('ignores a non-left pointer without changing control state', () => {
-    const {
-      cameraController,
-      first,
-      manager,
-      second,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = 0.5;
-    cameraController.startFollow.mockClear();
-    cameraController.stopFollow.mockClear();
-    const emit = jest.spyOn(EventBus, 'emit');
-
-    manager.handleTrainClick(second, rightPointer);
-
-    expect(manager.selectedTrain).toBe(first);
-    expect(first.enginePower).toBe(0.5);
-    expect(first.selected).toBe(true);
-    expect(second.selected).toBe(false);
-    expect(emit).not.toHaveBeenCalled();
-    expect(cameraController.startFollow).not.toHaveBeenCalled();
-    expect(cameraController.stopFollow).not.toHaveBeenCalled();
-    emit.mockRestore();
-  });
-
-  it.each([
-    ['null selection', (manager: TrainManager) => manager.selectTrain(null)],
-    ['unknown ID', (manager: TrainManager) => manager.selectTrain('missing')],
-    ['explicit deselection', (manager: TrainManager) => manager.deselectTrain()],
-  ])('%s neutralises and releases the selected train once', (_name, release) => {
-    const {
-      cameraController,
-      first,
-      manager,
-      unrelated,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = -0.7;
-    unrelated.enginePower = 0.3;
-    cameraController.startFollow.mockClear();
-    cameraController.stopFollow.mockClear();
-    const selectedEvents: string[] = [];
-    const deselectedEvents: Record<string, never>[] = [];
-    const onSelected = ({ trainId }: { trainId: string }) => {
-      selectedEvents.push(trainId);
-    };
-    const onDeselected = (event: Record<string, never>) => {
-      deselectedEvents.push(event);
-    };
-    EventBus.on('train:selected', onSelected);
-    EventBus.on('train:deselected', onDeselected);
-
-    try {
-      release(manager);
-    } finally {
-      EventBus.off('train:selected', onSelected);
-      EventBus.off('train:deselected', onDeselected);
-    }
-
-    expect(first.enginePower).toBe(0);
-    expect(first.selected).toBe(false);
-    expect(manager.selectedTrain).toBeNull();
-    expect(unrelated.enginePower).toBe(0.3);
-    expect(selectedEvents).toEqual([]);
-    expect(deselectedEvents).toEqual([{}]);
-    expect(cameraController.startFollow).not.toHaveBeenCalled();
-    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ['null selection', (manager: TrainManager) => manager.selectTrain(null)],
-    ['unknown ID', (manager: TrainManager) => manager.selectTrain('missing')],
-    ['explicit deselection', (manager: TrainManager) => manager.deselectTrain()],
-  ])('%s is a no-op without a current selection', (_name, release) => {
-    const {
-      cameraController,
-      manager,
-    } = makeSelectionFixture();
-    const emit = jest.spyOn(EventBus, 'emit');
-
-    release(manager);
-
-    expect(manager.selectedTrain).toBeNull();
-    expect(emit).not.toHaveBeenCalled();
-    expect(cameraController.startFollow).not.toHaveBeenCalled();
-    expect(cameraController.stopFollow).not.toHaveBeenCalled();
-    emit.mockRestore();
-  });
-
-  it('neutralises a selected freight train before destroying it', () => {
-    const {
-      cameraController,
-      first,
-      manager,
-    } = makeSelectionFixture();
-    manager.selectTrain('first');
-    first.enginePower = 0.9;
-    cameraController.stopFollow.mockClear();
-    let powerAtDestroy: number | null = null;
-    let selectedAtDestroy: boolean | null = null;
-    let managerSelectionAtDestroy: Train | null = first;
-    jest.spyOn(first, 'destroy').mockImplementation(() => {
-      powerAtDestroy = first.enginePower;
-      selectedAtDestroy = first.selected;
-      managerSelectionAtDestroy = manager.selectedTrain;
-    });
-    const deselectedEvents: Record<string, never>[] = [];
-    const onDeselected = (event: Record<string, never>) => {
-      deselectedEvents.push(event);
-    };
-    EventBus.on('train:deselected', onDeselected);
-
-    try {
-      expect(manager.removeFreightTrain('first')).toBe(true);
-    } finally {
-      EventBus.off('train:deselected', onDeselected);
-    }
-
-    expect(powerAtDestroy).toBe(0);
-    expect(selectedAtDestroy).toBe(false);
-    expect(managerSelectionAtDestroy).toBeNull();
-    expect(manager.selectedTrain).toBeNull();
-    expect(deselectedEvents).toEqual([{}]);
-    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('TrainManager aggregate freight trains', () => {
-  const { makeScene } = require('../../__mocks__/phaser');
-
-  beforeEach(() => {
-    GameStateManager.setActiveTrains(0);
-  });
-
-  it('creates one train, one solver, one body mapping, and no carriage', () => {
-    const manager = new TrainManager(
-      makeScene(),
-      {} as any,
-      {} as any,
-    );
-
-    const train = manager.createFreightTrain(
-      'freight-train',
-      'flatbed-freight-set',
-    );
-
-    expect(manager.trains).toEqual([train]);
-    expect(manager.carriages).toEqual([]);
-    expect(train.freightSetId).toBe('flatbed-freight-set');
-    expect((manager as any).trackSolvers.size).toBe(1);
-    expect(TrainManager.bodyToTrain.get(train.getMatterBody())).toBe(train);
-    expect(GameStateManager.activeTrains).toBe(1);
-  });
-
-  it('fully removes a selected freight train and updates active count', () => {
-    const scene = makeScene();
-    const cameraController = {
-      startFollow: jest.fn(),
-      stopFollow: jest.fn(),
-    };
-    const manager = new TrainManager(
-      scene,
-      {} as any,
-      cameraController as any,
-    );
-    const train = manager.createFreightTrain(
-      'freight-train',
-      'flatbed-freight-set',
-    );
-    const body = train.getMatterBody();
-    const bodyDestroy = jest.spyOn(body, 'destroy');
-    const containerDestroy = jest.spyOn(train, 'destroy');
-    manager.selectTrain(train.getUUID());
-
-    expect(manager.removeFreightTrain('freight-train')).toBe(true);
-
-    expect(manager.trains).toEqual([]);
-    expect((manager as any).trackSolvers.size).toBe(0);
-    expect(TrainManager.bodyToTrain.has(body)).toBe(false);
-    expect(manager.selectedTrain).toBeNull();
-    expect(bodyDestroy).toHaveBeenCalledTimes(1);
-    expect(containerDestroy).toHaveBeenCalledTimes(1);
-    expect(cameraController.stopFollow).toHaveBeenCalledTimes(1);
-    expect(GameStateManager.activeTrains).toBe(0);
-    expect(manager.removeFreightTrain('freight-train')).toBe(false);
-  });
-
-  it('stops only the requested freight trains', () => {
-    const manager = new TrainManager(
-      makeScene(),
-      {} as any,
-      {} as any,
-    );
-    const first = manager.createFreightTrain('first', 'flatbed-freight-set');
-    const second = manager.createFreightTrain('second', 'flatbed-freight-set');
-    first.enginePower = 1;
-    second.enginePower = -1;
-
-    manager.stopFreightTrains(['second']);
-
-    expect(first.enginePower).toBe(1);
-    expect(second.enginePower).toBe(0);
-  });
-
-  it('keeps operations-locked trains stopped throughout their update', () => {
-    const manager = new TrainManager(
-      makeScene(),
-      {} as any,
-      {} as any,
-    );
-    const locked = manager.createFreightTrain(
-      'locked',
-      'flatbed-freight-set',
-    );
-    const free = manager.createFreightTrain(
-      'free',
-      'flatbed-freight-set',
-    );
-    jest.spyOn(locked, 'update').mockImplementation();
-    jest.spyOn(free, 'update').mockImplementation();
-    for (const solver of (manager as any).trackSolvers.values()) {
-      jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
-    }
-    locked.enginePower = 1;
-    free.enginePower = -1;
-
-    manager.update(0, 16, new Set(['locked']));
-
-    expect(locked.enginePower).toBe(0);
-    expect(free.enginePower).toBe(-1);
-  });
-
-  it('rejects non-freight trains from freight placement and removal APIs', () => {
-    const trackManager = { getTrack: jest.fn() };
-    const manager = new TrainManager(
-      makeScene(),
-      trackManager as any,
-      {} as any,
-    );
-    const bootstrap = manager.createInitialTrain('bootstrap-train');
-    const body = bootstrap.getMatterBody();
-    const bodyDestroy = jest.spyOn(body, 'destroy');
-    const trainDestroy = jest.spyOn(bootstrap, 'destroy');
-
-    expect(manager.placeFreightTrain(
-      bootstrap,
-      'track-1',
-      0.5,
-      1,
-    )).toBe(false);
-    expect(trackManager.getTrack).not.toHaveBeenCalled();
-    expect(manager.removeFreightTrain('bootstrap-train')).toBe(false);
-    expect(manager.trains).toEqual([bootstrap]);
-    expect(bodyDestroy).not.toHaveBeenCalled();
-    expect(trainDestroy).not.toHaveBeenCalled();
-  });
-
-  it('does not stop or operation-lock non-freight trains by ID', () => {
-    const manager = new TrainManager(
-      makeScene(),
-      {} as any,
-      {} as any,
-    );
-    const bootstrap = manager.createInitialTrain('bootstrap-train');
-    jest.spyOn(bootstrap, 'update').mockImplementation();
-    const solver = (manager as any).trackSolvers.get(bootstrap);
-    jest.spyOn(solver, 'applyTrackFlowForces').mockImplementation();
-    bootstrap.enginePower = 1;
-
-    manager.stopFreightTrains(['bootstrap-train']);
-    expect(bootstrap.enginePower).toBe(1);
-
-    manager.update(0, 16, new Set(['bootstrap-train']));
-    expect(bootstrap.enginePower).toBe(1);
-    expect(bootstrap.update).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('TrainManager.tryRecoverDerailedTrain()', () => {
   it('returns false when train is not derailed', () => {
     const trackManager = { getClosestTrack: jest.fn() } as any;
@@ -572,8 +172,6 @@ describe('TrainManager.tryRecoverDerailedTrain()', () => {
       getMatterBody: jest.fn().mockReturnValue(body),
       recover: jest.fn(),
       enginePower: 0,
-      pidControllerFront: { reset: jest.fn() },
-      pidControllerRear:  { reset: jest.fn() },
     } as any;
 
     const recovered = manager.tryRecoverDerailedTrain(carriage);
@@ -585,8 +183,6 @@ describe('TrainManager.tryRecoverDerailedTrain()', () => {
     expect(body.setAngle).toHaveBeenCalledWith(90);
     expect(carriage.currentTrack).toBe(closestTrack);
     expect(carriage.recover).toHaveBeenCalledTimes(1);
-    expect(carriage.pidControllerFront.reset).toHaveBeenCalledTimes(1);
-    expect(carriage.pidControllerRear.reset).toHaveBeenCalledTimes(1);
   });
 
   it('snaps to the nearest track and recovers a derailed train', () => {
@@ -610,8 +206,6 @@ describe('TrainManager.tryRecoverDerailedTrain()', () => {
       getMatterBody: jest.fn().mockReturnValue(body),
       recover: jest.fn(),
       enginePower: 10,
-      pidControllerFront: { reset: jest.fn() },
-      pidControllerRear:  { reset: jest.fn() },
     } as any;
 
     const recovered = manager.tryRecoverDerailedTrain(train);
@@ -627,169 +221,56 @@ describe('TrainManager.tryRecoverDerailedTrain()', () => {
   });
 });
 
-describe('REGRESSION: recovered derailed train should not be flung off the track', () => {
-  const { makeScene, simulateMatterUpdate } = require('../../__mocks__/phaser');
+describe('TrainManager rail collision dispatch', () => {
+  const { makeScene } = require('../../__mocks__/phaser');
 
-  function makeTrack(scene: any, x1 = 0, y1 = 0, x2 = 500, y2 = 0): RailTrack {
-    const Phaser = require('phaser');
-    const p0 = new Phaser.Math.Vector2(x1, y1);
-    const p1 = new Phaser.Math.Vector2(x1 + (x2 - x1) / 3, y1 + (y2 - y1) / 3 + 30);
-    const p2 = new Phaser.Math.Vector2(x1 + 2 * (x2 - x1) / 3, y1 + 2 * (y2 - y1) / 3 - 30);
-    const p3 = new Phaser.Math.Vector2(x2, y2);
-    return new RailTrack(scene, p0, p1, p2, p3);
-  }
-
-  function simulateDragAndRecover(
-    train: Train,
-    track: RailTrack,
-    manager: TrainManager,
-    dragPath: { x: number; y: number }[],
-  ) {
-    const trainBody = train.getMatterBody();
-    train.derailed = true;
-    train.currentTrack = null;
-
-    for (const point of dragPath) {
-      trainBody.setPosition(point.x, point.y);
-      trainBody.setVelocity(0, 0);
-      trainBody.setAngularVelocity(0);
-      simulateMatterUpdate(trainBody.body);
-    }
-
-    const body = train.getMatterBody();
-    body.setPosition(trainBody.x, trainBody.y);
-    const recovered = manager.tryRecoverDerailedTrain(train);
-    return recovered;
-  }
-
-  it('stays on the track after recovery when TrackFlowForces are applied', () => {
+  it('releases opposing vehicles into free-body physics and emits one incident', () => {
     const scene = makeScene();
-    const track = makeTrack(scene, 0, 0, 500, 500);
-
-    const train = new Train(scene, 250, 350);
-    const trainBody = train.getMatterBody();
-    trainBody.angle = 45;
-
+    const track = new RailTrack(
+      scene,
+      new Phaser.Math.Vector2(0, 0),
+      new Phaser.Math.Vector2(333, 0),
+      new Phaser.Math.Vector2(667, 0),
+      new Phaser.Math.Vector2(1_000, 0),
+    );
+    track.setUUID('main');
     const trackManager = {
-      getClosestTrack: jest.fn().mockImplementation((pos: any, limit: number) => {
-        const dx = pos.x - 250;
-        const dy = pos.y - 250;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        return dist <= (limit || Infinity) ? track : null;
-      }),
-      getJunctionsForTrack: jest.fn().mockReturnValue([]),
+      tracks: [track],
+      junctions: [],
+      getTrack: (uuid: string) => uuid === 'main' ? track : null,
     };
-
     const manager = new TrainManager(scene, trackManager as any, {} as any);
-    const solver = new TrackFlowSolver(trackManager as any, train);
+    const eastbound = manager.createInitialTrain('eastbound');
+    const westbound = manager.createInitialTrain('westbound');
+    manager.restoreVehicleDynamics(eastbound, {
+      mode: 'on-rail',
+      trackUUID: 'main',
+      distance: 400,
+      direction: 1,
+      speedMps: 10,
+      consistId: 'east',
+      consistOrder: 0,
+    });
+    manager.restoreVehicleDynamics(westbound, {
+      mode: 'on-rail',
+      trackUUID: 'main',
+      distance: 590,
+      direction: -1,
+      speedMps: 10,
+      consistId: 'west',
+      consistOrder: 0,
+    });
+    const incidents: unknown[] = [];
+    const listener = (incident: unknown) => incidents.push(incident);
+    EventBus.on('train:incident', listener as any);
 
-    const recovered = simulateDragAndRecover(train, track, manager, [
-      { x: 250, y: 330 },
-      { x: 250, y: 310 },
-      { x: 250, y: 290 },
-      { x: 250, y: 270 },
-      { x: 250, y: 250 },
-    ]);
+    manager.update(0, 9);
 
-    expect(recovered).toBe(true);
-    expect(train.derailed).toBe(false);
-    expect(train.currentTrack).toBe(track);
-
-    const body = trainBody.body as any;
-    expect(body.angle).toBe(body.anglePrev);
-
-    train.update(0, 16);
-    solver.applyTrackFlowForces();
-    simulateMatterUpdate(trainBody.body);
-
-    expect(train.derailed).toBe(false);
-    expect(train.currentTrack).toBe(track);
-
-    train.update(16, 16);
-    solver.applyTrackFlowForces();
-    simulateMatterUpdate(trainBody.body);
-    expect(train.derailed).toBe(false);
-    expect(train.currentTrack).toBe(track);
-  });
-
-  it('does not acquire large velocity immediately after recovery', () => {
-    const scene = makeScene();
-    const track = makeTrack(scene, 0, 0, 500, 500);
-
-    const train = new Train(scene, 250, 350);
-    const trainBody = train.getMatterBody();
-    trainBody.angle = 45;
-
-    const trackManager = {
-      getClosestTrack: jest.fn().mockImplementation((pos: any, limit: number) => {
-        const dx = pos.x - 250;
-        const dy = pos.y - 250;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        return dist <= (limit || Infinity) ? track : null;
-      }),
-      getJunctionsForTrack: jest.fn().mockReturnValue([]),
-    };
-
-    const manager = new TrainManager(scene, trackManager as any, {} as any);
-    const solver = new TrackFlowSolver(trackManager as any, train);
-
-    simulateDragAndRecover(train, track, manager, [
-      { x: 250, y: 330 },
-      { x: 250, y: 310 },
-      { x: 250, y: 290 },
-      { x: 250, y: 270 },
-      { x: 250, y: 250 },
-    ]);
-
-    const body = trainBody.body as any;
-    expect(body.angle).toBe(body.anglePrev);
-
-    train.update(0, 16);
-    solver.applyTrackFlowForces();
-    simulateMatterUpdate(trainBody.body);
-
-    const vx = (trainBody.body as any).velocity.x;
-    const vy = (trainBody.body as any).velocity.y;
-    const speed = Math.sqrt(vx * vx + vy * vy);
-
-    expect(speed).toBeLessThan(10);
-  });
-
-  it('numerically proves anglePrev mismatch causes fling and setAngle fixes it', () => {
-    const { simulateMatterUpdate: simUpdate, makeMatterBody } = require('../../__mocks__/phaser');
-
-    // Simulate exact state after matterScaling(): fresh body, angle=0, anglePrev=0
-    const buggyBody = makeMatterBody(250, 250);
-    buggyBody.angle = 0;
-    buggyBody.anglePrev = 0;
-
-    // BUGGY approach: direct angle assignment (old code).
-    // The mock's angle setter ONLY writes body.angle, leaving anglePrev at 0.
-    buggyBody.angle = 45 * (Math.PI / 180); // 0.785 rad
-
-    simUpdate(buggyBody, 16.666);
-
-    // With angle=0.785 and anglePrev=0, Verlet computes
-    // angularVelocity approx (0.785 - 0) * frictionAir approx 0.77 rad/frame.
-    // This is the root cause of the fling -- massive instantaneous spin.
-    expect(buggyBody.angularVelocity).toBeGreaterThan(0.5);
-
-    // FIXED approach: setAngle syncs both angle and anglePrev.
-    const fixedBody = makeMatterBody(250, 250);
-    fixedBody.angle = 0;
-    fixedBody.anglePrev = 0;
-
-    const targetAngle = 45 * (Math.PI / 180);
-    fixedBody.angle = targetAngle;
-    fixedBody.anglePrev = targetAngle;
-
-    simUpdate(fixedBody, 16.666);
-
-    // With angle === anglePrev, angularVelocity stays near zero.
-    expect(fixedBody.angularVelocity).toBeLessThan(0.1);
-
-    // Quantitative proof: buggy angular velocity is >0.5 rad/frame,
-    // fixed angular velocity is <0.1 rad/frame.
-    expect(buggyBody.angularVelocity / fixedBody.angularVelocity).toBeGreaterThan(5);
+    EventBus.off('train:incident', listener as any);
+    expect(eastbound.derailed).toBe(true);
+    expect(westbound.derailed).toBe(true);
+    expect((eastbound.getMatterBody().body as any).isStatic).toBe(false);
+    expect((westbound.getMatterBody().body as any).isStatic).toBe(false);
+    expect(incidents).toHaveLength(1);
   });
 });

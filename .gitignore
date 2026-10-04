@@ -1,10 +1,13 @@
 /dist/
+/releases/
 /node_modules/
 /.worktrees/
 /.idea/
 /coverage/
 
 /test-results/
+/test-results-*/
+/full-game-*.log
 /playwright-report/
 /test_output*.txt
 /tmp_test*.txt

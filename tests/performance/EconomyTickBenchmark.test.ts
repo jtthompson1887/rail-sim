@@ -828,7 +828,9 @@ describe('EconomySystem multi-train tick budget', () => {
     expect(first.world.operationsRevision).toBe(FINAL_AUTHORITY_TICKS);
     expect(validateWorldData(first.world).compatible).toBe(true);
     expect(first.hash).toBe(second.hash);
-    expect(first.hash).toBe('6cd9a373');
+    // Schema 11 adds authoritative persisted dynamics to every benchmark train.
+    // The full economic/conservation assertions above remain unchanged.
+    expect(first.hash).toBe('494bd89a');
     expect(Number.isFinite(p95)).toBe(true);
     expect(p95).toBeGreaterThanOrEqual(0);
     if (!collectingCoverage) {

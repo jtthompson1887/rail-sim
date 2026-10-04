@@ -71,6 +71,7 @@ export class Station extends Phaser.GameObjects.Container {
   }
 
   getWaiting(): number { return this.waitingPassengers; }
+  setManagedPresentation(managed: boolean): void { this.passengerBadge.setVisible(!managed); }
   getTrack(): RailTrack { return this.track; }
   getTrackT(): number { return this.trackT; }
 }

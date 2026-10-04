@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 import { expect, test, type Page } from '@playwright/test';
 import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
@@ -107,16 +108,7 @@ async function createFixedSeedWorld(page: Page): Promise<void> {
     { timeout: 25_000 },
   );
   await page.keyboard.press('Enter');
-  await page.locator('canvas').click({
-    position: { x: VIEWPORT.width / 2, y: VIEWPORT.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(WORLD_SEED));
-  await page.locator('canvas').click({
-    position: { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 - 219 },
-  });
-  await page.locator('canvas').click({
-    position: { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 + 301 },
-  });
+  await createLegacyWorld(page, WORLD_SEED);
   await waitForWorld(page);
 }
 

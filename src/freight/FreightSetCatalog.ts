@@ -86,9 +86,15 @@ export const FREIGHT_SETS: readonly FreightSetDefinition[] =
     runningCostPerActiveTick: 22,
   }]);
 
-const freightSetById = new Map(
-  FREIGHT_SETS.map((set) => [set.id, set]),
-);
+export const LAUNCH_FREIGHT_SETS = Object.freeze([
+  ...FREIGHT_SETS, ...freezeFreightSets([
+  { id: 'grain-hopper-set', displayName: 'Grain Hopper Set', cargoClass: 'bulk', compatibleProductIds: ['grain'], payloadMassKg: 70_000, payloadVolumeLitres: 100_000, purchasePrice: 100_000, runningCostPerActiveTick: 18 },
+  { id: 'food-van-set', displayName: 'Food and Flour Van Set', cargoClass: 'covered', compatibleProductIds: ['flour', 'food'], payloadMassKg: 48_000, payloadVolumeLitres: 80_000, purchasePrice: 95_000, runningCostPerActiveTick: 16 },
+  { id: 'scrap-hopper-set', displayName: 'Scrap Hopper Set', cargoClass: 'bulk', compatibleProductIds: ['scrap'], payloadMassKg: 90_000, payloadVolumeLitres: 135_000, purchasePrice: 100_000, runningCostPerActiveTick: 19 },
+  ]),
+]);
+
+const freightSetById = new Map(LAUNCH_FREIGHT_SETS.map((set) => [set.id, set]));
 
 export const getFreightSet = (
   id: string,

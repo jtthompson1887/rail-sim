@@ -63,6 +63,12 @@ export default class Junction extends Phaser.GameObjects.Container implements Tr
     return this._branchState === 'left' ? this.rightTrack : this.leftTrack;
   }
 
+  getRoutedContinuation(fromTrack: RailTrack): RailTrack | null {
+    if (fromTrack === this.mainTrack) return this.getActiveBranchTrack();
+    if (fromTrack === this.leftTrack || fromTrack === this.rightTrack) return this.mainTrack;
+    return null;
+  }
+
   toggle(): void {
     this._branchState = this._branchState === 'left' ? 'right' : 'left';
     this.switched = true;

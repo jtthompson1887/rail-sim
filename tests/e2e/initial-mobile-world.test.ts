@@ -1,3 +1,4 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
 import { expect, test, type Page } from '@playwright/test';
 
 const MOBILE_VIEWPORT = { width: 375, height: 667 };
@@ -61,25 +62,7 @@ test('creates and initially frames a mobile world within continuous camera bound
   );
 
   await page.keyboard.press('Enter');
-  await page.locator('canvas').click({
-    position: {
-      x: MOBILE_VIEWPORT.width / 2,
-      y: MOBILE_VIEWPORT.height - 90,
-    },
-  });
-  page.once('dialog', (dialog) => dialog.accept('real-terrain-alpha'));
-  await page.locator('canvas').click({
-    position: {
-      x: MOBILE_VIEWPORT.width / 2,
-      y: 146,
-    },
-  });
-  await page.locator('canvas').click({
-    position: {
-      x: MOBILE_VIEWPORT.width / 2,
-      y: 603,
-    },
-  });
+  await createLegacyWorld(page, 'real-terrain-alpha');
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__railSimScene === 'WorldScene'
       && typeof window.__railSimConstructionSnapshot === 'function',

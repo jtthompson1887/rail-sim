@@ -1,5 +1,6 @@
 type EventCallback<T = unknown> = (data: T) => void;
 import type { ConstructionPreviewEvent } from '../ui/ConstructionPreviewOverlay';
+import type { TrackDraftIntent } from '../systems/TrackDraft';
 import type { FacilityInspectionDto } from '../economy/FacilityPresentation';
 import type {
   DeleteReviewRequest,
@@ -17,12 +18,17 @@ import type {
 } from '../freight/FreightPresentation';
 import type { FreightObjectiveDto } from '../freight/FreightObjective';
 import type { FreightDeliveryEvent } from '../freight/CargoSystem';
+import type { TrainIncidentRecord } from '../physics/CrashTransition';
 
 interface EventMap {
+  'app:prepare-close': Record<string, never>;
+  'railway:enabled': Record<string, never>;
   'train:selected': { trainId: string };
   'train:deselected': Record<string, never>;
   'train:derailed': { trainId: string };
   'carriage:derailed': { carriageId: string };
+  'train:incident': TrainIncidentRecord;
+  'coupler:broken': { consistId: string; couplerId: string; forceN: number };
   'vehicle:type-changed': { type: 'locomotive' | 'passenger-carriage' };
   'junction:toggled': { junctionId: string; state: 'left' | 'right' };
   'passenger:boarded': { stationId: string; count: number };
@@ -79,6 +85,7 @@ interface EventMap {
   'ui:validation-hint': { state: 'ok' | 'warning' | 'error'; message: string };
   'construction:preview': ConstructionPreviewEvent;
   'construction:intent': { action: 'confirm' | 'backstep' | 'cancel' };
+  'construction:shape-intent': TrackDraftIntent;
   'ui:company-state': {
     cash: number;
     saveState: 'saved' | 'unsaved' | 'saving';

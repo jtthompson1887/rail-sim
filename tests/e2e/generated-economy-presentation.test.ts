@@ -1,5 +1,6 @@
+import { createLegacyWorld } from './helpers/CreateLegacyWorld';
+import { accessibleWorldPoint } from './helpers/AccessibleWorldPoint';
 import { expect, test, type Page } from '@playwright/test';
-import { worldToCameraPoint } from './helpers/CameraCoordinates';
 
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 375, height: 667 };
@@ -88,22 +89,7 @@ async function createFixedSeedWorld(
     { timeout: 25_000 },
   );
   await page.keyboard.press('Enter');
-  await page.locator('canvas').click({
-    position: { x: viewport.width / 2, y: viewport.height - 90 },
-  });
-  page.once('dialog', (dialog) => dialog.accept(seed));
-  await page.locator('canvas').click({
-    position: {
-      x: viewport.width / 2,
-      y: viewport.width <= 720 ? 146 : viewport.height / 2 - 219,
-    },
-  });
-  await page.locator('canvas').click({
-    position: {
-      x: viewport.width / 2,
-      y: viewport.width <= 720 ? 603 : viewport.height / 2 + 301,
-    },
-  });
+  await createLegacyWorld(page, seed);
   await waitForWorld(page);
 }
 
@@ -126,82 +112,13 @@ async function openOnlySavedWorld(
   await waitForWorld(page);
 }
 
-async function toScreen(
-  page: Page,
-  point: Point,
-  state: PresentationSnapshot,
-): Promise<Point> {
-  const canvas = await page.locator('canvas').boundingBox();
-  if (!canvas) throw new Error('Canvas is unavailable');
-  const internal = worldToCameraPoint(point, state.camera);
-  return {
-    x: canvas.x + internal.x * canvas.width / state.camera.width,
-    y: canvas.y + internal.y * canvas.height / state.camera.height,
-  };
-}
-
 async function inspectSawmill(page: Page): Promise<void> {
-  let state = await snapshot(page);
+  const state = await snapshot(page);
   const sawmill = state.world.economy.facilities.find(
     ({ id }) => id === 'sawmill',
   );
   if (!sawmill) throw new Error('Sawmill was not generated');
-  let screen = await toScreen(page, sawmill, state);
-  const isCanvasHitTestable = async (point: Point): Promise<boolean> =>
-    page.evaluate(({ x, y }) => (
-      document.elementsFromPoint(x, y)[0] instanceof HTMLCanvasElement
-    ), point);
-  if (!(await isCanvasHitTestable(screen))) {
-    const destination = await page.evaluate(({ x, y }) => {
-      const isCanvas = (candidateY: number): boolean =>
-        document.elementsFromPoint(x, candidateY)[0]
-          instanceof HTMLCanvasElement;
-      const candidates: number[] = [];
-      for (let candidateY = 24; candidateY < window.innerHeight - 24; candidateY += 8) {
-        if (
-          isCanvas(candidateY)
-          && isCanvas(candidateY - 16)
-          && isCanvas(candidateY + 16)
-        ) {
-          candidates.push(candidateY);
-        }
-      }
-      if (candidates.length === 0) {
-        throw new Error('No unobstructed canvas destination is available');
-      }
-      return candidates.reduce((closest, candidate) => (
-        Math.abs(candidate - y) < Math.abs(closest - y)
-          ? candidate
-          : closest
-      ));
-    }, screen);
-    const deltaY = destination - screen.y;
-    const gesture = await page.evaluate((movementY) => {
-      const isCanvas = (x: number, y: number): boolean =>
-        document.elementsFromPoint(x, y)[0] instanceof HTMLCanvasElement;
-      for (let x = 48; x < window.innerWidth - 24; x += 8) {
-        for (let startY = 24; startY < window.innerHeight - 24; startY += 8) {
-          const endY = startY + movementY;
-          if (
-            endY >= 24
-            && endY < window.innerHeight - 24
-            && isCanvas(x, startY)
-            && isCanvas(x, endY)
-          ) {
-            return { start: { x, y: startY }, end: { x, y: endY } };
-          }
-        }
-      }
-      throw new Error('No unobstructed canvas pan gesture is available');
-    }, deltaY);
-    await page.mouse.move(gesture.start.x, gesture.start.y);
-    await page.mouse.down({ button: 'left' });
-    await page.mouse.move(gesture.end.x, gesture.end.y, { steps: 8 });
-    await page.mouse.up({ button: 'left' });
-    state = await snapshot(page);
-    screen = await toScreen(page, sawmill, state);
-    expect(await isCanvasHitTestable(screen)).toBe(true);
-  }
+  const screen = await accessibleWorldPoint(page, sawmill);
   await page.mouse.click(screen.x, screen.y);
   const inspector = page.locator('[data-testid="facility-inspector"]');
   await expect(inspector).toBeVisible();
@@ -486,11 +403,7 @@ for (const { seed, viewport } of playtestCases) {
       await page.waitForTimeout(1_100);
       expect((await snapshot(page)).world.economy.tick)
         .toBe(saturated.world.economy.tick);
-      const saturatedForestScreen = await toScreen(
-        page,
-        saturatedForest,
-        saturated,
-      );
+      const saturatedForestScreen = await accessibleWorldPoint(page, saturatedForest);
       await page.mouse.click(
         saturatedForestScreen.x,
         saturatedForestScreen.y,

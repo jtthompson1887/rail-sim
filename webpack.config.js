@@ -4,9 +4,9 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 
 module.exports = (env = {}) => ({
-    entry: './src/main.ts',
+    entry: { main: './src/main.ts', 'rehearsal-worker': './src/simulation/rehearsal.worker.ts' },
     output: {
-        filename: 'main.js',
+        filename: '[name].js',
         path: path.resolve(__dirname, 'dist/client'),
         publicPath: 'auto',
         chunkFilename: '[name].[contenthash].chunk.js',
@@ -52,6 +52,7 @@ module.exports = (env = {}) => ({
         }),
         new HtmlWebpackPlugin({
             template: './src/index.html',
+            chunks: ['main'],
         }),
         new CopyPlugin({
             patterns: [

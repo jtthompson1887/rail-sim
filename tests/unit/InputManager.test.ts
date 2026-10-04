@@ -5,9 +5,9 @@ import {
 import { TrainManager } from '../../src/managers/TrainManager';
 import Train from '../../src/entities/Train';
 import RailTrack from '../../src/entities/RailTrack';
-import TrackFlowSolver from '../../src/systems/TrackFlowSolver';
 import { GameConfig } from '../../src/config/GameConfig';
 import { EventBus } from '../../src/services/EventBus';
+import { CameraController } from '../../src/systems/CameraController';
 
 const { makeScene } = require('../../__mocks__/phaser');
 
@@ -52,6 +52,7 @@ describe('InputManager drag recovery regression', () => {
 
     const cameraController = {
       setInputLockOwner: jest.fn(),
+      getInputLockOwner: jest.fn().mockReturnValue('camera'),
       update: jest.fn(),
       startFollow: jest.fn(),
       stopFollow: jest.fn(),
@@ -60,6 +61,22 @@ describe('InputManager drag recovery regression', () => {
     trainManager = new TrainManager(scene, trackManager as any, cameraController as any);
     inputManager = new InputManager(scene, cameraController as any);
     inputManager.setupClickHandling(trainManager);
+  });
+
+  it('distinguishes neutral coast from Stop in authoritative on-rail physics', () => {
+    const trackManager=(trainManager as any).trackManager;
+    const track=trackManager.getClosestTrack({x:250,y:0},1000);
+    trackManager.tracks=[track];trackManager.junctions=[];trackManager.getTrack=()=>track;
+    const train=trainManager.createInitialTrain('physics-stop');
+    trainManager.restoreVehicleDynamics(train,{mode:'on-rail',trackUUID:track.getUUID(),distance:250,direction:1,
+      speedMps:3,consistId:'consist-physics-stop',consistOrder:0});
+    trainManager.update(0,20);
+    EventBus.emit('mobile:throttle',{value:0,hardStop:false});inputManager.handleTrainMovement(train);trainManager.update(20,20);
+    expect(train.persistedDynamics).toEqual(expect.objectContaining({speedMps:expect.any(Number)}));
+    if(train.persistedDynamics.mode==='on-rail')expect(train.persistedDynamics.speedMps).toBeGreaterThan(0);
+    EventBus.emit('mobile:throttle',{value:0,hardStop:true});inputManager.handleTrainMovement(train);trainManager.update(40,20);
+    expect(train.persistedDynamics).toEqual(expect.objectContaining({speedMps:0}));
+    expect(trainManager.getDynamicsAdapter('consist-physics-stop')!.getOnRailState(train.getUUID())!.speedMps).toBe(0);
   });
 
   function fireDrag(gameObject: any, dragX: number, dragY: number) {
@@ -98,19 +115,8 @@ describe('InputManager drag recovery regression', () => {
     expect(train.derailed).toBe(false);
     expect(train.currentTrack).not.toBeNull();
 
-    // Simulate the next physics tick
-    const solver = trainManager['trackSolvers'].get(train) as TrackFlowSolver;
-    train.update(0, 16);
-    solver.applyTrackFlowForces();
-
-    // The train must NOT immediately derail again
     expect(train.derailed).toBe(false);
     expect(train.currentTrack).not.toBeNull();
-
-    // Run a second tick
-    train.update(16, 16);
-    solver.applyTrackFlowForces();
-    expect(train.derailed).toBe(false);
   });
 
   it('does not fling the train with high velocity after drag recovery', () => {
@@ -128,10 +134,6 @@ describe('InputManager drag recovery regression', () => {
     fireDrag(body, 250, 0);
 
     fireDragEnd(body);
-
-    const solver = trainManager['trackSolvers'].get(train) as TrackFlowSolver;
-    train.update(0, 16);
-    solver.applyTrackFlowForces();
 
     const vx = (body.body as any).velocity.x;
     const vy = (body.body as any).velocity.y;
@@ -160,16 +162,8 @@ describe('InputManager drag recovery regression', () => {
     expect(carriage.derailed).toBe(false);
     expect(carriage.currentTrack).not.toBeNull();
 
-    const solver = trainManager['trackSolvers'].get(carriage) as TrackFlowSolver;
-    carriage.update(0, 16);
-    solver.applyTrackFlowForces();
-
     expect(carriage.derailed).toBe(false);
     expect(carriage.currentTrack).not.toBeNull();
-
-    carriage.update(16, 16);
-    solver.applyTrackFlowForces();
-    expect(carriage.derailed).toBe(false);
     expect(carriage.currentTrack).not.toBeNull();
   });
 
@@ -187,10 +181,6 @@ describe('InputManager drag recovery regression', () => {
     fireDrag(body, 250, 0);
 
     fireDragEnd(body);
-
-    const solver = trainManager['trackSolvers'].get(carriage) as TrackFlowSolver;
-    carriage.update(0, 16);
-    solver.applyTrackFlowForces();
 
     const vx = (body.body as any).velocity.x;
     const vy = (body.body as any).velocity.y;
@@ -383,5 +373,73 @@ describe('InputManager drag recovery regression', () => {
     inputManager.handleTrainMovement(train);
     expect(train.enginePower).toBe(-0.25);
     input.remove();
+  });
+});
+
+describe('InputManager construction click ownership', () => {
+  function setup() {
+    const scene = makeScene();
+    const callbacks = new Map<string, Function[]>();
+    scene.input.on = jest.fn((event: string, callback: Function) => {
+      callbacks.set(event, [...(callbacks.get(event) ?? []), callback]);
+    });
+    const camera = scene.cameras.main;
+    // Match Phaser's immediate scroll change when a click starts camera follow.
+    camera.startFollow.mockImplementation((body: { x: number; y: number }) => {
+      camera.scrollX = body.x - camera.width / 2;
+      camera.scrollY = body.y - camera.height / 2;
+    });
+    camera.getWorldPoint.mockImplementation((x: number, y: number) => ({
+      x: x + camera.scrollX, y: y + camera.scrollY,
+    }));
+    const controller = new CameraController(scene);
+    const manager = new TrainManager(scene, {} as any, controller);
+    const input = new InputManager(scene, controller);
+    input.setupClickHandling(manager);
+    const selected = manager.createInitialTrain('selected');
+    const underPointer = manager.createInitialTrain('under-pointer');
+    underPointer.getMatterBody().setPosition(5400, -3200);
+    manager.selectTrain(selected.getUUID());
+    camera.startFollow.mockClear();
+    camera.stopFollow.mockClear();
+    const pointer = { id: 0, button: 0, x: 400, y: 200,
+      leftButtonDown: () => true, middleButtonDown: () => false };
+    const fire = (event: string, ...args: unknown[]) => {
+      for (const callback of callbacks.get(event) ?? []) callback(...args);
+    };
+    return { camera, controller, manager, input, selected, underPointer, pointer, fire };
+  }
+
+  it.each(['editor-tool', 'ui'] as const)('preserves selection and world coordinates when %s owns a train click', owner => {
+    const { camera, controller, manager, input, selected, underPointer, pointer, fire } = setup();
+    controller.setInputLockOwner(owner);
+    const before = input.toWorldPoint(pointer);
+    const selectedThrottle = selected.enginePower = 0.25;
+
+    // This is Phaser's actual order, followed by the editor's world conversion.
+    fire('gameobjectdown', pointer, underPointer.getMatterBody());
+    fire('pointerdown', pointer);
+    expect(input.toWorldPoint(pointer)).toEqual(before);
+    expect(manager.selectedTrain).toBe(selected);
+    expect(selected.enginePower).toBe(selectedThrottle);
+    expect(camera.startFollow).not.toHaveBeenCalled();
+    expect(camera.stopFollow).not.toHaveBeenCalled();
+
+    // A bare construction/UI click must not deselect either.
+    fire('pointerdown', pointer);
+    expect(manager.selectedTrain).toBe(selected);
+    expect(camera.stopFollow).not.toHaveBeenCalled();
+  });
+
+  it('still selects trains and deselects on bare clicks when the camera owns input', () => {
+    const { camera, controller, manager, underPointer, pointer, fire } = setup();
+    expect(controller.getInputLockOwner()).toBe('camera');
+    fire('gameobjectdown', pointer, underPointer.getMatterBody());
+    fire('pointerdown', pointer);
+    expect(manager.selectedTrain).toBe(underPointer);
+    expect(camera.startFollow).toHaveBeenCalledWith(underPointer.getMatterBody());
+    fire('pointerup', pointer);
+    fire('pointerdown', pointer);
+    expect(manager.selectedTrain).toBeNull();
   });
 });

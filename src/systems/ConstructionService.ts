@@ -24,6 +24,7 @@ import {
   resolveTrackEndpoint,
   type ResolvedTrackEndpoint,
 } from './SnapSystem';
+import { constrainDraftHandle, draftCrossesItself, type TrackCurveControls } from './TrackDraft';
 
 export type TrackEndpoint = 'start' | 'end';
 
@@ -168,6 +169,7 @@ export class ConstructionService {
     start: ConstructionInputAnchor,
     end: ConstructionInputAnchor,
     newTrackUUID: string = crypto.randomUUID(),
+    controls?: TrackCurveControls,
   ): ConstructionPreview | null {
     const world = WorldManager.world;
     if (!world || !WorldManager.canAdvanceRevision()
@@ -175,7 +177,10 @@ export class ConstructionService {
       || !newTrackUUID || this.trackManager.getTrack(newTrackUUID)
       || world.tracks.some((track) => track.uuid === newTrackUUID)
       || !this.isSupportedAnchor(start)
-      || !this.isSupportedAnchor(end)) return null;
+      || !this.isSupportedAnchor(end)
+      || (controls && ![controls.p1, controls.p2].every(
+        (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y),
+      ))) return null;
 
     const startSnap = this.resolveInputEndpoint(start);
     const endSnap = this.resolveInputEndpoint(end);
@@ -201,6 +206,10 @@ export class ConstructionService {
         ? { ...endSnap.outward }
         : undefined,
     });
+    if (controls) {
+      geometry.p1 = constrainDraftHandle(geometry.p0, controls.p1, startSnap?.outward);
+      geometry.p2 = constrainDraftHandle(geometry.p3, controls.p2, endSnap?.outward);
+    }
 
     const predictedConnections: PredictedEndpointConnectionDef[] = [];
     if (startSnap) {
@@ -225,6 +234,14 @@ export class ConstructionService {
     const analyzed = this.safeAnalyzeDetailed(geometry);
     if (!analyzed) return null;
     let proposal = clonePlainData(analyzed.proposal);
+    if (proposal.valid && draftCrossesItself(geometry)) {
+      proposal = {
+        ...proposal,
+        valid: false,
+        reasonCode: 'clearance',
+        remedy: 'Curve crosses itself — shorten the approaches or draw separate sections.',
+      };
+    }
     if (
       proposal.valid
       && !this.hasClearance(
@@ -424,6 +441,7 @@ export class ConstructionService {
     curveSamples: ConstructionAnalysisDetail['curveSamples'],
     predictedConnections: readonly PredictedEndpointConnectionDef[],
   ): boolean {
+    if (draftCrossesItself(geometry)) return false;
     const existingTracks: ClearanceTrack[] = [];
     for (const track of [...this.trackManager.getAllTracks()].sort((left, right) => (
       left.getUUID() < right.getUUID()

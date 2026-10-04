@@ -38,8 +38,9 @@ import {
   MAX_OPPORTUNITY_ATTEMPTS,
   MAX_SITE_CANDIDATES_PER_ATTEMPT,
 } from '../config/WorldGeneration';
-import { clonePlainData, equalPlainData } from '../utils/PlainData';
+import { clonePlainData, copyPlainDataInto, equalPlainData } from '../utils/PlainData';
 import { MAX_REGIONAL_PAIR_ANALYSES } from '../config/FreightProgression';
+import { prepareNewRegionalWorld } from '../region/NewRegionalWorld';
 
 export interface WorldConstructionDraft {
   company: CompanyStateDef;
@@ -236,6 +237,7 @@ class WorldManagerClass {
     biome: BiomeType = 'temperate',
     opportunityGenerator?: OpportunityGeneratorPort,
     economyGenerator?: EconomyGeneratorPort,
+    options?: { landscapePreset?: 'lowlands'|'coastal'|'mountains'; gameDifficulty?: 'standard'|'expert'|'sandbox'; regional?: boolean },
   ): GeneratedWorldCreationResult {
     if (this.batchInProgress) {
       return {
@@ -248,12 +250,14 @@ class WorldManagerClass {
       seed,
       biome,
       constructionDifficultyId: 'standard',
+      ...(options?.landscapePreset ? { landscapePreset: options.landscapePreset } : {}),
+      ...(options?.gameDifficulty ? { gameDifficulty: options.gameDifficulty } : {}),
     };
     const validationFailure: GeneratedWorldCreationResult = {
       ok: false,
       error: { code: 'world-validation-failed', seed },
     };
-    const terrain = new TerrainGenerator(seed);
+    const terrain = new TerrainGenerator(seed, options?.landscapePreset);
     const jointlyGenerateDefaults = opportunityGenerator === undefined
       && economyGenerator === undefined;
     let acceptedDefaultGeneration: {
@@ -379,13 +383,18 @@ class WorldManagerClass {
       return validationFailure;
     }
 
-    const detachedWorld = createEmptyWorld(
+    let detachedWorld = createEmptyWorld(
       name,
       seed,
       biome,
       generatedOpportunity,
       generatedEconomy.economy,
     );
+    detachedWorld.generationConfig = generationConfig;
+    if (options?.regional) {
+      try { detachedWorld = prepareNewRegionalWorld(detachedWorld, terrain, options.gameDifficulty); }
+      catch { return validationFailure; }
+    }
     if (!validateWorldData(detachedWorld).compatible) {
       return {
         ok: false,
@@ -440,6 +449,37 @@ class WorldManagerClass {
   }
 
   // ── Track mutations ────────────────────────────────────────────────────────
+
+  /** Install a detached simulation result without replacing the world identity used by commands. */
+  applySimulationSnapshot(expectedRevision: number, snapshot: WorldData): boolean {
+    const world = this._world;
+    if (!world || this.batchInProgress || world.revision !== expectedRevision
+      || snapshot.revision < expectedRevision || snapshot.operationsRevision < world.operationsRevision
+      || snapshot.id !== world.id || snapshot.constructionRevision !== world.constructionRevision
+      || !equalPlainData(snapshot.tracks, world.tracks) || !equalPlainData(snapshot.junctions, world.junctions)
+      || !equalPlainData(snapshot.stations, world.stations) || !validateWorldData(snapshot).compatible) return false;
+    copyPlainDataInto(world, snapshot);
+    return true;
+  }
+
+  /** Validate a complete management/editor transaction before changing the live world. */
+  applyManagementChange(expectedRevision: number, mutate: (draft: WorldData) => boolean,
+    domain: 'operations' | 'construction' = 'operations'): boolean {
+    const world = this._world;
+    if (!world || this.batchInProgress || world.revision !== expectedRevision || !this.canAdvanceRevision()) return false;
+    const candidate = clonePlainData(world);
+    this.batchInProgress = true;
+    try {
+      if (!mutate(candidate)) return false;
+      candidate.revision = world.revision + 1;
+      candidate.operationsRevision = world.operationsRevision + (domain === 'operations' ? 1 : 0);
+      candidate.constructionRevision = world.constructionRevision + (domain === 'construction' ? 1 : 0);
+      if (!validateWorldData(candidate).compatible) return false;
+      copyPlainDataInto(world, candidate);
+      return true;
+    } catch { return false; }
+    finally { this.batchInProgress = false; }
+  }
 
   applyConstructionBatch(
     expectedConstructionRevision: number,

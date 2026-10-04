@@ -62,6 +62,25 @@ const isDeepFrozen = (value: unknown): boolean => {
 };
 
 describe('proposeRunningCosts active attribution', () => {
+  it.each(['__proto__', 'constructor'])('uses own rates and reports blockers for imported ID %s', (trainId) => {
+    const input = { tick: 7, company: createCompanyState(1_000), trains: [makeTrain(trainId)],
+      runtime: [makeRuntime(trainId, { throttle: 1 })] };
+    const defaults = proposeRunningCosts({ ...input, rateByTrainId: {} });
+    expect(defaults.aggregateCost).toBe(20);
+    expect(Object.prototype.hasOwnProperty.call(defaults.blockerByTrainId, trainId)).toBe(true);
+
+    const rates: Record<string, number> = Object.create(null);
+    rates[trainId] = 57;
+    const priced = proposeRunningCosts({ ...input, rateByTrainId: rates });
+    expect(priced.aggregateCost).toBe(57);
+    expect(priced.company.cash).toBe(943);
+    expect(priced.trains[0].operations.lifetimeRunningCost).toBe(57);
+    const blocked = proposeRunningCosts({ ...input, company: createCompanyState(0), rateByTrainId: rates });
+    expect(Object.getPrototypeOf(blocked.blockerByTrainId)).toBeNull();
+    expect(blocked.blockerByTrainId[trainId]).toBe('insufficient-running-cash');
+    expect(blocked.stopTrainIds).toEqual([trainId]);
+  });
+
   it.each([
     {
       name: 'powered while stopped',

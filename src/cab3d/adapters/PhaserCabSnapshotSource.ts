@@ -61,7 +61,11 @@ export class PhaserCabSnapshotSource implements ICabSnapshotSource {
 
     const body = train.getMatterBody();
     const velocity = (body.body as any)?.velocity ?? { x: 0, y: 0 };
-    const speedMps = computeSpeedMps(velocity.x, velocity.y, delta, CabConfig.SPEED_SCALE);
+    const dynamics = train.persistedDynamics;
+    const speedMps = !train.derailed && train.currentTrack !== null && dynamics?.mode === 'on-rail'
+      && Number.isFinite(dynamics.speedMps)
+      ? Math.abs(dynamics.speedMps)
+      : computeSpeedMps(velocity.x, velocity.y, delta, CabConfig.SPEED_SCALE);
     const maxPower = GameConfig.TRAIN.ENGINE_POWER;
     const throttle = maxPower ? Math.max(-1, Math.min(1, train.enginePower / maxPower)) : 0;
 
