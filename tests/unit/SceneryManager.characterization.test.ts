@@ -76,6 +76,16 @@ describe('SceneryManager persistence and streaming contracts', () => {
     manager.destroyAll();
   });
 
+  it('keeps empty authored Riverside chunks clear instead of growing procedural trees over the town', () => {
+    WorldManager.world!.generationConfig.seed = 'riverside-brookford-v1';
+    WorldManager.world!.scenery.push(definition('authored-tree', 100, 200));
+    const manager = new SceneryManager(makeScene(), {} as any, 'temperate', 'riverside-brookford-v1');
+    const generate = jest.spyOn((manager as any).generator, 'generateForChunk');
+    expect(manager.getSceneryDefsForChunk(0, 0).map(s => s.id)).toEqual(['authored-tree']);
+    expect(manager.getSceneryDefsForChunk(1, 0)).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it('destroys objects leaving the streamed neighbourhood and clears all remaining objects', () => {
     const scene = makeScene();
     scene.add.graphics.mockImplementation(() => moundGraphics());

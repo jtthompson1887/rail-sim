@@ -182,7 +182,7 @@ export function footprintIsClear(footprint: { x: number; y: number; radius: numb
 }
 
 /** Decorative footprints relocate around their site; both built and proposed railway remain unobstructed. */
-export function resolveTransformationFootprints(state: RegionState, tracks: readonly TrackGeometryDef[], draftTracks: readonly TrackGeometryDef[] = []): RegionalFootprint[] {
+export function resolveTransformationFootprints(state: RegionState, tracks: readonly TrackGeometryDef[], draftTracks: readonly TrackGeometryDef[] = [], siteAllowed: (footprint: RegionalFootprint) => boolean = () => true): RegionalFootprint[] {
   const footprints: RegionalFootprint[] = [];
   for (const project of state.projects) {
     if (project.completedAtTick === null) continue;
@@ -192,7 +192,7 @@ export function resolveTransformationFootprints(state: RegionState, tracks: read
       const distance = 400 + Math.floor(candidate / 8) * 260;
       const footprint = { projectId: project.definitionId, x: project.x + Math.cos(angle) * distance, y: project.y + Math.sin(angle) * distance, ...definition.appearance };
       if (Math.abs(footprint.x) + footprint.radius > 8_192 || Math.abs(footprint.y) + footprint.radius > 8_192) continue;
-      if (footprintIsClear(footprint, [...tracks, ...draftTracks]) && footprints.every(f => Math.hypot(f.x - footprint.x, f.y - footprint.y) > f.radius + footprint.radius + 24)) { footprints.push(footprint); break; }
+      if (siteAllowed(footprint) && footprintIsClear(footprint, [...tracks, ...draftTracks]) && footprints.every(f => Math.hypot(f.x - footprint.x, f.y - footprint.y) > f.radius + footprint.radius + 24)) { footprints.push(footprint); break; }
     }
   }
   return footprints;

@@ -23,7 +23,10 @@ async function waitForMenuScene(page: import('@playwright/test').Page): Promise<
   );
 }
 
-test.describe('MenuScene – derailed train recovery', () => {
+// The illustrated title screen no longer runs a physics world. These historical
+// checks require a replacement gameplay fixture before they can provide evidence.
+// Retain them explicitly as skipped; menu presentation checks do not validate recovery.
+test.describe.skip('Legacy menu physics fixture – derailed train recovery', () => {
   test('recovered train stays on track after real physics ticks', async ({ page }) => {
     await page.goto('/');
 

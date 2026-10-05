@@ -84,6 +84,41 @@ describe('TerrainChunk', () => {
   });
 
   describe('fillStyle call inspection', () => {
+    it('shares identical vertex colours along neighbouring terrain cells', () => {
+      const prototype = Phaser.GameObjects.Graphics.prototype;
+      const original = prototype.fillGradientStyle;
+      const gradient = jest.fn().mockReturnThis();
+      prototype.fillGradientStyle = gradient;
+      try {
+        const { scene } = makeScene();
+        const terrain = { getHeightAt: (x: number, y: number) => 160 + x * .02 + y * .01, slopeAt: () => 0 } as any;
+        new TerrainChunk(scene, 0, 0, terrain, 'temperate');
+        expect(gradient).toHaveBeenCalledTimes((CHUNK / STEP) ** 2);
+        const first = gradient.mock.calls[0], next = gradient.mock.calls[1];
+        expect(first[1]).toBe(next[0]);
+        expect(first[3]).toBe(next[2]);
+      } finally {
+        prototype.fillGradientStyle = original;
+      }
+    });
+
+    it('fills shoreline water only as clipped polygons, leaving the land base free of blue cell rectangles', () => {
+      const fillRect = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'fillRect');
+      const fillPath = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'fillPath');
+      const fillStyle = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'fillStyle');
+      const { scene } = makeScene();
+      const terrain = { getHeightAt: (_x: number, y: number) => y - 1900, slopeAt: () => 0 } as any;
+      new TerrainChunk(scene, 0, 0, terrain, 'temperate');
+      // The initial pass is the only rectangular fill. Even cells whose top-left
+      // lies under water receive land colour before the exact water contour is filled.
+      expect(fillRect).toHaveBeenCalledTimes((CHUNK / STEP) ** 2);
+      expect(fillPath).toHaveBeenCalled();
+      const baseEndOrder = fillRect.mock.invocationCallOrder.at(-1)!;
+      const baseColours = fillStyle.mock.calls.filter((_, i) => fillStyle.mock.invocationCallOrder[i] < baseEndOrder);
+      expect(baseColours.every(([colour]) => ((colour >> 8) & 255) >= (colour & 255))).toBe(true);
+      fillRect.mockRestore(); fillPath.mockRestore(); fillStyle.mockRestore();
+    });
+
     it('renders a fully out-of-bounds chunk only as deep ocean with no overlays', () => {
       const fillStyle = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'fillStyle');
       const strokeRect = jest.spyOn(Phaser.GameObjects.Graphics.prototype, 'strokeRect');

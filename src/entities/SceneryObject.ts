@@ -1,247 +1,114 @@
 import Phaser from 'phaser';
 import type { SceneryObjectDef, SceneryType } from '../config/WorldData';
+import { OVERHEAD, artHash } from '../presentation/OverheadPalette';
 
-/**
- * SceneryObject
- *
- * A lightweight Phaser.GameObjects.Container that draws a single scenery
- * asset procedurally using Phaser.GameObjects.Graphics. No external sprites
- * are needed — everything is drawn via the Graphics API so the system works
- * without any art assets loaded.
- *
- * Depth is set to `y * 0.1` to achieve painter's-order layering: objects
- * lower on screen naturally appear in front of those higher up.
- */
+/** Roof-first vegetation and geology. Persisted transforms affect shape, never the sun direction. */
 export class SceneryObject extends Phaser.GameObjects.Container {
   private readonly gfx: Phaser.GameObjects.Graphics;
+  private readonly shadowX: number;
+  private readonly shadowY: number;
 
   constructor(scene: Phaser.Scene, def: SceneryObjectDef) {
     super(scene, def.x, def.y);
     scene.add.existing(this);
-
     this.gfx = scene.add.graphics();
     this.add(this.gfx);
-
     this.setRotation(def.rotation);
     this.setScale(def.scale);
-    this.setDepth(def.y * 0.1);
-
-    this.draw(def.type, def.variant);
+    // Terrain and roofs retain an overhead layer order; a tree at large Y cannot hide a train.
+    this.setDepth(20 + def.y * .0001);
+    const c=Math.cos(def.rotation),s=Math.sin(def.rotation),scale=Math.max(.1,def.scale);
+    this.shadowX=(8*c+10*s)/scale;
+    this.shadowY=(-8*s+10*c)/scale;
+    this.draw(def.type,Math.abs(Math.floor(def.variant))%4);
   }
-
-  // ── Drawing dispatch ────────────────────────────────────────────────────────
 
   private draw(type: SceneryType, variant: number): void {
-    switch (type) {
-      case 'tree_oak':   this.drawOak(variant);   break;
-      case 'tree_pine':  this.drawPine(variant);  break;
-      case 'tree_birch': this.drawBirch(variant); break;
-      case 'tree_dead':  this.drawDeadTree(variant); break;
-      case 'rock_boulder':  this.drawBoulder(variant); break;
-      case 'rock_outcrop':  this.drawOutcrop(variant); break;
-      case 'rock_cluster':  this.drawRockCluster(variant); break;
-      case 'terrain_pond':  this.drawPond(variant);  break;
-      case 'terrain_cliff': this.drawCliff(variant); break;
-      case 'terrain_mound': this.drawMound(variant); break;
+    switch(type){
+      case 'tree_oak': this.drawCrown(50+variant*7,variant,false);break;
+      case 'tree_birch': this.drawCrown(40+variant*5,variant,true);break;
+      case 'tree_pine': this.drawPine(variant);break;
+      case 'tree_dead': this.drawDeadTree(variant);break;
+      case 'rock_boulder': this.drawBoulder(0,0,28+variant*7,variant);break;
+      case 'rock_outcrop': for(let i=0;i<3+variant;i++)this.drawBoulder((i-1)*24,(i%2)*13,28+i*3,variant+i);break;
+      case 'rock_cluster': for(let i=0;i<4+variant;i++){const a=i*2.3;this.drawBoulder(Math.cos(a)*i*13,Math.sin(a)*i*11,13+(i%3)*5,i);}break;
+      case 'terrain_pond': this.drawPond(variant);break;
+      case 'terrain_cliff': this.drawCliff(variant);break;
+      case 'terrain_mound': this.drawMound(variant);break;
     }
   }
 
-  // ── Trees ───────────────────────────────────────────────────────────────────
-
-  private drawOak(variant: number): void {
-    const trunkH   = 60 + variant * 10;
-    const trunkW   = 14;
-    const canopyR  = 50 + variant * 8;
-    const canopyX  = 0;
-    const canopyY  = -(trunkH + canopyR * 0.6);
-
-    // Trunk
-    this.gfx.fillStyle(0x5c3a1e, 1);
-    this.gfx.fillRect(-trunkW / 2, -trunkH, trunkW, trunkH);
-
-    // Multi-layer canopy
-    this.gfx.fillStyle(0x2d6a1e, 1);
-    this.gfx.fillEllipse(canopyX, canopyY, canopyR * 2, canopyR * 1.6);
-    this.gfx.fillStyle(0x3a8a28, 0.85);
-    this.gfx.fillEllipse(canopyX - 12, canopyY - 10, canopyR * 1.5, canopyR * 1.2);
-    this.gfx.fillStyle(0x4aaa34, 0.6);
-    this.gfx.fillEllipse(canopyX + 10, canopyY - 8, canopyR * 1.2, canopyR);
+  private drawCrown(radius:number,variant:number,birch:boolean):void{
+    const g=this.gfx;
+    g.fillStyle(OVERHEAD.shadow,.08);g.fillEllipse(this.shadowX+3,this.shadowY+3,radius*2.18,radius*1.95);
+    g.fillStyle(OVERHEAD.shadow,.16);g.fillEllipse(this.shadowX,this.shadowY,radius*2.02,radius*1.86);
+    g.fillStyle(birch?0x5f7748:OVERHEAD.treeShade,1);g.fillEllipse(0,0,radius*1.92,radius*1.82);
+    // Rounded lobes are a canopy seen from above, with no standing trunk or triangular tree.
+    for(let i=0;i<11;i++){
+      const angle=i*Math.PI*2/11+.27*variant;
+      const distance=radius*(.48+artHash(i,variant,3)*.09),r=radius*(.38+artHash(i,variant,4)*.10);
+      const x=Math.cos(angle)*distance,y=Math.sin(angle)*distance;
+      g.fillStyle(birch?0x819559:OVERHEAD.tree,1);g.fillEllipse(x,y,r*2,r*1.85);
+      g.fillStyle(birch?0xabb479:OVERHEAD.treeLight,.42);g.fillEllipse(x-5,y-7,r*1.26,r*1.09);
+    }
+    g.fillStyle(birch?0x91a566:0x6c8550,1);g.fillEllipse(-radius*.10,-radius*.12,radius*1.03,radius*.97);
+    g.fillStyle(birch?0xb3bc82:0x91a86a,.28);g.fillEllipse(-radius*.21,-radius*.24,radius*.72,radius*.55);
+    g.lineStyle(1.4,OVERHEAD.treeShade,.2);g.beginPath();g.moveTo(-radius*.25,radius*.08);g.lineTo(radius*.08,radius*.28);g.strokePath();
   }
 
-  private drawPine(variant: number): void {
-    const trunkH  = 50 + variant * 8;
-    const trunkW  = 10;
-    const tiers   = 3 + variant;
-    const baseW   = 55 + variant * 5;
+  private drawPine(variant:number):void{
+    const radius=40+variant*6,g=this.gfx;
+    g.fillStyle(OVERHEAD.shadow,.18);g.fillEllipse(this.shadowX,this.shadowY,radius*2.05,radius*1.92);
+    for(let tier=0;tier<3;tier++){
+      const r=radius*(1-tier*.25),points:Phaser.Math.Vector2[]=[];
+      for(let i=0;i<18;i++){const a=i*Math.PI*2/18+.2*variant,reach=r*(i%2===0?1:.57);points.push(new Phaser.Math.Vector2(Math.cos(a)*reach,Math.sin(a)*reach));}
+      g.fillStyle([0x314b3b,0x49674b,0x6c855a][tier],1);g.fillPoints(points,true);
+    }
+    g.fillStyle(0x91a277,.5);g.fillEllipse(-7,-9,14,19);
+  }
 
-    // Trunk
-    this.gfx.fillStyle(0x5c3a1e, 1);
-    this.gfx.fillRect(-trunkW / 2, -trunkH * 0.5, trunkW, trunkH * 0.5);
+  private drawDeadTree(variant:number):void{
+    const radius=37+variant*5,g=this.gfx;
+    for(let i=0;i<7;i++){
+      const angle=i*Math.PI*2/7+.3*variant,x=Math.cos(angle)*radius,y=Math.sin(angle)*radius;
+      g.lineStyle(6,OVERHEAD.shadow,.14);g.beginPath();g.moveTo(this.shadowX,this.shadowY);g.lineTo(x+this.shadowX,y+this.shadowY);g.strokePath();
+      g.lineStyle(4,0x766a50,1);g.beginPath();g.moveTo(0,0);g.lineTo(x*.58,y*.58);g.lineTo(x,y);g.strokePath();
+      g.lineStyle(2,0x8e8264,.85);g.beginPath();g.moveTo(x*.58,y*.58);g.lineTo(x*.73-y*.2,y*.73+x*.2);g.strokePath();
+    }
+    g.fillStyle(0x8f7a58,1);g.fillEllipse(0,0,12,12);
+  }
 
-    // Stacked triangular tiers from bottom to top
-    for (let t = 0; t < tiers; t++) {
-      const frac = t / tiers;
-      const w    = baseW * (1 - frac * 0.65);
-      const y    = -(trunkH * 0.4 + t * (trunkH * 0.7 / tiers));
-      const green = 0x1a5c14 + t * 0x001a00;
-      this.gfx.fillStyle(Math.min(green, 0x3aaa2a), 1);
-      this.gfx.fillTriangle(-w / 2, y, w / 2, y, 0, y - trunkH * 0.45 / tiers);
+  private drawBoulder(x:number,y:number,radius:number,variant:number):void{
+    const g=this.gfx,points:Phaser.Math.Vector2[]=[];
+    for(let i=0;i<7;i++){const a=i*Math.PI*2/7,reach=radius*(.78+artHash(i,variant,2)*.22);points.push(new Phaser.Math.Vector2(x+Math.cos(a)*reach,y+Math.sin(a)*reach*.86));}
+    g.fillStyle(OVERHEAD.shadow,.14);g.fillEllipse(x+this.shadowX,y+this.shadowY,radius*2,radius*1.68);
+    g.fillStyle(0x888a7a,1);g.fillPoints(points,true);
+    g.fillStyle(0xb6b5a1,.65);g.fillEllipse(x-radius*.21,y-radius*.23,radius*1.2,radius*.9);
+    g.lineStyle(2,0x6c7167,.6);g.beginPath();g.moveTo(x-radius*.35,y+radius*.35);g.lineTo(x+radius*.36,y-radius*.1);g.strokePath();
+  }
+
+  private drawPond(variant:number):void{
+    const rx=55+variant*9,ry=36+variant*5,g=this.gfx;
+    g.fillStyle(OVERHEAD.meadow,.7);g.fillEllipse(0,0,rx*2.30,ry*2.3);
+    g.fillStyle(OVERHEAD.sand,.75);g.fillEllipse(0,0,rx*2.10,ry*2.12);
+    g.fillStyle(OVERHEAD.water,1);g.fillEllipse(0,0,rx*2,ry*2);
+    g.fillStyle(OVERHEAD.waterDeep,.28);g.fillEllipse(7,5,rx*1.45,ry*1.35);
+    g.lineStyle(2,OVERHEAD.waterLight,.5);g.strokeEllipse(-3,-2,rx*1.63,ry*1.55);
+  }
+
+  private drawCliff(variant:number):void{
+    const g=this.gfx,w=75+variant*20,h=38+variant*10;
+    g.fillStyle(OVERHEAD.shadow,.15);g.fillEllipse(this.shadowX,this.shadowY,w*1.16,h*1.35);
+    for(let i=0;i<4;i++){
+      g.fillStyle(i%2?0xaaa28a:0x878a75,1);g.fillEllipse(i*13-w*.3,0,w*.65,h*(1-i*.08));
+      g.lineStyle(3,0xd1cbb3,.5);g.beginPath();g.moveTo(i*13-w*.5,-h*.22);g.lineTo(i*13-w*.12,-h*.34);g.strokePath();
     }
   }
 
-  private drawBirch(variant: number): void {
-    const trunkH  = 70 + variant * 8;
-    const trunkW  = 10;
-    const canopyR = 38 + variant * 6;
-
-    // Pale trunk with dark marks
-    this.gfx.fillStyle(0xe8e0d0, 1);
-    this.gfx.fillRect(-trunkW / 2, -trunkH, trunkW, trunkH);
-    for (let i = 1; i <= 3; i++) {
-      this.gfx.fillStyle(0x5c5040, 0.5);
-      this.gfx.fillRect(-trunkW / 2, -trunkH * (i / 4), trunkW, 4);
-    }
-
-    // Light-green canopy
-    this.gfx.fillStyle(0x5aaa38, 1);
-    this.gfx.fillEllipse(0, -(trunkH + canopyR * 0.5), canopyR * 2, canopyR * 1.4);
-    this.gfx.fillStyle(0x70cc4a, 0.7);
-    this.gfx.fillEllipse(-8, -(trunkH + canopyR * 0.7), canopyR * 1.3, canopyR);
-  }
-
-  private drawDeadTree(variant: number): void {
-    const trunkH = 55 + variant * 10;
-    const trunkW = 12;
-
-    // Dark bare trunk
-    this.gfx.fillStyle(0x3a2a1a, 1);
-    this.gfx.fillRect(-trunkW / 2, -trunkH, trunkW, trunkH);
-
-    // Angular bare branches
-    this.gfx.lineStyle(5, 0x3a2a1a, 1);
-    const branchCount = 3 + variant;
-    for (let i = 0; i < branchCount; i++) {
-      const by  = -(trunkH * (0.4 + i * 0.18));
-      const bx  = (i % 2 === 0 ? 1 : -1) * (20 + i * 5);
-      this.gfx.beginPath();
-      this.gfx.moveTo(0, by);
-      this.gfx.lineTo(bx, by - 18 - i * 4);
-      this.gfx.strokePath();
-    }
-  }
-
-  // ── Rocks ───────────────────────────────────────────────────────────────────
-
-  private drawBoulder(variant: number): void {
-    const r     = 28 + variant * 8;
-    const sides = 6 + variant;
-    const points: number[] = [];
-
-    for (let i = 0; i < sides; i++) {
-      const angle  = (i / sides) * Math.PI * 2;
-      // Slight random-like radius variation seeded by variant + index
-      const jitter = 0.7 + 0.3 * ((Math.sin(i * 7.3 + variant * 2.1) + 1) / 2);
-      points.push(Math.cos(angle) * r * jitter, Math.sin(angle) * r * jitter * 0.65);
-    }
-
-    this.gfx.fillStyle(0x6a6860, 1);
-    this.gfx.fillPoints(this.pairToVec(points), true);
-    // Highlight
-    this.gfx.fillStyle(0x9a9890, 0.5);
-    this.gfx.fillEllipse(-r * 0.2, -r * 0.2, r * 0.6, r * 0.4);
-  }
-
-  private drawOutcrop(variant: number): void {
-    const count = 2 + variant;
-    for (let i = 0; i < count; i++) {
-      const ox = (i - count / 2) * 30;
-      const oy = (i % 2 === 0 ? 0 : -12);
-      const w  = 22 + variant * 4 + i * 4;
-      const h  = 30 + i * 8;
-      this.gfx.fillStyle(0x5a5850, 1);
-      this.gfx.fillRect(ox - w / 2, oy - h, w, h);
-      // Highlight edge
-      this.gfx.fillStyle(0x8a8880, 0.5);
-      this.gfx.fillRect(ox - w / 2, oy - h, 4, h);
-    }
-  }
-
-  private drawRockCluster(variant: number): void {
-    const count = 3 + variant;
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + variant;
-      const dist  = 15 + i * 10;
-      const rx    = Math.cos(angle) * dist;
-      const ry    = Math.sin(angle) * dist * 0.6;
-      const r     = 10 + ((i + variant) % 3) * 6;
-      this.gfx.fillStyle(0x6a6860, 1);
-      this.gfx.fillEllipse(rx, ry, r * 2, r * 1.3);
-    }
-  }
-
-  // ── Terrain variations ──────────────────────────────────────────────────────
-
-  private drawPond(variant: number): void {
-    const rx = 55 + variant * 10;
-    const ry = 35 + variant * 5;
-
-    this.gfx.fillStyle(0x2a6aaa, 0.75);
-    this.gfx.fillEllipse(0, 0, rx * 2, ry * 2);
-
-    // Shoreline ripples
-    this.gfx.lineStyle(1, 0x5aaadd, 0.4);
-    this.gfx.strokeEllipse(0, 0, rx * 1.6, ry * 1.6);
-  }
-
-  private drawCliff(variant: number): void {
-    const h = 45 + variant * 15;
-    const w = 70 + variant * 20;
-
-    // Main cliff face
-    this.gfx.fillStyle(0x6a6050, 1);
-    this.gfx.fillRect(-w / 2, -h, w, h);
-
-    // Striated hatching
-    this.gfx.lineStyle(2, 0x4a4038, 0.6);
-    for (let s = 1; s <= 4; s++) {
-      const y = -h * s / 5;
-      this.gfx.beginPath();
-      this.gfx.moveTo(-w / 2, y);
-      this.gfx.lineTo(w / 2, y);
-      this.gfx.strokePath();
-    }
-    // Top edge highlight
-    this.gfx.lineStyle(3, 0x9a9080, 0.7);
-    this.gfx.beginPath();
-    this.gfx.moveTo(-w / 2, -h);
-    this.gfx.lineTo(w / 2, -h);
-    this.gfx.strokePath();
-  }
-
-  private drawMound(variant: number): void {
-    const rx = 60 + variant * 15;
-    const ry = 25 + variant * 8;
-
-    // Base shadow
-    this.gfx.fillStyle(0x2a3820, 0.3);
-    this.gfx.fillEllipse(4, 4, rx * 2, ry * 2);
-
-    // Mound body
-    this.gfx.fillStyle(0x4a6a2a, 1);
-    this.gfx.fillEllipse(0, 0, rx * 2, ry * 2);
-
-    // Highlight
-    this.gfx.fillStyle(0x6a9a3a, 0.5);
-    this.gfx.fillEllipse(-rx * 0.2, -ry * 0.2, rx, ry);
-  }
-
-  // ── Utility ─────────────────────────────────────────────────────────────────
-
-  private pairToVec(pairs: number[]): Phaser.Math.Vector2[] {
-    const vecs: Phaser.Math.Vector2[] = [];
-    for (let i = 0; i < pairs.length; i += 2) {
-      vecs.push(new Phaser.Math.Vector2(pairs[i], pairs[i + 1]));
-    }
-    return vecs;
+  private drawMound(variant:number):void{
+    const rx=60+variant*12,ry=38+variant*7,g=this.gfx;
+    g.fillStyle(OVERHEAD.shadow,.10);g.fillEllipse(this.shadowX,this.shadowY,rx*2,ry*2);
+    g.fillStyle(0x879575,.62);g.fillEllipse(0,0,rx*2,ry*2);
+    g.fillStyle(0xabb08a,.42);g.fillEllipse(-rx*.2,-ry*.2,rx,ry);
   }
 }

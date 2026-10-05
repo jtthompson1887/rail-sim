@@ -4,6 +4,9 @@ import { consistSpecification, getPoweredVehicleFamily } from '../region/Vehicle
 import { capacityForProduct, getFreightSet } from '../freight/FreightSetCatalog';
 import { getProduct } from '../economy/ProductCatalog';
 import { RailGraph } from '../simulation/RailGraph';
+import {
+  drawFleetBody, drawFleetBogie, drawFleetShadow, drawStationPlatform, drawStationShadow, FLEET_SHADOW_OFFSET,
+} from '../presentation/FleetArt';
 
 export type PoweredSilhouette = 'short-hood' | 'double-cab' | 'electric-box' | 'regional-unit' | 'commuter-unit' | 'heavy-six-axle';
 export const POWERED_SILHOUETTES: Readonly<Record<string, PoweredSilhouette>> = {
@@ -124,8 +127,8 @@ interface RenderTrain {
   readonly selected?: boolean;
 }
 interface TrainPresentationPort { readonly trains: readonly RenderTrain[]; selectTrain?(trainId: string | null): void }
-interface PartDisplay { signature: string; body: Phaser.GameObjects.Graphics; front: Phaser.GameObjects.Graphics; rear: Phaser.GameObjects.Graphics }
-interface StationDisplay { platform: Phaser.GameObjects.Graphics; people: Phaser.GameObjects.Graphics; badge: Phaser.GameObjects.Text; signature: string }
+interface PartDisplay { signature: string; body: Phaser.GameObjects.Graphics; front: Phaser.GameObjects.Graphics; rear: Phaser.GameObjects.Graphics; shadow: Phaser.GameObjects.Graphics }
+interface StationDisplay { platform: Phaser.GameObjects.Graphics; people: Phaser.GameObjects.Graphics; badge: Phaser.GameObjects.Text; shadow: Phaser.GameObjects.Graphics; signature: string }
 interface PartMotion { from: FleetPartPose; target: FleetPartPose; changedAt: number; duration: number }
 
 /** Read-only illustrated overhead fleet. Physics sprites stay alive, interactive, and cab-compatible. */
@@ -173,7 +176,7 @@ export class FleetPresentation {
         let display = this.parts.get(part.id);
         const signature = JSON.stringify(part);
         if (!display) {
-          display = { signature: '', body: this.scene.add.graphics().setDepth(103), front: this.scene.add.graphics().setDepth(102), rear: this.scene.add.graphics().setDepth(102) };
+          display = { signature: '', body: this.scene.add.graphics().setDepth(103), front: this.scene.add.graphics().setDepth(102), rear: this.scene.add.graphics().setDepth(102), shadow: this.scene.add.graphics().setDepth(101) };
           this.parts.set(part.id, display);
           if (this.trains.selectTrain) {
             display.body.setInteractive({ useHandCursor: true, hitArea: { x: 0, y: 0, width: 1, height: 1 },
@@ -185,11 +188,12 @@ export class FleetPresentation {
           }
         }
         if (display.signature !== signature) {
-          this.drawPart(display.body, part);
-          this.drawBogie(display.front, part.width, part.silhouette === 'heavy-six-axle' ? 3 : 2); this.drawBogie(display.rear, part.width, part.silhouette === 'heavy-six-axle' ? 3 : 2);
+          drawFleetBody(display.body, part); drawFleetShadow(display.shadow, part);
+          drawFleetBogie(display.front, part.width, part.silhouette === 'heavy-six-axle' ? 3 : 2); drawFleetBogie(display.rear, part.width, part.silhouette === 'heavy-six-axle' ? 3 : 2);
           display.signature = signature;
         }
         display.body.setPosition(pose.x, pose.y).setRotation(pose.angle).setVisible(true);
+        display.shadow.setPosition(pose.x + FLEET_SHADOW_OFFSET.x, pose.y + FLEET_SHADOW_OFFSET.y).setRotation(pose.angle).setVisible(true);
         if (display.body.input?.hitArea) {
           const height = Math.max(part.width + 10, 24 / zoom);
           Object.assign(display.body.input.hitArea, { x: -part.length / 2, y: -height / 2, width: part.length, height });
@@ -212,7 +216,7 @@ export class FleetPresentation {
         body.setAlpha(0.001);
       } else this.restoreBody(train.id);
     }
-    for (const [id, display] of this.parts) if (!visible.has(id)) { display.body.destroy(); display.front.destroy(); display.rear.destroy(); this.parts.delete(id); this.motions.delete(id); }
+    for (const [id, display] of this.parts) if (!visible.has(id)) { display.body.destroy(); display.front.destroy(); display.rear.destroy(); display.shadow.destroy(); this.parts.delete(id); this.motions.delete(id); }
     for (const id of this.hiddenBodies.keys()) if (!activeTrains.has(id)) this.restoreBody(id);
     for (const id of this.lastTracks.keys()) if (!activeTrains.has(id)) { this.trackHistory.delete(id); this.lastTracks.delete(id); }
     this.updateStations(world, time, zoom);
@@ -221,8 +225,8 @@ export class FleetPresentation {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const display of this.parts.values()) { display.body.destroy(); display.front.destroy(); display.rear.destroy(); }
-    for (const display of this.stations.values()) { display.platform.destroy(); display.people.destroy(); display.badge.destroy(); }
+    for (const display of this.parts.values()) { display.body.destroy(); display.front.destroy(); display.rear.destroy(); display.shadow.destroy(); }
+    for (const display of this.stations.values()) { display.platform.destroy(); display.people.destroy(); display.badge.destroy(); display.shadow.destroy(); }
     for (const id of this.hiddenBodies.keys()) this.restoreBody(id);
     this.selection.destroy(); this.parts.clear(); this.stations.clear(); this.trackHistory.clear(); this.lastTracks.clear(); this.motions.clear(); this.graph = null;
   }
@@ -242,105 +246,6 @@ export class FleetPresentation {
     return interpolateFleetPartPose(motion.from, motion.target, (time - motion.changedAt) / motion.duration);
   }
 
-  private drawBogie(graphics: Phaser.GameObjects.Graphics, width: number, axles: number): void {
-    graphics.clear();
-    const half = axles === 3 ? 14 : 10;
-    graphics.fillStyle(0x0b1c23, 1).fillRoundedRect(-half, -width / 2 - 2, half * 2, width + 4, 3);
-    graphics.fillStyle(0x77868a, 1);
-    for (const x of axles === 3 ? [-11, -1, 9] : [-7, 5]) { graphics.fillRect(x, -width / 2 - 3, 3, 5); graphics.fillRect(x, width / 2 - 2, 3, 5); }
-  }
-
-  private drawPart(g: Phaser.GameObjects.Graphics, part: FleetPartVisual): void {
-    g.clear();
-    const length = part.length, width = part.width, left = -length / 2;
-    g.fillStyle(0x000000, 0.25).fillRoundedRect(left + 4, -width / 2 + 5, length, width, 7);
-    g.fillStyle(0x18323b, 1).fillRoundedRect(left, -width / 2 + 2, length, width - 4, 4);
-    g.fillStyle(part.kind === 'powered' ? part.colour : 0x697c80, 1).fillRoundedRect(left, -width / 2, length, width, part.passenger ? 9 : 4);
-    g.lineStyle(1.5, 0xcbd8d7, 0.6).strokeRoundedRect(left, -width / 2, length, width, part.passenger ? 9 : 4);
-    if (part.kind === 'wagon') { this.drawWagon(g, part); g.fillStyle(0xe25d52, 1).fillCircle(left + 2, -7, 2).fillCircle(left + 2, 7, 2); return; }
-    if (part.passenger) {
-      g.fillStyle(0xe7e4d5, 1).fillRoundedRect(left + 6, -width * 0.25, length - 12, width * 0.5, 6);
-      g.fillStyle(0x17394b, 1);
-      for (let x = left + 24; x < length / 2 - 20; x += 19) { g.fillRect(x, -width / 2 + 1, 12, 4); g.fillRect(x, width / 2 - 5, 12, 4); }
-      g.fillStyle(0xabc0c2, 1);
-      for (const x of [-length * 0.24, length * 0.2]) g.fillRoundedRect(x - 9, -7, 18, 14, 3);
-      g.fillStyle(0xf4c459, 1);
-      if (part.cabAtFront) g.fillRoundedRect(length / 2 - 13, -width / 2 + 2, 11, width - 4, 4);
-      if (part.cabAtRear) g.fillRoundedRect(left + 2, -width / 2 + 2, 11, width - 4, 4);
-      g.fillStyle(0x123242, 1);
-      if (part.cabAtFront) g.fillRect(length / 2 - 16, -9, 5, 18);
-      if (part.cabAtRear) g.fillRect(left + 11, -9, 5, 18);
-      if (part.silhouette === 'commuter-unit') this.drawPantograph(g, 0, width);
-    } else if (part.silhouette === 'short-hood') {
-      g.fillStyle(0xe0ded1, 1).fillRoundedRect(left + 8, -width / 2 + 1, length * 0.3, width - 2, 3);
-      g.fillStyle(0x103447, 1).fillRect(left + length * 0.33, -10, 5, 20);
-      g.fillStyle(0x18555c, 1).fillRoundedRect(-length * 0.07, -width * 0.32, length * 0.47, width * 0.64, 3);
-      g.fillStyle(0x101f24, 1).fillCircle(length * 0.15, 0, 5);
-      this.drawNoses(g, length, width, true);
-    } else {
-      g.fillStyle(part.silhouette === 'electric-box' ? 0xcbd4ce : 0xd8dacb, 1).fillRoundedRect(left + 19, -width * 0.31, length - 38, width * 0.62, 4);
-      this.drawNoses(g, length, width, false);
-      g.fillStyle(0x163342, 1).fillRect(left + 14, -11, 5, 22).fillRect(length / 2 - 19, -11, 5, 22);
-      if (part.silhouette === 'electric-box') {
-        this.drawPantograph(g, -length * 0.22, width); this.drawPantograph(g, length * 0.22, width);
-        g.lineStyle(2, 0xb25134, 1).lineBetween(-length * 0.18, 0, length * 0.18, 0);
-      } else {
-        const fans = part.silhouette === 'heavy-six-axle' ? 3 : 2;
-        for (let i = 0; i < fans; i++) { const x = (i - (fans - 1) / 2) * 24; g.fillStyle(0x203b41, 1).fillCircle(x, 0, 8); g.lineStyle(1.5, 0x95a8a3, 1).lineBetween(x - 6, 0, x + 6, 0).lineBetween(x, -6, x, 6); }
-        if (part.silhouette === 'heavy-six-axle') { g.fillStyle(0x10313a, 1); for (let x = left + 30; x < length / 2 - 24; x += 9) { g.fillRect(x, -width / 2 + 2, 5, 4); g.fillRect(x, width / 2 - 6, 5, 4); } }
-      }
-    }
-    if (part.cabAtFront) g.fillStyle(0xfff4bf, 1).fillCircle(length / 2 - 2, -7, 2).fillCircle(length / 2 - 2, 7, 2);
-    if (part.passenger && part.cabAtRear) g.fillStyle(0xe25d52, 1).fillCircle(left + 2, -7, 1.5).fillCircle(left + 2, 7, 1.5);
-  }
-
-  private drawNoses(g: Phaser.GameObjects.Graphics, length: number, width: number, stripes: boolean): void {
-    g.fillStyle(0xf4c459, 1).fillRect(length / 2 - 12, -width / 2 + 1, 10, width - 2);
-    if (stripes) { g.lineStyle(2.5, 0x243f45, 1); for (const y of [-8, 0, 8]) g.lineBetween(length / 2 - 12, y - 4, length / 2 - 3, y + 4); }
-    else g.fillRect(-length / 2 + 2, -width / 2 + 1, 10, width - 2);
-  }
-
-  private drawPantograph(g: Phaser.GameObjects.Graphics, x: number, width: number): void {
-    g.lineStyle(2, 0x344b52, 1).lineBetween(x - 9, 0, x, -width * 0.27).lineBetween(x, -width * 0.27, x + 9, 0).lineBetween(x + 9, 0, x, width * 0.27).lineBetween(x, width * 0.27, x - 9, 0);
-    g.lineStyle(2, 0xc87b58, 1).lineBetween(x - 6, -width * 0.33, x + 6, -width * 0.33);
-  }
-
-  private drawWagon(g: Phaser.GameObjects.Graphics, part: FleetPartVisual): void {
-    const length = part.length, width = part.width, left = -length / 2;
-    g.fillStyle(0x304850, 1).fillRoundedRect(left + 6, -width / 2 + 4, length - 12, width - 8, 2);
-    if (part.wagonFamilyId === 'covered-hopper') {
-      g.fillStyle(0xd4d5c5, 1).fillRoundedRect(left + 8, -width / 2 + 4, length - 16, width - 8, 7);
-      for (const x of [-length / 4, 0, length / 4]) { g.fillStyle(0x7b8c89, 1).fillCircle(x, 0, 7); g.lineStyle(1, 0xf1f1df, 1).strokeCircle(x, 0, 5); }
-    } else if (part.wagonFamilyId === 'covered-van' || part.wagonFamilyId === 'passenger-coach') {
-      g.fillStyle(0xe1ddcc, 1).fillRoundedRect(left + 6, -width / 2 + 3, length - 12, width - 6, 3);
-      g.lineStyle(1.5, 0xa4b0aa, 0.8); for (let x = left + 16; x < length / 2 - 8; x += 14) g.lineBetween(x, -width / 2 + 5, x, width / 2 - 5);
-      g.fillStyle(part.colour, 1).fillRect(left + 8, width / 2 - 5, length - 16, 3);
-    } else if (part.wagonFamilyId === 'bulk-hopper') {
-      g.lineStyle(3, 0xa6b6af, 1).strokeRect(left + 6, -width / 2 + 4, length - 12, width - 8);
-      if (part.loadFraction > 0) {
-        const colour = part.productId === 'grain' ? 0xd8b55b : part.productId === 'scrap' ? 0x809a9d : 0xc3c4b9;
-        g.fillStyle(colour, 1).fillRoundedRect(left + 11, -width / 2 + 8, (length - 22) * part.loadFraction, width - 16, 2);
-        g.lineStyle(2, 0x344d54, 0.6); for (let x = left + 15; x < left + 11 + (length - 22) * part.loadFraction; x += 13) g.lineBetween(x, -4, x + 6, 4);
-      }
-    } else {
-      g.lineStyle(1.5, 0x8b9890, 1); for (let x = left + 10; x < length / 2; x += 16) g.lineBetween(x, -10, x, 10);
-      if (part.loadFraction > 0) {
-        const loadLength = (length - 24) * part.loadFraction;
-        if (part.productId === 'building-modules') {
-          g.fillStyle(0xe3d8b7, 1).fillRoundedRect(left + 12, -12, Math.max(16, loadLength), 24, 2);
-          g.fillStyle(0x426778, 1); for (let x = left + 19; x < left + 10 + loadLength; x += 22) g.fillRect(x, -6, 10, 5);
-        } else {
-          const colour = part.productId === 'steel' ? 0x98adb4 : part.productId === 'structural-timber' ? 0xd9b87d : 0x9c6943;
-          g.fillStyle(colour, 1);
-          for (const y of [-8, 0, 8]) g.fillRoundedRect(left + 12, y - 3, Math.max(10, loadLength), 6, part.productId === 'logs' ? 3 : 0);
-          g.lineStyle(2, 0xd6cc9c, 0.95).lineBetween(-length * 0.25, -12, -length * 0.25, 12).lineBetween(length * 0.25, -12, length * 0.25, 12);
-        }
-      }
-    }
-    // A restrained load stripe communicates sealed cargo without pretending the roof is transparent.
-    if (part.loadFraction > 0 && ['covered-hopper', 'covered-van'].includes(part.wagonFamilyId ?? '')) g.fillStyle(0xd4ad53, 1).fillRect(left + 12, -width / 2 + 2, (length - 24) * part.loadFraction, 3);
-  }
-
   private updateStations(world: WorldData, time: number, zoom: number): void {
     const active = new Set<string>();
     const waiting = stationWaitingCounts(world);
@@ -352,18 +257,18 @@ export class FleetPresentation {
       active.add(station.id);
       let display = this.stations.get(station.id);
       if (!display) {
-        display = { platform: this.scene.add.graphics().setDepth(48), people: this.scene.add.graphics().setDepth(51), badge: this.scene.add.text(0, 0, '', { fontFamily: 'Verdana', fontSize: '12px', color: '#fff8dd', backgroundColor: '#153746e8', padding: { x: 7, y: 4 } }).setOrigin(0.5, 0).setDepth(52), signature: '' };
+        display = { platform: this.scene.add.graphics().setDepth(48), people: this.scene.add.graphics().setDepth(51), shadow: this.scene.add.graphics().setDepth(47), badge: this.scene.add.text(0, 0, '', { fontFamily: 'Verdana', fontSize: '11px', color: '#3b4b44', backgroundColor: '#f0e7cfed', padding: { x: 7, y: 3 } }).setOrigin(0.5, 0).setDepth(52), signature: '' };
         this.stations.set(station.id, display);
       }
       const length = (station.platformLengthMetres ?? 120) * 10;
-      const signature = `${length}:${station.name}`;
+      const colour = liveryColour({}, world.companyStyle?.colour);
+      const signature = `${length}:${station.name}:${colour}`;
       if (signature !== display.signature) {
-        display.platform.clear().fillStyle(0x849391, 1).fillRoundedRect(-length / 2, 21, length, 28, 4);
-        display.platform.lineStyle(2, 0xf0d37d, 1).lineBetween(-length / 2 + 4, 23, length / 2 - 4, 23);
-        display.platform.fillStyle(0x284d59, 1).fillRoundedRect(-36, 29, 72, 16, 2);
+        drawStationPlatform(display.platform, length, colour); drawStationShadow(display.shadow, length);
         display.signature = signature;
       }
       display.platform.setPosition(pose.point.x, pose.point.y).setRotation(angle);
+      display.shadow.setPosition(pose.point.x + FLEET_SHADOW_OFFSET.x, pose.point.y + FLEET_SHADOW_OFFSET.y).setRotation(angle);
       display.people.clear().setPosition(pose.point.x, pose.point.y).setRotation(angle);
       const count = waiting[station.id] ?? 0;
       for (let i = 0; i < Math.min(8, count); i++) {
@@ -372,6 +277,6 @@ export class FleetPresentation {
       }
       display.badge.setText(`${count} waiting`).setPosition(pose.point.x - pose.tangent.y * 58, pose.point.y + pose.tangent.x * 58).setScale(1 / zoom);
     }
-    for (const [id, display] of this.stations) if (!active.has(id)) { display.platform.destroy(); display.people.destroy(); display.badge.destroy(); this.stations.delete(id); }
+    for (const [id, display] of this.stations) if (!active.has(id)) { display.platform.destroy(); display.people.destroy(); display.badge.destroy(); display.shadow.destroy(); this.stations.delete(id); }
   }
 }

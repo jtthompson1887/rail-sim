@@ -73,6 +73,7 @@ function gameObject() {
     setPosition: jest.fn().mockReturnThis(),
     setText: jest.fn().mockReturnThis(),
     setColor: jest.fn().mockReturnThis(),
+    setVisible: jest.fn().mockReturnThis(),
     setRadius: jest.fn().mockReturnThis(),
     setStrokeStyle: jest.fn().mockReturnThis(),
     setInteractive: jest.fn().mockReturnThis(),
@@ -86,33 +87,30 @@ function gameObject() {
 }
 
 function sceneHarness() {
-  const graphics = {
-    setDepth: jest.fn().mockReturnThis(),
-    clear: jest.fn().mockReturnThis(),
-    lineStyle: jest.fn().mockReturnThis(),
-    fillStyle: jest.fn().mockReturnThis(),
-    strokeCircle: jest.fn().mockReturnThis(),
-    fillCircle: jest.fn().mockReturnThis(),
-    fillRect: jest.fn().mockReturnThis(),
-    destroy: jest.fn(),
-  };
+  const surfaces = Array.from({ length: 3 }, () => {
+    const g: Record<string, jest.Mock> = {};
+    for (const method of ['setDepth', 'clear', 'lineStyle', 'fillStyle', 'strokeCircle', 'fillCircle', 'fillRect',
+      'fillRoundedRect', 'fillEllipse', 'lineBetween', 'strokeRect', 'destroy']) g[method] = jest.fn(() => g);
+    return g;
+  });
   const marker = gameObject();
   const labels = [gameObject(), gameObject()];
   const scene = {
     add: {
-      graphics: jest.fn().mockReturnValue(graphics),
+      graphics: jest.fn().mockImplementation(() => surfaces.shift()),
       circle: jest.fn().mockReturnValue(marker),
       text: jest.fn()
         .mockImplementation(() => labels.shift()!),
     },
   };
-  return { scene, graphics, marker };
+  const [ground, buildings, graphics] = surfaces;
+  return { scene, ground, buildings, graphics, marker };
 }
 
 describe('FacilityView', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('renders a named marker, status, compact inventory, and screen-scaled access ring', () => {
+  it('renders world-sized roofs with screen-scaled labels and reserves access diagnostics for selection', () => {
     const harness = sceneHarness();
     const view = new FacilityView(
       harness.scene as any,
@@ -139,13 +137,20 @@ describe('FacilityView', () => {
     );
     expect((view as any).nameText.setScale).toHaveBeenLastCalledWith(4);
     expect((view as any).statusText.setScale).toHaveBeenLastCalledWith(4);
+    expect(harness.graphics.strokeCircle).not.toHaveBeenCalled();
+    expect(harness.graphics.fillCircle).not.toHaveBeenCalled();
+    expect(harness.buildings.fillRect).toHaveBeenCalled();
+    expect((view as any).statusText.setVisible).toHaveBeenLastCalledWith(false);
+    const roofCalls = harness.buildings.fillRect.mock.calls.slice();
+    view.update(inspection(), 0.5, true);
+    expect(harness.buildings.fillRect.mock.calls).toEqual(roofCalls);
     expect(harness.graphics.strokeCircle).toHaveBeenCalledWith(135, 165, 120);
-    expect(harness.graphics.fillCircle).toHaveBeenCalledWith(100, 200, 48);
     expect(harness.graphics.fillRect).toHaveBeenCalledTimes(2);
+    expect((view as any).statusText.setVisible).toHaveBeenLastCalledWith(true);
     expect((view as any).hitArea).toEqual(expect.objectContaining({
-      x: 48,
-      y: 48,
-      radius: 48,
+      x: 282,
+      y: 282,
+      radius: 282,
     }));
   });
 
@@ -157,6 +162,7 @@ describe('FacilityView', () => {
       placement(),
       inspection(),
     );
+    view.update(inspection(), 1, true);
     const disconnectedStyle = harness.graphics.lineStyle.mock.calls.at(-1);
 
     view.update(inspection({ railConnected: true }), 1, true);
@@ -212,6 +218,8 @@ describe('FacilityView', () => {
 
     expect(JSON.stringify(dto)).toBe(before);
     expect(harness.graphics.destroy).toHaveBeenCalled();
+    expect(harness.ground.destroy).toHaveBeenCalled();
+    expect(harness.buildings.destroy).toHaveBeenCalled();
     expect(harness.marker.destroy).toHaveBeenCalled();
     expect((view as any).nameText.destroy).toHaveBeenCalled();
     expect((view as any).statusText.destroy).toHaveBeenCalled();

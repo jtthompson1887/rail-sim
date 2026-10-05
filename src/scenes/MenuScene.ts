@@ -1,345 +1,54 @@
 import Phaser from 'phaser';
-import Background from '../entities/Background';
-import RailTrack from '../entities/RailTrack';
-import Train from '../entities/Train';
-import { CameraController } from '../systems/CameraController';
 import { SaveService } from '../services/SaveService';
-import { responsiveFontSize } from '../utils/responsive';
-import { connectPorts } from '../entities/TrackPort';
-import { TrackGraphRouteResolver } from '../physics/adapters/TrackGraphRouteResolver';
-import { createDerailmentHazardState } from '../physics/DerailmentEvaluator';
-import { LOCOMOTIVE_PHYSICS } from '../config/VehicleTypes';
-import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
-import { TrainDynamicsAdapter } from '../systems/TrainDynamicsAdapter';
-import { GameConfig } from '../config/GameConfig';
+import { MainMenu } from '../ui/MainMenu';
+import { createRiversideRegion } from '../region/RiversideRegion';
 
-/** Window augmentation for Playwright / E2E test hooks. */
 declare global {
   interface Window {
     __railSimScene: string;
-    __railSimMenuDerailCount: number;
-    __railSimMenuTrains: Train[] | undefined;
-    __railSimMenuTracks: RailTrack[] | undefined;
   }
 }
 
+/** Title presentation has no physics, world ownership or persistence side effects. */
 export default class MenuScene extends Phaser.Scene {
-  private railTracks: RailTrack[] = [];
-  private trains: Train[] = [];
-  private trainStartTracks: RailTrack[] = [];
-  /** Engine power per train, stored so recovery can restore it correctly. */
-  private trainEnginePowers: number[] = [];
-  private camControl?: CameraController;
-  private previewAdapters: TrainDynamicsAdapter[] = [];
-  private accumulatorSeconds = 0;
+  private menu?: MainMenu;
 
   constructor() {
     super({ key: 'MenuScene' });
   }
 
   create(): void {
-    this.railTracks = [];
-    this.trains = [];
-    this.trainStartTracks = [];
-    this.trainEnginePowers = [];
-    this.previewAdapters = [];
-    this.camControl = undefined;
+    this.menu?.destroy();
+    const worldId = SaveService.getLastPlayedWorldId();
+    const world = worldId ? SaveService.loadWorld(worldId) : null;
 
-    if (
-      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
-      && __RAIL_SIM_TEST_CONTROLS__
-    ) {
-      window.__railSimMenuDerailCount = 0;
-    }
+    this.menu = new MainMenu({
+      parent: this.game.canvas.parentElement ?? document.body,
+      savedWorldName: world?.name,
+      onNew: () => {
+        const brookford = createRiversideRegion();
+        if (!SaveService.saveWorld(brookford)) return false;
+        this.scene.start('WorldScene', { worldId: brookford.id, mode: 'create' });
+      },
+      onWorlds: () => { this.scene.start('WorldSelectScene'); },
+      onSettings: () => { this.scene.start('SettingsScene'); },
+      onContinue: () => {
+        // A save may have been removed in another window since opening the menu.
+        if (worldId && SaveService.loadWorld(worldId)) {
+          this.scene.start('WorldScene', { worldId, mode: 'create' });
+        } else {
+          this.scene.start('WorldSelectScene');
+        }
+      },
+    });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      if (
-        typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
-        && __RAIL_SIM_TEST_CONTROLS__
-      ) {
-        window.__railSimMenuTrains = undefined;
-        window.__railSimMenuTracks = undefined;
-      }
+      this.menu?.destroy();
+      this.menu = undefined;
     });
 
-    const { width, height } = this.scale;
-    const bg = new Background(this, 20, 20);
-    bg.setDepth(-20);
-
-    // Build a smooth circular track
-    const circleCenter = new Phaser.Math.Vector2(width * 0.32, height * 0.52);
-    const trackRadius = Math.min(width, height) * 0.32;
-    const circleSegments = 16;
-    const trackPoints: Phaser.Math.Vector2[] = [];
-
-    for (let i = 0; i < circleSegments; i++) {
-      const angle = Phaser.Math.DegToRad((360 / circleSegments) * i);
-      trackPoints.push(new Phaser.Math.Vector2(
-        circleCenter.x + Math.cos(angle) * trackRadius,
-        circleCenter.y + Math.sin(angle) * trackRadius,
-      ));
-    }
-
-    for (let i = 0; i < circleSegments; i++) {
-      const prev = trackPoints[(i - 1 + circleSegments) % circleSegments];
-      const current = trackPoints[i];
-      const next = trackPoints[(i + 1) % circleSegments];
-      const afterNext = trackPoints[(i + 2) % circleSegments];
-      const cp1 = new Phaser.Math.Vector2(current.x + (next.x - prev.x) / 6, current.y + (next.y - prev.y) / 6);
-      const cp2 = new Phaser.Math.Vector2(next.x - (afterNext.x - current.x) / 6, next.y - (afterNext.y - current.y) / 6);
-      this.railTracks.push(new RailTrack(this, current, cp1, cp2, next));
-    }
-    for (let i = 0; i < this.railTracks.length; i++) {
-      connectPorts(
-        this.railTracks[i].endPort,
-        this.railTracks[(i + 1) % this.railTracks.length].startPort,
-      );
-    }
-
-    this.cameras.main.setBounds(0, 0, width, height);
-    this.cameras.main.setZoom(1);
-    this.cameras.main.centerOn(circleCenter.x, circleCenter.y);
-    this.camControl = new CameraController(this);
-    this.camControl.stopFollow();
-
-    // Train 1 – starts at segment 0
-    const firstTrack = this.railTracks[0];
-    const startPoint1 = firstTrack.getCurvePath().getPoint(0);
-    const train1 = new Train(this, startPoint1.x, startPoint1.y);
-    const train1Body = train1.getMatterBody();
-    train1Body.setPosition(startPoint1.x, startPoint1.y);
-    train1.currentTrack = firstTrack;
-    train1Body.setAngle(firstTrack.getTrackAngle(train1Body));
-    train1.enginePower = GameConfig.TRAIN.ENGINE_POWER * 0.18;
-    train1.setDepth(50);
-    train1.getMatterBody().setDepth(50);
-    this.trains.push(train1);
-    this.trainStartTracks.push(firstTrack);
-    this.trainEnginePowers.push(train1.enginePower);
-
-    // Train 2 – starts at the opposite side of the circle
-    const halfSegment = Math.floor(circleSegments / 2);
-    const secondTrack = this.railTracks[halfSegment];
-    const startPoint2 = secondTrack.getCurvePath().getPoint(0);
-    const train2 = new Train(this, startPoint2.x, startPoint2.y);
-    const train2Body = train2.getMatterBody();
-    train2Body.setPosition(startPoint2.x, startPoint2.y);
-    train2.currentTrack = secondTrack;
-    train2Body.setAngle(secondTrack.getTrackAngle(train2Body));
-    train2.enginePower = GameConfig.TRAIN.ENGINE_POWER * 0.16;
-    train2.setDepth(50);
-    train2.getMatterBody().setDepth(50);
-    this.trains.push(train2);
-    this.trainStartTracks.push(secondTrack);
-    this.trainEnginePowers.push(train2.enginePower);
-    this.rebuildPreviewAdapters();
-
-    if (
-      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
-      && __RAIL_SIM_TEST_CONTROLS__
-    ) {
-      window.__railSimMenuTrains = this.trains;
-      window.__railSimMenuTracks = this.railTracks;
-    }
-
-    // Right-side menu panel
-    const panelWidth = width * 0.42;
-    const panelHeight = height * 0.78;
-    const panelX = width * 0.72;
-    const panelY = height * 0.5;
-    this.add.rectangle(panelX, panelY, panelWidth, panelHeight, 0x031626, 0.88)
-      .setStrokeStyle(4, 0xffffff, 0.2).setScrollFactor(0).setDepth(100);
-    this.add.rectangle(panelX, panelY - panelHeight * 0.375, panelWidth * 0.6, 6, 0x4ad5ff, 0.45)
-      .setScrollFactor(0).setDepth(101);
-
-    let currentY = panelY - panelHeight * 0.39;
-
-    // Responsive font sizes – scale down gracefully on smaller viewports
-    const titleFontSize    = responsiveFontSize(82, width, height, 28, 82);
-    const subtitleFontSize = responsiveFontSize(28, width, height, 13, 28);
-    const buttonFontSize   = responsiveFontSize(42, width, height, 16, 42);
-    const hintFontSize     = responsiveFontSize(24, width, height, 12, 24);
-
-    // Title with a gentle pulsing tween
-    const title = this.add.text(panelX, currentY, 'Rail Sim', {
-      fontFamily: 'Verdana',
-      fontSize: titleFontSize,
-      fontStyle: 'bold',
-      color: '#ffffff',
-    }).setOrigin(0.5, 0).setShadow(0, 6, 'rgba(0,0,0,0.6)', 8).setScrollFactor(0).setDepth(101);
-
-    this.tweens.add({
-      targets: title,
-      alpha: { from: 1, to: 0.75 },
-      duration: 1800,
-      ease: 'Sine.easeInOut',
-      yoyo: true,
-      repeat: -1,
-    });
-
-    currentY += title.height + 16;
-    const subtitle = this.add.text(panelX, currentY, 'Keep the rail network flowing smoothly', {
-      fontFamily: 'Verdana',
-      fontSize: subtitleFontSize,
-      color: '#d2e6ff',
-      align: 'center',
-      wordWrap: { width: panelWidth * 0.88 },
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
-
-    currentY += subtitle.height + 46;
-
-    // Menu buttons: New Game, Continue, Load, Settings
-    const buttonWidth = panelWidth * 0.72;
-    // Scale button height proportionally, with a minimum for touch targets
-    const buttonHeight = Math.max(48, Math.round(height * 0.072));
-    const buttonSpacing = Math.max(8, Math.round(height * 0.018));
-    const hasSave = SaveService.getLastPlayedWorldId() !== null || SaveService.hasSave();
-
-    const menuItems: { label: string; enabled: boolean; action: () => void }[] = [
-      { label: 'New World',  enabled: true,     action: () => this.scene.start('WorldSelectScene') },
-      { label: 'Continue',  enabled: hasSave,   action: () => this.continueGame() },
-      { label: 'Worlds',    enabled: true,      action: () => this.scene.start('WorldSelectScene') },
-      { label: 'Settings',  enabled: true,      action: () => this.scene.start('SettingsScene') },
-    ];
-
-    for (const item of menuItems) {
-      const btnY = currentY + buttonHeight / 2;
-      const fillAlpha = item.enabled ? 0.14 : 0.06;
-      const strokeAlpha = item.enabled ? 0.5 : 0.15;
-      const textColor = item.enabled ? '#ffffff' : '#5a7090';
-
-      const btn = this.add.rectangle(panelX, btnY, buttonWidth, buttonHeight, 0xffffff, fillAlpha)
-        .setStrokeStyle(2, 0xffffff, strokeAlpha)
-        .setScrollFactor(0)
-        .setDepth(101);
-
-      if (item.enabled) {
-        btn.setInteractive({ useHandCursor: true })
-          .on('pointerover', () => btn.setFillStyle(0xffffff, 0.27))
-          .on('pointerout',  () => btn.setFillStyle(0xffffff, fillAlpha))
-          .on('pointerdown', () => item.action());
-      }
-
-      this.add.text(panelX, btnY, item.label, {
-        fontFamily: 'Verdana',
-        fontSize: buttonFontSize,
-        fontStyle: 'bold',
-        color: textColor,
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(102);
-
-      currentY += buttonHeight + buttonSpacing;
-    }
-
-    currentY += 12;
-    this.add.text(panelX, currentY, 'Press SPACE or ENTER to start', {
-      fontFamily: 'Verdana',
-      fontSize: hintFontSize,
-      color: '#9fc0ff',
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
-
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('WorldSelectScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('WorldSelectScene'));
-    if (
-      typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
-      && __RAIL_SIM_TEST_CONTROLS__
-    ) {
+    if (typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined' && __RAIL_SIM_TEST_CONTROLS__) {
       window.__railSimScene = 'MenuScene';
-    }
-  }
-
-  update(time: number, delta: number): void {
-    this.camControl?.update(time, delta);
-    this.accumulatorSeconds += Math.min(Math.max(delta, 0) / 1000, 0.25);
-    while (this.accumulatorSeconds >= TRAIN_PHYSICS_CONFIG.fixedStepSeconds) {
-      this.previewAdapters.forEach((adapter) => {
-        adapter.fixedUpdate(TRAIN_PHYSICS_CONFIG.fixedStepSeconds);
-      });
-      this.accumulatorSeconds -= TRAIN_PHYSICS_CONFIG.fixedStepSeconds;
-    }
-    const alpha = this.accumulatorSeconds / TRAIN_PHYSICS_CONFIG.fixedStepSeconds;
-    this.previewAdapters.forEach((adapter) => adapter.render(alpha));
-    for (let i = 0; i < this.trains.length; i++) {
-      // Recovery safety net: if the train somehow derails on the menu loop,
-      // teleport it back to its starting position so it keeps running.
-      if (this.trains[i].derailed) {
-        this.recoverTrain(this.trains[i], i);
-        // Only count permanent derailments (where recovery itself fails).
-        if (this.trains[i].derailed) {
-          if (
-            typeof __RAIL_SIM_TEST_CONTROLS__ !== 'undefined'
-            && __RAIL_SIM_TEST_CONTROLS__
-          ) {
-            window.__railSimMenuDerailCount += 1;
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Reset a derailed menu train to its designated start position on the
-   * circular track so it can continue driving itself.
-   *
-   * Order matters: snap position/angle onto the track FIRST, then call
-   * recover() — which calls matterScaling() internally and replaces the
-   * Matter body.  If recover() runs first the new body is created at the
-   * old (derailed) position and the subsequent setPosition call goes to the
-   * stale body reference.
-   */
-  private recoverTrain(train: Train, index: number): void {
-    const track = this.trainStartTracks[index];
-    const point = track.getCurvePath().getPoint(0);
-    // Snap to track before recover() so matterScaling creates the body in place.
-    train.getMatterBody().setPosition(point.x, point.y);
-    train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
-    train.currentTrack = track;
-    train.recover();
-    // Re-snap after recover() to correct any drift introduced by matterScaling.
-    train.getMatterBody().setPosition(point.x, point.y);
-    train.getMatterBody().setAngle(track.getTrackAngle(train.getMatterBody()));
-    train.getMatterBody().setVelocity(0, 0);
-    train.getMatterBody().setAngularVelocity(0);
-    // Restore input and rebuild the same production dynamics adapter.
-    train.enginePower = this.trainEnginePowers[index];
-    this.rebuildPreviewAdapters();
-  }
-
-  private rebuildPreviewAdapters(): void {
-    const resolver = new TrackGraphRouteResolver(this.railTracks);
-    this.previewAdapters = this.trains.map((train, index) => {
-      const track = train.currentTrack ?? this.trainStartTracks[index];
-      const body = train.getMatterBody();
-      const distance = track.getArcLengthIndex().distanceForPoint(body);
-      const trackPose = track.getArcLengthIndex().poseAtDistance(distance);
-      const heading = { x: Math.cos(body.rotation), y: Math.sin(body.rotation) };
-      const direction = heading.x * trackPose.tangent.x + heading.y * trackPose.tangent.y >= 0
-        ? 1 as const
-        : -1 as const;
-      return new TrainDynamicsAdapter({
-        consistId: `menu-${index}`,
-        resolver,
-        bindings: [{
-          vehicle: train,
-          definition: LOCOMOTIVE_PHYSICS,
-          order: 0,
-          state: {
-            mode: 'on-rail',
-            vehicleId: train.getUUID(),
-            centre: { trackUUID: track.getUUID(), distance, direction },
-            speedMps: 0,
-            hazard: createDerailmentHazardState(train.getUUID()),
-          },
-        }],
-      });
-    });
-  }
-
-  private continueGame(): void {
-    const worldId = SaveService.getLastPlayedWorldId();
-    if (worldId) {
-      this.scene.start('WorldScene', { worldId, mode: 'create' });
-    } else {
-      this.scene.start('WorldSelectScene');
     }
   }
 }

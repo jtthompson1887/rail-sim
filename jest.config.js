@@ -4,6 +4,12 @@ module.exports = {
   testEnvironment: 'jest-environment-jsdom',
   roots: ['<rootDir>/tests'],
   testPathIgnorePatterns: ['/tests/e2e/'],
+  testMatch: [
+    '**/tests/unit/**/*.test.ts',
+    '**/tests/integration/**/*.test.ts',
+    '**/tests/physics/**/*.test.ts',
+  ],
+  collectCoverage: false,
   moduleNameMapper: {
     '^phaser$': '<rootDir>/__mocks__/phaser.js',
     '^@babylonjs/core$': '<rootDir>/__mocks__/@babylonjs/core.ts',

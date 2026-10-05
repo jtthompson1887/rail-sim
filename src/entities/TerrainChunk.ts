@@ -4,6 +4,7 @@ import { BIOME_PALETTES } from '../config/SceneryConfig';
 import type { TerrainGenerator } from '../systems/TerrainGenerator';
 import type { BiomeType } from '../config/WorldData';
 import type { BandName } from '../config/SceneryConfig';
+import { OVERHEAD, artHash, mixArtColour } from '../presentation/OverheadPalette';
 
 const TC  = GameConfig.TERRAIN;
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
@@ -78,32 +79,50 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
           continue;
         }
 
-        const h = terrain.getHeightAt(wx, wy);
-
-        // Blended colour from band palette
-        const baseColor = this.bandColor(h, biome);
-
-        // Ambient occlusion: darken cells facing away from the sun
-        const ao = this.computeAO(terrain, wx, wy);
-
-        const finalColor = this.applyAO(baseColor, ao);
-        this.fillStyle(finalColor, 1);
+        // Shared corner colours interpolate through each cell instead of revealing
+        // the heightmap's sample grid. Water is filled only by the clipped pass below.
+        const topLeft = this.groundColour(terrain, wx, wy, biome);
+        if (typeof this.fillGradientStyle === 'function') {
+          this.fillGradientStyle(topLeft,
+            this.groundColour(terrain, wx + STEP, wy, biome),
+            this.groundColour(terrain, wx, wy + STEP, biome),
+            this.groundColour(terrain, wx + STEP, wy + STEP, biome), 1);
+        } else this.fillStyle(topLeft, 1);
         this.fillRect(wx, wy, STEP, STEP);
       }
     }
 
-    // Water overlay – semi-transparent blue tint on water cells
+    this.drawGrassTexture(terrain, biome);
+
+    // The heightfield's zero contour defines the water. Clipped triangles replace
+    // square blue cells, keeping coastlines continuous across streamed chunks.
+    const shores: Array<[{x:number;y:number},{x:number;y:number}]> = [];
     for (let yi = 0; yi < samplesPerChunk - 1; yi++) {
       for (let xi = 0; xi < samplesPerChunk - 1; xi++) {
         const wx = this.chunkX + xi * STEP;
         const wy = this.chunkY + yi * STEP;
         // Skip out-of-bounds quads (already filled with ocean colour above)
         if (wx < -HALF_W || wx >= HALF_W || wy < -HALF_H || wy >= HALF_H) continue;
-        if (terrain.getHeightAt(wx, wy) < TC.BANDS.WATER.max) {
-          this.fillStyle(0x2a6aaa, 0.25);
-          this.fillRect(wx, wy, STEP, STEP);
+        const vertices = [
+          {x:wx,y:wy,h:this.sampleHeight(terrain,wx,wy)},
+          {x:wx+STEP,y:wy,h:this.sampleHeight(terrain,wx+STEP,wy)},
+          {x:wx+STEP,y:wy+STEP,h:this.sampleHeight(terrain,wx+STEP,wy+STEP)},
+          {x:wx,y:wy+STEP,h:this.sampleHeight(terrain,wx,wy+STEP)},
+        ];
+        this.drawWaterTriangle([vertices[0],vertices[1],vertices[2]],shores);
+        this.drawWaterTriangle([vertices[0],vertices[2],vertices[3]],shores);
+        if(vertices.every(v=>v.h < -8) && artHash(wx,wy,4)>.62){
+          const cy=wy+STEP*(.25+artHash(wx,wy,5)*.5);
+          this.lineStyle(2,OVERHEAD.waterLight,.20);this.beginPath();
+          this.moveTo(wx+24,cy);this.lineTo(wx+STEP-24,cy-3);this.strokePath();
         }
       }
+    }
+
+    for(const [a,b] of shores){
+      this.lineStyle(26,OVERHEAD.yardShade,.45);this.beginPath();this.moveTo(a.x,a.y);this.lineTo(b.x,b.y);this.strokePath();
+      this.lineStyle(12,OVERHEAD.sand,.85);this.beginPath();this.moveTo(a.x,a.y);this.lineTo(b.x,b.y);this.strokePath();
+      this.lineStyle(3,OVERHEAD.waterLight,.5);this.beginPath();this.moveTo(a.x,a.y);this.lineTo(b.x,b.y);this.strokePath();
     }
 
     // Cliff-edge shadow strips
@@ -115,10 +134,56 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
         if (wx < -HALF_W || wx >= HALF_W || wy < -HALF_H || wy >= HALF_H) continue;
         const slope = terrain.slopeAt(wx, wy);
         if (slope > TC.CLIFF_SLOPE_DEG) {
-          this.lineStyle(2, 0x000000, 0.35);
-          this.strokeRect(wx, wy, STEP, STEP);
+          this.lineStyle(3, 0x776f59, 0.25);
+          this.beginPath();this.moveTo(wx,wy+STEP*.65);this.lineTo(wx+STEP,wy+STEP*.45);this.strokePath();
         }
       }
+    }
+  }
+
+  private sampleHeight(terrain: TerrainGenerator, x: number, y: number): number {
+    return terrain.getHeightAt(Math.max(-HALF_W,Math.min(HALF_W-.001,x)),Math.max(-HALF_H,Math.min(HALF_H-.001,y)));
+  }
+
+  private groundColour(terrain: TerrainGenerator, x: number, y: number, biome: BiomeType): number {
+    const height = Math.max(18, this.sampleHeight(terrain, x, y));
+    const colour = mixArtColour(this.bandColor(height, biome), this.illustratedColour(height, biome), .88);
+    // Lowland shade is uniform; mountain gradients retain useful terrain relief.
+    return this.applyAO(colour, height < 110 ? .86 : this.computeAO(terrain, x, y));
+  }
+
+  private illustratedColour(h:number,biome:BiomeType):number{
+    if(h<0)return mixArtColour(OVERHEAD.water,OVERHEAD.waterDeep,Math.min(1,-h/180));
+    if(biome==='arid')return mixArtColour(0xbca582,0x978974,Math.min(1,h/340));
+    if(h>340)return biome==='alpine'?0xe0dfd1:0xb9b59d;
+    if(h>220)return mixArtColour(0x939780,0xaaa590,(h-220)/120);
+    return mixArtColour(OVERHEAD.grass,OVERHEAD.meadow,Math.min(1,h/240));
+  }
+
+  private drawWaterTriangle(vertices:Array<{x:number;y:number;h:number}>,shores:Array<[{x:number;y:number},{x:number;y:number}]>):void{
+    const polygon:Array<{x:number;y:number}>=[],crossings:Array<{x:number;y:number}>=[];
+    for(let i=0;i<vertices.length;i++){
+      const a=vertices[i],b=vertices[(i+1)%vertices.length],wetA=a.h<0,wetB=b.h<0;
+      if(wetA)polygon.push(a);
+      if(wetA!==wetB){const t=a.h/(a.h-b.h),p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};polygon.push(p);crossings.push(p);}
+    }
+    if(polygon.length>=3){
+      const depth=vertices.reduce((n,v)=>n+Math.min(0,v.h),0)/3;
+      this.fillStyle(mixArtColour(OVERHEAD.water,OVERHEAD.waterDeep,Math.min(.75,-depth/180)),1);
+      this.beginPath();this.moveTo(polygon[0].x,polygon[0].y);for(const p of polygon.slice(1))this.lineTo(p.x,p.y);this.closePath();this.fillPath();
+    }
+    if(crossings.length===2)shores.push([crossings[0],crossings[1]]);
+  }
+
+  private drawGrassTexture(terrain:TerrainGenerator,biome:BiomeType):void{
+    if(biome==='arid'||biome==='alpine')return;
+    // Sparse, broad brush marks give grass a material without a high-frequency noise veil.
+    for(let y=this.chunkY+48;y<this.chunkY+CHUNK;y+=96)for(let x=this.chunkX+32;x<this.chunkX+CHUNK;x+=96){
+      if(x < -HALF_W || x>=HALF_W || y < -HALF_H || y>=HALF_H)continue;
+      const h=terrain.getHeightAt(x,y);if(h<8||h>240)continue;
+      const j=artHash(x,y,20);if(j<.45)continue;
+      this.lineStyle(2,j>.75?0xc0c8a2:0x536f4a,.17);
+      this.beginPath();this.moveTo(x,y);this.lineTo(x+14+j*17,y-2);this.strokePath();
     }
   }
 
@@ -168,8 +233,8 @@ export class TerrainChunk extends Phaser.GameObjects.Graphics {
    * Returns a value in [0, 1] where 0 is fully in shadow and 1 is fully lit.
    */
   private computeAO(terrain: TerrainGenerator, wx: number, wy: number): number {
-    const dx = (terrain.getHeightAt(wx + STEP, wy) - terrain.getHeightAt(wx - STEP, wy)) / (2 * STEP);
-    const dy = (terrain.getHeightAt(wx, wy + STEP) - terrain.getHeightAt(wx, wy - STEP)) / (2 * STEP);
+    const dx = (this.sampleHeight(terrain,wx + STEP, wy) - this.sampleHeight(terrain,wx - STEP, wy)) / (2 * STEP);
+    const dy = (this.sampleHeight(terrain,wx, wy + STEP) - this.sampleHeight(terrain,wx, wy - STEP)) / (2 * STEP);
 
     // Surface normal (unnormalised, z = 1)
     const nx = -dx;

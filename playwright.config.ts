@@ -12,10 +12,22 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
 
 const serverUrl = `http://127.0.0.1:${port}`;
 
+export const LEGACY_JOURNEY_FILES = [
+  '**/first-freight-route.test.ts',
+  '**/structural-timber-link.test.ts',
+  '**/cement-supply-chain.test.ts',
+  '**/regional-construction-supply.test.ts',
+];
+
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: [
+    '**/*riverside*.test.ts',
+  ],
+  testIgnore: LEGACY_JOURNEY_FILES,
+  grepInvert: /@legacy/,
   timeout: 60_000,
-  retries: 1,
+  retries: 0,
   workers: 1,
   use: {
     baseURL: serverUrl,

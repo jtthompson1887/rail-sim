@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { EventBus } from '../services/EventBus';
+import { WorldManager } from '../managers/WorldManager';
+import { isRiverside } from '../region/RiversideRegion';
 import { isMobileWidth, scalePx, responsiveFontSize } from '../utils/responsive';
 
 /** All editor tools, including pan and eraser from the new framework. */
@@ -158,7 +160,7 @@ export class EditorToolbar {
     this.background = scene.add.rectangle(
       this.panelWidth / 2, height / 2,
       this.panelWidth, height,
-      0x06131f, 0.95,
+      0x183b34, 0.95,
     ).setScrollFactor(0).setDepth(599);
 
     this.border = scene.add.rectangle(
@@ -204,7 +206,8 @@ export class EditorToolbar {
     const shortcutSize = responsiveFontSize(8, width, height, 7, 8);
     let y = 12;
 
-    // ── Mode toggle button (top) ───────────────────────────────────────────
+    // Managed Riverside services run independently of construction mode.
+    if (!isRiverside(WorldManager.world)) {
     const modeBg = this.scene.add.rectangle(w / 2, y + btnSize / 2, w - 4, btnSize - 4, 0x1a6e3c, 0.9)
       .setStrokeStyle(1, 0x4ade80, 0.6)
       .setScrollFactor(0).setDepth(600)
@@ -220,6 +223,7 @@ export class EditorToolbar {
     this.allObjects.push(modeText);
 
     y += btnSize + 8;
+    }
 
     // ── Thin separator ────────────────────────────────────────────────────
     this.addDivider(y);
@@ -228,39 +232,40 @@ export class EditorToolbar {
     // ── Tool groups ────────────────────────────────────────────────────────
     for (let g = 0; g < TOOL_GROUPS.length; g++) {
       for (const entry of TOOL_GROUPS[g]) {
+        if (isRiverside(WorldManager.world) && (disabledConstructionToolReason(entry.tool) || entry.tool === 'place-vehicle')) continue;
         const bx = w / 2;
         const by = y + btnSize / 2;
         const disabled = disabledConstructionToolReason(entry.tool) !== null;
 
-        const activebar = this.scene.add.rectangle(2, by, 4, btnSize - 8, 0x2a8cff, 1)
+        const activebar = this.scene.add.rectangle(2, by, 4, btnSize - 8, 0xe0c58a, 1)
           .setScrollFactor(0).setDepth(600).setAlpha(0);
         this.allObjects.push(activebar);
 
-        const bg = this.scene.add.rectangle(bx, by, w - 4, btnSize - 4, 0x1a3a5c, 0.85)
+        const bg = this.scene.add.rectangle(bx, by, w - 4, btnSize - 4, 0x34574b, 0.85)
           .setStrokeStyle(1, 0xffffff, 0.1)
           .setScrollFactor(0).setDepth(600)
           .setInteractive({ useHandCursor: !disabled })
           .on('pointerover', () => {
-            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x1e4a6e, 0.95);
+            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x486d5a, 0.95);
           })
           .on('pointerout', () => {
-            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x1a3a5c, 0.85);
+            if (!disabled && this.activeTool !== entry.tool) bg.setFillStyle(0x34574b, 0.85);
           })
           .on('pointerdown', () => this.selectTool(entry.tool));
         this.allObjects.push(bg);
 
         const iconText = this.scene.add.text(bx, by - (mobile ? 4 : 6), entry.icon, {
-          fontFamily: 'Verdana', fontSize: iconSize, color: '#d0e8ff',
+          fontFamily: 'Verdana', fontSize: iconSize, color: '#eee8d2',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
         this.allObjects.push(iconText);
 
         const labelText = this.scene.add.text(bx, by + (mobile ? 6 : 8), mobile ? '' : entry.label, {
-          fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
+          fontFamily: 'Verdana', fontSize: labelSize, color: '#c5d0b6',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
         this.allObjects.push(labelText);
 
         const shortcutText = this.scene.add.text(bx + w / 2 - 10, by - btnSize / 2 + 4, entry.shortcut ?? '', {
-          fontFamily: 'Verdana', fontSize: shortcutSize, color: '#4a6a8a',
+          fontFamily: 'Verdana', fontSize: shortcutSize, color: '#91a78d',
         }).setOrigin(1, 0).setScrollFactor(0).setDepth(601);
         this.allObjects.push(shortcutText);
 
@@ -293,17 +298,17 @@ export class EditorToolbar {
 
     // Undo button
     const undoY = y + btnSize / 2;
-    this.undoBg = this.scene.add.rectangle(w / 2, undoY, w - 8, btnSize - 8, 0x1a3a5c, 0.5)
+    this.undoBg = this.scene.add.rectangle(w / 2, undoY, w - 8, btnSize - 8, 0x34574b, 0.5)
       .setStrokeStyle(1, 0xffffff, 0.1)
       .setScrollFactor(0).setDepth(600)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => { if (this.undoEnabled) this.undoBg.setFillStyle(0x1e4a6e, 0.8); })
-      .on('pointerout', () => this.undoBg.setFillStyle(0x1a3a5c, 0.5))
+      .on('pointerover', () => { if (this.undoEnabled) this.undoBg.setFillStyle(0x486d5a, 0.8); })
+      .on('pointerout', () => this.undoBg.setFillStyle(0x34574b, 0.5))
       .on('pointerdown', () => { if (this.undoEnabled) EventBus.emit('editor:undo', {}); });
     this.allObjects.push(this.undoBg);
 
     const undoText = this.scene.add.text(w / 2, undoY, '↩ Undo', {
-      fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
+      fontFamily: 'Verdana', fontSize: labelSize, color: '#c5d0b6',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
     this.allObjects.push(undoText);
 
@@ -311,17 +316,17 @@ export class EditorToolbar {
 
     // Redo button
     const redoY = y + btnSize / 2;
-    this.redoBg = this.scene.add.rectangle(w / 2, redoY, w - 8, btnSize - 8, 0x1a3a5c, 0.5)
+    this.redoBg = this.scene.add.rectangle(w / 2, redoY, w - 8, btnSize - 8, 0x34574b, 0.5)
       .setStrokeStyle(1, 0xffffff, 0.1)
       .setScrollFactor(0).setDepth(600)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => { if (this.redoEnabled) this.redoBg.setFillStyle(0x1e4a6e, 0.8); })
-      .on('pointerout', () => this.redoBg.setFillStyle(0x1a3a5c, 0.5))
+      .on('pointerover', () => { if (this.redoEnabled) this.redoBg.setFillStyle(0x486d5a, 0.8); })
+      .on('pointerout', () => this.redoBg.setFillStyle(0x34574b, 0.5))
       .on('pointerdown', () => { if (this.redoEnabled) EventBus.emit('editor:redo', {}); });
     this.allObjects.push(this.redoBg);
 
     const redoText = this.scene.add.text(w / 2, redoY, '↪ Redo', {
-      fontFamily: 'Verdana', fontSize: labelSize, color: '#8ab4d0',
+      fontFamily: 'Verdana', fontSize: labelSize, color: '#c5d0b6',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601);
     this.allObjects.push(redoText);
 
@@ -399,7 +404,7 @@ export class EditorToolbar {
     for (const ref of this.toolButtons) {
       const isActive = ref.tool === tool;
       ref.activebar.setAlpha(isActive ? 1 : 0);
-      ref.bg.setFillStyle(isActive ? 0x1e4a7c : 0x1a3a5c, isActive ? 0.95 : 0.85);
+      ref.bg.setFillStyle(isActive ? 0x1e4a7c : 0x34574b, isActive ? 0.95 : 0.85);
     }
     EventBus.emit('tool:changed', { tool });
   }

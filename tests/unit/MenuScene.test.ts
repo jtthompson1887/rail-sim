@@ -1,272 +1,142 @@
-/**
- * Unit tests for MenuScene – focused on depth/z-order configuration so that
- * menu trains render behind the UI panel and do not flicker.
- */
-
 import MenuScene from '../../src/scenes/MenuScene';
-import { GameConfig } from '../../src/config/GameConfig';
-
-jest.mock('../../src/entities/Background', () => {
-  return jest.fn().mockImplementation(() => ({
-    setDepth: jest.fn(),
-  }));
-});
-
-jest.mock('../../src/systems/CameraController', () => {
-  return {
-    CameraController: jest.fn().mockImplementation(() => ({
-      stopFollow: jest.fn(),
-      update: jest.fn(),
-    })),
-  };
-});
+import { SaveService } from '../../src/services/SaveService';
 
 jest.mock('../../src/services/SaveService', () => ({
   SaveService: {
-    getLastPlayedWorldId: jest.fn().mockReturnValue(null),
-    hasSave: jest.fn().mockReturnValue(false),
+    getLastPlayedWorldId: jest.fn(() => null),
+    loadWorld: jest.fn(() => null),
+    saveWorld: jest.fn(() => true),
   },
 }));
 
-function buildScene() {
-  const listeners: Record<string, Function[]> = {};
+jest.mock('../../src/region/RiversideRegion', () => ({
+  createRiversideRegion: jest.fn(() => ({ id: 'brookford-test', name: 'Brookford' })),
+}));
 
-  const fluentStub = () => ({
-    setStrokeStyle: jest.fn().mockReturnThis(),
-    setDepth: jest.fn().mockReturnThis(),
-    setScrollFactor: jest.fn().mockReturnThis(),
-    setInteractive: jest.fn().mockReturnThis(),
-    setVisible: jest.fn().mockReturnThis(),
-    setAlpha: jest.fn().mockReturnThis(),
-    setFillStyle: jest.fn().mockReturnThis(),
-    setOrigin: jest.fn().mockReturnThis(),
-    setText: jest.fn().mockReturnThis(),
-    setColor: jest.fn().mockReturnThis(),
-    setShadow: jest.fn().mockReturnThis(),
-    on: jest.fn().mockReturnThis(),
-    off: jest.fn().mockReturnThis(),
-    add: jest.fn().mockReturnThis(),
-    destroy: jest.fn(),
-    _children: [],
-    height: 60,
-  });
-
-  const scene: any = {};
-  scene.add = {
-    existing: jest.fn((obj: any) => {
-      return obj;
-    }),
-    image: jest.fn().mockReturnValue({
-      setOrigin: jest.fn().mockReturnThis(),
-      setScale: jest.fn().mockReturnThis(),
-      setDepth: jest.fn().mockReturnThis(),
-      rotation: 0,
-    }),
-    text: jest.fn().mockReturnValue(fluentStub()),
-    graphics: jest.fn().mockReturnValue({
-      setDepth: jest.fn().mockReturnThis(),
-      lineStyle: jest.fn().mockReturnThis(),
-      fillStyle: jest.fn().mockReturnThis(),
-      beginPath: jest.fn().mockReturnThis(),
-      moveTo: jest.fn().mockReturnThis(),
-      lineTo: jest.fn().mockReturnThis(),
-      strokePath: jest.fn().mockReturnThis(),
-      fillPath: jest.fn().mockReturnThis(),
-      fillCircle: jest.fn().mockReturnThis(),
-      fillRect: jest.fn().mockReturnThis(),
-      strokeRect: jest.fn().mockReturnThis(),
-      clear: jest.fn().mockReturnThis(),
-      destroy: jest.fn(),
-    }),
-    rectangle: jest.fn().mockReturnValue(fluentStub()),
-    container: jest.fn().mockReturnValue(fluentStub()),
-  };
-  scene.matter = {
-    add: {
-      image: jest.fn().mockImplementation((x: number, y: number, key: string) => {
-        const img: Record<string, any> = {
-          x: x || 0,
-          y: y || 0,
-          _key: key || '',
-          displayWidth: 100,
-          displayHeight: 50,
-          angle: 0,
-          _depth: 0,
-          setMass: jest.fn().mockReturnValue(undefined as any),
-          setFrictionAir: jest.fn().mockReturnValue(undefined as any),
-          // Use arrow so we can close over `img` without `this` implicit-any.
-          setAngle: jest.fn().mockImplementation((a: number) => { img.angle = a; return img; }),
-          setPosition: jest.fn().mockReturnValue(undefined as any),
-          setScale: jest.fn().mockReturnValue(undefined as any),
-          setTexture: jest.fn().mockReturnValue(undefined as any),
-          clearTint: jest.fn().mockReturnValue(undefined as any),
-          setTint: jest.fn().mockReturnValue(undefined as any),
-          setDepth: jest.fn().mockImplementation((d: number) => { img._depth = d; return img; }),
-          setInteractive: jest.fn().mockReturnThis(),
-          setVelocity: jest.fn().mockReturnThis(),
-          setAngularVelocity: jest.fn().mockReturnThis(),
-          setExistingBody: jest.fn().mockReturnThis(),
-          scene,
-          parentTrain: undefined,
-          body: {
-            position: { x: x || 0, y: y || 0 },
-            mass: 1000,
-            force: { x: 0, y: 0 },
-            isStatic: false,
-            friction: 0,
-            restitution: 0,
-            frictionAir: 0.015,
-            angle: 0,
-            anglePrev: 0,
-            angularVelocity: 0,
-            velocity: { x: 0, y: 0 },
-            positionPrev: { x: x || 0, y: y || 0 },
-            inertia: 1000,
-          },
-        };
-        return img;
-      }),
-    },
-    bodies: {
-      rectangle: jest.fn().mockReturnValue({
-        position: { x: 0, y: 0 },
-        mass: 1000,
-        force: { x: 0, y: 0 },
-        isStatic: false,
-        friction: 0,
-        restitution: 0,
-        angle: 0,
-      }),
-    },
-    world: {
-      remove: jest.fn(),
-      get scene() { return scene; },
-    },
-  };
-  scene.cameras = {
-    main: {
-      scrollX: 0, scrollY: 0, zoom: 1, width: 1920, height: 1080,
-      setBounds: jest.fn(),
-      setZoom: jest.fn(),
-      centerOn: jest.fn(),
-      getWorldPoint: jest.fn((x: number, y: number) => ({ x, y })),
-      startFollow: jest.fn(),
-      stopFollow: jest.fn(),
-    },
-  };
-  scene.scale = { width: 1920, height: 1080 };
-  scene.input = {
-    keyboard: {
-      addKey: jest.fn().mockReturnValue({ isDown: false }),
-      createCursorKeys: jest.fn().mockReturnValue({
-        left: { isDown: false },
-        right: { isDown: false },
-        up: { isDown: false },
-        down: { isDown: false },
-      }),
-      on: jest.fn(),
-      once: jest.fn(),
-    },
-    on: jest.fn((evt: string, cb: Function) => {
-      if (!listeners[evt]) listeners[evt] = [];
-      listeners[evt].push(cb);
-    }),
-    setDraggable: jest.fn(),
-    addPointer: jest.fn(),
-  };
-  scene.events = {
-    once: jest.fn(),
-    on: jest.fn(),
-    emit: jest.fn(),
-  };
-  scene.tweens = {
-    add: jest.fn(),
-  };
-  scene.sound = {
-    volume: 1,
-    mute: false,
-    add: jest.fn().mockReturnValue({ play: jest.fn(), stop: jest.fn() }),
-    play: jest.fn(),
-  };
-  scene.cache = { audio: { exists: jest.fn().mockReturnValue(false) } };
-  scene.game = { canvas: document.createElement('canvas') };
-  scene.make = {
-    tilemap: jest.fn().mockReturnValue({
-      addTilesetImage: jest.fn().mockReturnValue({}),
-      createBlankLayer: jest.fn().mockReturnValue({
-        setScale: jest.fn(),
-        putTileAt: jest.fn(),
-      }),
-    }),
-  };
-  scene.scene = {
-    start: jest.fn(),
-  };
-  return scene;
+function button(label: string): HTMLButtonElement {
+  return document.querySelector(`button[aria-label="${label}"]`)!;
 }
 
-describe('MenuScene', () => {
-  it('positions demo trains behind the UI panel so they do not flicker', () => {
-    const scene = buildScene();
-    const menu = new MenuScene();
-    // Transplant the mocked scene guts onto the MenuScene instance
-    Object.assign(menu, scene);
+function createMenu() {
+  const canvas = document.createElement('canvas');
+  document.body.append(canvas);
+  const start = jest.fn();
+  let shutdown: () => void = () => {};
+  const menu = new MenuScene();
+  Object.assign(menu, {
+    game: { canvas },
+    scene: { start },
+    events: { once: jest.fn((_event, handler) => { shutdown = handler; }) },
+  });
+  menu.create();
+  return { start, shutdown: () => { shutdown(); canvas.remove(); } };
+}
 
-    // Call create – if any mock is missing the test will throw and fail
-    (menu as any).create();
-
-    const trains = (menu as any).trains;
-    expect(trains).toHaveLength(2);
-
-    for (const train of trains) {
-      // The UI panel sits at depth 100; trains must be lower to avoid
-      // z-fighting / flickering.
-      expect(train._depth).toBeLessThan(100);
-      expect(train.getMatterBody()._depth).toBeLessThan(100);
-    }
+describe('Main menu navigation and lifecycle', () => {
+  let current: ReturnType<typeof createMenu> | undefined;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (SaveService.getLastPlayedWorldId as jest.Mock).mockReturnValue(null);
+    (SaveService.loadWorld as jest.Mock).mockReturnValue(null);
+    (SaveService.saveWorld as jest.Mock).mockReturnValue(true);
+  });
+  afterEach(() => {
+    current?.shutdown();
+    current = undefined;
+    document.body.replaceChildren();
+    delete (window as any).matchMedia;
   });
 
-  it('stores engine powers so recovery can restore them', () => {
-    const scene = buildScene();
-    const menu = new MenuScene();
-    Object.assign(menu, scene);
-
-    (menu as any).create();
-
-    const powers: number[] = (menu as any).trainEnginePowers;
-    expect(powers).toHaveLength(2);
-    // Verify the stored powers match what was assigned at create time.
-    expect(powers[0]).toBe(GameConfig.TRAIN.ENGINE_POWER * 0.18);
-    expect(powers[1]).toBe(GameConfig.TRAIN.ENGINE_POWER * 0.16);
+  it('starts a new railway without requiring an existing save', () => {
+    current = createMenu();
+    expect(button('Continue').disabled).toBe(true);
+    button('Play Brookford').click();
+    button('Play Brookford').click();
+    expect(current.start).toHaveBeenCalledTimes(1);
+    expect(current.start).toHaveBeenCalledWith('WorldScene', { worldId: 'brookford-test', mode: 'create' });
   });
 
-  it('snaps position/angle before recover() and restores engine power', () => {
-    const scene = buildScene();
-    const menu = new MenuScene();
-    Object.assign(menu, scene);
-    (menu as any).create();
+  it('keeps navigation usable and explains a failed quick-start save', () => {
+    (SaveService.saveWorld as jest.Mock).mockReturnValue(false);
+    current = createMenu();
+    button('Play Brookford').click();
+    expect(current.start).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('[role="alert"]')!.hidden).toBe(false);
+    button('Your railways').click();
+    expect(current.start).toHaveBeenCalledWith('WorldSelectScene');
+  });
 
-    const trains: any[] = (menu as any).trains;
-    const train = trains[0];
+  it.each([
+    ['Your railways', 'WorldSelectScene'],
+    ['Settings', 'SettingsScene'],
+  ])('opens %s', (label, destination) => {
+    current = createMenu();
+    button(label).click();
+    expect(current.start).toHaveBeenCalledWith(destination);
+  });
 
-    // Simulate derailment: mark the train as derailed, move it away.
-    train._derailed = true;
-    train.getMatterBody().x = 9999;
-    train.getMatterBody().y = 9999;
-    // Zero out the engine power to confirm recovery restores it.
-    train._enginePower = 0;
+  it('continues the actual last world and safely displays its name', () => {
+    (SaveService.getLastPlayedWorldId as jest.Mock).mockReturnValue('river-17');
+    (SaveService.loadWorld as jest.Mock).mockReturnValue({ name: '<img src=x onerror=alert(1)>' });
+    current = createMenu();
+    const continueButton = button('Continue');
+    expect(continueButton.disabled).toBe(false);
+    expect(continueButton.textContent).toContain('<img src=x onerror=alert(1)>');
+    expect(continueButton.querySelector('img')).toBeNull();
+    continueButton.click();
+    expect(current.start).toHaveBeenCalledWith('WorldScene', { worldId: 'river-17', mode: 'create' });
+  });
 
-    const recoverSpy = jest.spyOn(train, 'recover');
-    const setPosSpy  = jest.spyOn(train.getMatterBody(), 'setPosition');
+  it('does not advertise Continue for a stale or incompatible save', () => {
+    (SaveService.getLastPlayedWorldId as jest.Mock).mockReturnValue('missing');
+    current = createMenu();
+    expect(button('Continue').disabled).toBe(true);
+    button('Continue').click();
+    expect(current.start).not.toHaveBeenCalled();
+  });
 
-    (menu as any).recoverTrain(train, 0);
+  it('returns to the library if the save disappears while the menu is open', () => {
+    (SaveService.getLastPlayedWorldId as jest.Mock).mockReturnValue('river-17');
+    (SaveService.loadWorld as jest.Mock).mockReturnValueOnce({ name: 'Northmere' });
+    current = createMenu();
+    button('Continue').click();
+    expect(current.start).toHaveBeenCalledWith('WorldSelectScene');
+  });
 
-    // setPosition must be called BEFORE recover().
-    const posCallOrder     = setPosSpy.mock.invocationCallOrder[0];
-    const recoverCallOrder = recoverSpy.mock.invocationCallOrder[0];
-    expect(posCallOrder).toBeLessThan(recoverCallOrder);
+  it('preserves the Enter library shortcut, then removes it on shutdown', () => {
+    current = createMenu();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(current.start).toHaveBeenCalledWith('WorldSelectScene');
+    current.shutdown();
+    current.start.mockClear();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(current.start).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="main-menu"]')).toBeNull();
+  });
 
-    // Engine power must be restored after recovery.
-    expect(train._enginePower).toBe(GameConfig.TRAIN.ENGINE_POWER * 0.18);
+  it('leaves focused button activation to the browser instead of opening the library', () => {
+    current = createMenu();
+    const settings = button('Settings');
+    settings.focus();
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    settings.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(current.start).not.toHaveBeenCalled();
+  });
+
+  it('honours reduced motion, supports an explicit override and releases listeners', () => {
+    const addEventListener = jest.fn();
+    const removeEventListener = jest.fn();
+    window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener, removeEventListener });
+    current = createMenu();
+    const root = document.querySelector<HTMLElement>('[data-testid="main-menu"]')!;
+    expect(root.dataset.motion).toBe('paused');
+    button('Play scenery').click();
+    expect(root.dataset.motion).toBe('playing');
+    expect(current.start).not.toHaveBeenCalled();
+    addEventListener.mock.calls[0][1]({ matches: true });
+    expect(root.dataset.motion).toBe('paused');
+    current.shutdown();
+    expect(removeEventListener).toHaveBeenCalledWith('change', addEventListener.mock.calls[0][1]);
   });
 });

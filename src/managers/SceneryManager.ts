@@ -5,6 +5,7 @@ import { SceneryGenerator } from '../systems/SceneryGenerator';
 import type { TerrainGenerator } from '../systems/TerrainGenerator';
 import type { SceneryObjectDef, BiomeType } from '../config/WorldData';
 import { WorldManager } from './WorldManager';
+import { isRiverside } from '../region/RiversideRegion';
 
 const CHUNK = GameConfig.WORLD.CHUNK_SIZE;
 const HALF_W = GameConfig.TERRAIN.WORLD_WIDTH / 2;
@@ -138,14 +139,15 @@ export class SceneryManager {
     }
 
     // Use persisted defs if the player has manually edited this chunk
-    if (world && world.scenery.length > 0) {
+    if (world && (world.scenery.length > 0 || isRiverside(world))) {
       const persisted = world.scenery.filter(
         (s) => s.x >= -HALF_W && s.x < HALF_W &&
                 s.y >= -HALF_H && s.y < HALF_H &&
                 s.x >= chunkX && s.x < chunkX + CHUNK &&
                 s.y >= chunkY && s.y < chunkY + CHUNK,
       );
-      if (persisted.length > 0) return persisted;
+      // Authored clear ground is intentional, including chunks without a single tree.
+      if (persisted.length > 0 || isRiverside(world)) return persisted;
     }
 
     // Fall back to procedural generation

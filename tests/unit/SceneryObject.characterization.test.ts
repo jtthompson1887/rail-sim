@@ -27,7 +27,7 @@ function definition(type: SceneryType, variant = 1): SceneryObjectDef {
 }
 
 describe('SceneryObject rendering contract', () => {
-  it('adds the procedural drawing to the scene with the persisted transform and painter depth', () => {
+  it('preserves authored transforms with a bounded overhead layer below the train fleet', () => {
     const scene = makeScene();
     const gfx = drawingSurface();
     scene.add.graphics.mockReturnValue(gfx);
@@ -40,33 +40,37 @@ describe('SceneryObject rendering contract', () => {
       x: 120,
       y: 340,
       rotation: Math.PI / 5,
-      _depth: 34,
+      _depth: 20.034,
       displayWidth: 125,
       displayHeight: 62.5,
     });
   });
 
-  it.each([
-    ['tree_oak', 'fillEllipse', 3],
-    ['tree_pine', 'fillTriangle', 4],
-    ['tree_birch', 'fillRect', 4],
-    ['tree_dead', 'strokePath', 4],
-    ['rock_boulder', 'fillPoints', 1],
-    ['rock_outcrop', 'fillRect', 6],
-    ['rock_cluster', 'fillEllipse', 4],
-    ['terrain_pond', 'strokeEllipse', 1],
-    ['terrain_cliff', 'strokePath', 5],
-    ['terrain_mound', 'fillEllipse', 3],
-  ] as Array<[SceneryType, string, number]>)(
-    'draws %s with its distinguishing primitive and variant-dependent count',
-    (type, primitive, expectedCalls) => {
+  it.each(['tree_oak', 'tree_pine', 'tree_birch', 'tree_dead', 'rock_boulder', 'rock_outcrop',
+    'rock_cluster', 'terrain_pond', 'terrain_cliff', 'terrain_mound'] as SceneryType[])(
+    'draws %s without standing side-view tree triangles',
+    (type) => {
       const scene = makeScene();
       const gfx = drawingSurface();
       scene.add.graphics.mockReturnValue(gfx);
 
       new SceneryObject(scene, definition(type));
 
-      expect(gfx[primitive]).toHaveBeenCalledTimes(expectedCalls);
+      expect(gfx.fillStyle).toHaveBeenCalled();
+      expect(gfx.fillTriangle).not.toHaveBeenCalled();
     },
   );
+
+  it('keeps the tree shadow in the same world direction under authored rotation and scale', () => {
+    for (const rotation of [0, Math.PI / 2, Math.PI]) {
+      const scene = makeScene(), gfx = drawingSurface();
+      scene.add.graphics.mockReturnValue(gfx);
+      new SceneryObject(scene, { ...definition('tree_oak'), rotation, scale: 2 });
+      const [sx, sy] = gfx.fillEllipse.mock.calls[1];
+      const worldX = 2 * (sx * Math.cos(rotation) - sy * Math.sin(rotation));
+      const worldY = 2 * (sx * Math.sin(rotation) + sy * Math.cos(rotation));
+      expect(worldX).toBeCloseTo(8);
+      expect(worldY).toBeCloseTo(10);
+    }
+  });
 });

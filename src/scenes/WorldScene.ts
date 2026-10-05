@@ -70,6 +70,8 @@ import {
 } from '../freight/RailAccessConnectivity';
 import { TrainSerializer } from '../utils/TrainSerializer';
 import { RailwayController } from '../management/RailwayController';
+import { isRiverside } from '../region/RiversideRegion';
+import { drawRiversideVillage } from '../presentation/RiversidePresentation';
 import { SaveService } from '../services/SaveService';
 import type { WorldData } from '../config/WorldData';
 import type {
@@ -299,6 +301,7 @@ export default class WorldScene extends Phaser.Scene {
   };
 
   private readonly cabStateHandler = ({ active }: { active: boolean }) => {
+    if (!active && isRiverside(WorldManager.world) && GameStateManager.worldMode === 'play') GameStateManager.returnToCreate();
     this.railway?.setVisible(!active);
     this.cameraController.setInputLockOwner(active ? 'ui' : 'camera');
     this.scene.setVisible(!active);
@@ -767,6 +770,10 @@ export default class WorldScene extends Phaser.Scene {
 
     // ESC → pause in play mode
     this.input.keyboard.on('keydown-ESC', () => {
+      if (isRiverside(WorldManager.world) && this.activeTool !== 'place-track') {
+        this.railway?.showCompany();
+        return;
+      }
       if (GameStateManager.worldMode === 'play' && GameStateManager.state === 'playing') {
         GameStateManager.pause();
         EventBus.emit('ui:pause-visible', { visible: true });
@@ -812,6 +819,7 @@ export default class WorldScene extends Phaser.Scene {
     this.pendingStartupSaveError = null;
 
     this.applyStarterOpportunityCamera();
+    if (isRiverside(world)) drawRiversideVillage(this);
     this.renderStarterOpportunitySurvey();
     this.renderFacilities();
     EventBus.emit('ui:freight-purchase-state', {
@@ -829,6 +837,13 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Frame the persisted planning opportunity without regenerating it. */
   private applyStarterOpportunityCamera(): void {
+    if (isRiverside(WorldManager.world)) {
+      const inspectorWidth=this.scale.width>1100?390:0;
+      const zoom=clampCameraZoom(Math.min((this.scale.width-inspectorWidth-110)/5550,(this.scale.height-110)/3100));
+      this.cameras.main.setZoom(zoom);
+      this.cameras.main.centerOn(3090+inspectorWidth/(2*zoom),1900);
+      return;
+    }
     const recommendation = WorldManager.world?.starterOpportunity.recommendedCamera;
     if (!recommendation) return;
     const viewportScale = Math.min(
@@ -853,6 +868,7 @@ export default class WorldScene extends Phaser.Scene {
 
   /** Draw survey-only guidance; this deliberately creates no RailTrack objects. */
   private renderStarterOpportunitySurvey(): void {
+    if (isRiverside(WorldManager.world)) return;
     const opportunity = WorldManager.world?.starterOpportunity;
     if (!opportunity) return;
     const zoom = this.cameras.main.zoom;
@@ -1222,6 +1238,11 @@ export default class WorldScene extends Phaser.Scene {
   private advanceFirstRouteFixedTicks(count: number): void {
     if (!Number.isSafeInteger(count) || count < 0 || count > 10_000) {
       throw new RangeError('Fixed tick count must be between 0 and 10,000');
+    }
+    if (this.railway?.active) {
+      this.railway.advanceForAcceptance(count);
+      this.publishHUDState();
+      return;
     }
     if (GameStateManager.worldMode !== 'play'
       || GameStateManager.state !== 'playing') {
@@ -1882,8 +1903,9 @@ export default class WorldScene extends Phaser.Scene {
     this.handledKeyboardEvents.add(event);
     if (isGameplayInputFocused(event.target as Element | null)) return;
 
-    if (GameStateManager.worldMode === 'play' && GameConfig.CAB3D.ENABLED) {
+    if ((GameStateManager.worldMode === 'play' || isRiverside(WorldManager.world)) && GameConfig.CAB3D.ENABLED) {
       if (event.code === `Key${GameConfig.CAB3D.TOGGLE_KEY}` && !event.ctrlKey && !event.altKey) {
+        if (isRiverside(WorldManager.world) && GameStateManager.worldMode === 'create') GameStateManager.enterPlay(WorldManager.currentWorldId ?? '');
         EventBus.emit('cab:toggle', {});
         return;
       }

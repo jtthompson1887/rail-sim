@@ -22,6 +22,8 @@ import { EventBus } from '../services/EventBus';
 import { TrackArcLengthIndex } from '../physics/TrackArcLengthIndex';
 import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import { FleetPresentation } from './FleetPresentation';
+import { isRiverside, createRiversideReliefDraft } from '../region/RiversideRegion';
+import { drawNeighbourhood } from '../presentation/NeighbourhoodArt';
 
 export interface RailwayScenePort {
   scene: Phaser.Scene;
@@ -60,7 +62,7 @@ export class RailwayController {
       world:()=>WorldManager.world,enable:()=>this.enable(),speed:s=>this.speed(s),service:s=>this.service(s),removeService:id=>this.removeService(id),
       acceptProject:(id,station)=>this.project(id,station),buyTrain:(family,set,track,t)=>this.buy(family,set,track,t),station:(name,track,t,len)=>this.station(name,track,t,len),
       electrify:id=>this.electrify(id),captureDraft:()=>this.captureDraft(),sketch:(a,b,bend)=>this.sketch(a,b,bend),
-      passingLoop:(a,b,side)=>{const w=WorldManager.world!,from=w.economy.facilities.find(f=>f.id===a),to=w.economy.facilities.find(f=>f.id===b);if(!from||!to||a===b)throw new Error('Choose two different access points.');const fit=sketchPassingLoop(w,port.terrain,from.railAccess,to.railAccess,side);if(fit.ok===false)throw new Error(fit.message);return fit.draft;},
+      passingLoop:(a,b,side)=>{const w=WorldManager.world!;if(isRiverside(w))return createRiversideReliefDraft(w);const from=w.economy.facilities.find(f=>f.id===a),to=w.economy.facilities.find(f=>f.id===b);if(!from||!to||a===b)throw new Error('Choose two different access points.');const fit=sketchPassingLoop(w,port.terrain,from.railAccess,to.railAccess,side);if(fit.ok===false)throw new Error(fit.message);return fit.draft;},
       draftStation:(d,name,track,t,len)=>{const proposed=this.draftWorld(d);const added=createPlatformProposal(proposed,name,track,t,len);const next=clonePlainData(d);next.stations.push(added.station);return next;},
       draftTrain:(d,family,set,track,t)=>{const added=createFleetProposal(this.draftWorld(d),family,set,track,t);const next=clonePlainData(d);next.trains.push(added.train);return next;},
       draftService:(d,service)=>{const proposed=this.draftWorld(d),session=new SimulationSession(proposed);for(const existing of d.services)session.upsertService(existing);const added=session.upsertService(service);if(!added.ok)throw new Error(added.errors[0]);const next=clonePlainData(d);next.services.push(service);return next;},
@@ -70,6 +72,7 @@ export class RailwayController {
       exportWorld:async()=>{await port.save();return SaveService.exportWorld(WorldManager.world!);},
       importWorld:async text=>{const imported=SaveService.importWorld(text);if(!imported)return 'Import failed. The current world is unchanged.';await SaveService.flush();return 'Imported '+imported.name+'. Open it from the world picker.';},
       style:(name,colour)=>{this.mutate(w=>{w.companyStyle={name:name.trim().slice(0,80)||w.name,colour};w.trains.forEach(t=>t.livery=colour);return true;});},
+      returnToMenu:async()=>{this.speed(0);if(!await port.save())return false;port.scene.scene.stop('HUDScene');port.scene.scene.stop('DebugOverlayScene');port.scene.scene.start('MenuScene');return true;},
     });
     if(this.legacyFixture)this.panel.setVisible(false);
     void installAppLifecycle({onBackground:async()=>{this.speed(0);await port.save();},onForeground:()=>{this.panel.refresh(0,true);}}).then(remove=>{if(this.destroyed)remove();else this.removeLifecycle=remove;});
@@ -77,7 +80,21 @@ export class RailwayController {
     EventBus.on('app:prepare-close',this.closeHandler);EventBus.on('ui:pause-visible',this.pausePanelHandler);
   }
   get active(): boolean { return !!WorldManager.world?.management; }
+  showCompany():void { this.speed(0);this.panel.showCompany(); }
   controlledTrainIds(): ReadonlySet<string> { return new Set(this.active ? WorldManager.world!.trains.map(t=>t.id) : []); }
+  /** Bounded deterministic stepping for the short playable smoke; absent from ordinary player controls. */
+  advanceForAcceptance(seconds:number):void {
+    if(typeof __RAIL_SIM_TEST_CONTROLS__==='undefined'||!__RAIL_SIM_TEST_CONTROLS__)throw new Error('Acceptance controls are disabled.');
+    this.refreshSession();if(!this.session)return;
+    const world=WorldManager.world!,previousSpeed=world.management!.speed;
+    this.session.setSpeed(1);
+    for(let i=0;i<seconds*20;i++)this.session.advance(50);
+    this.session.setSpeed(previousSpeed);
+    if(!WorldManager.applySimulationSnapshot(world.revision,this.session.snapshot()))throw new Error('Acceptance snapshot failed validation.');
+    this.appliedRevision=WorldManager.world!.revision;
+    this.port.trains.applyManagedSnapshots(this.session.getTrainSnapshots());this.session.drainEvents();
+    this.panel.refresh(0,true);this.fleet.update(WorldManager.world!,0,this.session.presentationRoutes());this.visualKey='';this.draw(0);
+  }
   setVisible(visible:boolean):void{this.panel.setVisible(visible&&!this.legacyFixture);}
   destroy():void{this.destroyed=true;EventBus.off('app:prepare-close',this.closeHandler);EventBus.off('ui:pause-visible',this.pausePanelHandler);this.removeLifecycle?.();this.client.cancel();this.panel.destroy();this.fleet.destroy();this.graphics.destroy();}
   update(time:number,delta:number,runtime:readonly TrainRuntimeSnapshot[]):boolean{
@@ -166,7 +183,7 @@ export class RailwayController {
     const key=w.constructionRevision+':'+(w.region?.transformations.length??0)+':'+(this.draft?.id??'')+':'+(sample?.clockSeconds??'');if(key===this.visualKey)return;this.visualKey=key;
     this.graphics.clear();
     for(const track of this.draft?.tracks??[]){this.graphics.lineStyle(12,0x81dfd1,.65);this.graphics.beginPath();for(let i=0;i<=48;i++){const t=i/48,s=1-t,x=s**3*track.p0.x+3*s*s*t*track.p1.x+3*s*t*t*track.p2.x+t**3*track.p3.x,y=s**3*track.p0.y+3*s*s*t*track.p1.y+3*s*t*t*track.p2.y+t**3*track.p3.y;if(i===0)this.graphics.moveTo(x,y);else this.graphics.lineTo(x,y);}this.graphics.strokePath();}
-    if(w.region)for(const f of resolveTransformationFootprints(w.region,w.tracks,[...(this.draft?.tracks??[]),...(w.blueprints??[]).flatMap(d=>d.tracks)])){for(let i=0;i<f.buildingCount;i++){const a=i*2.4,r=Math.sqrt(i/f.buildingCount)*f.radius*.75,x=f.x+Math.cos(a)*r,y=f.y+Math.sin(a)*r;this.graphics.fillStyle(0x0c201b,.24);this.graphics.fillRoundedRect(x-16,y-16,52,40,5);this.graphics.fillStyle(f.colour,1);this.graphics.fillRoundedRect(x-22,y-24,44,34,4);this.graphics.lineStyle(2,0xffffff,.4);this.graphics.strokeRect(x-20,y-22,40,12);}}
+    if(w.region)for(const f of resolveTransformationFootprints(w.region,w.tracks,[...(this.draft?.tracks??[]),...(w.blueprints??[]).flatMap(d=>d.tracks)],f=>[[0,0],[f.radius,0],[-f.radius,0],[0,f.radius],[0,-f.radius]].every(([x,y])=>this.port.terrain.getHeightAt(f.x+x,f.y+y)>=0))){drawNeighbourhood(this.graphics,f);}
     if(sample)for(const t of sample.trains){this.graphics.fillStyle(0x92eee1,.7);this.graphics.fillCircle(t.x,t.y,28);this.graphics.lineStyle(4,0xebfffa,.8);this.graphics.lineBetween(t.x,t.y,t.x+Math.cos(t.angleRad)*60,t.y+Math.sin(t.angleRad)*60);}
   }
 }

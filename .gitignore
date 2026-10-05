@@ -8,6 +8,7 @@
 /test-results/
 /test-results-*/
 /full-game-*.log
+/riverside-*.log
 /playwright-report/
 /test_output*.txt
 /tmp_test*.txt

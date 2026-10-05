@@ -2668,7 +2668,7 @@ test.describe('regional construction supply browser journey', () => {
       });
   });
 
-  test('playtest-825 completes the regional chain through real controls', async ({
+  test('playtest-825 completes the regional chain through real controls @legacy', async ({
     page,
   }, testInfo) => {
     test.setTimeout(4_200_000);

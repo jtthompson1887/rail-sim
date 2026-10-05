@@ -1,159 +1,125 @@
-import { createLegacyWorld } from './helpers/CreateLegacyWorld';
-/**
- * E2E tests for the MenuScene.
- *
- * Verifies that:
- *  1. The game canvas loads and the MenuScene becomes active.
- *  2. The demo trains drive themselves around the circular track for at least
- *     five seconds without permanently derailing (derail count stays at 0).
- *
- * Run after building the project:
- *   npm run build && npx playwright test
- */
+import { test, expect, type Page } from '@playwright/test';
 
-import { test, expect } from '@playwright/test';
+async function openMenu(page: Page) {
+  await page.goto('/');
+  await expect(page.getByTestId('main-menu')).toBeVisible();
+  await expect.poll(() => page.locator('.rmm-art img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+}
+async function sceneIs(page: Page, name: string) {
+  await expect.poll(() => page.evaluate(key => window.__railSimGame.scene.isActive(key), name)).toBe(true);
+}
+async function backFromWorlds(page: Page, height: number) {
+  await page.locator('canvas').click({ position: { x: 70, y: height - 60 } });
+  await expect(page.getByTestId('main-menu')).toBeVisible();
+}
 
-const waitForRenderedFrame = async (page: import('@playwright/test').Page) => {
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
-};
-
-const menuTransitionActivity = async (
-  page: import('@playwright/test').Page,
-) => page.evaluate(() => {
-  const manager = window.__railSimGame.scene;
-  return {
-    menu: manager.isActive('MenuScene'),
-    worldSelect: manager.isActive('WorldSelectScene'),
-    world: manager.isActive('WorldScene'),
-    editorUI: manager.isActive('EditorUIScene'),
-    game: manager.isActive('GameScene'),
-    hud: manager.isActive('HUDScene'),
-    pause: manager.isActive('PauseScene'),
-    debug: manager.isActive('DebugOverlayScene'),
-  };
+test('desktop: artwork, pointer routes, keyboard focus and repeated scene cleanup', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openMenu(page);
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Pause scenery' }).click();
+  await page.mouse.move(1000, 30);
+  await page.screenshot({ path: testInfo.outputPath('main-menu-desktop.png') });
+  await page.getByRole('button', { name: 'Your railways', exact: true }).click();
+  await sceneIs(page, 'WorldSelectScene');
+  await expect(page.getByTestId('main-menu')).toHaveCount(0);
+  await backFromWorlds(page, 900);
+  await page.getByRole('button', { name: 'Your railways', exact: true }).click();
+  await sceneIs(page, 'WorldSelectScene');
+  await backFromWorlds(page, 900);
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Play Brookford', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('button', { name: 'Your railways', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await sceneIs(page, 'SettingsScene');
+  await expect(page.getByTestId('main-menu')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('main-menu')).toHaveCount(1);
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Space');
+  await sceneIs(page, 'SettingsScene');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('main-menu')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await sceneIs(page, 'WorldSelectScene');
+  expect(errors).toEqual([]);
 });
 
-test.describe('MenuScene – self-driving trains', () => {
-  test('opens Worlds with a real pointer after returning from play', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1920, height: 1400 });
-    await page.addInitScript(() => {
-      localStorage.clear();
-      sessionStorage.clear();
+test('opens Brookford, reloads the saved railway and continues it', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1920, height: 1400 });
+  await openMenu(page);
+  await page.getByRole('button', { name: 'Play Brookford', exact: true }).click();
+  await sceneIs(page, 'WorldScene');
+  await expect(page.getByTestId('company-hud')).toBeVisible();
+  await page.getByRole('button', { name: 'Company', exact: true }).click();
+  await page.getByRole('button', { name: 'Save world', exact: true }).click();
+  await expect(page.getByTestId('company-hud')).toContainText('Saved', { timeout: 30000 });
+  await page.reload();
+  await expect(page.getByTestId('main-menu')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
+  await expect(page.locator('.rmm-primary')).toContainText('Brookford');
+  await page.setViewportSize({ width: 1024, height: 640 });
+  await page.getByRole('button', { name: 'Pause scenery' }).click();
+  await page.screenshot({ path: testInfo.outputPath('main-menu-continue.png') });
+  for (const viewport of [{ width: 844, height: 390 }, { width: 668, height: 375 }]) {
+    await page.setViewportSize(viewport);
+    for (const button of await page.locator('.rail-main-menu button:visible').all()) {
+      const box = await button.boundingBox();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`main-menu-continue-${viewport.width}.png`) });
+  }
+  await page.setViewportSize({ width: 1024, height: 640 });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await sceneIs(page, 'WorldScene');
+  await expect(page.getByTestId('main-menu')).toHaveCount(0);
+  await expect(page.getByTestId('company-hud')).toBeVisible();
+});
+
+test('respects reduced motion and allows explicit scenery pause / play', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openMenu(page);
+  const art = page.locator('.rmm-art img');
+  await expect(art).toHaveCSS('animation-play-state', 'paused');
+  await page.getByRole('button', { name: 'Play scenery' }).click();
+  await expect(art).toHaveCSS('animation-play-state', 'running');
+  await page.getByRole('button', { name: 'Pause scenery' }).click();
+  await expect(art).toHaveCSS('animation-play-state', 'paused');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(art).toHaveCSS('animation-play-state', 'running');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(art).toHaveCSS('animation-play-state', 'paused');
+});
+
+test.describe('touch layout', () => {
+  test.use({ hasTouch: true });
+  for (const viewport of [{ width: 844, height: 390 }, { width: 668, height: 375 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
+    test(`${viewport.width}x${viewport.height}: controls fit and work without hover`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await openMenu(page);
+      const root = page.getByTestId('main-menu');
+      expect(await root.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const buttons = page.locator('.rail-main-menu button:visible');
+      for (const button of await buttons.all()) {
+        const box = await button.boundingBox();
+        expect(box!.width).toBeGreaterThanOrEqual(44);
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+        if (viewport.width > viewport.height) expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+      }
+      await page.screenshot({ path: testInfo.outputPath(`main-menu-${viewport.width}x${viewport.height}.png`) });
+      await page.getByRole('button', { name: 'Your railways', exact: true }).tap();
+      await sceneIs(page, 'WorldSelectScene');
+      await expect(root).toHaveCount(0);
     });
-    await page.goto('/');
-    await page.waitForFunction(
-      () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
-      { timeout: 25_000, polling: 500 },
-    );
-
-    await page.keyboard.press('Enter');
-    await expect.poll(
-      () => page.evaluate(
-        () => (window as unknown as Record<string, string>).__railSimScene,
-      ),
-    ).toBe('WorldSelectScene');
-
-    const canvas = page.locator('canvas');
-    await createLegacyWorld(page, 'playtest-753');
-    await expect.poll(
-      () => page.evaluate(
-        () => (window as unknown as Record<string, string>).__railSimScene,
-      ),
-    ).toBe('WorldScene');
-    await expect(page.locator('[data-testid="company-hud"]')).toBeVisible();
-    await expect(page.locator('[data-testid="vehicle-purchase-panel"]'))
-      .toBeVisible();
-
-    await canvas.click({ position: { x: 36, y: 40 } });
-    await expect(page.locator('[data-testid="vehicle-purchase-panel"]'))
-      .toBeHidden();
-    await page.keyboard.press('Escape');
-    await canvas.click({ position: { x: 960, y: 938 } });
-    await expect.poll(() => menuTransitionActivity(page)).toEqual({
-      menu: true,
-      worldSelect: false,
-      world: false,
-      editorUI: false,
-      game: false,
-      hud: false,
-      pause: false,
-      debug: false,
-    });
-    await expect.poll(
-      () => page.evaluate(
-        () => (window as unknown as Record<string, string>).__railSimScene,
-      ),
-    ).toBe('MenuScene');
-    await waitForRenderedFrame(page);
-
-    const box = await canvas.boundingBox();
-    if (!box) throw new Error('Canvas is not visible');
-    const layout = await page.evaluate(() => {
-      const menu = window.__railSimGame.scene.getScene('MenuScene');
-      const worlds = menu.children.list.find(
-        (child: any) => child.text === 'Worlds',
-      ) as any;
-      if (!worlds) throw new Error('Worlds menu item was not rendered');
-      return {
-        width: menu.scale.width,
-        height: menu.scale.height,
-        x: worlds.x,
-        y: worlds.y,
-      };
-    });
-    const worldsPoint = {
-      x: layout.x * box.width / layout.width,
-      y: layout.y * box.height / layout.height,
-    };
-    await canvas.hover({ position: worldsPoint });
-    await expect(canvas).toHaveCSS('cursor', 'pointer');
-    await canvas.click({ position: worldsPoint });
-    await expect.poll(() => menuTransitionActivity(page)).toEqual({
-      menu: false,
-      worldSelect: true,
-      world: false,
-      editorUI: false,
-      game: false,
-      hud: false,
-      pause: false,
-      debug: false,
-    });
-    await expect.poll(
-      () => page.evaluate(
-        () => (window as unknown as Record<string, string>).__railSimScene,
-      ),
-    ).toBe('WorldSelectScene');
-  });
-
-  test('trains drive continuously without derailing', async ({ page }) => {
-    await page.goto('/');
-
-    // 1. Wait for the Phaser canvas to appear in the DOM.
-    await page.waitForSelector('canvas', { timeout: 15_000 });
-
-    // 2. Wait until MenuScene has initialised and set the window flag.
-    await page.waitForFunction(
-      () => (window as unknown as Record<string, unknown>).__railSimScene === 'MenuScene',
-      { timeout: 25_000, polling: 500 },
-    );
-
-    // 3. Let the physics simulation run for 5 seconds.
-    await page.waitForTimeout(5_000);
-
-    // 4. Assert no permanent derailments occurred during the observation window.
-    const derailCount = await page.evaluate(
-      () => (window as unknown as Record<string, number>).__railSimMenuDerailCount ?? 0,
-    );
-    expect(derailCount).toBe(0);
-
-    // 5. Confirm the scene is still MenuScene (no crash / unexpected transition).
-    const scene = await page.evaluate(
-      () => (window as unknown as Record<string, string>).__railSimScene,
-    );
-    expect(scene).toBe('MenuScene');
-  });
+  }
 });

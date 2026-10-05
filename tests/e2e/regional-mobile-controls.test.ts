@@ -29,7 +29,7 @@ async function tapSceneLabel(page: Page, sceneName: string, label: string): Prom
 async function openWorldList(page: Page): Promise<void> {
   await page.goto('/');
   await waitForScene(page, 'MenuScene');
-  await tapSceneLabel(page, 'MenuScene', 'New World');
+  await page.getByRole('button', { name: 'Your railways', exact: true }).tap();
   await waitForScene(page, 'WorldSelectScene');
 }
 

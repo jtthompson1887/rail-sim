@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GameStateManager } from '../managers/GameStateManager';
 import { WorldManager } from '../managers/WorldManager';
 import { EventBus } from '../services/EventBus';
+import { isRiverside } from '../region/RiversideRegion';
 import { isMobileWidth, responsiveFontSize, touchSafeSize, scalePx } from '../utils/responsive';
 
 export default class HUDScene extends Phaser.Scene {
@@ -217,6 +218,10 @@ export default class HUDScene extends Phaser.Scene {
   }
 
   update(): void {
+    if (isRiverside(WorldManager.world)) {
+      [this.timeText,this.trainsText,this.modeLabelText,this.modeToggleBtn].forEach(item=>item.setVisible(false));
+      return;
+    }
     const mode = GameStateManager.worldMode;
     const isPlay = mode === 'play';
 

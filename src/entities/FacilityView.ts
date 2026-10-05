@@ -2,9 +2,10 @@ import Phaser from 'phaser';
 import type { FacilityInspectionDto } from '../economy/FacilityPresentation';
 import type { FacilityId } from '../economy/EconomyData';
 import { EventBus } from '../services/EventBus';
+import { drawFacilityArt, facilityArtKey } from '../presentation/FacilityArt';
 
 const MARKER_RADIUS_PX = 12;
-const NAME_OFFSET_PX = 25;
+const NAME_OFFSET_PX = 13;
 const STATUS_OFFSET_PX = 9;
 const BAR_OFFSET_PX = 28;
 const BAR_WIDTH_PX = 70;
@@ -24,6 +25,8 @@ export interface FacilityViewPlacement {
 export class FacilityView {
   readonly facilityId: FacilityId;
   private readonly graphics: Phaser.GameObjects.Graphics;
+  private readonly ground: Phaser.GameObjects.Graphics;
+  private readonly buildings: Phaser.GameObjects.Graphics;
   private readonly hitTarget: Phaser.GameObjects.Arc;
   private readonly hitArea: Phaser.Geom.Circle;
   private readonly nameText: Phaser.GameObjects.Text;
@@ -31,6 +34,7 @@ export class FacilityView {
   private current: FacilityInspectionDto;
   private selected = false;
   private selectionEnabled = true;
+  private renderedArtKey = '';
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -39,6 +43,8 @@ export class FacilityView {
   ) {
     this.facilityId = placement.id;
     this.current = inspection;
+    this.ground = scene.add.graphics().setDepth(-15);
+    this.buildings = scene.add.graphics().setDepth(32);
     this.graphics = scene.add.graphics().setDepth(34);
     this.hitArea = new Phaser.Geom.Circle(
       MARKER_RADIUS_PX,
@@ -47,7 +53,7 @@ export class FacilityView {
     );
     this.hitTarget = scene.add.circle(
       placement.x,
-      placement.y,
+      placement.y - 170,
       MARKER_RADIUS_PX,
       0xffffff,
       0.001,
@@ -68,10 +74,10 @@ export class FacilityView {
       inspection.name,
       {
         fontFamily: 'Verdana',
-        fontSize: '14px',
+        fontSize: '13px',
         fontStyle: 'bold',
-        color: '#ffffff',
-        backgroundColor: '#06131fe6',
+        color: '#314b43',
+        backgroundColor: '#e0d9bdd9',
         padding: { x: 5, y: 2 },
       },
     ).setOrigin(0.5, 1).setDepth(35);
@@ -112,18 +118,16 @@ export class FacilityView {
       : inspection.status.code === 'output-full'
         ? '#ff9b86'
         : '#ffe39a';
+    const key = facilityArtKey(inspection);
+    if (key !== this.renderedArtKey) {
+      drawFacilityArt(this.ground, this.buildings, inspection, x, y);
+      this.renderedArtKey = key;
+    }
     this.graphics.clear();
-    this.graphics.lineStyle(RING_WIDTH_PX * scale, colour, 0.8);
-    this.graphics.strokeCircle(
-      railAccessX,
-      railAccessY,
-      railAccessRadius,
-    );
-    this.graphics.fillStyle(
-      selected ? 0xffffff : colour,
-      selected ? 1 : 0.92,
-    );
-    this.graphics.fillCircle(x, y, MARKER_RADIUS_PX * scale);
+    if (selected) {
+      this.graphics.lineStyle(RING_WIDTH_PX * scale, colour, 0.8);
+      this.graphics.strokeCircle(railAccessX, railAccessY, railAccessRadius);
+    }
 
     const stock = inspection.inventories.reduce(
       (sum, slot) => sum + slot.quantity,
@@ -135,36 +139,26 @@ export class FacilityView {
     );
     const barX = x - BAR_WIDTH_PX * scale / 2;
     const barY = y + BAR_OFFSET_PX * scale;
-    this.graphics.fillStyle(0x0d2535, 0.95);
-    this.graphics.fillRect(
-      barX,
-      barY,
-      BAR_WIDTH_PX * scale,
-      BAR_HEIGHT_PX * scale,
-    );
-    this.graphics.fillStyle(colour, 0.95);
-    this.graphics.fillRect(
-      barX,
-      barY,
-      BAR_WIDTH_PX * scale * (capacity > 0 ? stock / capacity : 0),
-      BAR_HEIGHT_PX * scale,
-    );
+    if (selected) {
+      this.graphics.fillStyle(0x0d2535, 0.95);
+      this.graphics.fillRect(barX, barY, BAR_WIDTH_PX * scale, BAR_HEIGHT_PX * scale);
+      this.graphics.fillStyle(colour, 0.95);
+      this.graphics.fillRect(barX, barY, BAR_WIDTH_PX * scale * (capacity > 0 ? stock / capacity : 0), BAR_HEIGHT_PX * scale);
+    }
 
     this.nameText
       .setText(inspection.name)
-      .setPosition(x, y - NAME_OFFSET_PX * scale)
+      .setPosition(x, y - 382 - NAME_OFFSET_PX * scale)
       .setScale(scale);
     this.statusText
       .setText(inspection.status.label)
       .setColor(statusColour)
       .setPosition(x, y + STATUS_OFFSET_PX * scale)
-      .setScale(scale);
-    this.hitTarget.setRadius(MARKER_RADIUS_PX * scale);
-    this.hitArea.setTo(
-      MARKER_RADIUS_PX * scale,
-      MARKER_RADIUS_PX * scale,
-      MARKER_RADIUS_PX * scale,
-    );
+      .setScale(scale)
+      .setVisible(selected);
+    const hitRadius = Math.max(282, MARKER_RADIUS_PX * scale);
+    this.hitTarget.setRadius(hitRadius);
+    this.hitArea.setTo(hitRadius, hitRadius, hitRadius);
   }
 
   setSelected(selected: boolean): void {
@@ -176,6 +170,8 @@ export class FacilityView {
   }
 
   destroy(): void {
+    this.ground.destroy();
+    this.buildings.destroy();
     this.graphics.destroy();
     this.hitTarget.destroy();
     this.nameText.destroy();

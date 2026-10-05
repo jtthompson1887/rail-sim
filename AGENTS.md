@@ -1,4 +1,31 @@
-# Agent Notes
+# Agent Notes — Riverside milestone
+
+## Active priority
+
+Build **a railway scene you want to build in and watch**. Read `docs/CURRENT_STATE.md` first. This reset supersedes older release plans and completion gates.
+
+One authored riverside region contains a town, mill, freight yard, passenger stations, two services, a shared-track bottleneck and one neighbourhood project. The 15–20-minute session is a playtest target. Deliver the illustrated overhead landscape, recognisable facilities, convincing trains, unified controls and restrained feedback in the actual running game. Additional content and concept studies wait.
+
+## Work discipline
+
+- Keep one active milestone and bounded tasks with distinct file ownership.
+- End each work block with a playable build or concrete blocker. After two failed approaches, reassess.
+- Preserve simulation unless a demonstrated player-visible defect requires a change. No new abstraction without a current use.
+- Freeze migrations, native packaging and additional platform/compatibility architecture unless they block this experience. Prototype interfaces and development save formats may change; preserve old files without adding migration work.
+- Keep `docs/CURRENT_STATE.md` short: objective, preview, evidence, blocker and next action. Detailed history belongs elsewhere.
+- Presentation milestones require actual screenshots and interaction evidence. Enjoyment requires human playtests.
+
+## Everyday verification
+
+- `npm run check:fast`: compilation, relevant tests and critical simulation/current-save checks without coverage; target under three minutes.
+- `npm run test:smoke`: short playable checks, including the authored riverside region.
+- Extended coverage, legacy journeys, benchmarks and native packaging run only at deliberate stabilization points. Long manual-driving journeys must not block presentation work.
+- Use clearly labelled valid fixtures close to the behaviour under test, and deterministic stepping for economic/routing assertions.
+- Preserve checks for crashes, incorrect charges, cargo conservation and current-save corruption. Quarantining an unresolved test never means it passed.
+
+## Recovery checkpoint
+
+Commit `7f5f34f`, tag `codex/pre-riverside-reset-2026-10-05`, preserves the integrated source before this reset. Ignored builds, installers and logs remain on disk. The original owning checkout's staged physics work remains untouched.
 
 ## 3-D Cab View (`src/cab3d`)
 
@@ -14,7 +41,7 @@ All cab-view code is isolated under `src/cab3d` and must keep the existing game 
 
 These rules are enforced by `tests/unit/Cab3dIsolation.test.ts` and `tests/unit/Cab3dPurity.test.ts`.
 
-### Verification commands
+### Historical cab milestone verification (not the current presentation gate)
 
 ```powershell
 npm test -- --runInBand
@@ -34,7 +61,7 @@ Phase 1 build requirements:
 - `jest.config.js` excludes `src/cab3d/renderer/**/*.ts` from coverage and limits test discovery to `tests/unit` and `tests/integration`.
 - Toggle key is `C` in play mode; controlled by `GameConfig.CAB3D.TOGGLE_KEY`.
 
-### Phase 13 final gates
+### Historical Phase 13 final gates
 
 When closing a cab3d milestone, also run:
 

@@ -1,5 +1,7 @@
 # Design a railway. Rehearse it. Transform a region.
 
+> Historical implementation record. The riverside reset in `../CURRENT_STATE.md` is the active priority. The long legacy regional journey remains unresolved; its latest run was deliberately stopped. Native packaging, migration work and exhaustive legacy gates are frozen during the presentation milestone.
+
 Implementation status for the integrated development slice, 5 October 2026.
 This is not a claim that the complete release plan or its player-experience
 targets have been achieved.
