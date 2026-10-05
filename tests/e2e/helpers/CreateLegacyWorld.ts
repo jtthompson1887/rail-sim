@@ -24,7 +24,17 @@ export async function createLegacyWorld(page: Page, seed: string, biome: 'temper
     await page.locator('canvas').click({ position: { x: 960, y: 1001 } });
     await page.waitForFunction(() => (window as any).__railSimScene === 'WorldScene'
       && typeof (window as any).__railSimConstructionSnapshot === 'function');
-    if (viewport) await page.setViewportSize(viewport);
+    if (viewport && (viewport.width !== 1920 || viewport.height !== 1400)) {
+      await page.setViewportSize(viewport);
+      // Reopen at the phone size so Phaser's scene-owned HUD is laid out there.
+      await page.reload();
+      await page.waitForFunction(() => (window as any).__railSimScene === 'MenuScene');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => (window as any).__railSimScene === 'WorldSelectScene');
+      await page.locator('canvas').click({ position: { x: viewport.width / 2, y: 200 } });
+      await page.waitForFunction(() => (window as any).__railSimScene === 'WorldScene'
+        && typeof (window as any).__railSimConstructionSnapshot === 'function');
+    }
     return page.evaluate(() => (window as any).__railSimConstructionSnapshot().world.id);
   }
   return page.evaluate(async ({ seed: fixtureSeed, biome: fixtureBiome }) => {
