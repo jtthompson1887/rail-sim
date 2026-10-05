@@ -1,5 +1,12 @@
 import MenuScene from '../../src/scenes/MenuScene';
 import { SaveService } from '../../src/services/SaveService';
+import { MenuRailway } from '../../src/presentation/MenuRailway';
+
+jest.mock('../../src/presentation/MenuRailway', () => ({
+  MenuRailway: jest.fn().mockImplementation(() => ({
+    setPaused: jest.fn(), update: jest.fn(), destroy: jest.fn(),
+  })),
+}));
 
 jest.mock('../../src/services/SaveService', () => ({
   SaveService: {
@@ -131,12 +138,17 @@ describe('Main menu navigation and lifecycle', () => {
     current = createMenu();
     const root = document.querySelector<HTMLElement>('[data-testid="main-menu"]')!;
     expect(root.dataset.motion).toBe('paused');
-    button('Play scenery').click();
+    const railway = (MenuRailway as jest.Mock).mock.results[0].value;
+    expect(railway.setPaused).toHaveBeenLastCalledWith(true);
+    button('Play preview').click();
     expect(root.dataset.motion).toBe('playing');
     expect(current.start).not.toHaveBeenCalled();
+    expect(railway.setPaused).toHaveBeenLastCalledWith(false);
     addEventListener.mock.calls[0][1]({ matches: true });
     expect(root.dataset.motion).toBe('paused');
+    expect(railway.setPaused).toHaveBeenLastCalledWith(true);
     current.shutdown();
     expect(removeEventListener).toHaveBeenCalledWith('change', addEventListener.mock.calls[0][1]);
+    expect(railway.destroy).toHaveBeenCalled();
   });
 });

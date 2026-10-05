@@ -41,6 +41,9 @@ test('Brookford: draw, recover, run, diagnose, grow and reopen',async({page},tes
   const grown=await snapshot(page);
   expect(grown.world.region!.projects.find(p=>p.definitionId==='housing')!.completedAtTick).not.toBeNull();
   expect(grown.world.region!.passengerDemandBonusBps).toBe(2500);
+  const news=page.getByRole('complementary',{name:'Regional development'});
+  await expect(news).toContainText('You helped Brookford grow');
+  await expect(news).toContainText('passenger demand +25%');
   if(await panel.locator('.rp-toggle').getAttribute('aria-expanded')==='false')await panel.locator('.rp-toggle').click();
   await panel.getByRole('button',{name:'Services',exact:true}).click();
   await expect(panel).toContainText('s waiting');
@@ -48,6 +51,10 @@ test('Brookford: draw, recover, run, diagnose, grow and reopen',async({page},tes
   await panel.getByRole('button',{name:'Projects',exact:true}).click();
   await expect(panel).toContainText('Complete');
   await page.screenshot({path:testInfo.outputPath('brookford-neighbourhood.png')});
+  await news.getByRole('button',{name:'See the new homes',exact:true}).click();
+  await expect(news).toBeHidden();
+  await expect.poll(async()=>(await snapshot(page)).camera.zoom).toBeGreaterThanOrEqual(.54);
+  await page.screenshot({path:testInfo.outputPath('brookford-homes-closeup.png')});
   await panel.getByRole('button',{name:'Company',exact:true}).click();
   await panel.getByRole('button',{name:'Save world',exact:true}).click();
   await expect(panel.getByRole('status')).toHaveText('World saved.');
@@ -56,6 +63,7 @@ test('Brookford: draw, recover, run, diagnose, grow and reopen',async({page},tes
   const loaded=await snapshot(page);
   expect(loaded.world.id).toBe(grown.world.id);expect(loaded.world.tracks).toEqual(grown.world.tracks);
   expect(loaded.world.region!.transformations).toEqual(grown.world.region!.transformations);
+  await expect(page.getByRole('complementary',{name:'Regional development'})).toBeHidden();
   expect(errors).toEqual([]);
 });
 
@@ -74,6 +82,40 @@ test('Brookford: preview and buy a relief line with an exact charge',async({page
   await page.screenshot({path:testInfo.outputPath('brookford-relief-line.png')});
 });
 
+test('Brookford: adjust a real timetable, locate a blocking train and keep the journey on reload',async({page},testInfo)=>{
+  await page.setViewportSize({width:1600,height:1000});await openBrookford(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.evaluate(()=>window.__railSimFirstRouteHarness!.advanceFixedTicks(60));
+  const before=(await snapshot(page)).world,panel=page.locator('.railway-panel');
+  const service=before.management!.services.find(s=>s.id==='mill-goods')!;
+  const card=panel.locator('.rp-card').filter({has:page.getByRole('heading',{name:service.name,exact:true})});
+  await card.getByRole('button',{name:'Edit timetable',exact:true}).click();
+  await panel.locator('[name="edit-frequency"]').fill('160');
+  await panel.locator('[name="edit-offset"]').fill('20');
+  await panel.locator('[name="edit-priority"]').fill('3');
+  await page.screenshot({path:testInfo.outputPath('brookford-timetable.png')});
+  await panel.getByRole('button',{name:'Save timetable',exact:true}).click();
+  const after=(await snapshot(page)).world;
+  expect(after.management!.services.find(s=>s.id===service.id)).toMatchObject({frequencySeconds:160,departureOffsetSeconds:20,priority:3,trainId:service.trainId,stops:service.stops});
+  expect(after.company).toEqual(before.company);
+  expect(after.trains).toEqual(before.trains);
+  expect(after.management!.serviceStates[service.id]).toMatchObject({completedCycles:before.management!.serviceStates[service.id].completedCycles,nextStopIndex:before.management!.serviceStates[service.id].nextStopIndex});
+  const blocking=panel.getByRole('button',{name:'Find blocking train',exact:true});
+  await expect(blocking).toBeVisible();
+  await blocking.click();
+  await expect.poll(async()=>(await snapshot(page)).camera.zoom).toBeGreaterThanOrEqual(.54);
+  await page.screenshot({path:testInfo.outputPath('brookford-train-closeup.png')});
+  await panel.getByRole('button',{name:'Company',exact:true}).click();
+  await panel.getByRole('button',{name:'Save world',exact:true}).click();
+  await expect(panel.getByRole('status')).toHaveText('World saved.');
+  await page.reload();await page.getByRole('button',{name:'Continue',exact:true}).click();
+  await page.waitForFunction(()=>window.__railSimScene==='WorldScene');
+  const reopened=(await snapshot(page)).world;
+  expect(reopened.management!.services.find(s=>s.id===service.id)).toEqual(after.management!.services.find(s=>s.id===service.id));
+  expect(reopened.trains).toEqual(after.trains);
+  expect(errors).toEqual([]);
+});
+
 test.describe('Brookford on landscape touch',()=>{
   test.use({hasTouch:true,viewport:{width:844,height:390}});
   test('starts, pauses and opens the focused project without hover',async({page},testInfo)=>{
@@ -87,6 +129,11 @@ test.describe('Brookford on landscape touch',()=>{
     const bounds=(await panel.boundingBox())!;expect(bounds.x+bounds.width).toBeLessThanOrEqual(844);expect(bounds.y+bounds.height).toBeLessThanOrEqual(390);
     const heights=await panel.locator('button:visible').evaluateAll(buttons=>buttons.map(b=>b.getBoundingClientRect().height));expect(heights.every(h=>h>=44)).toBe(true);
     await page.screenshot({path:testInfo.outputPath('brookford-touch.png')});
+    await panel.getByRole('button',{name:'Services',exact:true}).tap();
+    await panel.getByRole('button',{name:'Edit timetable',exact:true}).first().tap();
+    await panel.locator('[name="edit-frequency"]').fill('140');
+    await panel.getByRole('button',{name:'Save timetable',exact:true}).tap();
+    expect((await snapshot(page)).world.management!.services.find(s=>s.id==='mill-goods')!.frequencySeconds).toBe(140);
     await panel.getByRole('button',{name:'Company',exact:true}).tap();
     await panel.getByRole('button',{name:'Save and return to menu',exact:true}).tap();
     await expect(page.getByRole('button',{name:'Continue',exact:true})).toBeVisible();

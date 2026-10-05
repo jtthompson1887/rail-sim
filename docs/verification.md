@@ -65,6 +65,22 @@ The long regional chain also carries the `@legacy` title marker. These scenarios
 
 ## Recorded evidence at the October 2026 reset
 
+### Brookford timetable and presentation follow-up
+
+The focused command `npm run check:fast -- tests/unit/RiversideFeedback.test.ts tests/unit/RailwayControllerProject.test.ts tests/unit/ManagementPanel.test.ts tests/integration/ServiceTimetableEditing.test.ts` passed **13 suites / 251 tests in 35.8 seconds**, including TypeScript, without coverage. This checks live timetable edits with cargo and passengers aboard, unchanged money and trip history, departure slots, current save/reload, validation failures, notice dismissal and the critical simulation checks. A separate agent run of timetable integration plus the existing session suite passed 27 tests.
+
+`PLAYWRIGHT_REUSE_BUILD=1 PLAYWRIGHT_PORT=41761 npm run test:smoke -- tests/e2e/riverside.test.ts --retries=0` passed **4/4 cases in 2.1 minutes** on the test-controls build. This includes exact construction charges, earned development and its new notice, camera focus, timetable edits with unchanged train/cargo and company state, save/reopen, relief purchase and 844×390 touch editing/menu navigation. The later close-up correction has **3 passing placement tests**, including built tracks, reserved draft tracks, water and parcel corners. Test-controls compilation after that correction passed in **33.5 seconds**, with the existing bundle-size warnings.
+
+Close-up inspection identified a housing parcel covering an existing road. The corrected authored extension is east of the town, linked to its eastern lane, and avoids built/reserved railway and water. Its enlarged roofs, internal lanes and gardens match the established houses. The final targeted `draw, recover` browser rerun passed in **47.9 seconds** after the visual correction; saved evidence includes `brookford-homes-closeup.png`, `brookford-timetable.png`, `brookford-train-closeup.png` and the refreshed overview/touch images.
+
+The final ordinary production build passed in **38.9 seconds** and was reopened in the in-app browser at port 41719, with Brookford paused and ready. `dist/client/main.js` is **1,847,548 bytes**; the isolated lazy cab chunk is **7,077,268 bytes**. Existing asset/entry size warnings remain. Whitespace checks pass. Concurrent menu/fleet work in the shared checkout was preserved; this record claims only the checks listed here.
+
+A bounded deterministic comparison changed only Valley local's interval to 140 seconds, offset to 65 seconds and priority to 1. Over 600 simulated seconds, combined waiting fell from **511.1s to 404.8s**, while passenger return trips fell from **4 to 3** and fare revenue from **£3,432 to £3,366**. Housing completed at 436s rather than 505s. This is one valid operational trade-off in the authored starting scenario; defaults remain unchanged. It is not a guarantee under later demand or track changes.
+
+Human enjoyment and physical-device performance remain unverified. The native/compatibility freeze and optional unresolved legacy suite remain in place.
+
+### Initial reset build
+
 The integrated Riverside fast check passed in **38.0 seconds**, including TypeScript and **17 suites / 287 tests**, without coverage. This selection adds the authored region, presentation, management and menu tests to the critical checks. Source changes after that run were a small inspector wording/spacing fix and browser-suite selection.
 
 Final critical/UI/config verification passed in **26.9 seconds**, **11 suites / 235 tests**, after the menu-return correction. The focused browser suite passed **3/3 cases in 1.2 minutes** on the final source: mouse construction/cancellation, exact charges, real service progression, blockage inspection, neighbourhood completion, save/reopen, relief-line purchase, landscape touch and returning to the menu. Deterministic session stepping avoids the long manual journey. Screenshots are saved in `docs/riverside/evidence/`. Physical-device testing and human enjoyment remain unverified.

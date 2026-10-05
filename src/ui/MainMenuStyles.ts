@@ -5,7 +5,7 @@ export const MAIN_MENU_STYLES = `
   --menu-ink: #26362f;
   --menu-green: #345c49;
   position: fixed; inset: 0; z-index: 1500; isolation: isolate;
-  color: var(--menu-cream); background: #263c30;
+  color: var(--menu-cream); background: transparent;
   font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
   overflow: auto; overscroll-behavior: contain;
   -webkit-tap-highlight-color: transparent;
@@ -14,11 +14,6 @@ export const MAIN_MENU_STYLES = `
 .rail-main-menu button { font: inherit; color: inherit; touch-action: manipulation; }
 .rail-main-menu button:focus-visible { outline: 3px solid #efd69a; outline-offset: 5px; }
 .rail-main-menu button:disabled { cursor: default; }
-.rail-main-menu .rmm-art { position: absolute; inset: 0; overflow: hidden; z-index: -2; }
-.rail-main-menu .rmm-art img {
-  width: 100%; height: 100%; object-fit: cover; object-position: 61% 50%;
-  animation: rmm-drift 40s ease-in-out infinite alternate;
-}
 .rail-main-menu .rmm-veil {
   position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: linear-gradient(90deg, #122a24f5 0%, #142b25ef 22%, #162e27b5 38%, #14281c25 65%, #14281c08 100%),
@@ -75,9 +70,6 @@ export const MAIN_MENU_STYLES = `
 }
 .rail-main-menu .rmm-motion:hover { background: #345c49; }
 .rail-main-menu .rmm-motion svg { width: 15px; height: 15px; }
-.rail-main-menu[data-motion="paused"] .rmm-art img { animation-play-state: paused; }
-.rail-main-menu[data-hidden="true"] .rmm-art img { animation-play-state: paused; }
-@keyframes rmm-drift { from { transform: scale(1.015); } to { transform: scale(1.065); } }
 @media (min-width: 1600px) {
   .rail-main-menu .rmm-layout { padding: 44px 64px 32px 6vw; }
   .rail-main-menu .rmm-main { padding-top: 50px; padding-bottom: 50px; }
@@ -114,8 +106,6 @@ export const MAIN_MENU_STYLES = `
   .rail-main-menu .rmm-veil { background: linear-gradient(90deg,#122a24fa 0%,#122a24ef 26%,#122a2490 44%,#14281c08 80%),linear-gradient(0deg,#12251cbf,transparent 40%); }
 }
 @media (max-width: 700px) and (min-height: 521px), (max-width: 600px) {
-  .rail-main-menu .rmm-art { height: 44%; }
-  .rail-main-menu .rmm-art img { object-position: 68% 45%; }
   .rail-main-menu .rmm-veil { background: linear-gradient(0deg,#172e27 57%,#172e27eb 63%,#172e2700 89%); }
   .rail-main-menu .rmm-layout { padding: max(20px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); min-height: max(100%, 620px); }
   .rail-main-menu .rmm-topline { text-shadow: 0 1px 4px #10241f; }

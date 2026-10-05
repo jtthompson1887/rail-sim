@@ -24,6 +24,8 @@ import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import { FleetPresentation } from './FleetPresentation';
 import { isRiverside, createRiversideReliefDraft } from '../region/RiversideRegion';
 import { drawNeighbourhood } from '../presentation/NeighbourhoodArt';
+import { RiversideFeedback } from '../presentation/RiversideFeedback';
+import { riversideHousingSite } from '../presentation/RiversideDevelopment';
 
 export interface RailwayScenePort {
   scene: Phaser.Scene;
@@ -43,6 +45,9 @@ export class RailwayController {
   readonly panel: ManagementPanel;
   private readonly graphics: Phaser.GameObjects.Graphics;
   private readonly fleet: FleetPresentation;
+  private readonly feedback: RiversideFeedback;
+  private readonly focusMarker: Phaser.GameObjects.Graphics;
+  private focused: { id?: string; point: { x: number; y: number }; remaining: number } | null = null;
   private draft: BlueprintDraft | null = null;
   private ghost: Awaited<ReturnType<RehearsalClient['run']>> | null = null;
   private ghostTime = 0;
@@ -57,7 +62,9 @@ export class RailwayController {
 
   constructor(private readonly port: RailwayScenePort) {
     this.graphics=port.scene.add.graphics().setDepth(15);
+    this.focusMarker=port.scene.add.graphics().setDepth(30);
     this.fleet=new FleetPresentation(port.scene,port.trains);
+    this.feedback=new RiversideFeedback(WorldManager.world,()=>this.visitHomes());
     this.panel=new ManagementPanel({
       world:()=>WorldManager.world,enable:()=>this.enable(),speed:s=>this.speed(s),service:s=>this.service(s),removeService:id=>this.removeService(id),
       acceptProject:(id,station)=>this.project(id,station),buyTrain:(family,set,track,t)=>this.buy(family,set,track,t),station:(name,track,t,len)=>this.station(name,track,t,len),
@@ -81,6 +88,7 @@ export class RailwayController {
   }
   get active(): boolean { return !!WorldManager.world?.management; }
   showCompany():void { this.speed(0);this.panel.showCompany(); }
+  showFleet():void { this.panel.setVisible(true);this.panel.showFleet(); }
   controlledTrainIds(): ReadonlySet<string> { return new Set(this.active ? WorldManager.world!.trains.map(t=>t.id) : []); }
   /** Bounded deterministic stepping for the short playable smoke; absent from ordinary player controls. */
   advanceForAcceptance(seconds:number):void {
@@ -93,10 +101,11 @@ export class RailwayController {
     if(!WorldManager.applySimulationSnapshot(world.revision,this.session.snapshot()))throw new Error('Acceptance snapshot failed validation.');
     this.appliedRevision=WorldManager.world!.revision;
     this.port.trains.applyManagedSnapshots(this.session.getTrainSnapshots());this.session.drainEvents();
+    this.feedback.observe(WorldManager.world!);
     this.panel.refresh(0,true);this.fleet.update(WorldManager.world!,0,this.session.presentationRoutes());this.visualKey='';this.draw(0);
   }
-  setVisible(visible:boolean):void{this.panel.setVisible(visible&&!this.legacyFixture);}
-  destroy():void{this.destroyed=true;EventBus.off('app:prepare-close',this.closeHandler);EventBus.off('ui:pause-visible',this.pausePanelHandler);this.removeLifecycle?.();this.client.cancel();this.panel.destroy();this.fleet.destroy();this.graphics.destroy();}
+  setVisible(visible:boolean):void{this.panel.setVisible(visible&&!this.legacyFixture);this.feedback.setVisible(visible&&!this.legacyFixture);}
+  destroy():void{this.destroyed=true;EventBus.off('app:prepare-close',this.closeHandler);EventBus.off('ui:pause-visible',this.pausePanelHandler);this.removeLifecycle?.();this.client.cancel();this.panel.destroy();this.feedback.destroy();this.fleet.destroy();this.graphics.destroy();this.focusMarker.destroy();}
   update(time:number,delta:number,runtime:readonly TrainRuntimeSnapshot[]):boolean{
     this.panel.refresh(time);this.refreshSession();
     if(!this.session)return false;
@@ -108,8 +117,9 @@ export class RailwayController {
       this.appliedRevision=snapshot.revision;
       this.port.trains.setManagedTrainIds(this.controlledTrainIds());this.port.trains.applyManagedSnapshots(advanced.trains);
       for(const event of this.session.drainEvents())if(event.type==='freight-delivery'){EventBus.emit('ui:cash-pulse',{amount:event.revenue});}
+      this.feedback.observe(WorldManager.world!);
     }
-    this.fleet.update(WorldManager.world!,time,this.session.presentationRoutes());this.draw(delta);return true;
+    this.fleet.update(WorldManager.world!,time,this.session.presentationRoutes());this.draw(delta);this.drawFocus(delta);return true;
   }
   private refreshSession():void{const w=WorldManager.world;if(!w?.management){this.session=null;return;}
     for(const station of this.port.content.stations)station.setManagedPresentation(true);
@@ -173,17 +183,51 @@ export class RailwayController {
     const result=await this.client.run({requestId:crypto.randomUUID(),world:w,draft,horizonSeconds:600,sampleIntervalSeconds:2});
     if(result.status==='complete'){this.ghost=result;this.ghostTime=0;this.visualKey='';}return result;
   }
-  private focus(id:string):void{const w=WorldManager.world!,facility=w.economy.facilities.find(f=>f.id===id),station=w.stations.find(s=>s.id===id),train=w.trains.find(t=>t.id===id);
+  private entityPoint(id:string):{x:number;y:number}|null{const w=WorldManager.world!,facility=w.economy.facilities.find(f=>f.id===id),station=w.stations.find(s=>s.id===id),train=w.trains.find(t=>t.id===id);
+    const frame=train&&this.session?.getTrainSnapshots().find(t=>t.trainId===id);
+    if(frame)return{x:frame.x,y:frame.y};
     let point=facility?{x:facility.x,y:facility.y}:null;
-    const located=station??train;if(located){const track=w.tracks.find(t=>t.uuid===located.trackUUID);if(track)point=new TrackArcLengthIndex(track,TRAIN_PHYSICS_CONFIG.arcSampleSpacing).poseAtDistance(new TrackArcLengthIndex(track,TRAIN_PHYSICS_CONFIG.arcSampleSpacing).distanceAtParameter(located.trackT)).point;}
-    if(point){this.port.scene.cameras.main.stopFollow();this.port.scene.cameras.main.centerOn(point.x,point.y);}
+    const located=station??train;if(located){const track=w.tracks.find(t=>t.uuid===located.trackUUID);if(track){const index=new TrackArcLengthIndex(track,TRAIN_PHYSICS_CONFIG.arcSampleSpacing);point=index.poseAtDistance(index.distanceAtParameter(located.trackT)).point;}}
+    return point;
+  }
+  private focus(id:string):void{const point=this.entityPoint(id);if(point)this.focusPoint(point,id);}
+  private focusPoint(point:{x:number;y:number},id?:string):void{
+    const camera=this.port.scene.cameras.main;camera.stopFollow();
+    if(isRiverside(WorldManager.world)){
+      this.focused={id,point,remaining:8};
+      const zoom=Math.max(camera.zoom,.55);
+      if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){camera.setZoom(zoom);camera.centerOn(point.x,point.y);}
+      else {camera.pan(point.x,point.y,280,'Sine.easeInOut',true);camera.zoomTo(zoom,280,'Sine.easeInOut',true);}
+      this.drawFocus(0);
+    }else camera.centerOn(point.x,point.y);
+  }
+  private visitHomes():void{
+    const footprint=this.transformationFootprints().find(f=>f.projectId==='housing');
+    if(footprint)this.focusPoint(footprint);
+  }
+  private transformationFootprints(){
+    const w=WorldManager.world!;
+    const reserved=[...(this.draft?.tracks??[]),...(w.blueprints??[]).flatMap(d=>d.tracks)];
+    if(isRiverside(w)){const site=riversideHousingSite(w,reserved,(x,y)=>this.port.terrain.getHeightAt(x,y));return site?[site]:[];}
+    return w.region?resolveTransformationFootprints(w.region,w.tracks,reserved,f=>[[0,0],[f.radius,0],[-f.radius,0],[0,f.radius],[0,-f.radius]].every(([x,y])=>this.port.terrain.getHeightAt(f.x+x,f.y+y)>=0)):[];
+  }
+  private drawFocus(delta:number):void{
+    this.focusMarker.clear();if(!this.focused)return;
+    this.focused.remaining-=delta/1000;if(this.focused.remaining<=0){this.focused=null;return;}
+    const point=this.focused.id?this.entityPoint(this.focused.id):this.focused.point;if(!point)return;
+    const zoom=this.port.scene.cameras.main.zoom;
+    this.focusMarker.lineStyle(3/zoom,0xffedb3,.9);this.focusMarker.strokeCircle(point.x,point.y,25/zoom);
+    this.focusMarker.lineStyle(1/zoom,0x315a4a,.8);this.focusMarker.strokeCircle(point.x,point.y,29/zoom);
   }
   private draw(delta:number):void{const w=WorldManager.world!;this.ghostTime+=delta/1000*4;const samples=this.ghost?.samples;
     const sample=samples?.length?samples[Math.floor(this.ghostTime/2)%samples.length]:undefined;
     const key=w.constructionRevision+':'+(w.region?.transformations.length??0)+':'+(this.draft?.id??'')+':'+(sample?.clockSeconds??'');if(key===this.visualKey)return;this.visualKey=key;
     this.graphics.clear();
     for(const track of this.draft?.tracks??[]){this.graphics.lineStyle(12,0x81dfd1,.65);this.graphics.beginPath();for(let i=0;i<=48;i++){const t=i/48,s=1-t,x=s**3*track.p0.x+3*s*s*t*track.p1.x+3*s*t*t*track.p2.x+t**3*track.p3.x,y=s**3*track.p0.y+3*s*s*t*track.p1.y+3*s*t*t*track.p2.y+t**3*track.p3.y;if(i===0)this.graphics.moveTo(x,y);else this.graphics.lineTo(x,y);}this.graphics.strokePath();}
-    if(w.region)for(const f of resolveTransformationFootprints(w.region,w.tracks,[...(this.draft?.tracks??[]),...(w.blueprints??[]).flatMap(d=>d.tracks)],f=>[[0,0],[f.radius,0],[-f.radius,0],[0,f.radius],[0,-f.radius]].every(([x,y])=>this.port.terrain.getHeightAt(f.x+x,f.y+y)>=0))){drawNeighbourhood(this.graphics,f);}
+    for(const f of this.transformationFootprints()){
+      if(isRiverside(w)){this.graphics.lineStyle(22,0x657b57,.25);this.graphics.lineBetween(6000,f.y,f.x-f.radius,f.y);this.graphics.lineStyle(14,0xd8cdb3);this.graphics.lineBetween(6000,f.y,f.x-f.radius,f.y);}
+      drawNeighbourhood(this.graphics,f);
+    }
     if(sample)for(const t of sample.trains){this.graphics.fillStyle(0x92eee1,.7);this.graphics.fillCircle(t.x,t.y,28);this.graphics.lineStyle(4,0xebfffa,.8);this.graphics.lineBetween(t.x,t.y,t.x+Math.cos(t.angleRad)*60,t.y+Math.sin(t.angleRad)*60);}
   }
 }

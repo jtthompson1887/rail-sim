@@ -3,7 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 async function openMenu(page: Page) {
   await page.goto('/');
   await expect(page.getByTestId('main-menu')).toBeVisible();
-  await expect.poll(() => page.locator('.rmm-art img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  await page.waitForFunction(() => !!window.__railSimMenuPreview);
+  await expect(page.locator('.rail-main-menu img')).toHaveCount(0);
 }
 async function sceneIs(page: Page, name: string) {
   await expect.poll(() => page.evaluate(key => window.__railSimGame.scene.isActive(key), name)).toBe(true);
@@ -13,13 +14,13 @@ async function backFromWorlds(page: Page, height: number) {
   await expect(page.getByTestId('main-menu')).toBeVisible();
 }
 
-test('desktop: artwork, pointer routes, keyboard focus and repeated scene cleanup', async ({ page }, testInfo) => {
+test('desktop: game view, pointer routes, keyboard focus and repeated scene cleanup', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 900 });
   await openMenu(page);
   await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Pause scenery' }).click();
+  await page.getByRole('button', { name: 'Pause preview' }).click();
   await page.mouse.move(1000, 30);
   await page.screenshot({ path: testInfo.outputPath('main-menu-desktop.png') });
   await page.getByRole('button', { name: 'Your railways', exact: true }).click();
@@ -66,7 +67,7 @@ test('opens Brookford, reloads the saved railway and continues it', async ({ pag
   await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
   await expect(page.locator('.rmm-primary')).toContainText('Brookford');
   await page.setViewportSize({ width: 1024, height: 640 });
-  await page.getByRole('button', { name: 'Pause scenery' }).click();
+  await page.getByRole('button', { name: 'Pause preview' }).click();
   await page.screenshot({ path: testInfo.outputPath('main-menu-continue.png') });
   for (const viewport of [{ width: 844, height: 390 }, { width: 668, height: 375 }]) {
     await page.setViewportSize(viewport);
@@ -86,16 +87,53 @@ test('opens Brookford, reloads the saved railway and continues it', async ({ pag
 test('respects reduced motion and allows explicit scenery pause / play', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openMenu(page);
-  const art = page.locator('.rmm-art img');
-  await expect(art).toHaveCSS('animation-play-state', 'paused');
-  await page.getByRole('button', { name: 'Play scenery' }).click();
-  await expect(art).toHaveCSS('animation-play-state', 'running');
-  await page.getByRole('button', { name: 'Pause scenery' }).click();
-  await expect(art).toHaveCSS('animation-play-state', 'paused');
+  const clock = () => page.evaluate(() => window.__railSimMenuPreview!().clockSeconds);
+  const initial = await clock();
+  await expect(page.getByTestId('main-menu')).toHaveAttribute('data-motion', 'paused');
+  await page.waitForTimeout(250);
+  expect(await clock()).toBe(initial);
+  await page.getByRole('button', { name: 'Play preview' }).click();
+  await expect.poll(clock).toBeGreaterThan(initial);
+  await page.getByRole('button', { name: 'Pause preview' }).click();
+  const paused = await clock();
+  await page.waitForTimeout(250);
+  expect(await clock()).toBe(paused);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await expect(art).toHaveCSS('animation-play-state', 'running');
+  await expect.poll(clock).toBeGreaterThan(paused);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(art).toHaveCSS('animation-play-state', 'paused');
+  await expect.poll(() => page.evaluate(() => window.__railSimMenuPreview!().paused)).toBe(true);
+});
+
+test.describe('live title railway', () => {
+  test('trains visibly move, pause exactly and do not create a saved game', async ({ browser }, testInfo) => {
+    const context = await browser.newContext({
+      baseURL: testInfo.project.use.baseURL, viewport: { width: 1440, height: 900 },
+      recordVideo: { dir: testInfo.outputPath('recording'), size: { width: 1440, height: 900 } },
+    });
+    const page = await context.newPage();
+    try {
+      await openMenu(page);
+      const rendered = () => page.evaluate(() => window.__railSimGame.scene.getScene('MenuScene').children.list
+        .filter((item: any) => item.depth === 103).map((item: any) => ({ x: item.x, y: item.y, angle: item.rotation })));
+      const storageBefore = await page.evaluate(() => JSON.stringify(localStorage));
+      const before = await rendered();
+      expect(before.length).toBeGreaterThanOrEqual(2);
+      await page.screenshot({ path: testInfo.outputPath('live-menu-before.png') });
+      await expect.poll(async () => {
+        const after = await rendered();
+        return after.some((part, i) => Math.hypot(part.x - before[i].x, part.y - before[i].y) > 180);
+      }, { timeout: 8000 }).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath('live-menu-after.png') });
+      await page.getByRole('button', { name: 'Pause preview' }).click();
+      const stopped = await rendered();
+      await page.waitForTimeout(500);
+      expect(await rendered()).toEqual(stopped);
+      await page.getByRole('button', { name: 'Play preview' }).click();
+      await expect.poll(async () => JSON.stringify(await rendered())).not.toBe(JSON.stringify(stopped));
+      expect(await page.evaluate(() => JSON.stringify(localStorage))).toBe(storageBefore);
+      await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+    } finally { await context.close(); }
+  });
 });
 
 test.describe('touch layout', () => {

@@ -5,6 +5,7 @@ type MenuAction = () => void | boolean;
 interface MainMenuOptions {
   parent: HTMLElement;
   savedWorldName?: string;
+  onMotionChange?: (paused: boolean) => void;
   onNew: MenuAction;
   onContinue: MenuAction;
   onWorlds: MenuAction;
@@ -38,6 +39,7 @@ export class MainMenu {
   };
   private readonly onVisibility = () => {
     this.root.dataset.hidden = String(document.hidden);
+    this.options.onMotionChange?.(this.motionPaused || document.hidden);
   };
   private readonly onKeyUp = (event: KeyboardEvent) => {
     if ((event.key === ' ' || event.key === 'Enter')
@@ -81,7 +83,6 @@ export class MainMenu {
     // Only static authored markup is interpolated. Saved names use textContent.
     this.root.innerHTML = `
       <style>${MAIN_MENU_STYLES}</style>
-      <div class="rmm-art" aria-hidden="true"><img src="assets/images/menu/riverside-title-v1.png" alt="" decoding="async" fetchpriority="high" draggable="false"></div>
       <div class="rmm-veil"></div>
       <div class="rmm-layout">
         <header class="rmm-topline">
@@ -98,7 +99,7 @@ export class MainMenu {
         </div></div>
         <footer class="rmm-footer">
           <p class="rmm-hint"><kbd>Enter</kbd> Your railways <span aria-hidden="true">&nbsp;·&nbsp;</span> <kbd>Tab</kbd> Explore</p>
-          <div class="rmm-caption"><p class="rmm-caption-title">Every line starts somewhere.</p><p class="rmm-caption-note">Riverside · Title illustration</p></div>
+          <div class="rmm-caption"><p class="rmm-caption-title">Every line starts somewhere.</p><p class="rmm-caption-note">Brookford · Live railway</p></div>
         </footer>
       </div>`;
 
@@ -175,8 +176,9 @@ export class MainMenu {
 
   private renderMotionState(): void {
     this.root.dataset.motion = this.motionPaused ? 'paused' : 'playing';
-    const label = this.motionPaused ? 'Play scenery' : 'Pause scenery';
+    const label = this.motionPaused ? 'Play preview' : 'Pause preview';
     this.motionButton.setAttribute('aria-label', label);
     this.motionButton.innerHTML = `${icon(this.motionPaused ? 'play' : 'pause')}<span>${label}</span>`;
+    this.options.onMotionChange?.(this.motionPaused || document.hidden);
   }
 }

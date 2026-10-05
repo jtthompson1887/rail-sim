@@ -92,6 +92,7 @@ export class SimulationSession {
 
   upsertService(service: ServiceDefinition): { ok: boolean; errors: string[] } {
     const errors = validateServiceDefinition(service);
+    if (errors.length) return { ok: false, errors };
     if (!this.world.trains.some((train) => train.id === service.trainId)) errors.push('Choose a train that exists in this world.');
     if (this.world.management.services.some((existing) => existing.id !== service.id && existing.trainId === service.trainId)) {
       errors.push('This train already belongs to another service.');
@@ -104,13 +105,26 @@ export class SimulationSession {
     if (service.kind === 'passenger' && family && family.passengerCapacity <= 0) errors.push('Choose a passenger unit for this service.');
     if (errors.length) return { ok: false, errors: [...new Set(errors)] };
     const prior = this.world.management.services.find((candidate) => candidate.id === service.id);
-    if (prior && equalPlainData({ ...prior, enabled: true }, { ...service, enabled: true })) {
-      if (prior.enabled === service.enabled) return { ok: true, errors: [] };
-      prior.enabled = service.enabled;
-      this.releaseJourney(service.id); this.stopTrain(service.trainId);
-      const state=this.world.management.serviceStates[service.id];
-      if (!service.enabled) state.stoppedReason=this.reason('disabled','This service is paused.','Resume this service when ready.');
-      else if(state.stoppedReason?.code==='disabled')state.stoppedReason=null;
+    const sameRoute = prior && prior.trainId === service.trainId && prior.kind === service.kind
+      && prior.stops.length === service.stops.length && prior.stops.every((stop,index) =>
+        stop.targetId === service.stops[index].targetId && stop.targetKind === service.stops[index].targetKind);
+    if (sameRoute) {
+      if (equalPlainData(prior, service)) return { ok: true, errors: [] };
+      const enabledChanged = prior.enabled !== service.enabled;
+      const timingChanged = prior.frequencySeconds !== service.frequencySeconds
+        || prior.departureOffsetSeconds !== service.departureOffsetSeconds;
+      Object.assign(prior, clonePlainData(service));
+      const state = this.world.management.serviceStates[service.id];
+      // An outward trip keeps its committed departure. Return scheduling uses the new timetable.
+      // A train already returning to the origin continues moving and waits there for its new slot.
+      if (timingChanged && state.nextStopIndex === 0) {
+        state.nextDepartureSeconds = this.nextScheduledDeparture(service, this.world.management.clockSeconds);
+      }
+      if (enabledChanged) {
+        this.releaseJourney(service.id); this.stopTrain(service.trainId);
+        if (!service.enabled) state.stoppedReason=this.reason('disabled','This service is paused.','Resume this service when ready.');
+        else if(state.stoppedReason?.code==='disabled')state.stoppedReason=null;
+      }
       this.touchRevision();
       return {ok:true,errors:[]};
     }

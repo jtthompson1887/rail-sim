@@ -60,9 +60,14 @@ body.riverside-interface [data-testid="company-hud"] :is([data-testid="company-c
 .railway-panel.rp-riverside .rp-service-route{font-size:11px;color:#67765e;margin:7px 0}
 .railway-panel.rp-riverside .rp-service-state{font-size:12px;margin:6px 0}
 .railway-panel.rp-riverside .rp-service-tools button{font-size:11px;min-height:44px}
+.railway-panel.rp-riverside .rp-timetable{border-top:1px solid #d6d1bf;margin-top:12px;padding-top:12px}
+.railway-panel.rp-riverside .rp-timetable .rp-row>label{min-width:0}
+.railway-panel.rp-riverside .rp-timetable input[aria-invalid="true"]{border-color:#a05740}
+.railway-panel.rp-riverside .rp-timetable-error{color:#954d38;font-size:12px}
 .railway-panel.rp-riverside details{border-top:1px solid #d6d1bf;padding:10px 0}
 .railway-panel.rp-riverside summary{cursor:pointer;font-size:12px;font-weight:600}
 @media(max-width:1100px){.railway-panel.rp-riverside{width:330px}}
+@media(max-width:900px){body.riverside-interface [data-testid="company-hud"]{left:58px!important}}
 @media(max-width:720px){
  body.riverside-interface [data-testid="company-hud"]{left:58px!important;right:10px!important;top:10px!important;gap:8px!important;padding:9px 11px!important}
  body.riverside-interface [data-testid="company-hud"]::before{font-size:17px}

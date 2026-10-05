@@ -1,8 +1,10 @@
-# Rail Sim title artwork
+# Superseded Rail Sim title illustration
 
-`riverside-title-v1.png` is locally packaged title-screen illustration, generated
-with the built-in imagegen tool on 5 October 2026. It is decorative artwork,
-not a screenshot or a world preview. The original output is retained separately.
+`superseded-menu-illustration.png` preserves the earlier title illustration,
+generated with the built-in imagegen tool on 5 October 2026. It is no longer
+packaged or displayed by the game. User feedback requested actual game visuals
+and moving trains instead. The title now runs a detached `SimulationSession`
+with the production terrain, village, track, facility and fleet renderers.
 
 References: `docs/full-game/visual-direction/illustrated-overhead-v2.png` and
 `docs/full-game/visual-direction/roof-first-asset-study-v1.png`. Menu colours

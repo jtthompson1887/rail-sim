@@ -8,6 +8,7 @@ import { copyBlueprint, validateBlueprintDraft } from '../management/BlueprintFo
 import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import { isRiverside } from '../region/RiversideRegion';
 import { RIVERSIDE_INTERFACE_CLASS, RIVERSIDE_INTERFACE_STYLES } from '../presentation/RiversideInterface';
+import { fleetPurchasePrice } from '../management/RailwayPurchases';
 
 export interface RailwayPanelActions {
   world(): WorldData | null;
@@ -43,6 +44,17 @@ const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => 
 const money = (value: number) => '£' + Math.round(value).toLocaleString('en-GB');
 const option = (id: string, name: string,selected=false) => `<option value="${escape(id)}"${selected?' selected':''}>${escape(name)}</option>`;
 type Tab = 'services' | 'projects' | 'plans' | 'fleet' | 'stations' | 'company';
+interface TimetableEdit {
+  serviceId:string;
+  frequency:string;
+  offset:string;
+  priority:string;
+  loadingStopIndex:number;
+  loadingTargetId:string|null;
+  loadRule:'available'|'full';
+  maxWait:string;
+  error:string;
+}
 
 /** Mouse and touch use the same controls; every action has a visible label and a 44px target. */
 export class ManagementPanel {
@@ -55,6 +67,7 @@ export class ManagementPanel {
   private tab: Tab = 'services';
   private open = false;
   private riverside = false;
+  private timetableEdit:TimetableEdit|null = null;
   private draft: BlueprintDraft | null = null;
   private readonly undoDrafts: Array<BlueprintDraft|null> = [];
   private readonly redoDrafts: Array<BlueprintDraft|null> = [];
@@ -77,6 +90,8 @@ export class ManagementPanel {
     this.root.setAttribute('aria-label', 'Railway management');
     const style = document.createElement('style');
     style.textContent = `.railway-panel{position:fixed;right:12px;top:70px;z-index:80;color:#e8efe8;font:14px/1.45 system-ui,sans-serif;max-width:calc(100vw - 95px);width:370px;pointer-events:auto}.railway-panel *{box-sizing:border-box}.railway-panel button,.railway-panel input,.railway-panel select{font:inherit;min-height:44px;border:1px solid #53706a;border-radius:7px;background:#193b37;color:#f1f4e9;padding:8px;max-width:100%}.railway-panel button{cursor:pointer}.railway-panel button:focus-visible,.railway-panel input:focus-visible,.railway-panel select:focus-visible{outline:3px solid #eccd78;outline-offset:2px}.railway-panel button:disabled{opacity:.45;cursor:default}.railway-panel .rp-head{display:flex;align-items:center;gap:8px;background:#122e2af0;padding:8px;border-radius:12px;box-shadow:0 3px 16px #0005}.railway-panel .rp-head span{flex:1;font-size:12px}.railway-panel .rp-body{background:#122e2af7;border:1px solid #53706a;border-radius:12px;margin-top:6px;padding:12px;max-height:calc(100vh - 148px);overflow:auto;overscroll-behavior:contain;box-shadow:0 10px 26px #0005}.railway-panel nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:12px}.railway-panel nav button{white-space:nowrap;font-size:12px}.railway-panel nav button[aria-selected=true]{background:#d7bd75;color:#162d28;border-color:#e5d49c}.railway-panel h2{font-size:19px;margin:6px 0}.railway-panel h3{font-size:15px;margin:0 0 5px}.railway-panel p{margin:6px 0 10px}.railway-panel .rp-muted{color:#aac3b9;font-size:12px}.railway-panel .rp-card{border:1px solid #41645b;background:#204239;border-radius:9px;padding:11px;margin:10px 0}.railway-panel label{display:block;font-size:12px;margin:10px 0 5px}.railway-panel label select,.railway-panel label input{display:block;width:100%;margin-top:4px}.railway-panel .rp-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.railway-panel .rp-row>*{flex:1}.railway-panel progress{width:100%;height:8px;accent-color:#d7bd75}.railway-panel .rp-primary{background:#d7bd75;color:#162d28;border-color:#e5d49c;font-weight:650}.railway-panel .rp-status{padding-top:8px;border-top:1px solid #41645b;color:#ecd899;white-space:pre-line}.railway-panel .rp-stops select{width:100%;margin:3px 0}.railway-panel [hidden]{display:none!important}@media(max-width:900px){.railway-panel{top:56px;right:6px;width:320px;font-size:13px}.railway-panel .rp-body{max-height:calc(100vh - 123px)}.railway-panel .rp-head{padding:5px}.railway-panel nav button{padding:6px}}@media(prefers-reduced-motion:reduce){.railway-panel *{scroll-behavior:auto}}`;
+    // Keep navigation reachable while Fleet feedback scrolls into view.
+    style.textContent += '.railway-panel:not(.rp-riverside) nav{position:sticky;top:0;z-index:1;background:#122e2a}';
     style.textContent += RIVERSIDE_INTERFACE_STYLES;
     this.root.append(style);
     const head = this.head; head.className = 'rp-head';
@@ -104,7 +119,14 @@ export class ManagementPanel {
       this.fileInput.value='';
     };
     this.root.append(this.fileInput); document.body.append(this.root);
-    for(const event of ['pointerdown','pointerup','pointermove','wheel','keydown','keyup'])this.root.addEventListener(event,e=>e.stopPropagation());
+    // Phaser also listens for compatibility mouse/touch starts on window. Prevent
+    // UI presses reaching facilities behind the panel; keep native focus/clicks.
+    for(const event of ['pointerdown','pointerup','pointermove','touchstart','wheel','keydown','keyup'])this.root.addEventListener(event,e=>e.stopPropagation());
+    this.root.addEventListener('mousedown',event=>{
+      event.stopPropagation();
+      const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if(button&&event.button===0){event.preventDefault();button.focus({preventScroll:true});}
+    });
     this.root.addEventListener('click',event=>{ const b=(event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]'); if(b)void this.perform(b.dataset.action!,b.dataset.id); });
     window.addEventListener('resize',this.resizeHandler);
     window.visualViewport?.addEventListener('resize',this.resizeHandler);
@@ -131,6 +153,15 @@ export class ManagementPanel {
   }
   setVisible(visible: boolean): void { this.root.hidden=!visible;if(visible)this.scheduleLayout(); }
   showCompany():void { this.open=true;this.tab='company';this.render(); }
+  showFleet():void {
+    const world=this.actions.world();if(!world?.management)return;
+    this.syncPresentation(world);this.open=true;this.tab=this.riverside?'services':'fleet';
+    this.message(this.riverside
+      ? 'Brookford supplies two trains. Use Services to inspect and operate them.'
+      : 'Choose a train and a clear depot track, then buy to place it. Set its stops in Services.');
+    this.render();this.content.scrollTop=0;
+    if(this.riverside)this.status.scrollIntoView?.({block:'nearest'});
+  }
   contains(x: number,y: number): boolean { const r=this.root.getBoundingClientRect();return !this.root.hidden&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom; }
   refresh(time: number, force=false): void {
     if(!force&&time-this.lastRefresh<700)return;this.lastRefresh=time;
@@ -144,17 +175,17 @@ export class ManagementPanel {
       b.classList.toggle('rp-start',start);b.textContent=start?'Start':speed===0?'Ⅱ':speed+'×';
       b.title=start?'Start railway':speed===0?'Pause railway':speed+'× simulation speed';b.setAttribute('aria-label',b.title);
     });
-    if(this.open&&w.management&&(force||w.management.speed>0)&&!this.content.contains(document.activeElement)&&!this.pending&&(this.tab==='services'||this.tab==='projects'))this.render();
+    if(this.open&&w.management&&(force||w.management.speed>0)&&!this.content.contains(document.activeElement)&&!this.pending&&!(this.tab==='services'&&this.timetableEdit)&&(this.tab==='services'||this.tab==='projects'))this.render();
   }
   private message(text: string): void { this.status.textContent=text; }
   private value(name: string): string { return (this.content.querySelector(`[name="${name}"]`) as HTMLInputElement|HTMLSelectElement|null)?.value??''; }
   private button(action: string,label: string,id?: string,primary=false): string { return `<button data-action="${action}"${id?` data-id="${escape(id)}"`:''}${primary?' class="rp-primary"':''}>${label}</button>`; }
-  private facilityName(world: WorldData,id:string):string { const f=world.economy.facilities.find(f=>f.id===id);return f?(isRiverside(world)?f.name:getFacilityDefinition(f.definitionId)?.displayName??f.definitionId):id; }
+  private facilityName(world: WorldData,id:string):string { const f=world.economy.facilities.find(f=>f.id===id);return f?(isRiverside(world)?f.name:getFacilityDefinition(f.definitionId)?.displayName??f.definitionId):isRiverside(world)?'Unavailable stop':id; }
   private targetOptions(world: WorldData): string { return world.economy.facilities.map(f=>option('facility:'+f.id,this.facilityName(world,f.id))).join('')+world.stations.map(s=>option('station:'+s.id,s.name)).join(''); }
   private facilityOptions(world:WorldData,second=false):string{return world.economy.facilities.map((f,i)=>option(f.id,this.facilityName(world,f.id),this.riverside&&second&&i===1)).join('');}
   private syncPresentation(world:WorldData):void{
     const riverside=isRiverside(world);
-    if(riverside!==this.riverside){this.riverside=riverside;this.open=riverside&&window.innerWidth>1100;this.tab='services';}
+    if(riverside!==this.riverside){this.riverside=riverside;this.open=riverside&&window.innerWidth>1100;this.tab='services';this.timetableEdit=null;}
     document.body.classList.toggle(RIVERSIDE_INTERFACE_CLASS,riverside);this.root.classList.toggle('rp-riverside',riverside);
     this.toggle.textContent=riverside?'Railway '+(this.open?'▾':'▸'):'Railway';this.toggle.setAttribute('aria-expanded',String(this.open));
     if(riverside)this.toggle.setAttribute('aria-label',this.open?'Collapse railway inspector':'Open railway inspector');else this.toggle.removeAttribute('aria-label');
@@ -165,6 +196,41 @@ export class ManagementPanel {
     const project=world.region?.projects.find(p=>p.definitionId==='housing');
     const modules=project?.progress.modules??0,arrivals=project?.progress.residents??0,complete=project?.completedAtTick!==null&&project?.completedAtTick!==undefined;
     return `<article class="rp-objective" aria-label="Brookford objective"><p class="rp-eyebrow">${complete?'A growing town':'Your first chapter'}</p><h2>Homes by the railway</h2><p>Two services share a single track. Carry building modules to Brookford Goods Yard and bring residents into town.</p><div class="rp-goals"><div class="rp-goal"><strong>${modules} / 16</strong>Building modules<progress aria-label="Building modules delivered" value="${modules}" max="16"></progress></div><div class="rp-goal"><strong>${arrivals} / 60</strong>Passenger arrivals<progress aria-label="Passenger arrivals" value="${arrivals}" max="60"></progress></div></div><p class="rp-muted">${complete?'Neighbourhood complete · passenger demand +25%.':'Complete the neighbourhood to increase passenger demand by 25%.'}</p>${world.management?.speed===0?this.button('start-railway','Start railway',undefined,true):''}</article>`;
+  }
+  private captureTimetableInputs():void{
+    const edit=this.timetableEdit;if(!edit)return;
+    for(const field of ['frequency','offset','priority','loadRule','maxWait'] as const){
+      const input=this.content.querySelector<HTMLInputElement|HTMLSelectElement>(`[name="edit-${field}"]`);
+      if(!input)continue;
+      if(field==='loadRule'){if(input.value==='full'||input.value==='available')edit.loadRule=input.value;}else edit[field]=input.value;
+    }
+  }
+  private timetableEditor(service:ServiceDefinition,world:WorldData):string{
+    const edit=this.timetableEdit;if(edit?.serviceId!==service.id)return '';
+    return `<section class="rp-timetable" aria-label="Edit timetable for ${escape(service.name)}"><h3>Edit timetable</h3><div class="rp-row"><label>Departure interval (seconds)<input name="edit-frequency" type="number" min="0" max="86400" step="any" value="${escape(edit.frequency)}"></label><label>Departure offset (seconds)<input name="edit-offset" type="number" min="0" max="86400" step="any" value="${escape(edit.offset)}"></label></div><p class="rp-muted">An interval of 0 departs when ready. Longer intervals leave more room for the other service; an offset staggers departures.</p><label>Route priority (0–100)<input name="edit-priority" type="number" min="0" max="100" step="1" value="${escape(edit.priority)}"></label><p class="rp-muted">Higher numbers ask for a clear route first. Priority applies to the next reservation and cannot displace a train already on the line.</p>${edit.loadingStopIndex<0?'':`<label>Loading at ${escape(this.facilityName(world,edit.loadingTargetId!))}<select name="edit-loadRule">${option('available','Leave with available cargo',edit.loadRule==='available')}${option('full','Wait for a full load',edit.loadRule==='full')}</select></label><label>Maximum loading wait (seconds)<input name="edit-maxWait" type="number" min="0" max="3600" step="any" value="${escape(edit.maxWait)}"></label><p class="rp-muted">Full loads carry more each trip but may wait longer. At the maximum wait, the train can leave with the cargo it has.</p>`}<p class="rp-muted">Changes apply to the next departure from the first stop. Trains already travelling finish their current journey.</p><p class="rp-timetable-error" role="alert"${edit.error?'':' hidden'}>${escape(edit.error)}</p><div class="rp-row">${this.button('save-timetable','Save timetable',service.id,true)}${this.button('cancel-timetable','Cancel',service.id)}</div></section>`;
+  }
+  private saveTimetable(world:WorldData):void{
+    this.captureTimetableInputs();const edit=this.timetableEdit;if(!edit)return;
+    const service=world.management?.services.find(s=>s.id===edit.serviceId);
+    const invalid=(field:string,message:string)=>{
+      edit.error=message;const error=this.content.querySelector<HTMLElement>('.rp-timetable-error');if(error){error.textContent=message;error.hidden=false;}
+      const input=this.content.querySelector<HTMLInputElement>(`[name="edit-${field}"]`);input?.setAttribute('aria-invalid','true');input?.focus();
+    };
+    if(!service){invalid('frequency','This service is no longer available. Cancel and reopen its timetable.');return;}
+    const frequency=Number(edit.frequency),offset=Number(edit.offset),priority=Number(edit.priority),maxWait=Number(edit.maxWait);
+    if(!edit.frequency.trim()||!Number.isFinite(frequency)||frequency<0||frequency>86400){invalid('frequency','Departure interval must be between 0 and 86,400 seconds.');return;}
+    if(!edit.offset.trim()||!Number.isFinite(offset)||offset<0||offset>86400){invalid('offset','Departure offset must be between 0 and 86,400 seconds.');return;}
+    if(!edit.priority.trim()||!Number.isSafeInteger(priority)||priority<0||priority>100){invalid('priority','Route priority must be a whole number from 0 to 100.');return;}
+    if(edit.loadingStopIndex>=0&&(!edit.maxWait.trim()||!Number.isFinite(maxWait)||maxWait<0||maxWait>3600)){invalid('maxWait','Maximum loading wait must be between 0 and 3,600 seconds.');return;}
+    if(edit.loadingStopIndex>=0&&service.stops[edit.loadingStopIndex]?.targetId!==edit.loadingTargetId){invalid('maxWait','This service’s loading stop changed. Cancel and reopen its timetable.');return;}
+    const updated:ServiceDefinition={...service,frequencySeconds:frequency,departureOffsetSeconds:offset,priority,stops:service.stops.map((stop,i)=>i===edit.loadingStopIndex?{...stop,loadRule:edit.loadRule,maxWaitSeconds:maxWait}:{...stop})};
+    const result=this.actions.service(updated);
+    // The action interface returns a message. Read back authoritative state before dismissing an edit.
+    const applied=this.actions.world()?.management?.services.find(s=>s.id===updated.id);
+    if(!applied||applied.frequencySeconds!==frequency||applied.departureOffsetSeconds!==offset||applied.priority!==priority||JSON.stringify(applied.stops)!==JSON.stringify(updated.stops)){
+      invalid('frequency',result||'The timetable could not be applied. Please try again.');return;
+    }
+    this.timetableEdit=null;this.message('Timetable applied. The service follows the new schedule.');this.render();this.refresh(0,true);
   }
   private trackOptions(world: WorldData): string { return world.tracks.map((t,i)=>option(t.uuid,`Track ${i+1}${t.electrified?' · electric':''}`)).join(''); }
   private scheduleLayout():void{
@@ -188,6 +254,7 @@ export class ManagementPanel {
     this.content.style.maxHeight=`${Math.max(0,Math.floor(viewportBottom-top-headHeight-6-8))}px`;
   }
   private render(): void {
+    this.captureTimetableInputs();
     this.scheduleLayout();
     const w=this.actions.world();if(!w)return;
     this.syncPresentation(w);this.content.hidden=!this.open;if(!this.open)return;
@@ -198,9 +265,11 @@ export class ManagementPanel {
       html+=this.riverside?this.objective(w)+`<p class="rp-eyebrow">Your services</p>`:`<h2>Run your railway</h2><p class="rp-muted">Select stops in order. Trains repeat the list, reverse automatically, and reserve clear track. Pause or edit a service to resolve a conflict.</p>`;
       for(const s of w.management.services){const state=w.management.serviceStates[s.id],reason=state?.stoppedReason;
         if(this.riverside){
-          const route=s.stops.map(stop=>stop.targetKind==='facility'?this.facilityName(w,stop.targetId):w.stations.find(station=>station.id===stop.targetId)?.name??stop.targetId).map(escape).join(' ↔ ');
-          const description=!s.enabled?'Service paused':reason?.message??(w.management.speed===0?'Ready for departure':'Travelling to the next stop');
-          html+=`<div class="rp-card"><div class="rp-service-heading"><h3>${escape(s.name)}</h3><span class="rp-service-kind">${s.kind}</span></div><p class="rp-service-route">${route}</p><p class="rp-service-state">${escape(description)}</p>${reason?`<p class="rp-muted">${escape(reason.remedy)}</p>`:''}<p class="rp-muted">${state?.completedCycles??0} return trips · ${Math.round(state?.delaySeconds??0)}s waiting</p><div class="rp-row rp-service-tools">${this.button('focus','Find train',s.trainId)}${this.button('toggle-service',s.enabled?'Pause service':'Resume service',s.id)}</div></div>`;
+          const route=s.stops.map(stop=>stop.targetKind==='facility'?this.facilityName(w,stop.targetId):w.stations.find(station=>station.id===stop.targetId)?.name??'Unavailable station').map(escape).join(' ↔ ');
+          const description=reason?(w.management.speed===0?'Paused · ':'')+reason.message:!s.enabled?'Service paused':w.management.speed===0?'Ready for departure':'Travelling to the next stop';
+          const blockingTrain=reason?.relatedEntityId&&reason.relatedEntityId!==s.trainId&&w.trains.some(t=>t.id===reason.relatedEntityId)?reason.relatedEntityId:null;
+          const timing=s.frequencySeconds===0?'Departs when ready':`Every ${s.frequencySeconds}s · offset ${s.departureOffsetSeconds}s`;
+          html+=`<div class="rp-card"><div class="rp-service-heading"><h3>${escape(s.name)}</h3><span class="rp-service-kind">${s.kind}</span></div><p class="rp-service-route">${route}</p><p class="rp-service-state">${escape(description)}</p>${reason?`<p class="rp-muted">${escape(reason.remedy)}</p>`:''}<p class="rp-muted">${timing} · priority ${s.priority}<br>${state?.completedCycles??0} return trips · ${Math.round(state?.delaySeconds??0)}s waiting</p><div class="rp-row rp-service-tools">${this.button('focus','Find train',s.trainId)}${this.button('toggle-service',s.enabled?'Pause service':'Resume service',s.id)}</div><div class="rp-row rp-service-tools">${this.timetableEdit?.serviceId===s.id?'':this.button('edit-timetable','Edit timetable',s.id)}${blockingTrain?this.button('focus-blocking-train','Find blocking train',blockingTrain):''}</div>${this.timetableEditor(s,w)}</div>`;
           continue;
         }
         html+=`<div class="rp-card"><h3>${escape(s.name)}</h3><p>${escape(reason?.message??'Running to the next stop')}<br><span class="rp-muted">${escape(reason?.remedy??'Automatic routing and safe braking are active.')}</span></p><p class="rp-muted">${state?.completedCycles??0} cycles · ${Math.round(state?.delaySeconds??0)} seconds waiting</p><div class="rp-row">${this.button('focus','Find train',s.trainId)}${this.button('toggle-service',s.enabled?'Pause service':'Resume service',s.id)}${this.button('remove-service','Remove service',s.id)}</div></div>`;
@@ -215,11 +284,11 @@ export class ManagementPanel {
         html+=`<div class="rp-card"><h3>${escape(d.title)}${p.completedAtTick!==null?' · Complete':''}</h3><p>${escape(d.description)}</p>${d.requirements.map(r=>{const target=r.kind==='freight-delivery'?r.units:r.passengers;return `<label>${escape(r.kind==='freight-delivery'?(this.riverside&&r.productId==='building-modules'?'Building modules':r.productId):'Passenger arrivals')} · ${p.progress[r.id]??0} / ${target}<progress value="${p.progress[r.id]??0}" max="${target}"></progress></label>`;}).join('')}<p class="rp-muted">Grant ${money(d.reward.grant)} · passenger demand +${Math.round(d.reward.passengerDemandBonusBps/100)}%${d.reward.production.map(v=>' · production +'+v.bonusBps/100+'%').join('')}</p><label>Passenger station<select name="project-${p.definitionId}">${stationOptions}</select></label><p class="rp-muted">Only stations within ${Math.round(REGIONAL_PROJECT_CATCHMENT_RADIUS/TRAIN_PHYSICS_CONFIG.worldUnitsPerMetre).toLocaleString('en-GB')} metres of the project site contribute passenger arrivals.</p><div class="rp-row">${this.button('focus','Visit site',p.anchorFacilityId??'')}${this.button('project',p.accepted?'Update station':'Accept project',p.definitionId,!p.accepted)}</div></div>`;
       }
     }else if(this.tab==='fleet'){
-      html+=`<h2>Fleet depot</h2><p class="rp-muted">Choose a train for the gradients, traffic and platforms on your railway. Electric trains require continuous wires.</p><label>Powered family<select name="family">${POWERED_VEHICLE_FAMILIES.map(f=>option(f.id,`${f.displayName} · ${money(f.purchasePrice)}`)).join('')}</select></label>${POWERED_VEHICLE_FAMILIES.map(f=>`<details><summary>${escape(f.displayName)}</summary><p>${escape(f.description)}</p><p class="rp-muted">${f.maxSpeedKph} km/h · ${f.lengthMetres} m · ${f.powerKw} kW · ${f.passengerCapacity} seats</p></details>`).join('')}<label>Freight wagons (passenger units ignore this)<select name="set">${LAUNCH_FREIGHT_SETS.map(s=>option(s.id,s.displayName)).join('')}</select></label><label>Depot track<select name="fleet-track">${this.trackOptions(w)}</select></label><label>Position along track (%)<input name="fleet-t" type="range" min="5" max="95" value="20"></label><p class="rp-muted">Freight consists include a wagon allowance. Leave space around the train before buying.</p>${this.button('buy','Buy and place train',undefined,true)}`;
+      html+=`<h2>Fleet depot</h2><p class="rp-muted">${w.tracks.length?'Choose a clear track and position for the whole train. Electric trains require wires.':'Build a track first, then reopen Vehicle to choose it as your depot track.'}</p><label>Powered family<select name="family">${POWERED_VEHICLE_FAMILIES.map(f=>option(f.id,`${f.displayName} · ${money(fleetPurchasePrice(f))}`)).join('')}</select></label><label>Freight wagons (passenger units ignore this)<select name="set">${LAUNCH_FREIGHT_SETS.map(s=>option(s.id,s.displayName)).join('')}</select></label><label>Depot track<select name="fleet-track">${this.trackOptions(w)}</select></label><label>Position along track (%)<input name="fleet-t" type="range" min="5" max="95" value="50"></label><p>Total purchase: <strong data-testid="fleet-purchase-price"></strong></p><p class="rp-muted">Freight prices include wagons. After buying, assign stops in Services.</p><div data-fleet-feedback></div>${this.button('buy','Buy and place train',undefined,true)}<details><summary>Compare train specifications</summary>${POWERED_VEHICLE_FAMILIES.map(f=>`<h3>${escape(f.displayName)}</h3><p>${escape(f.description)}</p><p class="rp-muted">${f.maxSpeedKph} km/h · ${f.lengthMetres} m · ${f.powerKw} kW · ${f.passengerCapacity} seats</p>`).join('')}</details>`;
     }else if(this.tab==='stations'){
       html+=`<h2>Passenger stations</h2><p class="rp-muted">Place a modular platform on a track. Destinations generate groups of passengers; connected services carry them and support transfers.</p>${w.stations.map(s=>`<div class="rp-card"><h3>${escape(s.name)}</h3><p>${s.platformLengthMetres??120} m platform · ${s.passengerSpawnRate} passengers/min</p>${this.button('focus','Visit station',s.id)}</div>`).join('')}<label>Station name<input name="station-name" value="Regional station" maxlength="80"></label><label>Track<select name="station-track">${this.trackOptions(w)}</select></label><label>Position (%)<input name="station-t" type="range" min="5" max="95" value="50"></label><label>Platform length (m)<input name="length" type="number" min="30" max="300" step="10" value="120"></label>${this.button('station','Build platform',undefined,true)}<p class="rp-muted">Platforms cost £5,000 plus £100/metre. Track electrification costs £30/metre.</p><label>Electrify track<select name="wire-track">${this.trackOptions(w)}</select></label>${this.button('wire','Install overhead wires')}`;
     }else if(this.tab==='plans'){
-      html+=`<h2>Design and rehearse</h2><p class="rp-muted">${this.riverside?'Sketch another route between the mill and goods yard. Compare it in a rehearsal before building. Drafts cost nothing.':'Draw with the track tool, then capture its preview here. Or sketch between two industry access points. Drafts cost nothing until you build.'}</p>${this.riverside?'':`<div class="rp-row">${this.button('capture','Capture track preview')}${this.button('import-blueprint','Import blueprint')}</div>`}<label>From<select name="from">${this.facilityOptions(w)}</select></label><label>To<select name="to">${this.facilityOptions(w,true)}</select></label>${this.riverside?'<label>Curve shape<select name="bend"><option value="0">Straight</option><option value="300">Broad curve</option><option value="-300">Opposite curve</option></select></label>':'<label>Curve offset (world units)<input name="bend" type="number" value="0" step="50"></label>'}<div class="rp-row">${this.button('sketch','Preview connection')}${this.button('loop',this.riverside?'Preview northern relief line':'Fit passing loop')}</div>`;
+      html+=`<h2>Design and rehearse</h2><p class="rp-muted">${this.riverside?'Sketch another route between the mill and goods yard. Compare it in a rehearsal before building. Drafts cost nothing.':'Draw with the track tool, then capture its preview here. Or sketch between two industry access points. Drafts cost nothing until you build.'}</p>${this.riverside?'':`<div class="rp-row">${this.button('capture','Capture track preview')}${this.button('import-blueprint','Import blueprint')}</div>`}<label>From<select name="from">${this.facilityOptions(w)}</select></label><label>To<select name="to">${this.facilityOptions(w,true)}</select></label>${this.riverside?'<label>Curve shape<select name="bend"><option value="0">Straight</option><option value="300">Broad curve</option><option value="-300">Opposite curve</option></select></label>':'<label>Curve offset (world units)<input name="bend" type="number" value="0" step="50"></label>'}<div class="rp-row">${this.button('sketch','Preview connection')}${this.button('loop',this.riverside?'Preview northern relief line':'Fit passing loop')}</div>${this.riverside?'<p class="rp-muted">The northern relief line gives the local a separate route around the shared track. Or use the stops and curve above to sketch your own connection.</p>':''}`;
       if(this.draft){const q=this.actions.quote(this.draft);html+=`<div class="rp-card"><label>Draft name<input name="draft-name" value="${escape(this.draft.name)}" maxlength="80"></label><p>${money(q.cost)} · ${escape(q.details)}</p><p class="rp-muted">${escape(q.errors[0]??'Engineering checks passed. The final quote is rechecked when you build.')}</p><div class="rp-row">${this.button('save-draft','Save alternative')}${this.button('export-blueprint','Export')}</div><div class="rp-row">${this.button('rehearse-draft',this.pending?'Rehearsing…':'Rehearse draft')}${this.button('commit','Build draft',undefined,true)}${this.button('clear-draft','Clear')}</div></div>`;}
       if(this.draft){const planned={...w,tracks:[...w.tracks,...this.draft.tracks],stations:[...w.stations,...this.draft.stations],trains:[...w.trains,...this.draft.trains]};
         html+=`<div class="rp-row">${this.button('draft-undo','Undo sketch')}${this.button('draft-redo','Redo sketch')}${this.button('rotate-draft','Rotate 90°')}</div><details><summary>Plan a platform</summary><label>Planned station name<input name="plan-station-name" value="New station"></label><label>Platform track<select name="plan-station-track">${this.trackOptions(planned)}</select></label><div class="rp-row"><label>Position (%)<input name="plan-station-t" type="number" min="5" max="95" value="50"></label><label>Length (m)<input name="plan-station-length" type="number" min="30" max="300" value="120"></label></div>${this.button('draft-station','Add platform to draft')}</details><details><summary>Plan a train</summary><label>Planned train family<select name="plan-family">${POWERED_VEHICLE_FAMILIES.map(f=>option(f.id,f.displayName)).join('')}</select></label><label>Planned wagons<select name="plan-set">${LAUNCH_FREIGHT_SETS.map(s=>option(s.id,s.displayName)).join('')}</select></label><label>Planned depot track<select name="plan-fleet-track">${this.trackOptions(planned)}</select></label><label>Depot position (%)<input name="plan-fleet-t" type="number" min="5" max="95" value="20"></label>${this.button('draft-train','Add train to draft')}</details><details><summary>Plan a service</summary><label>Planned service name<input name="plan-service-name" value="Proposed shuttle"></label><label>Planned service train<select name="plan-train">${planned.trains.filter(t=>!w.management!.services.some(s=>s.trainId===t.id)).map(t=>option(t.id,getFreightName(t.vehicleFamilyId,t.freightSetId)+' · '+t.id.slice(0,6))).join('')}</select></label><label>Planned service type<select name="plan-kind"><option value="freight">Freight</option><option value="passenger">Passenger</option></select></label><label>First stop<select name="plan-stop-0">${this.targetOptions(planned)}</select></label><label>Second stop<select name="plan-stop-1">${this.targetOptions(planned)}</select></label><label>Departure interval (s)<input name="plan-frequency" type="number" min="0" value="0"></label>${this.button('draft-service','Add service to draft')}</details><p class="rp-muted">Draft contains ${this.draft.stations.length} platforms, ${this.draft.trains.length} trains and ${this.draft.services.length} services. These commit together with the railway.</p>`;
@@ -232,6 +301,15 @@ export class ManagementPanel {
     }
     if(this.riverside&&this.tab==='company')html+=this.button('main-menu','Save and return to menu');
     this.content.innerHTML=html;this.content.append(this.status);
+    if(this.tab==='fleet'){
+      this.content.querySelector('[data-fleet-feedback]')!.append(this.status);
+      const family=this.content.querySelector<HTMLSelectElement>('[name="family"]')!;
+      const updatePrice=()=>{
+        const selected=POWERED_VEHICLE_FAMILIES.find(f=>f.id===family.value)!;
+        this.content.querySelector('[data-testid="fleet-purchase-price"]')!.textContent=money(fleetPurchasePrice(selected));
+      };
+      family.onchange=updatePrice;updatePrice();
+    }
     if(this.riverside){
       this.content.querySelector('[name="plan-family"]')?.closest('details')?.remove();
       this.content.querySelector('[name="plan-train"]')?.closest('details')?.remove();
@@ -242,6 +320,15 @@ export class ManagementPanel {
     const w=this.actions.world();if(!w)return;
     try{
       if(action==='tab'){if(this.riverside&&(id==='fleet'||id==='stations'))return;this.tab=id as Tab;this.render();return;}
+      if(action==='edit-timetable'&&this.riverside){
+        if(this.timetableEdit){this.message('Save or cancel the open timetable before editing another service.');return;}
+        const service=w.management?.services.find(s=>s.id===id);if(!service)return;
+        const loadingStopIndex=service.kind==='freight'?service.stops.findIndex(stop=>stop.loadRule==='available'||stop.loadRule==='full'):-1,stop=service.stops[loadingStopIndex];
+        this.timetableEdit={serviceId:service.id,frequency:String(service.frequencySeconds),offset:String(service.departureOffsetSeconds),priority:String(service.priority),loadingStopIndex,loadingTargetId:stop?.targetId??null,loadRule:stop?.loadRule==='full'?'full':'available',maxWait:String(stop?.maxWaitSeconds??0),error:''};
+        this.render();return;
+      }
+      if(action==='cancel-timetable'){this.timetableEdit=null;this.message('Timetable changes cancelled.');this.render();return;}
+      if(action==='save-timetable'){this.saveTimetable(w);return;}
       if(action==='enable'){this.message(this.actions.enable());this.render();return;}
       if(action==='start-railway'){this.actions.speed(1);}
       else if(action==='create-service'){
@@ -250,8 +337,12 @@ export class ManagementPanel {
       }else if(action==='remove-service'){this.actions.removeService(id!);this.message('Service removed. Its train is stopped and available for reassignment.');}
       else if(action==='toggle-service'){const s=w.management!.services.find(s=>s.id===id)!;this.message(this.actions.service({...s,enabled:!s.enabled}));}
       else if(action==='focus')this.actions.focus(id!);
+      else if(action==='focus-blocking-train'){if(w.trains.some(t=>t.id===id))this.actions.focus(id!);}
       else if(action==='project')this.message(this.actions.acceptProject(id!,this.value('project-'+id)||null));
-      else if(action==='buy')this.message(this.actions.buyTrain(this.value('family'),this.value('set'),this.value('fleet-track'),Number(this.value('fleet-t'))/100));
+      else if(action==='buy'){
+        this.message(this.actions.buyTrain(this.value('family'),this.value('set'),this.value('fleet-track'),Number(this.value('fleet-t'))/100));
+        this.status.scrollIntoView?.({block:'nearest'});this.refresh(0,true);return;
+      }
       else if(action==='station')this.message(this.actions.station(this.value('station-name'),this.value('station-track'),Number(this.value('station-t'))/100,Number(this.value('length'))));
       else if(action==='wire')this.message(this.actions.electrify(this.value('wire-track')));
       else if(action==='capture'){this.changeDraft(this.actions.captureDraft());this.message(this.draft?'Track preview captured.':'Draw a track preview first, or use the connection controls.');}
@@ -273,13 +364,16 @@ export class ManagementPanel {
         try{const r=await this.actions.rehearse(draft);if(r.status==='complete'){this.results.set(draft?.name??'Current railway',r);this.message('Rehearsal complete. Engineering uses the same rules as live services.');}else this.message(r.errors.join('\n')||'Rehearsal cancelled.');}finally{this.pending=false;}
       }else if(action==='cancel-rehearsal'){this.actions.cancelRehearsal();this.message('Cancellation requested.');}
       else if(action==='style'){this.actions.style(this.value('company-name'),this.value('colour'));this.message('Company style applied.');}
-      else if(action==='save')this.message(await this.actions.save()?'World saved.':'Save failed. Export the world to keep a recovery copy.');
+      else if(action==='save'){
+        this.message('Saving world…');
+        this.message(await this.actions.save()?'World saved.':'Save failed. Export the world to keep a recovery copy.');
+      }
       else if(action==='main-menu'){if(!await this.actions.returnToMenu?.())this.message('Could not save. Stay here and export the world before leaving.');return;}
       else if(action==='export-world')this.download(await this.actions.exportWorld(),w.name+'.railworld');
       else if(action==='export-blueprint'&&this.draft)this.download(JSON.stringify(this.draft),this.draft.name+'.railblueprint');
       else if(action==='import-world'||action==='import-blueprint'){this.importKind=action==='import-world'?'world':'blueprint';this.fileInput.click();}
       this.render();this.refresh(0,true);
-    }catch(e){this.pending=false;this.message(e instanceof Error?e.message:'Unable to complete this action.');}
+    }catch(e){this.pending=false;this.message(e instanceof Error?e.message:'Unable to complete this action.');this.status.scrollIntoView?.({block:'nearest'});}
   }
   private changeDraft(draft:BlueprintDraft|null):void{this.undoDrafts.push(this.draft?structuredClone(this.draft):null);if(this.undoDrafts.length>50)this.undoDrafts.shift();this.redoDrafts.length=0;this.draft=draft;this.actions.showDraft(draft);}
   private download(text:string,name:string):void{const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=name.replace(/[<>:"/\\|?*]/g,'-');link.click();setTimeout(()=>URL.revokeObjectURL(url),500);this.message('Local export created.');}

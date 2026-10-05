@@ -310,6 +310,9 @@ export default class WorldScene extends Phaser.Scene {
 
   private readonly toolChangedHandler = ({ tool }: { tool: CreateTool }) => {
     if (GameStateManager.worldMode !== 'create') return;
+    // Regional worlds buy through Fleet; the legacy quote panel is hidden there.
+    const openFleet = tool === 'place-vehicle' && this.railway?.active;
+    if (openFleet) tool = 'none';
     const disabledReason = disabledConstructionToolReason(tool);
     if (disabledReason) {
       this.activeEditorTool?.cancel();
@@ -335,6 +338,10 @@ export default class WorldScene extends Phaser.Scene {
     this.cameraController.setInputLockOwner(
       this.inputLockOwnerForTool(tool),
     );
+    if (openFleet) {
+      EventBus.emit('ui:toolbar-select-tool', { tool: 'none' });
+      this.railway!.showFleet();
+    }
   };
 
   private readonly undoHandler = () => {

@@ -1,9 +1,13 @@
 import type { TrainDef, WorldData, WorldStationDef } from '../config/WorldData';
-import { getPoweredVehicleFamily, consistSpecification } from '../region/VehicleRoster';
+import { getPoweredVehicleFamily, consistSpecification, type PoweredVehicleFamily } from '../region/VehicleRoster';
 import { getFreightSet } from '../freight/FreightSetCatalog';
 import { TrackArcLengthIndex } from '../physics/TrackArcLengthIndex';
 import { TRAIN_PHYSICS_CONFIG } from '../physics/TrainPhysicsConfig';
 import { postLedgerEntry } from '../economy/FinanceLedger';
+
+export function fleetPurchasePrice(family: PoweredVehicleFamily): number {
+  return family.purchasePrice + (family.passengerCapacity > 0 ? 0 : 20_000);
+}
 
 export function createFleetProposal(world: WorldData, familyId: string, setId: string, trackId: string, trackT: number): { train: TrainDef; price: number } {
   const family = getPoweredVehicleFamily(familyId), set = getFreightSet(setId), track = world.tracks.find(t => t.uuid === trackId);
@@ -15,7 +19,7 @@ export function createFleetProposal(world: WorldData, familyId: string, setId: s
   if (distance<length/2 || index.length-distance<length/2) throw new Error('Move the train further inside the depot track so its whole consist fits.');
   if (world.trains.some(t => t.dynamics.mode === 'on-rail' && t.trackUUID === trackId && Math.abs(t.dynamics.distance - distance) < length + 200)) throw new Error('Move the existing train or choose a clear depot track.');
   const id = crypto.randomUUID();
-  return { price: family.purchasePrice + (family.passengerCapacity > 0 ? 0 : 20_000), train: {
+  return { price: fleetPurchasePrice(family), train: {
     id, freightSetId: setId, vehicleFamilyId: family.id, livery: world.companyStyle?.colour ?? '#dfb75c', trackUUID: trackId, trackT, facing: 1, cargo: null,
     operations: { currentTripRevenue: 0, currentTripRunningCost: 0, lastTripRevenue: 0, lastTripRunningCost: 0, lifetimeDeliveredUnits: 0, lifetimeRevenue: 0, lifetimeRunningCost: 0 },
     dynamics: { mode: 'on-rail', trackUUID: trackId, distance, direction: 1, speedMps: 0, consistId: 'consist-' + id, consistOrder: 0 },
